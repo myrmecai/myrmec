@@ -23,6 +23,7 @@ import { Route as AuthenticatedAgentsRouteImport } from './routes/_authenticated
 import { Route as AuthenticatedAgentProfilesRouteImport } from './routes/_authenticated/agent-profiles'
 import { Route as AuthenticatedWorkflowsIndexRouteImport } from './routes/_authenticated/workflows/index'
 import { Route as AuthenticatedAdminSecretsRouteImport } from './routes/_authenticated/admin/secrets'
+import { Route as AuthenticatedAdminQuotasRouteImport } from './routes/_authenticated/admin/quotas'
 import { Route as AuthenticatedAdminAuditLogRouteImport } from './routes/_authenticated/admin/audit-log'
 import { Route as AuthenticatedAdminGroupsIndexRouteImport } from './routes/_authenticated/admin/groups/index'
 import { Route as AuthenticatedWorkflowsWorkflowIdRequestsRouteImport } from './routes/_authenticated/workflows/$workflowId.requests'
@@ -106,6 +107,12 @@ const AuthenticatedAdminSecretsRoute =
     path: '/admin/secrets',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedAdminQuotasRoute =
+  AuthenticatedAdminQuotasRouteImport.update({
+    id: '/admin/quotas',
+    path: '/admin/quotas',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedAdminAuditLogRoute =
   AuthenticatedAdminAuditLogRouteImport.update({
     id: '/admin/audit-log',
@@ -174,6 +181,7 @@ export interface FileRoutesByFullPath {
   '/tools': typeof AuthenticatedToolsRoute
   '/users': typeof AuthenticatedUsersRoute
   '/admin/audit-log': typeof AuthenticatedAdminAuditLogRoute
+  '/admin/quotas': typeof AuthenticatedAdminQuotasRoute
   '/admin/secrets': typeof AuthenticatedAdminSecretsRoute
   '/workflows/': typeof AuthenticatedWorkflowsIndexRoute
   '/projects/$projectId/chat': typeof AuthenticatedProjectsProjectIdChatRoute
@@ -198,6 +206,7 @@ export interface FileRoutesByTo {
   '/tools': typeof AuthenticatedToolsRoute
   '/users': typeof AuthenticatedUsersRoute
   '/admin/audit-log': typeof AuthenticatedAdminAuditLogRoute
+  '/admin/quotas': typeof AuthenticatedAdminQuotasRoute
   '/admin/secrets': typeof AuthenticatedAdminSecretsRoute
   '/workflows': typeof AuthenticatedWorkflowsIndexRoute
   '/projects/$projectId/chat': typeof AuthenticatedProjectsProjectIdChatRoute
@@ -224,6 +233,7 @@ export interface FileRoutesById {
   '/_authenticated/tools': typeof AuthenticatedToolsRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/_authenticated/admin/audit-log': typeof AuthenticatedAdminAuditLogRoute
+  '/_authenticated/admin/quotas': typeof AuthenticatedAdminQuotasRoute
   '/_authenticated/admin/secrets': typeof AuthenticatedAdminSecretsRoute
   '/_authenticated/workflows/': typeof AuthenticatedWorkflowsIndexRoute
   '/_authenticated/projects/$projectId/chat': typeof AuthenticatedProjectsProjectIdChatRoute
@@ -250,6 +260,7 @@ export interface FileRouteTypes {
     | '/tools'
     | '/users'
     | '/admin/audit-log'
+    | '/admin/quotas'
     | '/admin/secrets'
     | '/workflows/'
     | '/projects/$projectId/chat'
@@ -274,6 +285,7 @@ export interface FileRouteTypes {
     | '/tools'
     | '/users'
     | '/admin/audit-log'
+    | '/admin/quotas'
     | '/admin/secrets'
     | '/workflows'
     | '/projects/$projectId/chat'
@@ -299,6 +311,7 @@ export interface FileRouteTypes {
     | '/_authenticated/tools'
     | '/_authenticated/users'
     | '/_authenticated/admin/audit-log'
+    | '/_authenticated/admin/quotas'
     | '/_authenticated/admin/secrets'
     | '/_authenticated/workflows/'
     | '/_authenticated/projects/$projectId/chat'
@@ -417,6 +430,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminSecretsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/admin/quotas': {
+      id: '/_authenticated/admin/quotas'
+      path: '/admin/quotas'
+      fullPath: '/admin/quotas'
+      preLoaderRoute: typeof AuthenticatedAdminQuotasRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/admin/audit-log': {
       id: '/_authenticated/admin/audit-log'
       path: '/admin/audit-log'
@@ -532,6 +552,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedToolsRoute: typeof AuthenticatedToolsRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
   AuthenticatedAdminAuditLogRoute: typeof AuthenticatedAdminAuditLogRoute
+  AuthenticatedAdminQuotasRoute: typeof AuthenticatedAdminQuotasRoute
   AuthenticatedAdminSecretsRoute: typeof AuthenticatedAdminSecretsRoute
   AuthenticatedWorkflowsIndexRoute: typeof AuthenticatedWorkflowsIndexRoute
   AuthenticatedWorkflowsWorkflowIdEditRoute: typeof AuthenticatedWorkflowsWorkflowIdEditRoute
@@ -550,6 +571,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedToolsRoute: AuthenticatedToolsRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
   AuthenticatedAdminAuditLogRoute: AuthenticatedAdminAuditLogRoute,
+  AuthenticatedAdminQuotasRoute: AuthenticatedAdminQuotasRoute,
   AuthenticatedAdminSecretsRoute: AuthenticatedAdminSecretsRoute,
   AuthenticatedWorkflowsIndexRoute: AuthenticatedWorkflowsIndexRoute,
   AuthenticatedWorkflowsWorkflowIdEditRoute:

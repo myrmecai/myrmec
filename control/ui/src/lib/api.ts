@@ -41,7 +41,27 @@ class ApiClient {
         errorCode: 'UNKNOWN_ERROR',
         message: response.statusText,
       }))
-      throw new ApiRequestError(response.status, error)
+      const retryAfterRaw = response.headers.get('Retry-After')
+      const retryAfter = retryAfterRaw ? Number.parseInt(retryAfterRaw, 10) : null
+      const apiErr = new ApiRequestError(
+        response.status,
+        error,
+        Number.isFinite(retryAfter as number) ? (retryAfter as number) : null,
+      )
+      // Phase 8d &mdash; let the in-app banner react to quota blocks
+      // without each call site having to know about it.
+      if (response.status === 429 && error.errorCode === 'QUOTA_EXCEEDED') {
+        try {
+          window.dispatchEvent(
+            new CustomEvent('myrmec:quota-exceeded', {
+              detail: { retryAfter: apiErr.retryAfter, error },
+            }),
+          )
+        } catch {
+          // window may be unavailable (tests); ignore.
+        }
+      }
+      throw apiErr
     }
 
     if (response.status === 204) {
@@ -75,7 +95,8 @@ class ApiClient {
 export class ApiRequestError extends Error {
   constructor(
     public status: number,
-    public error: ApiError
+    public error: ApiError,
+    public retryAfter: number | null = null,
   ) {
     super(error.message)
     this.name = 'ApiRequestError'
@@ -1214,5 +1235,86 @@ export const auditLogApi = {
     if (q.size !== undefined) params.set('size', String(q.size))
     const qs = params.toString()
     return api.get<AuditLogPage>(`/audit-log${qs ? `?${qs}` : ''}`)
+  },
+}
+
+// ==================== Quotas (Phase 8d) ====================
+
+export type QuotaScope = 'ORG' | 'GROUP' | 'PROJECT' | 'USER'
+export type QuotaResourceType = 'TOKENS' | 'COST_USD_CENTS'
+export type QuotaPeriod = 'DAILY' | 'MONTHLY_CALENDAR' | 'LIFETIME'
+
+export interface Quota {
+  id: string
+  scopeType: QuotaScope
+  scopeId: string
+  resourceType: QuotaResourceType
+  period: QuotaPeriod
+  limitAmount: number
+  enforced: boolean
+  tags: Record<string, unknown> | null
+  createdBy: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateQuotaRequest {
+  scopeType: QuotaScope
+  scopeId: string
+  resourceType: QuotaResourceType
+  period: QuotaPeriod
+  limitAmount: number
+  enforced: boolean
+  tags?: Record<string, unknown> | null
+}
+
+export interface UpdateQuotaRequest {
+  limitAmount: number
+  enforced: boolean
+  tags?: Record<string, unknown> | null
+}
+
+export interface QuotaConsumption {
+  blocked: boolean
+  warning: boolean
+  limitAmount: number
+  consumedAmount: number
+  remainingAmount: number
+  scopeHit: QuotaScope | null
+}
+
+export const quotasApi = {
+  list: (scopeType?: QuotaScope, scopeId?: string) => {
+    const params = new URLSearchParams()
+    if (scopeType) params.set('scopeType', scopeType)
+    if (scopeId) params.set('scopeId', scopeId)
+    const qs = params.toString()
+    return api.get<Quota[]>(`/admin/quotas${qs ? `?${qs}` : ''}`)
+  },
+  create: (req: CreateQuotaRequest) =>
+    api.post<Quota>('/admin/quotas', req),
+  update: (id: string, req: UpdateQuotaRequest) =>
+    api.put<Quota>(`/admin/quotas/${id}`, req),
+  delete: (id: string) =>
+    api.delete<void>(`/admin/quotas/${id}`),
+  /**
+   * Probe how the policy engine would respond to a {@code charge}
+   * against {@code scopeId}. Returns consumed / limit / blocked so the
+   * UI can render the 80% warning band or 100% red banner without
+   * waiting for the next real request to fail.
+   */
+  consumption: (
+    scopeType: QuotaScope,
+    scopeId: string,
+    resourceType: QuotaResourceType,
+    amount = 0,
+  ) => {
+    const params = new URLSearchParams({
+      scopeType,
+      scopeId,
+      resourceType,
+      amount: String(amount),
+    })
+    return api.get<QuotaConsumption>(`/admin/quotas/consumption?${params.toString()}`)
   },
 }

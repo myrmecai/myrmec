@@ -10,7 +10,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Users, FolderKanban, LayoutDashboard, LogOut, Bot, ChevronDown, Settings, User, Workflow, List, Cpu, Wrench, BookOpen, ShieldCheck, KeyRound, Building2, Server, ScrollText } from 'lucide-react'
+import { Users, FolderKanban, LayoutDashboard, LogOut, Bot, ChevronDown, Settings, User, Workflow, List, Cpu, Wrench, BookOpen, ShieldCheck, KeyRound, Building2, Server, ScrollText, Gauge } from 'lucide-react'
+import { QuotaBanner } from '@/components/quota-banner'
 
 export const Route = createFileRoute('/_authenticated')({
   beforeLoad: ({ context }) => {
@@ -158,6 +159,12 @@ function AuthenticatedLayout() {
                     Audit Log
                   </Link>
                 </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link to="/admin/quotas" className="cursor-pointer">
+                    <Gauge className="h-4 w-4 mr-2" />
+                    Quotas
+                  </Link>
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -239,6 +246,7 @@ function AuthenticatedLayout() {
 
       {/* Main content */}
       <main className="flex-1 bg-muted/40">
+        <QuotaBanner />
         <Outlet />
       </main>
     </div>

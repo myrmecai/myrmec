@@ -45,6 +45,11 @@ public class QuotaService {
         return quotaRepository.findByScopeTypeAndScopeId(scope, scopeId);
     }
 
+    @Transactional(readOnly = true)
+    public List<Quota> findAll() {
+        return quotaRepository.findAll();
+    }
+
     @Transactional
     public Quota create(Quota.Scope scope, UUID scopeId, Quota.ResourceType resource,
                         Quota.Period period, long limitAmount, boolean enforced,
