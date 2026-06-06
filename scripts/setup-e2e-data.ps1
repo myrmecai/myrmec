@@ -2,7 +2,7 @@
 # Creates all required test data for full E2E testing
 # 
 # Prerequisites:
-#   - Engine running with e2e profile: mvn spring-boot:run -D"spring-boot.run.profiles=e2e"
+#   - Engine running with e2e profile: mvn -pl engine-core -am spring-boot:run -D"spring-boot.run.profiles=e2e"
 #
 # Usage:
 #   .\setup-e2e-data.ps1

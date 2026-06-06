@@ -2,14 +2,33 @@
 
 Spring Boot-based backend for the Myrmec control plane.
 
-## Maven Coordinates
+## Maven Layout
+
+Multi-module build rooted at `control/engine/`:
+
+```
+control/engine/
+├── pom.xml              ← parent (packaging=pom), aggregates the two modules
+├── engine-spi/          ← stable Service Provider Interfaces (no Spring runtime)
+│   └── pom.xml          (artifactId: engine-spi)
+└── engine-core/         ← Spring Boot application + Community implementations
+    ├── pom.xml          (artifactId: engine-core)
+    └── src/             (main + test sources)
+```
+
+The Enterprise module (`engine-enterprise`) lives in the separate `myrmec-ee`
+repository and consumes `engine-spi` from Maven Central.
+
+**Maven coordinates**
 
 ```xml
 <groupId>ai.myrmec</groupId>
-<artifactId>control-engine</artifactId>
+<artifactId>control-engine</artifactId>  <!-- parent -->
+<artifactId>engine-spi</artifactId>      <!-- SPI -->
+<artifactId>engine-core</artifactId>     <!-- runnable Spring Boot app -->
 ```
 
-**Base Package:** `ai.myrmec.engine`
+**Base Package:** `ai.myrmec.engine` (core) / `ai.myrmec.engine.spi` (SPI)
 
 ## Features
 
@@ -53,14 +72,17 @@ POST   /api/v1/requests
 ## Development
 
 ```bash
-# Build
+# Build everything (parent + both modules)
 mvn clean install
 
-# Run development server
-mvn spring-boot:run
+# Run the Spring Boot app (engine-core is the runnable module)
+mvn -pl engine-core -am spring-boot:run
 
-# Run tests
+# Run tests across all modules
 mvn test
+
+# Run tests in just one module
+mvn -pl engine-core test
 ```
 
 ## Non-Functional Requirements

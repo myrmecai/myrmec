@@ -165,5 +165,5 @@ Write-Host "API: http://localhost:9090/api/v1" -ForegroundColor Yellow
 Write-Host "Swagger UI: http://localhost:9090/swagger-ui.html" -ForegroundColor Yellow
 Write-Host ""
 
-# Start Spring Boot
-mvn spring-boot:run
+# Start Spring Boot (engine-core is the runnable module in the multi-module build)
+mvn -pl engine-core -am spring-boot:run

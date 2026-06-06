@@ -22,7 +22,7 @@ cd myrmec
 ```powershell
 cd control/engine
 $env:JAVA_HOME = "C:\jdk\jdk-21.0.6"
-mvn spring-boot:run -D"spring-boot.run.profiles=e2e"
+mvn -pl engine-core -am spring-boot:run -D"spring-boot.run.profiles=e2e"
 ```
 
 ## Seed address book test data

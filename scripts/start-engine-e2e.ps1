@@ -150,5 +150,5 @@ Write-Host "API: http://localhost:9090/api/v1" -ForegroundColor Yellow
 Write-Host "Swagger UI: http://localhost:9090/swagger-ui.html" -ForegroundColor Yellow
 Write-Host ""
 
-# Start Spring Boot with e2e profile
-mvn spring-boot:run -D"spring-boot.run.profiles=e2e"
+# Start Spring Boot with e2e profile (engine-core is the runnable module)
+mvn -pl engine-core -am spring-boot:run -D"spring-boot.run.profiles=e2e"
