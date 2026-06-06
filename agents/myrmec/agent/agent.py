@@ -12,12 +12,17 @@ from uuid import UUID
 
 from myrmec.agent.connection import ReconnectingConnection, WebSocketConnection
 from myrmec.agent.context import TaskContext
+from myrmec.agent.conversation import (
+    ConversationTurnHandler,
+    EchoConversationTurnHandler,
+)
 from myrmec.agent.errors import classify_exception
 from myrmec.agent.executor import TaskExecutor
 from myrmec.agent.http_client import EngineHttpClient
 from myrmec.agent.logging_handler import AgentLoggingHandler, OutputCapture
 from myrmec.agent.messages import CloseCode, MessageType, WebSocketMessage
 from myrmec.agent.models import (
+    ConversationTurnAssignPayload,
     Task,
     TaskAcceptPayload,
     TaskAssignPayload,
@@ -63,6 +68,7 @@ class Agent:
         sdk_version: str = "0.1.0",
         capture_logging: bool = True,
         capture_output: bool = True,
+        conversation_handler: ConversationTurnHandler | None = None,
     ):
         """
         Initialize the Agent.
@@ -75,12 +81,18 @@ class Agent:
             sdk_version: SDK version to report to Engine.
             capture_logging: If True, capture Python logging output as AGENT logs.
             capture_output: If True, capture stdout/stderr as SYSTEM logs.
+            conversation_handler: Optional handler for conversational turns
+                (Phase 6e). Defaults to :class:`EchoConversationTurnHandler`
+                which streams a synthetic reply — enough to exercise the
+                end-to-end wire path without an LLM provider. Subclass
+                :class:`ConversationTurnHandler` for real model integration.
         """
         self._engine_url = engine_url
         self._registration_key = registration_key
         self._executor = executor
         self._metadata = metadata
         self._sdk_version = sdk_version
+        self._conversation_handler = conversation_handler or EchoConversationTurnHandler()
         
         # Clients
         self._http_client = EngineHttpClient(
@@ -258,6 +270,8 @@ class Agent:
             await self._handle_task_assign(payload)
         elif msg_type == MessageType.TASK_CANCEL:
             await self._handle_task_cancel(payload)
+        elif msg_type == MessageType.CONVERSATION_TURN_ASSIGN:
+            await self._handle_conversation_turn_assign(payload)
         else:
             logger.warning("Unknown message type: %s", msg_type)
     
@@ -299,6 +313,32 @@ class Agent:
                 self._task_execution.cancel()
         else:
             logger.warning("Received cancel for unknown task: %s", task_id)
+
+    async def _handle_conversation_turn_assign(self, payload: dict[str, Any]) -> None:
+        """Handle a conversational turn assignment (Phase 6e).
+
+        Conversational turns are independent from workflow tasks — they
+        do not occupy ``self._current_task`` and the agent stays
+        eligible for further dispatch. This is intentional: chat
+        latency matters and we don't want a slow LLM call to lock the
+        agent out of workflow work it could otherwise execute.
+        """
+        try:
+            turn = ConversationTurnAssignPayload.model_validate(payload)
+        except Exception as exc:  # noqa: BLE001 — surface validation problems clearly
+            logger.error("Invalid conversation.turn.assign payload: %s", exc)
+            return
+        logger.info(
+            "Received conversation turn for conv %s seq %s",
+            turn.conversation_id, turn.assistant_sequence_no,
+        )
+        try:
+            await self._conversation_handler.execute(turn, self._send_message)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Conversation handler raised for conv %s seq %s",
+                turn.conversation_id, turn.assistant_sequence_no,
+            )
     
     # ==================== Task Execution ====================
     
