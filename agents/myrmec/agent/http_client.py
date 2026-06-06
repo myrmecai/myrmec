@@ -31,6 +31,30 @@ class RefreshResponse(BaseModel):
     refresh_token: str
 
 
+class RetrievalHit(BaseModel):
+    """A single retrieval hit returned by ``POST /api/v1/agent/retrieve``."""
+
+    passage: str
+    chunk_id: UUID
+    source_id: UUID
+    source_name: str
+    locator: str
+    score: float
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "RetrievalHit":
+        """Build a hit from the raw engine JSON (camelCase keys)."""
+        return cls(
+            passage=payload["passage"],
+            chunk_id=UUID(payload["chunkId"]),
+            source_id=UUID(payload["sourceId"]),
+            source_name=payload["sourceName"],
+            locator=payload["locator"],
+            score=float(payload["score"]),
+        )
+
+
+
 class EngineHttpClient:
     """
     HTTP client for agent registration and token management.
@@ -131,6 +155,54 @@ class EngineHttpClient:
     async def close(self) -> None:
         """Close the HTTP client."""
         await self._client.aclose()
+
+    async def retrieve(
+        self,
+        access_token: str,
+        knowledge_base_id: UUID | str,
+        query: str,
+        top_k: int = 5,
+        filters: dict[str, str] | None = None,
+    ) -> list[RetrievalHit]:
+        """
+        Run a retrieval query against a knowledge base.
+
+        Backs the ``ctx.retrieve()`` ergonomic helper that ships with the
+        chat runtime in a later release. For now agents that want RAG
+        grounding can call this directly with their current access token.
+
+        Args:
+            access_token: Agent access token (from ``register``/``refresh``).
+            knowledge_base_id: Target knowledge base UUID.
+            query: Free-text retrieval query.
+            top_k: Maximum number of hits to return.
+            filters: Optional provider-specific filters.
+
+        Returns:
+            Ordered list of ``RetrievalHit`` (highest-score first). Empty
+            list if the provider returns nothing or fails — the engine
+            surfaces provider failures as an empty 200 so a misbehaving
+            knowledge base never aborts an agent run.
+
+        Raises:
+            httpx.HTTPStatusError: On 4xx (bad request / auth) responses.
+        """
+        body: dict[str, Any] = {
+            "knowledgeBaseId": str(knowledge_base_id),
+            "query": query,
+            "topK": top_k,
+        }
+        if filters:
+            body["filters"] = filters
+
+        response = await self._client.post(
+            f"{self._engine_url}/api/v1/agent/retrieve",
+            json=body,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        response.raise_for_status()
+        return [RetrievalHit.from_payload(item) for item in response.json()]
+
     
     def _get_ip_address(self) -> str | None:
         """Get local IP address."""
