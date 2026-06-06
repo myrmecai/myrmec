@@ -66,6 +66,9 @@ public abstract class IntegrationTestBase {
     @Autowired
     protected ai.myrmec.engine.snapshot.ExecutionSnapshotRepository executionSnapshotRepository;
 
+    @Autowired
+    protected ai.myrmec.engine.audit.AuditLogEntryRepository auditLogEntryRepository;
+
     /**
      * Test admin - retrieved or created for E2E tests.
      */
@@ -97,6 +100,7 @@ public abstract class IntegrationTestBase {
         // Delete in correct order to avoid FK violations.
         // Conversation tables reference projects, so they must go first.
         executionSnapshotRepository.deleteAllInBatch();
+        auditLogEntryRepository.deleteAllInBatch();
         conversationMessageRepository.deleteAllInBatch();
         conversationParticipantRepository.deleteAllInBatch();
         conversationRepository.deleteAllInBatch();

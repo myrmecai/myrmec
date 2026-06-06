@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Phase 9b — User-action audit log.
+
+        Separate from ``execution_snapshots`` (which records engine-side
+        events) and from ``audit_events`` (the legacy SPI sink): this
+        table records HUMAN-driven actions for compliance review:
+        login, role change, secret create, quota edit, KB source add /
+        remove, project lifecycle, etc.
+
+        Design notes:
+          * ``action`` is a free-form string (e.g. ``LOGIN``,
+            ``USER_ROLE_GRANTED``, ``SECRET_CREATED``). No enum so
+            adding a new action type doesn't require a schema change.
+          * ``resource_type`` + ``resource_id`` identify what was acted
+            on; both nullable because some actions (e.g. login)
+            have no resource.
+          * ``scope_type`` + ``scope_id`` mirror the role-grant scope
+            so the audit UI can filter by group / project quickly.
+          * ``actor_user_id`` may be null for SYSTEM actions
+            (bootstrap admin creation, scheduled jobs).
+          * ``payload_json`` carries action-specific detail (e.g. for
+            USER_ROLE_GRANTED: {role, scopeType, scopeId, grantedBy};
+            for LOGIN_FAILED: {reason}). Capped softly by the
+            AuditLogService writer; no hard FK on it.
+          * NO foreign keys on actor_user_id or resource_id: deletes
+            of users / resources MUST NOT cascade-wipe audit history.
+            The audit table is append-only by policy.
+    -->
+
+    <changeSet id="20260608-03-01" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="audit_log"/>
+            </not>
+        </preConditions>
+        <createTable tableName="audit_log">
+            <column name="id" type="uuid" defaultValueComputed="gen_random_uuid()">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="actor_user_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="action" type="varchar(80)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="resource_type" type="varchar(50)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="resource_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="scope_type" type="varchar(20)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="scope_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="ip_address" type="varchar(45)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="user_agent" type="varchar(500)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="request_id" type="varchar(80)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="payload_json" type="clob">
+                <constraints nullable="true"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone"
+                    defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="20260608-03-02" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not><indexExists indexName="idx_audit_log_actor_created"/></not>
+        </preConditions>
+        <createIndex tableName="audit_log" indexName="idx_audit_log_actor_created">
+            <column name="actor_user_id"/>
+            <column name="created_at"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="20260608-03-03" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not><indexExists indexName="idx_audit_log_resource"/></not>
+        </preConditions>
+        <createIndex tableName="audit_log" indexName="idx_audit_log_resource">
+            <column name="resource_type"/>
+            <column name="resource_id"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="20260608-03-04" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not><indexExists indexName="idx_audit_log_action_created"/></not>
+        </preConditions>
+        <createIndex tableName="audit_log" indexName="idx_audit_log_action_created">
+            <column name="action"/>
+            <column name="created_at"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

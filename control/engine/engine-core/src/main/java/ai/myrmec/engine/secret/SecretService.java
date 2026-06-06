@@ -35,6 +35,7 @@ public class SecretService {
     private final SecretBackendRegistry backendRegistry;
     private final LocalSecretBackendAdapter localBackend;
     private final ProjectKnowledgeRepoRepository knowledgeRepoRepository;
+    private final ai.myrmec.engine.audit.AuditLogService auditLogService;
 
     // -------- reads --------
 
@@ -106,6 +107,14 @@ public class SecretService {
 
         secret = secretRepository.save(secret);
         log.info("Updated secret {} ({})", secret.getName(), id);
+        auditLogService.record(ai.myrmec.engine.audit.AuditLogService.AuditEvent.builder()
+                .action("SECRET_UPDATED")
+                .resourceType("SECRET")
+                .resourceId(secret.getId())
+                .scopeType(secret.getProject() == null ? "SYSTEM" : "PROJECT")
+                .scopeId(secret.getProject() == null ? null : secret.getProject().getId())
+                .payload(java.util.Map.of("name", secret.getName(), "type", secret.getType().name()))
+                .build());
         return SecretResponse.from(secret);
     }
 
@@ -126,6 +135,14 @@ public class SecretService {
         }
         secretRepository.delete(secret);
         log.info("Deleted secret {} ({})", secret.getName(), id);
+        auditLogService.record(ai.myrmec.engine.audit.AuditLogService.AuditEvent.builder()
+                .action("SECRET_DELETED")
+                .resourceType("SECRET")
+                .resourceId(id)
+                .scopeType(secret.getProject() == null ? "SYSTEM" : "PROJECT")
+                .scopeId(secret.getProject() == null ? null : secret.getProject().getId())
+                .payload(java.util.Map.of("name", secret.getName()))
+                .build());
     }
 
     // -------- helpers --------
@@ -153,6 +170,15 @@ public class SecretService {
         secret = secretRepository.save(secret);
         log.info("Created secret {} (type={}, scope={})",
                 secret.getName(), secret.getType(), secret.isGlobal() ? "GLOBAL" : "PROJECT");
+        auditLogService.record(ai.myrmec.engine.audit.AuditLogService.AuditEvent.builder()
+                .action("SECRET_CREATED")
+                .actorUserId(currentUserId)
+                .resourceType("SECRET")
+                .resourceId(secret.getId())
+                .scopeType(secret.isGlobal() ? "SYSTEM" : "PROJECT")
+                .scopeId(secret.isGlobal() ? null : secret.getProject().getId())
+                .payload(java.util.Map.of("name", secret.getName(), "type", secret.getType().name()))
+                .build());
         return SecretResponse.from(secret);
     }
 

@@ -27,6 +27,7 @@ public class UserService {
     private final UserRoleRepository userRoleRepository;
     private final PasswordValidator passwordValidator;
     private final AuthProviderService authProviderService;
+    private final ai.myrmec.engine.audit.AuditLogService auditLogService;
 
     /**
      * Find all users.
@@ -136,6 +137,16 @@ public class UserService {
 
         log.info("Assigned role {} ({}) to user {} (group={}, project={}, granted by={})",
                 role, scopeType, userId, groupId, projectId, grantedByUserId);
+        auditLogService.record(ai.myrmec.engine.audit.AuditLogService.AuditEvent.builder()
+                .action("USER_ROLE_GRANTED")
+                .actorUserId(grantedByUserId)
+                .resourceType("USER")
+                .resourceId(userId)
+                .scopeType(scopeType.name())
+                .scopeId(scopeType == UserRole.ScopeType.GROUP ? groupId
+                        : scopeType == UserRole.ScopeType.PROJECT ? projectId : null)
+                .payload(java.util.Map.of("role", role.name()))
+                .build());
 
         return userRole;
     }
