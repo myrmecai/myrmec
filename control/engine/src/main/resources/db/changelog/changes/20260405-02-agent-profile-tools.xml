@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Junction table for agent_profiles to tools (many-to-many) -->
+    <changeSet id="20260405-02-01" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="agent_profile_tools"/>
+            </not>
+        </preConditions>
+        <createTable tableName="agent_profile_tools">
+            <column name="profile_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="tool_code" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addPrimaryKey tableName="agent_profile_tools"
+                       columnNames="profile_id, tool_code"
+                       constraintName="pk_agent_profile_tools"/>
+
+        <addForeignKeyConstraint
+            baseTableName="agent_profile_tools"
+            baseColumnNames="profile_id"
+            referencedTableName="agent_profiles"
+            referencedColumnNames="id"
+            constraintName="fk_agent_profile_tools_profile"
+            onDelete="CASCADE"/>
+
+        <addForeignKeyConstraint
+            baseTableName="agent_profile_tools"
+            baseColumnNames="tool_code"
+            referencedTableName="tools"
+            referencedColumnNames="code"
+            constraintName="fk_agent_profile_tools_tool"
+            onDelete="CASCADE"/>
+
+        <createIndex tableName="agent_profile_tools" indexName="idx_agent_profile_tools_tool_code">
+            <column name="tool_code"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- Add system_prompt column to agent_profiles -->
+    <changeSet id="20260405-02-02" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="agent_profiles" columnName="system_prompt"/>
+            </not>
+        </preConditions>
+        <addColumn tableName="agent_profiles">
+            <column name="system_prompt" type="text"/>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>

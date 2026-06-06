@@ -1,0 +1,54 @@
+spring:
+  application:
+    name: myrmec-control-engine
+
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/myrmec}
+    username: ${DATABASE_USERNAME:myrmec}
+    password: ${DATABASE_PASSWORD:secret}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+
+server:
+  port: 9090
+
+# JWT Configuration
+jwt:
+  secret: ${JWT_SECRET:your-256-bit-secret-key-for-development-only}
+  access-token-minutes: ${JWT_ACCESS_TOKEN_MINUTES:15}
+  refresh-token-days: ${JWT_REFRESH_TOKEN_DAYS:7}
+
+# Admin User Bootstrap
+myrmec:
+  admin:
+    email: ${MYRMEC_ADMIN_EMAIL:}
+    password: ${MYRMEC_ADMIN_PASSWORD:}
+    name: ${MYRMEC_ADMIN_NAME:System Administrator}
+  encryption:
+    key: ${MYRMEC_ENCRYPTION_KEY:default-encryption-key-change-in-production}
+    previous-keys: ${MYRMEC_ENCRYPTION_PREVIOUS_KEYS:}
+
+# API Documentation
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+
+# Logging
+logging:
+  level:
+    ai.myrmec: DEBUG
+    org.springframework.security: DEBUG

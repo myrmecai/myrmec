@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Workflows table - DAG-based workflow definitions -->
+    <changeSet id="20260405-04-01" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="workflows"/>
+            </not>
+        </preConditions>
+        <createTable tableName="workflows">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="steps" type="text" defaultValue="[]">
+                <constraints nullable="false"/>
+            </column>
+            <column name="input_schema" type="text"/>
+            <column name="version" type="integer" defaultValueNumeric="1">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="DRAFT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <!-- Unique constraint: workflow name per project -->
+    <changeSet id="20260405-04-02" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <uniqueConstraintExists tableName="workflows" constraintName="uk_workflows_project_name"/>
+            </not>
+        </preConditions>
+        <addUniqueConstraint tableName="workflows"
+                             columnNames="project_id, name"
+                             constraintName="uk_workflows_project_name"/>
+    </changeSet>
+
+    <!-- Foreign key to projects -->
+    <changeSet id="20260405-04-03" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_workflows_project"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="workflows"
+            baseColumnNames="project_id"
+            referencedTableName="projects"
+            referencedColumnNames="id"
+            constraintName="fk_workflows_project"
+            onDelete="CASCADE"/>
+    </changeSet>
+
+    <!-- Foreign key to users (created_by) -->
+    <changeSet id="20260405-04-04" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_workflows_user"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="workflows"
+            baseColumnNames="created_by"
+            referencedTableName="users"
+            referencedColumnNames="id"
+            constraintName="fk_workflows_user"
+            onDelete="SET NULL"/>
+    </changeSet>
+
+    <!-- Index for looking up workflows by project -->
+    <changeSet id="20260405-04-05" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_workflows_project_id"/>
+            </not>
+        </preConditions>
+        <createIndex tableName="workflows" indexName="idx_workflows_project_id">
+            <column name="project_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- Index for filtering by status -->
+    <changeSet id="20260405-04-06" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_workflows_status"/>
+            </not>
+        </preConditions>
+        <createIndex tableName="workflows" indexName="idx_workflows_status">
+            <column name="status"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

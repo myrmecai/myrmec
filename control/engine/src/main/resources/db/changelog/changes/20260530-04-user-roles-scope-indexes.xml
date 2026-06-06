@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Per-scope uniqueness on user_roles, split from 20260530-03 so a half-applied
+        prior run (H2 auto-commits DDL, so the column additions in 03 can survive
+        even when 03 itself fails) can still be recovered cleanly.
+
+        Postgres: three partial unique indexes scoped by scope_type. This is the
+        natural model and exploits Postgres's filtered-index support.
+
+        H2: no index is created. H2 supports neither partial indexes nor function
+        expressions inside CREATE INDEX column lists, and dev/test on H2 relies on
+        the service layer's pre-insert uniqueness checks. The CHECK constraint
+        ck_user_roles_scope (from 20260530-03) still guarantees the shape invariants.
+    -->
+
+    <changeSet id="20260530-04-user-roles-scope-indexes-pg" author="myrmec" dbms="postgresql">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="uq_user_roles_system"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE UNIQUE INDEX uq_user_roles_system
+                ON user_roles (user_id, role)
+                WHERE scope_type = 'SYSTEM'
+        </sql>
+        <sql>
+            CREATE UNIQUE INDEX uq_user_roles_group
+                ON user_roles (user_id, role, group_id)
+                WHERE scope_type = 'GROUP'
+        </sql>
+        <sql>
+            CREATE UNIQUE INDEX uq_user_roles_project
+                ON user_roles (user_id, role, project_id)
+                WHERE scope_type = 'PROJECT'
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

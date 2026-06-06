@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.24.xsd">
+
+    <!-- Execution Events - stores logs, progress updates, and tool calls from agent execution -->
+    <changeSet id="20260411-01-execution-events" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="execution_events"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="execution_events">
+            <!-- Primary key -->
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+
+            <!-- Task this event belongs to -->
+            <column name="task_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+
+            <!-- Event type: LOG, PROGRESS, TOOL_CALL, TOOL_RESULT, STATUS_CHANGE -->
+            <column name="event_type" type="VARCHAR(30)">
+                <constraints nullable="false"/>
+            </column>
+
+            <!-- For LOG events: DEBUG, INFO, WARN, ERROR -->
+            <column name="log_level" type="VARCHAR(10)"/>
+
+            <!-- Main message/description -->
+            <column name="message" type="TEXT"/>
+
+            <!-- Structured data (tool input/output, progress info, etc.) -->
+            <column name="data" type="TEXT"/>
+
+            <!-- Progress percentage (0-100) for PROGRESS events -->
+            <column name="progress" type="INTEGER"/>
+
+            <!-- Tool name for TOOL_CALL/TOOL_RESULT events -->
+            <column name="tool_name" type="VARCHAR(100)"/>
+
+            <!-- Tool call ID to correlate calls with results -->
+            <column name="tool_call_id" type="VARCHAR(100)"/>
+
+            <!-- Duration in ms for TOOL_RESULT events -->
+            <column name="duration_ms" type="BIGINT"/>
+
+            <!-- Error indicator for TOOL_RESULT events -->
+            <column name="is_error" type="BOOLEAN"/>
+
+            <!-- Timestamp with timezone -->
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <!-- Index for fetching events by task (most common query) -->
+        <createIndex tableName="execution_events" indexName="idx_execution_events_task_id">
+            <column name="task_id"/>
+            <column name="created_at"/>
+        </createIndex>
+
+        <!-- Foreign key to tasks -->
+        <addForeignKeyConstraint
+            baseTableName="execution_events"
+            baseColumnNames="task_id"
+            referencedTableName="workflow_tasks"
+            referencedColumnNames="id"
+            constraintName="fk_execution_events_task"
+            onDelete="CASCADE"/>
+
+        <rollback>
+            <dropTable tableName="execution_events"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

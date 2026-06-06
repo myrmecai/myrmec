@@ -1,0 +1,48 @@
+---
+import Card from "./ui/Card.astro";
+
+const features = [
+  {
+    eyebrow: "Workflows",
+    title: "Coordinated Multi-Agent Execution",
+    body: "Define ordered workflow steps and route each step to the right agent profile for code generation, review, and operations."
+  },
+  {
+    eyebrow: "Models",
+    title: "Provider-Agnostic Model Layer",
+    body: "Use OpenAI, Anthropic, Azure OpenAI, Ollama, and more without changing your workflow design."
+  },
+  {
+    eyebrow: "Tools",
+    title: "Tool-Driven Task Intelligence",
+    body: "Give agents controlled access to file systems, git, cloud CLIs, and databases through managed tool definitions."
+  },
+  {
+    eyebrow: "Knowledge",
+    title: "Context Injection with Governance",
+    body: "Attach organization and project knowledge docs so every task executes with standards, requirements, and architecture context."
+  },
+  {
+    eyebrow: "Control",
+    title: "Live Monitoring and Task Visibility",
+    body: "Track task status, logs, progress updates, and execution history through real-time channels and API records."
+  },
+  {
+    eyebrow: "Security",
+    title: "RBAC and Credential Protection",
+    body: "Use user and agent principal types, scoped roles, short-lived JWTs, and encrypted provider credentials for production safety."
+  }
+];
+---
+
+<section class="section-shell mt-20 md:mt-24">
+  <div class="mb-8 flex flex-wrap items-end justify-between gap-3">
+    <h2 class="font-display text-3xl font-extrabold text-ink md:text-4xl">Everything needed to run agentic software delivery</h2>
+    <a href="/features" class="text-sm font-semibold text-clay hover:text-pine">See detailed breakdown</a>
+  </div>
+  <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    {
+      features.map((item) => <Card title={item.title} body={item.body} eyebrow={item.eyebrow} />)
+    }
+  </div>
+</section>

@@ -1,0 +1,86 @@
+---
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+
+const nav = [
+  {
+    section: "Getting Started",
+    items: [
+      { href: "/docs/getting-started/introduction", label: "Introduction" },
+      { href: "/docs/getting-started/installation", label: "Installation" },
+      { href: "/docs/getting-started/quickstart", label: "Quickstart" }
+    ]
+  },
+  {
+    section: "Concepts",
+    items: [
+      { href: "/docs/concepts/agents", label: "Agents" },
+      { href: "/docs/concepts/workflows", label: "Workflows" },
+      { href: "/docs/concepts/tools", label: "Tools" },
+      { href: "/docs/concepts/models", label: "Models" },
+      { href: "/docs/concepts/knowledge-docs", label: "Knowledge Docs" }
+    ]
+  },
+  {
+    section: "Guides",
+    items: [
+      { href: "/docs/guides/authentication", label: "Authentication" },
+      { href: "/docs/guides/deployment", label: "Deployment" }
+    ]
+  },
+  {
+    section: "Reference",
+    items: [{ href: "/docs/reference/api", label: "API" }]
+  }
+];
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="generator" content={Astro.generator} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+  </head>
+  <body>
+    <Header />
+    <main class="section-shell py-10">
+      <div class="grid gap-8 lg:grid-cols-[250px_1fr]">
+        <aside class="soft-panel h-fit p-5">
+          {
+            nav.map((group) => (
+              <section class="mb-6 last:mb-0">
+                <p class="text-xs font-bold uppercase tracking-[0.18em] text-clay">{group.section}</p>
+                <ul class="mt-3 space-y-2">
+                  {group.items.map((item) => (
+                    <li>
+                      <a href={item.href} class="text-sm font-medium text-pine/85 hover:text-pine">
+                        {item.label}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))
+          }
+        </aside>
+
+        <article class="soft-panel p-7 md:p-10">
+          <slot />
+        </article>
+      </div>
+    </main>
+    <Footer />
+  </body>
+</html>

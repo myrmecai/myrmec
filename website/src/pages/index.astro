@@ -1,0 +1,278 @@
+---
+import MarketingLayout from "../layouts/MarketingLayout.astro";
+---
+
+<MarketingLayout
+  title="Myrmec | Orchestrate Intelligence at Scale"
+  description="The no-code AI agent orchestration platform. Deploy, govern, and scale autonomous agent workflows without developer dependency."
+>
+
+  <!-- ─── HERO ─────────────────────────────────────────────────── -->
+  <section class="relative overflow-hidden">
+    <!-- subtle grid overlay -->
+    <div
+      class="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(99,102,241,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(99,102,241,0.04)_1px,transparent_1px)] bg-[size:32px_32px]"
+    ></div>
+
+    <div class="section-shell relative py-24 md:py-36">
+      <p class="chip reveal">No-Code Agent Orchestration</p>
+
+      <h1 class="big-title reveal-2 mt-5 max-w-4xl text-slate-50">
+        Orchestrate intelligence<br />at scale.
+      </h1>
+
+      <p class="reveal-3 mt-6 max-w-2xl text-lg leading-relaxed text-slate-400">
+        Decouple your business from infrastructure. Deploy, govern, and scale autonomous agent swarms without
+        developer dependency.
+      </p>
+
+      <div class="mt-8 flex flex-wrap gap-4 reveal-3">
+        <a
+          href="/#contact"
+          class="rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-900/40 transition hover:bg-indigo-500"
+        >Get Early Access</a>
+        <a
+          href="/#use-cases"
+          class="rounded-xl border border-slate-700 bg-slate-800 px-6 py-3 text-sm font-semibold text-slate-200 transition hover:border-indigo-600 hover:text-white"
+        >See How It Works</a>
+      </div>
+
+      <!-- Three Pillars -->
+      <div class="mt-20 grid gap-5 md:grid-cols-3">
+
+        <article class="soft-panel p-6">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-950 text-indigo-400">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 7h18M3 12h18M3 17h18" />
+            </svg>
+          </div>
+          <p class="mt-4 text-xs font-bold uppercase tracking-widest text-indigo-400">Infrastructure Isolation</p>
+          <h2 class="mt-2 text-lg font-bold text-slate-100">DevOps owns the infra. Business owns the tasks.</h2>
+          <p class="mt-3 text-sm leading-relaxed text-slate-400">
+            DevOps manages Docker nodes, GPU clusters, and deployments. Business users define and run their own
+            agent workflows — no code required.
+          </p>
+        </article>
+
+        <article class="soft-panel p-6">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-950 text-indigo-400">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+            </svg>
+          </div>
+          <p class="mt-4 text-xs font-bold uppercase tracking-widest text-indigo-400">Centralised Governance</p>
+          <h2 class="mt-2 text-lg font-bold text-slate-100">Guardrails built in, not bolted on.</h2>
+          <p class="mt-3 text-sm leading-relaxed text-slate-400">
+            Admins set token limits, model access policies, and RBAC at the platform level. Every agent execution
+            runs within your organisation's defined boundaries.
+          </p>
+        </article>
+
+        <article class="soft-panel p-6">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-950 text-indigo-400">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+          </div>
+          <p class="mt-4 text-xs font-bold uppercase tracking-widest text-indigo-400">Deterministic Workflows</p>
+          <h2 class="mt-2 text-lg font-bold text-slate-100">Turn non-deterministic AI into predictable outcomes.</h2>
+          <p class="mt-3 text-sm leading-relaxed text-slate-400">
+            Structure agentic execution as explicit steps with defined inputs, outputs, and acceptance criteria.
+            Reproducible, auditable, and improvable over time.
+          </p>
+        </article>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── USE CASES ────────────────────────────────────────────── -->
+  <section id="use-cases" class="border-t border-slate-800">
+    <div class="section-shell py-20">
+      <p class="chip">Use Cases</p>
+      <h2 class="mt-5 text-3xl font-extrabold tracking-tight text-slate-50 md:text-4xl">
+        Built for the enterprise, not the playground.
+      </h2>
+      <p class="mt-4 max-w-2xl text-base text-slate-400">
+        Real workflows that run without developer involvement, once configured by an admin.
+      </p>
+
+      <div class="mt-12 grid gap-6 md:grid-cols-3">
+
+        <article class="soft-panel group p-6 transition hover:border-indigo-700">
+          <div class="font-mono text-xs text-emerald-500">01 — Code Quality</div>
+          <h3 class="mt-3 text-lg font-bold text-slate-100">Self-Healing Repositories</h3>
+          <p class="mt-3 text-sm leading-relaxed text-slate-400">
+            Schedule an agent to scan for vulnerabilities and auto-generate pull requests based on your internal
+            security standards — no developer approval required to initiate.
+          </p>
+        </article>
+
+        <article class="soft-panel group p-6 transition hover:border-indigo-700">
+          <div class="font-mono text-xs text-emerald-500">02 — Modernisation</div>
+          <h3 class="mt-3 text-lg font-bold text-slate-100">Legacy Transformation</h3>
+          <p class="mt-3 text-sm leading-relaxed text-slate-400">
+            Orchestrate a workflow to migrate Java 8 monoliths to Spring Boot 3.4 microservices using
+            pre-defined structured workflows and your own architecture knowledge base.
+          </p>
+        </article>
+
+        <article class="soft-panel group p-6 transition hover:border-indigo-700">
+          <div class="font-mono text-xs text-emerald-500">03 — Governance</div>
+          <h3 class="mt-3 text-lg font-bold text-slate-100">Architectural Audit</h3>
+          <p class="mt-3 text-sm leading-relaxed text-slate-400">
+            Agents act as 24/7 tech leads, reviewing all code against your company's knowledge source and
+            standards before it ever reaches a human reviewer.
+          </p>
+        </article>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── WHY MYRMEC ───────────────────────────────────────────── -->
+  <section class="border-t border-slate-800">
+    <div class="section-shell py-20">
+      <p class="chip">Why Myrmec</p>
+      <h2 class="mt-5 text-3xl font-extrabold tracking-tight text-slate-50 md:text-4xl">
+        The platform your whole organisation runs on.
+      </h2>
+
+      <div class="mt-12 grid gap-8 md:grid-cols-3">
+
+        <div>
+          <div class="text-2xl font-bold text-indigo-400">01</div>
+          <h3 class="mt-2 text-lg font-bold text-slate-100">Institutional Memory</h3>
+          <p class="mt-3 text-sm leading-relaxed text-slate-400">
+            Capture prompts, agent logic, and workflows in the platform — not in individual developers' heads.
+            When people leave, the knowledge stays.
+          </p>
+        </div>
+
+        <div>
+          <div class="text-2xl font-bold text-indigo-400">02</div>
+          <h3 class="mt-2 text-lg font-bold text-slate-100">Shadow AI Mitigation</h3>
+          <p class="mt-3 text-sm leading-relaxed text-slate-400">
+            Provide a secure, governed environment so employees stop using unmanaged personal AI accounts.
+            Token limits enforced at model, profile, project, and user level.
+          </p>
+        </div>
+
+        <div>
+          <div class="text-2xl font-bold text-indigo-400">03</div>
+          <h3 class="mt-2 text-lg font-bold text-slate-100">Vendor Agnostic</h3>
+          <p class="mt-3 text-sm leading-relaxed text-slate-400">
+            Swap models — DeepSeek to Llama, GPT-4 to Claude — with one change in the Admin Panel.
+            Workflows never break, costs stay in control.
+          </p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── CONTACT ──────────────────────────────────────────────── -->
+  <section id="contact" class="border-t border-slate-800">
+    <div class="section-shell py-20">
+      <p class="chip">Contact</p>
+      <h2 class="mt-5 text-3xl font-extrabold tracking-tight text-slate-50 md:text-4xl">
+        Get in touch with the Myrmec team.
+      </h2>
+      <p class="mt-4 max-w-xl text-sm leading-relaxed text-slate-400">
+        Product questions, partnership enquiries, or feedback — we reply from info@myrmec.ai.
+      </p>
+
+      <div id="contact-success" class="mt-6 hidden rounded-xl border border-emerald-800 bg-emerald-950 px-4 py-3 text-sm text-emerald-400">
+        Your message was sent. We will be in touch soon.
+      </div>
+      <div id="contact-error" class="mt-6 hidden rounded-xl border border-red-800 bg-red-950 px-4 py-3 text-sm text-red-400">
+        Something went wrong. Please try again in a few minutes.
+      </div>
+
+      <form method="post" action="/contact.php" class="mt-8 grid max-w-xl gap-5">
+
+        <label class="grid gap-2 text-sm font-medium text-slate-300">
+          Type
+          <select
+            name="type"
+            required
+            class="rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-slate-100 focus:border-indigo-500 focus:outline-none"
+          >
+            <option value="" disabled selected>Select a type…</option>
+            <option value="Feedback">Feedback</option>
+            <option value="Issue">Issue</option>
+            <option value="InformationRequired">Information Required</option>
+          </select>
+        </label>
+
+        <label class="grid gap-2 text-sm font-medium text-slate-300">
+          Email
+          <input
+            type="email"
+            name="email"
+            required
+            maxlength="180"
+            placeholder="you@company.com"
+            class="rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
+          />
+        </label>
+
+        <label class="grid gap-2 text-sm font-medium text-slate-300">
+          Subject
+          <input
+            type="text"
+            name="subject"
+            required
+            maxlength="180"
+            placeholder="Brief summary"
+            class="rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
+          />
+        </label>
+
+        <label class="grid gap-2 text-sm font-medium text-slate-300">
+          Message
+          <textarea
+            name="message"
+            required
+            rows="6"
+            maxlength="4000"
+            placeholder="Your message…"
+            class="rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
+          ></textarea>
+        </label>
+
+        <!-- Honeypot -->
+        <label class="hidden" aria-hidden="true">
+          Leave empty
+          <input type="text" name="website" tabindex="-1" autocomplete="off" />
+        </label>
+
+        <!-- Cloudflare Turnstile -->
+        <div
+          class="cf-turnstile"
+          data-sitekey="0x4AAAAAADD1WFolzDbyalzR"
+          data-theme="dark"
+        ></div>
+
+        <button
+          type="submit"
+          class="w-fit rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-900/40 transition hover:bg-indigo-500"
+        >
+          Send message
+        </button>
+
+      </form>
+    </div>
+  </section>
+
+</MarketingLayout>
+
+<!-- Cloudflare Turnstile -->
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const sent = params.get("sent");
+  if (sent === "1") document.getElementById("contact-success")?.classList.remove("hidden");
+  if (sent === "0") document.getElementById("contact-error")?.classList.remove("hidden");
+</script>

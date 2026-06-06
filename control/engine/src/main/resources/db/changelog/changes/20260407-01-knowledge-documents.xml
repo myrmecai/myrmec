@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Knowledge Documents table -->
+    <changeSet id="20260407-01-01" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="knowledge_documents"/>
+            </not>
+        </preConditions>
+        <createTable tableName="knowledge_documents">
+            <column name="id" type="uuid" defaultValueComputed="gen_random_uuid()">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="scope" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_knowledge_project" references="projects(id)"/>
+            </column>
+            <column name="category" type="varchar(30)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="name" type="varchar(200)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="content" type="text">
+                <constraints nullable="false"/>
+            </column>
+            <column name="priority" type="int" defaultValueNumeric="100">
+                <constraints nullable="false"/>
+            </column>
+            <column name="applies_to" type="text"/>
+            <column name="source_path" type="varchar(500)"/>
+            <column name="active" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_knowledge_created_by" references="users(id)"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <!-- Unique constraint on scope + project_id + name -->
+    <changeSet id="20260407-01-02" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="uq_knowledge_scope_project_name"/>
+            </not>
+        </preConditions>
+        <addUniqueConstraint
+                tableName="knowledge_documents"
+                columnNames="scope, project_id, name"
+                constraintName="uq_knowledge_scope_project_name"/>
+    </changeSet>
+
+    <!-- Index on scope + project_id + active for context resolution queries -->
+    <changeSet id="20260407-01-03" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_knowledge_scope_project_active"/>
+            </not>
+        </preConditions>
+        <createIndex indexName="idx_knowledge_scope_project_active" tableName="knowledge_documents">
+            <column name="scope"/>
+            <column name="project_id"/>
+            <column name="active"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- Index on category for filtering -->
+    <changeSet id="20260407-01-04" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_knowledge_category"/>
+            </not>
+        </preConditions>
+        <createIndex indexName="idx_knowledge_category" tableName="knowledge_documents">
+            <column name="category"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- Check constraint: ORGANIZATION scope must have null project_id, PROJECT scope must have project_id -->
+    <changeSet id="20260407-01-05" author="myrmec">
+        <sql>
+            ALTER TABLE knowledge_documents ADD CONSTRAINT chk_knowledge_scope_project
+            CHECK (
+                (scope = 'ORGANIZATION' AND project_id IS NULL) OR
+                (scope = 'PROJECT' AND project_id IS NOT NULL)
+            );
+        </sql>
+        <rollback>
+            <sql>ALTER TABLE knowledge_documents DROP CONSTRAINT IF EXISTS chk_knowledge_scope_project;</sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

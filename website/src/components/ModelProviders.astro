@@ -1,0 +1,26 @@
+---
+const providers = [
+  "OpenAI",
+  "Anthropic",
+  "Azure OpenAI",
+  "Google AI",
+  "Mistral",
+  "Ollama",
+  "Groq",
+  "OpenRouter",
+  "GitHub Models"
+];
+---
+
+<section class="section-shell mt-20">
+  <p class="mb-4 text-xs font-bold uppercase tracking-[0.18em] text-clay">Model ecosystem</p>
+  <div class="soft-panel flex flex-wrap gap-3 p-5">
+    {
+      providers.map((provider) => (
+        <span class="rounded-lg border border-pine/15 bg-white px-3 py-2 text-xs font-semibold text-pine/85 md:text-sm">
+          {provider}
+        </span>
+      ))
+    }
+  </div>
+</section>

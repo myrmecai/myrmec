@@ -1,0 +1,45 @@
+---
+import Badge from "./ui/Badge.astro";
+import Button from "./ui/Button.astro";
+---
+
+<section class="section-shell pt-16 md:pt-24">
+  <div class="grid gap-10 md:grid-cols-[1.1fr_0.9fr] md:items-center">
+    <div class="reveal">
+      <Badge text="Distributed Agentic AI Platform" />
+      <h1 class="big-title mt-5 max-w-xl text-ink">Orchestrate intelligence at scale.</h1>
+      <p class="mt-6 max-w-xl text-lg leading-relaxed text-pine/85">
+        Myrmec gives your teams a control plane for orchestrating specialized AI agents, tools, and model providers across end-to-end workflows.
+      </p>
+      <div class="mt-8 flex flex-wrap gap-3">
+        <Button href="/docs/getting-started/quickstart" label="Run Quickstart" />
+        <Button href="/features" label="Explore Features" variant="secondary" />
+      </div>
+    </div>
+
+    <div class="reveal-2 soft-panel grid-pattern overflow-hidden p-5 md:p-7">
+      <div class="rounded-xl bg-ink p-4 font-mono text-xs text-emerald-300 md:text-sm">
+        <p class="mb-3 text-amber-300">$ myrmec workflow run --project addressbook --feature "contact search"</p>
+        <p class="mb-2 text-slate-200">task.assign  -> Generate Code</p>
+        <p class="mb-2 text-slate-200">tool.call    -> file-system.write</p>
+        <p class="mb-2 text-slate-200">tool.call    -> git_commit</p>
+        <p class="mb-2 text-slate-200">step.complete -> review</p>
+        <p class="text-emerald-300">workflow.complete -> merged to main</p>
+      </div>
+      <div class="mt-4 grid gap-3 sm:grid-cols-3">
+        <div class="rounded-lg bg-white p-3">
+          <p class="text-xs uppercase tracking-wide text-clay">Control Plane</p>
+          <p class="mt-1 text-sm font-semibold text-pine">Engine + UI</p>
+        </div>
+        <div class="rounded-lg bg-white p-3">
+          <p class="text-xs uppercase tracking-wide text-clay">Workers</p>
+          <p class="mt-1 text-sm font-semibold text-pine">LangGraph Agents</p>
+        </div>
+        <div class="rounded-lg bg-white p-3">
+          <p class="text-xs uppercase tracking-wide text-clay">Comms</p>
+          <p class="mt-1 text-sm font-semibold text-pine">HTTP + WebSocket</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

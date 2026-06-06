@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Add GIT tool for repository credential storage.
+        This tool represents Git integration and allows storing git tokens
+        as project secrets for cloning private repositories.
+    -->
+
+    <changeSet id="20260413-02-01" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM tools WHERE code = 'git'</sqlCheck>
+        </preConditions>
+        
+        <insert tableName="tools">
+            <column name="code" value="git"/>
+            <column name="name" value="Git"/>
+            <column name="description" value="Git repository integration for cloning and workspace setup"/>
+            <column name="tool_type" value="INTEGRATION"/>
+            <column name="config_schema" value='{"type":"object","properties":{"token":{"type":"string","description":"Personal access token or deploy key for private repos"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+    </changeSet>
+
+    <!-- Add Maven tool for build operations -->
+    <changeSet id="20260413-02-02" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM tools WHERE code = 'maven'</sqlCheck>
+        </preConditions>
+        
+        <insert tableName="tools">
+            <column name="code" value="maven"/>
+            <column name="name" value="Maven"/>
+            <column name="description" value="Apache Maven build tool for Java projects"/>
+            <column name="tool_type" value="SYSTEM"/>
+            <column name="config_schema" value='{"type":"object","properties":{"maven_home":{"type":"string","description":"Maven installation directory"},"java_home":{"type":"string","description":"Java installation directory"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+    </changeSet>
+
+    <!-- Git operation tools for workspace commits -->
+    <changeSet id="20260413-02-03" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM tools WHERE code = 'git_status'</sqlCheck>
+        </preConditions>
+        
+        <insert tableName="tools">
+            <column name="code" value="git_status"/>
+            <column name="name" value="Git Status"/>
+            <column name="description" value="Show the working tree status - modified, staged, and untracked files"/>
+            <column name="tool_type" value="GIT"/>
+            <column name="config_schema" value='{"type":"object","properties":{},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+        
+        <insert tableName="tools">
+            <column name="code" value="git_diff"/>
+            <column name="name" value="Git Diff"/>
+            <column name="description" value="Show changes between commits, commit and working tree, etc."/>
+            <column name="tool_type" value="GIT"/>
+            <column name="config_schema" value='{"type":"object","properties":{"file_path":{"type":"string","description":"Optional file path to diff"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+        
+        <insert tableName="tools">
+            <column name="code" value="git_add"/>
+            <column name="name" value="Git Add"/>
+            <column name="description" value="Add file contents to the staging area"/>
+            <column name="tool_type" value="GIT"/>
+            <column name="config_schema" value='{"type":"object","properties":{"file_paths":{"type":"string","description":"Space-separated file paths to stage, or . for all"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+        
+        <insert tableName="tools">
+            <column name="code" value="git_commit"/>
+            <column name="name" value="Git Commit"/>
+            <column name="description" value="Record changes to the repository with a commit message"/>
+            <column name="tool_type" value="GIT"/>
+            <column name="config_schema" value='{"type":"object","properties":{"message":{"type":"string","description":"Commit message describing the changes"}},"required":["message"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+        
+        <insert tableName="tools">
+            <column name="code" value="git_push"/>
+            <column name="name" value="Git Push"/>
+            <column name="description" value="Update remote refs along with associated objects"/>
+            <column name="tool_type" value="GIT"/>
+            <column name="config_schema" value='{"type":"object","properties":{"remote":{"type":"string","default":"origin","description":"Remote name"},"branch":{"type":"string","description":"Branch to push"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+        
+        <insert tableName="tools">
+            <column name="code" value="git_log"/>
+            <column name="name" value="Git Log"/>
+            <column name="description" value="Show commit logs"/>
+            <column name="tool_type" value="GIT"/>
+            <column name="config_schema" value='{"type":"object","properties":{"count":{"type":"integer","default":10,"description":"Number of commits to show (max 50)"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+        
+        <insert tableName="tools">
+            <column name="code" value="git_branch"/>
+            <column name="name" value="Git Branch"/>
+            <column name="description" value="List, create, or switch branches"/>
+            <column name="tool_type" value="GIT"/>
+            <column name="config_schema" value='{"type":"object","properties":{"branch_name":{"type":"string","description":"Branch name to create or switch to"},"create":{"type":"boolean","default":false,"description":"Create the branch if true"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+    </changeSet>
+
+</databaseChangeLog>

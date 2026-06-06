@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="20260403-05-create-models" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="models"/>
+            </not>
+        </preConditions>
+        <comment>Create models table for AI model configurations</comment>
+
+        <createTable tableName="models">
+            <column name="code" type="varchar(50)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(200)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="provider" type="varchar(30)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deployment_type" type="varchar(20)" defaultValue="CLOUD">
+                <constraints nullable="false"/>
+            </column>
+            <column name="model_id" type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="api_endpoint" type="varchar(500)"/>
+            <column name="api_key_encrypted" type="bytea"/>
+            <column name="requires_auth" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="infra_config" type="text"/>
+            <column name="default_params" type="text"/>
+            <column name="status" type="varchar(20)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="health_status" type="varchar(20)" defaultValue="UNKNOWN">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_health_check" type="timestamp with time zone"/>
+            <column name="last_tested_at" type="timestamp with time zone"/>
+            <column name="last_test_status" type="varchar(20)"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone"/>
+        </createTable>
+    </changeSet>
+
+    <!-- Seed default model for GitHub Models (gpt-4o) -->
+    <changeSet id="20260403-05-seed-github-gpt4o" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM models WHERE code = 'github-gpt-4o'</sqlCheck>
+        </preConditions>
+        <comment>Seed default GPT-4o model via GitHub Models for E2E testing and demo</comment>
+
+        <insert tableName="models">
+            <column name="code" value="github-gpt-4o"/>
+            <column name="name" value="GPT-4o (GitHub Models)"/>
+            <column name="provider" value="github_models"/>
+            <column name="deployment_type" value="CLOUD"/>
+            <column name="model_id" value="gpt-4o"/>
+            <column name="api_endpoint" value="https://models.inference.ai.azure.com"/>
+            <!-- API key will be set via bootstrap or API - not stored in changelog -->
+            <column name="requires_auth" valueBoolean="true"/>
+            <column name="default_params" value='{"temperature": 0.7}'/>
+            <column name="status" value="ACTIVE"/>
+            <column name="health_status" value="UNKNOWN"/>
+        </insert>
+    </changeSet>
+
+</databaseChangeLog>

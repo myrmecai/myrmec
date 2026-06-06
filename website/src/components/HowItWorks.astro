@@ -1,0 +1,32 @@
+<section class="section-shell mt-20 md:mt-24">
+  <h2 class="font-display text-3xl font-extrabold text-ink md:text-4xl">How Myrmec works</h2>
+  <p class="mt-4 max-w-3xl text-base leading-relaxed text-pine/85">
+    Myrmec combines transactional REST APIs with low-latency WebSocket streams so the control plane can assign work in real time while keeping execution state consistent.
+  </p>
+
+  <div class="mt-10 grid gap-5 md:grid-cols-3">
+    <article class="soft-panel reveal p-6">
+      <p class="text-xs font-bold uppercase tracking-wider text-clay">Step 1</p>
+      <h3 class="mt-2 font-display text-xl font-bold">Define workflow</h3>
+      <p class="mt-3 text-sm leading-relaxed text-pine/80">
+        Create projects, workflows, and step logic. Assign agent profiles, tools, and model constraints per step.
+      </p>
+    </article>
+
+    <article class="soft-panel reveal-2 p-6">
+      <p class="text-xs font-bold uppercase tracking-wider text-clay">Step 2</p>
+      <h3 class="mt-2 font-display text-xl font-bold">Dispatch tasks</h3>
+      <p class="mt-3 text-sm leading-relaxed text-pine/80">
+        Engine pushes task assignments over WebSocket. Agents accept, execute, stream progress, and return structured results.
+      </p>
+    </article>
+
+    <article class="soft-panel reveal-3 p-6">
+      <p class="text-xs font-bold uppercase tracking-wider text-clay">Step 3</p>
+      <h3 class="mt-2 font-display text-xl font-bold">Finalize outcomes</h3>
+      <p class="mt-3 text-sm leading-relaxed text-pine/80">
+        Workflow execution captures artifacts, logs, and status transitions, then merges validated changes back to mainline.
+      </p>
+    </article>
+  </div>
+</section>

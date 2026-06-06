@@ -1,0 +1,307 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="20260403-06-create-model-providers" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="model_providers"/>
+            </not>
+        </preConditions>
+        <comment>Create model_providers table for AI provider configurations</comment>
+
+        <createTable tableName="model_providers">
+            <column name="code" type="varchar(50)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="base_url" type="varchar(500)"/>
+            <column name="deployment_type" type="varchar(20)" defaultValue="CLOUD">
+                <constraints nullable="false"/>
+            </column>
+            <column name="requires_auth" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="auth_header" type="varchar(100)" defaultValue="Authorization">
+                <constraints nullable="false"/>
+            </column>
+            <column name="auth_prefix" type="varchar(50)" defaultValue="Bearer ">
+                <constraints nullable="false"/>
+            </column>
+            <column name="health_endpoint" type="varchar(200)"/>
+            <column name="models_endpoint" type="varchar(200)"/>
+            <column name="docs_url" type="varchar(500)"/>
+            <column name="description" type="text"/>
+            <column name="is_system" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone"/>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="20260403-06-seed-model-providers" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM model_providers WHERE code = 'openai'</sqlCheck>
+        </preConditions>
+        <comment>Seed known AI model providers</comment>
+
+        <!-- Cloud Providers - Direct -->
+        <insert tableName="model_providers">
+            <column name="code" value="openai"/>
+            <column name="name" value="OpenAI"/>
+            <column name="base_url" value="https://api.openai.com/v1"/>
+            <column name="deployment_type" value="CLOUD"/>
+            <column name="requires_auth" valueBoolean="true"/>
+            <column name="health_endpoint" value="/models"/>
+            <column name="models_endpoint" value="/models"/>
+            <column name="docs_url" value="https://platform.openai.com/docs/api-reference"/>
+            <column name="description" value="OpenAI API - GPT-4, GPT-3.5, DALL-E, Whisper"/>
+            <column name="is_system" valueBoolean="true"/>
+        </insert>
+
+        <insert tableName="model_providers">
+            <column name="code" value="anthropic"/>
+            <column name="name" value="Anthropic"/>
+            <column name="base_url" value="https://api.anthropic.com/v1"/>
+            <column name="deployment_type" value="CLOUD"/>
+            <column name="requires_auth" valueBoolean="true"/>
+            <column name="auth_header" value="x-api-key"/>
+            <column name="auth_prefix" value=""/>
+            <column name="docs_url" value="https://docs.anthropic.com/claude/reference"/>
+            <column name="description" value="Anthropic API - Claude 3.5, Claude 3 Opus/Sonnet/Haiku"/>
+            <column name="is_system" valueBoolean="true"/>
+        </insert>
+
+        <insert tableName="model_providers">
+            <column name="code" value="azure_openai"/>
+            <column name="name" value="Azure OpenAI"/>
+            <column name="deployment_type" value="CLOUD"/>
+            <column name="requires_auth" valueBoolean="true"/>
+            <column name="auth_header" value="api-key"/>
+            <column name="auth_prefix" value=""/>
+            <column name="docs_url" value="https://learn.microsoft.com/en-us/azure/ai-services/openai/reference"/>
+            <column name="description" value="Azure OpenAI Service - GPT models via Azure (endpoint varies per deployment)"/>
+            <column name="is_system" valueBoolean="true"/>
+        </insert>
+
+        <insert tableName="model_providers">
+            <column name="code" value="google_ai"/>
+            <column name="name" value="Google AI"/>
+            <column name="base_url" value="https://generativelanguage.googleapis.com/v1beta"/>
+            <column name="deployment_type" value="CLOUD"/>
+            <column name="requires_auth" valueBoolean="true"/>
+            <column name="docs_url" value="https://ai.google.dev/api/rest"/>
+            <column name="description" value="Google AI Studio - Gemini models"/>
+            <column name="is_system" valueBoolean="true"/>
+        </insert>
+
+        <insert tableName="model_providers">
+            <column name="code" value="mistral"/>
+            <column name="name" value="Mistral AI"/>
+            <column name="base_url" value="https://api.mistral.ai/v1"/>
+            <column name="deployment_type" value="CLOUD"/>
+            <column name="requires_auth" valueBoolean="true"/>
+            <column name="health_endpoint" value="/models"/>
+            <column name="models_endpoint" value="/models"/>
+            <column name="docs_url" value="https://docs.mistral.ai/api/"/>
+            <column name="description" value="Mistral AI - Mistral, Mixtral, Codestral models"/>
+            <column name="is_system" valueBoolean="true"/>
+        </insert>
+
+        <!-- Cloud Providers - Aggregators/Inference Platforms -->
+        <insert tableName="model_providers">
+            <column name="code" value="github_models"/>
+            <column name="name" value="GitHub Models"/>
+            <column name="base_url" value="https://models.inference.ai.azure.com"/>
+            <column name="deployment_type" value="CLOUD"/>
+            <column name="requires_auth" valueBoolean="true"/>
+            <column name="health_endpoint" value="/models"/>
+            <column name="models_endpoint" value="/models"/>
+            <column name="docs_url" value="https://docs.github.com/en/github-models"/>
+            <column name="description" value="GitHub Models - Access GPT-4o, Llama, Mistral via GitHub token"/>
+            <column name="is_system" valueBoolean="true"/>
+        </insert>
+
+        <insert tableName="model_providers">
+            <column name="code" value="openrouter"/>
+            <column name="name" value="OpenRouter"/>
+            <column name="base_url" value="https://openrouter.ai/api/v1"/>
+            <column name="deployment_type" value="CLOUD"/>
+            <column name="requires_auth" valueBoolean="true"/>
+            <column name="health_endpoint" value="/models"/>
+            <column name="models_endpoint" value="/models"/>
+            <column name="docs_url" value="https://openrouter.ai/docs"/>
+            <column name="description" value="OpenRouter - Unified access to 100+ models (GPT, Claude, Llama, Gemini)"/>
+            <column name="is_system" valueBoolean="true"/>
+        </insert>
+
+        <insert tableName="model_providers">
+            <column name="code" value="together_ai"/>
+            <column name="name" value="Together AI"/>
+            <column name="base_url" value="https://api.together.xyz/v1"/>
+            <column name="deployment_type" value="CLOUD"/>
+            <column name="requires_auth" valueBoolean="true"/>
+            <column name="health_endpoint" value="/models"/>
+            <column name="models_endpoint" value="/models"/>
+            <column name="docs_url" value="https://docs.together.ai/reference"/>
+            <column name="description" value="Together AI - Fast inference for open source models (Llama, Mixtral, etc.)"/>
+            <column name="is_system" valueBoolean="true"/>
+        </insert>
+
+        <insert tableName="model_providers">
+            <column name="code" value="groq"/>
+            <column name="name" value="Groq"/>
+            <column name="base_url" value="https://api.groq.com/openai/v1"/>
+            <column name="deployment_type" value="CLOUD"/>
+            <column name="requires_auth" valueBoolean="true"/>
+            <column name="health_endpoint" value="/models"/>
+            <column name="models_endpoint" value="/models"/>
+            <column name="docs_url" value="https://console.groq.com/docs/quickstart"/>
+            <column name="description" value="Groq - Ultra-fast inference with custom LPU hardware (Llama, Mixtral, Gemma)"/>
+            <column name="is_system" valueBoolean="true"/>
+        </insert>
+
+        <insert tableName="model_providers">
+            <column name="code" value="fireworks"/>
+            <column name="name" value="Fireworks AI"/>
+            <column name="base_url" value="https://api.fireworks.ai/inference/v1"/>
+            <column name="deployment_type" value="CLOUD"/>
+            <column name="requires_auth" valueBoolean="true"/>
+            <column name="health_endpoint" value="/models"/>
+            <column name="models_endpoint" value="/models"/>
+            <column name="docs_url" value="https://docs.fireworks.ai/api-reference"/>
+            <column name="description" value="Fireworks AI - Fast inference with function calling support"/>
+            <column name="is_system" valueBoolean="true"/>
+        </insert>
+
+        <insert tableName="model_providers">
+            <column name="code" value="deepinfra"/>
+            <column name="name" value="DeepInfra"/>
+            <column name="base_url" value="https://api.deepinfra.com/v1/openai"/>
+            <column name="deployment_type" value="CLOUD"/>
+            <column name="requires_auth" valueBoolean="true"/>
+            <column name="health_endpoint" value="/models"/>
+            <column name="models_endpoint" value="/models"/>
+            <column name="docs_url" value="https://deepinfra.com/docs"/>
+            <column name="description" value="DeepInfra - Pay-per-token inference for open source models"/>
+            <column name="is_system" valueBoolean="true"/>
+        </insert>
+
+        <insert tableName="model_providers">
+            <column name="code" value="perplexity"/>
+            <column name="name" value="Perplexity"/>
+            <column name="base_url" value="https://api.perplexity.ai"/>
+            <column name="deployment_type" value="CLOUD"/>
+            <column name="requires_auth" valueBoolean="true"/>
+            <column name="docs_url" value="https://docs.perplexity.ai/reference"/>
+            <column name="description" value="Perplexity - Search-augmented Sonar models"/>
+            <column name="is_system" valueBoolean="true"/>
+        </insert>
+
+        <!-- On-Premise Providers -->
+        <insert tableName="model_providers">
+            <column name="code" value="ollama"/>
+            <column name="name" value="Ollama"/>
+            <column name="base_url" value="http://localhost:11434"/>
+            <column name="deployment_type" value="ON_PREMISE"/>
+            <column name="requires_auth" valueBoolean="false"/>
+            <column name="health_endpoint" value="/api/tags"/>
+            <column name="models_endpoint" value="/api/tags"/>
+            <column name="docs_url" value="https://github.com/ollama/ollama/blob/main/docs/api.md"/>
+            <column name="description" value="Ollama - Easy local LLM server (Llama, Mistral, Gemma, etc.)"/>
+            <column name="is_system" valueBoolean="true"/>
+        </insert>
+
+        <insert tableName="model_providers">
+            <column name="code" value="vllm"/>
+            <column name="name" value="vLLM"/>
+            <column name="base_url" value="http://localhost:8000/v1"/>
+            <column name="deployment_type" value="ON_PREMISE"/>
+            <column name="requires_auth" valueBoolean="false"/>
+            <column name="health_endpoint" value="/health"/>
+            <column name="models_endpoint" value="/models"/>
+            <column name="docs_url" value="https://docs.vllm.ai/en/latest/"/>
+            <column name="description" value="vLLM - High-throughput inference with PagedAttention (production GPU deployments)"/>
+            <column name="is_system" valueBoolean="true"/>
+        </insert>
+
+        <insert tableName="model_providers">
+            <column name="code" value="tgi"/>
+            <column name="name" value="Text Generation Inference"/>
+            <column name="base_url" value="http://localhost:8080"/>
+            <column name="deployment_type" value="ON_PREMISE"/>
+            <column name="requires_auth" valueBoolean="false"/>
+            <column name="health_endpoint" value="/health"/>
+            <column name="models_endpoint" value="/info"/>
+            <column name="docs_url" value="https://huggingface.co/docs/text-generation-inference"/>
+            <column name="description" value="HuggingFace TGI - Production inference server with Flash Attention"/>
+            <column name="is_system" valueBoolean="true"/>
+        </insert>
+
+        <insert tableName="model_providers">
+            <column name="code" value="llama_cpp"/>
+            <column name="name" value="llama.cpp"/>
+            <column name="base_url" value="http://localhost:8080"/>
+            <column name="deployment_type" value="ON_PREMISE"/>
+            <column name="requires_auth" valueBoolean="false"/>
+            <column name="health_endpoint" value="/health"/>
+            <column name="docs_url" value="https://github.com/ggerganov/llama.cpp/blob/master/examples/server/README.md"/>
+            <column name="description" value="llama.cpp - Efficient CPU/GPU inference with GGUF quantization"/>
+            <column name="is_system" valueBoolean="true"/>
+        </insert>
+
+        <insert tableName="model_providers">
+            <column name="code" value="localai"/>
+            <column name="name" value="LocalAI"/>
+            <column name="base_url" value="http://localhost:8080/v1"/>
+            <column name="deployment_type" value="ON_PREMISE"/>
+            <column name="requires_auth" valueBoolean="false"/>
+            <column name="health_endpoint" value="/readyz"/>
+            <column name="models_endpoint" value="/models"/>
+            <column name="docs_url" value="https://localai.io/docs/"/>
+            <column name="description" value="LocalAI - Multi-modal OpenAI-compatible server (text, images, audio)"/>
+            <column name="is_system" valueBoolean="true"/>
+        </insert>
+
+        <!-- Generic Provider -->
+        <insert tableName="model_providers">
+            <column name="code" value="generic"/>
+            <column name="name" value="Generic (OpenAI-compatible)"/>
+            <column name="deployment_type" value="CLOUD"/>
+            <column name="requires_auth" valueBoolean="true"/>
+            <column name="docs_url" value="https://platform.openai.com/docs/api-reference"/>
+            <column name="description" value="Generic OpenAI-compatible endpoint - For any provider following the OpenAI API format"/>
+            <column name="is_system" valueBoolean="true"/>
+        </insert>
+    </changeSet>
+
+    <changeSet id="20260403-06-add-provider-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_models_provider"/>
+            </not>
+        </preConditions>
+        <comment>Add foreign key from models to model_providers</comment>
+
+        <addForeignKeyConstraint
+            baseTableName="models"
+            baseColumnNames="provider"
+            referencedTableName="model_providers"
+            referencedColumnNames="code"
+            constraintName="fk_models_provider"
+            onDelete="RESTRICT"
+            onUpdate="CASCADE"/>
+    </changeSet>
+
+</databaseChangeLog>

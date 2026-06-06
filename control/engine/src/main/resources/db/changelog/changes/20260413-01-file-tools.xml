@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- 
+        Add individual file management tools.
+        These granular tools replace the generic 'filesystem' tool for better control.
+    -->
+
+    <changeSet id="20260413-01-01" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM tools WHERE code = 'read_file'</sqlCheck>
+        </preConditions>
+        
+        <!-- read_file -->
+        <insert tableName="tools">
+            <column name="code" value="read_file"/>
+            <column name="name" value="Read File"/>
+            <column name="description" value="Read the contents of a file from the workspace"/>
+            <column name="tool_type" value="FILE"/>
+            <column name="config_schema" value='{"type":"object","properties":{"file_path":{"type":"string","description":"Path to the file (relative to workspace)"},"encoding":{"type":"string","default":"utf-8","description":"Text encoding"}},"required":["file_path"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+        
+        <!-- write_file -->
+        <insert tableName="tools">
+            <column name="code" value="write_file"/>
+            <column name="name" value="Write File"/>
+            <column name="description" value="Write content to a file in the workspace"/>
+            <column name="tool_type" value="FILE"/>
+            <column name="config_schema" value='{"type":"object","properties":{"file_path":{"type":"string","description":"Path to the file (relative to workspace)"},"content":{"type":"string","description":"Content to write"},"encoding":{"type":"string","default":"utf-8","description":"Text encoding"},"create_dirs":{"type":"boolean","default":true,"description":"Create parent directories if missing"}},"required":["file_path","content"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+        
+        <!-- list_directory -->
+        <insert tableName="tools">
+            <column name="code" value="list_directory"/>
+            <column name="name" value="List Directory"/>
+            <column name="description" value="List contents of a directory in the workspace"/>
+            <column name="tool_type" value="FILE"/>
+            <column name="config_schema" value='{"type":"object","properties":{"dir_path":{"type":"string","default":".","description":"Directory path (relative to workspace)"},"include_hidden":{"type":"boolean","default":false,"description":"Include hidden files/directories"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+        
+        <!-- search_files -->
+        <insert tableName="tools">
+            <column name="code" value="search_files"/>
+            <column name="name" value="Search Files"/>
+            <column name="description" value="Search for files matching a glob pattern"/>
+            <column name="tool_type" value="FILE"/>
+            <column name="config_schema" value='{"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern (e.g., *.py, src/**/*.java)"},"dir_path":{"type":"string","default":".","description":"Directory to search in"},"max_results":{"type":"integer","default":100,"description":"Maximum results"}},"required":["pattern"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+        
+        <!-- search_code -->
+        <insert tableName="tools">
+            <column name="code" value="search_code"/>
+            <column name="name" value="Search Code"/>
+            <column name="description" value="Search for text or regex pattern in code files"/>
+            <column name="tool_type" value="FILE"/>
+            <column name="config_schema" value='{"type":"object","properties":{"query":{"type":"string","description":"Search string or regex pattern"},"file_pattern":{"type":"string","default":"*","description":"Glob pattern for files to search"},"dir_path":{"type":"string","default":".","description":"Directory to search in"},"is_regex":{"type":"boolean","default":false,"description":"Treat query as regex pattern"},"max_results":{"type":"integer","default":50,"description":"Maximum matches"},"context_lines":{"type":"integer","default":2,"description":"Lines of context before/after match"}},"required":["query"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+        
+        <!-- get_file_tree -->
+        <insert tableName="tools">
+            <column name="code" value="get_file_tree"/>
+            <column name="name" value="Get File Tree"/>
+            <column name="description" value="Get a tree view of directory structure"/>
+            <column name="tool_type" value="FILE"/>
+            <column name="config_schema" value='{"type":"object","properties":{"dir_path":{"type":"string","default":".","description":"Starting directory"},"max_depth":{"type":"integer","default":3,"description":"Maximum depth to traverse"},"include_hidden":{"type":"boolean","default":false,"description":"Include hidden files/directories"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+        
+        <!-- delete_file -->
+        <insert tableName="tools">
+            <column name="code" value="delete_file"/>
+            <column name="name" value="Delete File"/>
+            <column name="description" value="Delete a file from the workspace"/>
+            <column name="tool_type" value="FILE"/>
+            <column name="config_schema" value='{"type":"object","properties":{"file_path":{"type":"string","description":"Path to the file to delete"}},"required":["file_path"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+        
+        <!-- create_directory -->
+        <insert tableName="tools">
+            <column name="code" value="create_directory"/>
+            <column name="name" value="Create Directory"/>
+            <column name="description" value="Create a directory in the workspace"/>
+            <column name="tool_type" value="FILE"/>
+            <column name="config_schema" value='{"type":"object","properties":{"dir_path":{"type":"string","description":"Path to the directory to create"}},"required":["dir_path"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+    </changeSet>
+
+    <!-- 
+        NOTE: Keeping filesystem tool ACTIVE for backward compatibility.
+        The granular file tools (read_file, write_file, etc.) are available as alternatives.
+    -->
+
+</databaseChangeLog>

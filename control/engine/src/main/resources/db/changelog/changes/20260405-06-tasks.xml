@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Workflow tasks table - individual step executions within a request -->
+    <changeSet id="20260405-06-01" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="workflow_tasks"/>
+            </not>
+        </preConditions>
+        <createTable tableName="workflow_tasks">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="request_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="step_id" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="agent_profile_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="agent_instance_id" type="uuid"/>
+            <column name="input" type="text"/>
+            <column name="output" type="text"/>
+            <column name="status" type="varchar(20)" defaultValue="PENDING">
+                <constraints nullable="false"/>
+            </column>
+            <column name="result" type="varchar(20)"/>
+            <column name="error_message" type="text"/>
+            <column name="attempt" type="integer" defaultValueNumeric="1">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="started_at" type="timestamp with time zone"/>
+            <column name="completed_at" type="timestamp with time zone"/>
+        </createTable>
+    </changeSet>
+
+    <!-- Unique constraint: one task per step per request per attempt -->
+    <changeSet id="20260405-06-02" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <uniqueConstraintExists tableName="workflow_tasks" constraintName="uk_workflow_tasks_request_step_attempt"/>
+            </not>
+        </preConditions>
+        <addUniqueConstraint tableName="workflow_tasks"
+                             columnNames="request_id, step_id, attempt"
+                             constraintName="uk_workflow_tasks_request_step_attempt"/>
+    </changeSet>
+
+    <!-- Foreign key to workflow_requests -->
+    <changeSet id="20260405-06-03" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_workflow_tasks_request"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="workflow_tasks"
+            baseColumnNames="request_id"
+            referencedTableName="workflow_requests"
+            referencedColumnNames="id"
+            constraintName="fk_workflow_tasks_request"
+            onDelete="CASCADE"/>
+    </changeSet>
+
+    <!-- Foreign key to agent_profiles -->
+    <changeSet id="20260405-06-04" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_workflow_tasks_agent_profile"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="workflow_tasks"
+            baseColumnNames="agent_profile_id"
+            referencedTableName="agent_profiles"
+            referencedColumnNames="id"
+            constraintName="fk_workflow_tasks_agent_profile"
+            onDelete="SET NULL"/>
+    </changeSet>
+
+    <!-- Foreign key to agent_instances -->
+    <changeSet id="20260405-06-05" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_workflow_tasks_agent_instance"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="workflow_tasks"
+            baseColumnNames="agent_instance_id"
+            referencedTableName="agent_instances"
+            referencedColumnNames="id"
+            constraintName="fk_workflow_tasks_agent_instance"
+            onDelete="SET NULL"/>
+    </changeSet>
+
+    <!-- Index for looking up tasks by request -->
+    <changeSet id="20260405-06-06" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_workflow_tasks_request_id"/>
+            </not>
+        </preConditions>
+        <createIndex tableName="workflow_tasks" indexName="idx_workflow_tasks_request_id">
+            <column name="request_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- Index for filtering by status (for task queue) -->
+    <changeSet id="20260405-06-07" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_workflow_tasks_status"/>
+            </not>
+        </preConditions>
+        <createIndex tableName="workflow_tasks" indexName="idx_workflow_tasks_status">
+            <column name="status"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- Index for looking up tasks by agent instance -->
+    <changeSet id="20260405-06-08" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_workflow_tasks_agent_instance_id"/>
+            </not>
+        </preConditions>
+        <createIndex tableName="workflow_tasks" indexName="idx_workflow_tasks_agent_instance_id">
+            <column name="agent_instance_id"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

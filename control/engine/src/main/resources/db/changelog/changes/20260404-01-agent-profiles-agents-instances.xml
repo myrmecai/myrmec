@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- ============================================================
+         3-Tier Agent Model
+         - agent_profiles: Reusable templates with capabilities/tools
+         - agents: Deployable definitions with registration keys
+         - agent_instances: Running containers/runtimes
+         ============================================================ -->
+
+    <changeSet id="20260404-01-create-agent-profiles" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="agent_profiles"/>
+            </not>
+        </preConditions>
+        <comment>Create agent_profiles table - reusable agent templates with capabilities</comment>
+
+        <createTable tableName="agent_profiles">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uk_agent_profiles_name"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="capabilities" type="text" defaultValue="[]">
+                <constraints nullable="false"/>
+            </column>
+            <column name="supported_tools" type="text" defaultValue="[]">
+                <constraints nullable="false"/>
+            </column>
+            <column name="default_model" type="varchar(50)"/>
+            <column name="is_system" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone"/>
+        </createTable>
+
+        <createIndex tableName="agent_profiles" indexName="idx_agent_profiles_status">
+            <column name="status"/>
+        </createIndex>
+
+        <addForeignKeyConstraint
+            baseTableName="agent_profiles"
+            baseColumnNames="default_model"
+            referencedTableName="models"
+            referencedColumnNames="code"
+            constraintName="fk_agent_profiles_model"
+            onDelete="SET NULL"/>
+    </changeSet>
+
+    <changeSet id="20260404-02-create-agents" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="agents"/>
+            </not>
+        </preConditions>
+        <comment>Create agents table - deployable agent definitions with registration keys</comment>
+
+        <createTable tableName="agents">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uk_agents_name"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="profile_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid"/>
+            <column name="registration_key" type="varchar(255)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uk_agents_registration_key"/>
+            </column>
+            <column name="model_override" type="varchar(50)"/>
+            <column name="config" type="text"/>
+            <column name="max_instances" type="integer" defaultValueNumeric="1">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone"/>
+        </createTable>
+
+        <createIndex tableName="agents" indexName="idx_agents_profile_id">
+            <column name="profile_id"/>
+        </createIndex>
+
+        <createIndex tableName="agents" indexName="idx_agents_project_id">
+            <column name="project_id"/>
+        </createIndex>
+
+        <createIndex tableName="agents" indexName="idx_agents_status">
+            <column name="status"/>
+        </createIndex>
+
+        <addForeignKeyConstraint
+            baseTableName="agents"
+            baseColumnNames="profile_id"
+            referencedTableName="agent_profiles"
+            referencedColumnNames="id"
+            constraintName="fk_agents_profile"
+            onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint
+            baseTableName="agents"
+            baseColumnNames="project_id"
+            referencedTableName="projects"
+            referencedColumnNames="id"
+            constraintName="fk_agents_project"
+            onDelete="SET NULL"/>
+
+        <addForeignKeyConstraint
+            baseTableName="agents"
+            baseColumnNames="model_override"
+            referencedTableName="models"
+            referencedColumnNames="code"
+            constraintName="fk_agents_model"
+            onDelete="SET NULL"/>
+    </changeSet>
+
+    <changeSet id="20260404-03-create-agent-instances" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="agent_instances"/>
+            </not>
+        </preConditions>
+        <comment>Create agent_instances table - running agent containers/runtimes</comment>
+
+        <createTable tableName="agent_instances">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="agent_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="hostname" type="varchar(255)"/>
+            <column name="ip_address" type="varchar(45)"/>
+            <column name="runtime_version" type="varchar(50)"/>
+            <column name="status" type="varchar(20)" defaultValue="OFFLINE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_heartbeat_at" type="timestamp with time zone"/>
+            <column name="registered_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="metadata" type="text"/>
+        </createTable>
+
+        <createIndex tableName="agent_instances" indexName="idx_agent_instances_agent_id">
+            <column name="agent_id"/>
+        </createIndex>
+
+        <createIndex tableName="agent_instances" indexName="idx_agent_instances_status">
+            <column name="status"/>
+        </createIndex>
+
+        <createIndex tableName="agent_instances" indexName="idx_agent_instances_last_heartbeat">
+            <column name="last_heartbeat_at"/>
+        </createIndex>
+
+        <addForeignKeyConstraint
+            baseTableName="agent_instances"
+            baseColumnNames="agent_id"
+            referencedTableName="agents"
+            referencedColumnNames="id"
+            constraintName="fk_agent_instances_agent"
+            onDelete="CASCADE"/>
+    </changeSet>
+
+</databaseChangeLog>

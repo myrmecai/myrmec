@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Add branch column to workflow_requests for per-execution feature branches -->
+    <changeSet id="20260419-01-01" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="workflow_requests" columnName="branch"/>
+            </not>
+        </preConditions>
+        <addColumn tableName="workflow_requests">
+            <column name="branch" type="varchar(200)"/>
+        </addColumn>
+    </changeSet>
+
+    <!-- Add git_merge tool for merging branches -->
+    <changeSet id="20260419-01-02" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM tools WHERE code = 'git_merge'</sqlCheck>
+        </preConditions>
+        <insert tableName="tools">
+            <column name="code" value="git_merge"/>
+            <column name="name" value="Git Merge"/>
+            <column name="description" value="Merge a branch into the current branch"/>
+            <column name="tool_type" value="GIT"/>
+            <column name="config_schema" value='{"type":"object","properties":{"branch":{"type":"string","description":"Branch name to merge into current branch"}},"required":["branch"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+    </changeSet>
+
+</databaseChangeLog>

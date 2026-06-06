@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Project knowledge repositories (1 project : N repos) + cross-FKs from projects/knowledge_repos
+        to the `secrets` table. This file lives after 20260405-03-secrets.xml so the FK target exists.
+    -->
+
+    <changeSet id="20260420-01-01" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not><tableExists tableName="project_knowledge_repos"/></not>
+        </preConditions>
+        <createTable tableName="project_knowledge_repos">
+            <column name="id" type="uuid" defaultValueComputed="gen_random_uuid()">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="name" type="varchar(200)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="repo_url" type="varchar(500)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="branch" type="varchar(100)" defaultValue="main">
+                <constraints nullable="false"/>
+            </column>
+            <column name="instruction_paths" type="text"/>
+            <column name="credential_secret_id" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="20260420-01-02" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not><foreignKeyConstraintExists foreignKeyName="fk_knowledge_repos_project"/></not>
+        </preConditions>
+        <addForeignKeyConstraint
+                baseTableName="project_knowledge_repos"
+                baseColumnNames="project_id"
+                referencedTableName="projects"
+                referencedColumnNames="id"
+                constraintName="fk_knowledge_repos_project"
+                onDelete="CASCADE"/>
+    </changeSet>
+
+    <changeSet id="20260420-01-03" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not><uniqueConstraintExists tableName="project_knowledge_repos" constraintName="uq_knowledge_repos_project_name"/></not>
+        </preConditions>
+        <addUniqueConstraint
+                tableName="project_knowledge_repos"
+                columnNames="project_id, name"
+                constraintName="uq_knowledge_repos_project_name"/>
+    </changeSet>
+
+    <changeSet id="20260420-01-04" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not><foreignKeyConstraintExists foreignKeyName="fk_pkr_credential_secret"/></not>
+        </preConditions>
+        <addForeignKeyConstraint
+                baseTableName="project_knowledge_repos"
+                baseColumnNames="credential_secret_id"
+                referencedTableName="secrets"
+                referencedColumnNames="id"
+                constraintName="fk_pkr_credential_secret"
+                onDelete="RESTRICT"/>
+    </changeSet>
+
+    <!-- FK from projects.workspace_credential_secret_id -> secrets(id).
+         Column is declared in 20260403-04-projects.xml; FK is added here, after secrets exists. -->
+    <changeSet id="20260420-01-05" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not><foreignKeyConstraintExists foreignKeyName="fk_projects_workspace_credential_secret"/></not>
+        </preConditions>
+        <addForeignKeyConstraint
+                baseTableName="projects"
+                baseColumnNames="workspace_credential_secret_id"
+                referencedTableName="secrets"
+                referencedColumnNames="id"
+                constraintName="fk_projects_workspace_credential_secret"
+                onDelete="RESTRICT"/>
+    </changeSet>
+
+</databaseChangeLog>

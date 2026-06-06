@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: myrmec-postgres
+    environment:
+      POSTGRES_DB: myrmec
+      POSTGRES_USER: myrmec
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - myrmec-data:/var/lib/postgresql/data
+
+volumes:
+  myrmec-data:

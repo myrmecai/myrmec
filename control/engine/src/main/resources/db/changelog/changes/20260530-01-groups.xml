@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="20260530-01-create-groups" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="groups"/>
+            </not>
+        </preConditions>
+        <comment>Group: governance container above projects. Hosts members, budgets, policy.
+            v1 is flat in the UI; parent_group_id is reserved nullable for future nesting.</comment>
+
+        <createTable tableName="groups">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(200)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uk_groups_name"/>
+            </column>
+            <column name="parent_group_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone"/>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="groups"
+            baseColumnNames="parent_group_id"
+            constraintName="fk_groups_parent_group"
+            referencedTableName="groups"
+            referencedColumnNames="id"
+            onDelete="RESTRICT"/>
+
+        <createIndex indexName="idx_groups_parent_group_id" tableName="groups">
+            <column name="parent_group_id"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="20260530-01-seed-default-group" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">
+                SELECT COUNT(*) FROM groups WHERE id = '00000000-0000-0000-0000-000000000001'
+            </sqlCheck>
+        </preConditions>
+        <comment>Seed the well-known "Default" group. Projects without an explicit group land here.</comment>
+
+        <insert tableName="groups">
+            <column name="id" value="00000000-0000-0000-0000-000000000001"/>
+            <column name="name" value="Default"/>
+            <column name="description" value="Default group for projects without explicit group assignment."/>
+        </insert>
+    </changeSet>
+
+</databaseChangeLog>

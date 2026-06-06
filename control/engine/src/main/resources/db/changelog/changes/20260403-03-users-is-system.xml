@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="20260403-03-users-add-is-system" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="users" columnName="is_system"/>
+            </not>
+        </preConditions>
+        <comment>Add is_system flag to users table for protected system users</comment>
+
+        <addColumn tableName="users">
+            <column name="is_system" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+
+        <sql>
+            ALTER TABLE users
+            ADD CONSTRAINT ck_users_system_local_provider
+            CHECK (is_system = false OR provider_code = 'LOCAL');
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

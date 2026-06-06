@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Myrmec">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#cc5b3e"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="#17332f"/>
+  <path d="M14 47V20L24 34L32 26L40 34L50 20V47" fill="none" stroke="url(#g)" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <ellipse cx="32" cy="26" rx="5" ry="4" fill="none" stroke="#f9d28f" stroke-width="2"/>
+  <ellipse cx="32" cy="38" rx="6" ry="4" fill="none" stroke="#f9d28f" stroke-width="1.8"/>
+  <path d="M32 31V36.5" fill="none" stroke="#f9d28f" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="32" cy="34" r="1.5" fill="#fff1d4"/>
+
+  <path d="M28 23L24 19" fill="none" stroke="#f9d28f" stroke-width="2" stroke-linecap="round"/>
+  <path d="M36 23L40 19" fill="none" stroke="#f9d28f" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="24" cy="19" r="1.6" fill="#f59e0b"/>
+  <circle cx="40" cy="19" r="1.6" fill="#f59e0b"/>
+
+  <path d="M18 35L10 31" fill="none" stroke="#f9d28f" stroke-width="2" stroke-linecap="round"/>
+  <path d="M18 41L10 45" fill="none" stroke="#f9d28f" stroke-width="2" stroke-linecap="round"/>
+  <path d="M46 35L54 31" fill="none" stroke="#f9d28f" stroke-width="2" stroke-linecap="round"/>
+  <path d="M46 41L54 45" fill="none" stroke="#f9d28f" stroke-width="2" stroke-linecap="round"/>
+  <path d="M27 38L20 43" fill="none" stroke="#f9d28f" stroke-width="2" stroke-linecap="round"/>
+  <path d="M37 38L44 43" fill="none" stroke="#f9d28f" stroke-width="2" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="20260402-01-create-registration-keys" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="registration_keys"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="registration_keys">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="key_hash" type="varchar(64)">
+                <constraints nullable="false" unique="true"/>
+            </column>
+            <column name="label" type="varchar(100)"/>
+            <column name="created_at" type="timestamp" defaultValueComputed="CURRENT_TIMESTAMP"/>
+            <column name="expires_at" type="timestamp"/>
+            <column name="is_revoked" type="boolean" defaultValueBoolean="false"/>
+        </createTable>
+
+        <createIndex indexName="idx_registration_keys_key_hash" tableName="registration_keys">
+            <column name="key_hash"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

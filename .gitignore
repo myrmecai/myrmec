@@ -1,0 +1,43 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Build outputs
+target/
+build/
+dist/
+*.class
+*.jar
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+.eggs/
+
+# Node (for UI)
+node_modules/
+.npm/
+
+# Environment files with secrets
+*.env
+.env.*
+agent-registration.env
+# but keep the template
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Credentials
+*.pem
+*.key

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="20260525-01-models-add-pricing" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="models" columnName="input_price_per_1k_tokens"/>
+            </not>
+        </preConditions>
+        <comment>Add token pricing columns to models for cost computation</comment>
+
+        <addColumn tableName="models">
+            <column name="input_price_per_1k_tokens" type="decimal(10,6)"/>
+            <column name="output_price_per_1k_tokens" type="decimal(10,6)"/>
+            <column name="currency" type="varchar(3)" defaultValue="USD">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="20260525-01-seed-github-gpt4o-pricing" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <sqlCheck expectedResult="1">SELECT COUNT(*) FROM models WHERE code = 'github-gpt-4o'</sqlCheck>
+                <sqlCheck expectedResult="0">SELECT COUNT(*) FROM models WHERE code = 'github-gpt-4o' AND input_price_per_1k_tokens IS NOT NULL</sqlCheck>
+            </and>
+        </preConditions>
+        <comment>Seed best-effort token pricing for the seeded GitHub Models GPT-4o entry (USD per 1k tokens)</comment>
+
+        <update tableName="models">
+            <column name="input_price_per_1k_tokens" valueNumeric="0.005000"/>
+            <column name="output_price_per_1k_tokens" valueNumeric="0.015000"/>
+            <column name="currency" value="USD"/>
+            <where>code = 'github-gpt-4o'</where>
+        </update>
+    </changeSet>
+
+</databaseChangeLog>

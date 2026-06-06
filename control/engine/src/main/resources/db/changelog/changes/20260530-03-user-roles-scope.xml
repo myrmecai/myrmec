@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="20260530-03-user-roles-scope" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="user_roles" columnName="scope_type"/>
+            </not>
+        </preConditions>
+        <comment>Extend user_roles with scope_type + group_id so any role can be system / group /
+            project scoped. Drops the old SYSTEM_ADMIN check and the old unique constraint;
+            replaces with a multi-column check + three partial unique indexes (one per scope
+            type) so multi-row roles per (user,scope) are uniquely identified.
+
+            Dev-phase note: drops any rows still referencing the removed SYSTEM_ADMIN role.
+            The admin bootstrap recreates the platform admin assignment on next start.</comment>
+
+        <!-- 1. Drop legacy SYSTEM_ADMIN rows; the enum no longer contains it. -->
+        <delete tableName="user_roles">
+            <where>role = 'SYSTEM_ADMIN'</where>
+        </delete>
+
+        <!-- 2. Drop legacy constraints. -->
+        <dropUniqueConstraint
+            tableName="user_roles"
+            constraintName="uq_user_roles_user_role_project"/>
+
+        <sql>
+            ALTER TABLE user_roles DROP CONSTRAINT IF EXISTS ck_user_roles_system_admin_scope
+        </sql>
+
+        <!-- 3. Add new scope columns. -->
+        <addColumn tableName="user_roles">
+            <column name="scope_type" type="varchar(10)"/>
+            <column name="group_id" type="uuid"/>
+        </addColumn>
+
+        <!-- 4. Backfill scope_type from existing data: PROJECT if project_id set, else SYSTEM. -->
+        <update tableName="user_roles">
+            <column name="scope_type" value="PROJECT"/>
+            <where>project_id IS NOT NULL</where>
+        </update>
+        <update tableName="user_roles">
+            <column name="scope_type" value="SYSTEM"/>
+            <where>scope_type IS NULL</where>
+        </update>
+
+        <addNotNullConstraint
+            tableName="user_roles"
+            columnName="scope_type"
+            columnDataType="varchar(10)"/>
+
+        <!-- 5. Foreign key on group_id. -->
+        <addForeignKeyConstraint
+            baseTableName="user_roles"
+            baseColumnNames="group_id"
+            constraintName="fk_user_roles_group"
+            referencedTableName="groups"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <createIndex indexName="idx_user_roles_group_id" tableName="user_roles">
+            <column name="group_id"/>
+        </createIndex>
+
+        <!-- 6. Scope sanity check: exactly one of (system | group | project) is populated. -->
+        <sql>
+            ALTER TABLE user_roles
+            ADD CONSTRAINT ck_user_roles_scope CHECK (
+                (scope_type = 'SYSTEM'  AND group_id IS NULL     AND project_id IS NULL)
+             OR (scope_type = 'GROUP'   AND group_id IS NOT NULL AND project_id IS NULL)
+             OR (scope_type = 'PROJECT' AND group_id IS NULL     AND project_id IS NOT NULL)
+            )
+        </sql>
+
+        <!-- 7. Per-scope partial uniqueness indexes are created in
+             20260530-04-user-roles-scope-indexes.xml so a half-applied run on
+             H2 (DDL is auto-committed there) can still be recovered. -->
+    </changeSet>
+
+</databaseChangeLog>

@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Tools Registry table -->
+    <changeSet id="20260405-01-01" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="tools"/>
+            </not>
+        </preConditions>
+        <createTable tableName="tools">
+            <column name="code" type="varchar(50)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="tool_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="config_schema" type="text"/>
+            <column name="docs_url" type="varchar(500)"/>
+            <column name="is_system" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <!-- Index on tool_type for filtering -->
+    <changeSet id="20260405-01-02" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_tools_tool_type"/>
+            </not>
+        </preConditions>
+        <createIndex indexName="idx_tools_tool_type" tableName="tools">
+            <column name="tool_type"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- Index on status for filtering -->
+    <changeSet id="20260405-01-03" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_tools_status"/>
+            </not>
+        </preConditions>
+        <createIndex indexName="idx_tools_status" tableName="tools">
+            <column name="status"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- Seed system tools -->
+    <changeSet id="20260405-01-04" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM tools WHERE code = 'github'</sqlCheck>
+        </preConditions>
+        <insert tableName="tools">
+            <column name="code" value="github"/>
+            <column name="name" value="GitHub"/>
+            <column name="description" value="Interact with GitHub repositories, issues, pull requests, and more"/>
+            <column name="tool_type" value="INTEGRATION"/>
+            <column name="config_schema" value='{"type":"object","properties":{"token":{"type":"string","description":"GitHub personal access token"},"owner":{"type":"string","description":"Repository owner"},"repo":{"type":"string","description":"Repository name"}},"required":["token"]}'/>
+            <column name="docs_url" value="https://docs.github.com/rest"/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+        <insert tableName="tools">
+            <column name="code" value="filesystem"/>
+            <column name="name" value="Filesystem"/>
+            <column name="description" value="Read, write, and manage files on the local filesystem"/>
+            <column name="tool_type" value="SYSTEM"/>
+            <column name="config_schema" value='{"type":"object","properties":{"base_path":{"type":"string","description":"Base directory for file operations"},"allowed_extensions":{"type":"array","items":{"type":"string"},"description":"Allowed file extensions"}},"required":["base_path"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+        <insert tableName="tools">
+            <column name="code" value="postgres"/>
+            <column name="name" value="PostgreSQL"/>
+            <column name="description" value="Execute SQL queries against PostgreSQL databases"/>
+            <column name="tool_type" value="DATABASE"/>
+            <column name="config_schema" value='{"type":"object","properties":{"host":{"type":"string"},"port":{"type":"integer","default":5432},"database":{"type":"string"},"username":{"type":"string"},"password":{"type":"string"}},"required":["host","database","username","password"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+        <insert tableName="tools">
+            <column name="code" value="slack"/>
+            <column name="name" value="Slack"/>
+            <column name="description" value="Send messages and interact with Slack workspaces"/>
+            <column name="tool_type" value="INTEGRATION"/>
+            <column name="config_schema" value='{"type":"object","properties":{"bot_token":{"type":"string","description":"Slack bot OAuth token"},"default_channel":{"type":"string","description":"Default channel for messages"}},"required":["bot_token"]}'/>
+            <column name="docs_url" value="https://api.slack.com/"/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+        <insert tableName="tools">
+            <column name="code" value="fetch"/>
+            <column name="name" value="HTTP Fetch"/>
+            <column name="description" value="Make HTTP requests to external APIs"/>
+            <column name="tool_type" value="SYSTEM"/>
+            <column name="config_schema" value='{"type":"object","properties":{"base_url":{"type":"string","description":"Base URL for requests"},"headers":{"type":"object","description":"Default headers"},"timeout":{"type":"integer","default":30,"description":"Request timeout in seconds"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+    </changeSet>
+
+</databaseChangeLog>

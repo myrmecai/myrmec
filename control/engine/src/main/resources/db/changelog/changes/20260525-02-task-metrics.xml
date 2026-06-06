@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="20260525-02-workflow-tasks-add-metrics" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="workflow_tasks" columnName="metrics"/>
+            </not>
+        </preConditions>
+        <comment>Add metrics column to workflow_tasks for token usage, timing breakdown, cost (JSON via JsonMapConverter)</comment>
+
+        <addColumn tableName="workflow_tasks">
+            <column name="metrics" type="text"/>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>
