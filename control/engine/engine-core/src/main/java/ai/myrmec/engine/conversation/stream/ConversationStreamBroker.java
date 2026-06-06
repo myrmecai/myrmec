@@ -1,5 +1,6 @@
 package ai.myrmec.engine.conversation.stream;
 
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketSession;
@@ -13,13 +14,13 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 
 /**
- * In-process pub/sub for conversation events. Phase 6c-1 ships only the
- * server-side broker + the agent-handler hookpoints; the user-facing
- * WebSocket handler that drains the broker lands in Phase 6c-2.
+ * In-process pub/sub for conversation events.
  *
- * <p>Designed as a single class with no SPI on purpose — multi-instance
- * fan-out (Phase 6f) will swap the in-process impl for one backed by
- * Postgres LISTEN/NOTIFY without changing call sites.</p>
+ * <p>Cross-instance fan-out (Phase 6f) is delegated to a
+ * {@link ConversationStreamFanout} bean: the default
+ * {@link NoopConversationStreamFanout} keeps single-instance behaviour
+ * identical to Phase 6c, and clustered deployments inject the
+ * Postgres LISTEN/NOTIFY variant.</p>
  *
  * <p>Thread-safety: subscribers per conversation are kept in a
  * {@link CopyOnWriteArraySet} so {@link #broadcast} can iterate without
@@ -31,6 +32,22 @@ public class ConversationStreamBroker {
 
     /** conversationId → live WebSocket sessions tuned to that conversation. */
     private final Map<UUID, Set<WebSocketSession>> subscribers = new ConcurrentHashMap<>();
+
+    private final ConversationStreamFanout fanout;
+
+    public ConversationStreamBroker(ConversationStreamFanout fanout) {
+        this.fanout = fanout;
+    }
+
+    /**
+     * Register the local-only delivery callback with the fanout so frames
+     * arriving from peer instances re-enter the broker without triggering
+     * another {@link ConversationStreamFanout#publish}.
+     */
+    @PostConstruct
+    void wireRemoteHandler() {
+        fanout.setRemoteHandler(this::deliverLocal);
+    }
 
     public void subscribe(UUID conversationId, WebSocketSession session) {
         subscribers.computeIfAbsent(conversationId, k -> new CopyOnWriteArraySet<>())
@@ -49,12 +66,32 @@ public class ConversationStreamBroker {
     }
 
     /**
-     * Fan a frame out to every subscriber on the given conversation.
-     * Send failures are logged + the offending session is dropped so a
-     * single dead viewer can't poison the rest. Returns the number of
-     * recipients the frame actually reached.
+     * Fan a frame out to every subscriber on the given conversation and,
+     * if a clustered fan-out is configured, ask peer instances to do the
+     * same. Returns the number of LOCAL recipients reached — remote
+     * counts are not measured here.
+     *
+     * <p>Send failures to local sessions are logged and the offending
+     * session is dropped so a single dead viewer can't poison the rest.</p>
      */
     public int broadcast(UUID conversationId, String jsonFrame) {
+        int delivered = deliverLocal(conversationId, jsonFrame);
+        try {
+            fanout.publish(conversationId, jsonFrame);
+        } catch (RuntimeException e) {
+            // A flaky cross-instance bridge must never fail the local turn.
+            log.warn("Cross-instance fanout publish failed for conversation {}: {}",
+                    conversationId, e.toString());
+        }
+        return delivered;
+    }
+
+    /**
+     * Local-only delivery path. Used both as the implementation of
+     * {@link #broadcast} and as the callback handed to the
+     * {@link ConversationStreamFanout} for inbound remote frames.
+     */
+    int deliverLocal(UUID conversationId, String jsonFrame) {
         Set<WebSocketSession> set = subscribers.get(conversationId);
         if (set == null || set.isEmpty()) {
             return 0;
