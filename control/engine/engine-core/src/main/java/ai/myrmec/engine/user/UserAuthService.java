@@ -1,6 +1,6 @@
 package ai.myrmec.engine.user;
 
-import ai.myrmec.engine._system.crypto.EncryptionService;
+import ai.myrmec.engine.spi.crypto.EncryptionService;
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.InvalidTokenException;
 import ai.myrmec.engine._system.security.JwtTokenProvider;

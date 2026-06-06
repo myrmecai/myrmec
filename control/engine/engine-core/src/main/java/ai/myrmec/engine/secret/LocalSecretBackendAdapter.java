@@ -1,6 +1,6 @@
 package ai.myrmec.engine.secret;
 
-import ai.myrmec.engine._system.crypto.EncryptionService;
+import ai.myrmec.engine.spi.crypto.EncryptionService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;

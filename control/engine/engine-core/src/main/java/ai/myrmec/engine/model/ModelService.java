@@ -1,6 +1,6 @@
 package ai.myrmec.engine.model;
 
-import ai.myrmec.engine._system.crypto.EncryptionService;
+import ai.myrmec.engine.spi.crypto.EncryptionService;
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine.model.dto.CreateModelRequest;

@@ -1,8 +1,8 @@
 package ai.myrmec.engine._system.crypto;
 
+import ai.myrmec.engine.spi.crypto.EncryptionService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
 
 import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
@@ -17,11 +17,18 @@ import java.util.List;
 import java.util.stream.Stream;
 
 /**
- * Service for encrypting and decrypting sensitive data using AES-256-GCM.
+ * Community implementation of {@link EncryptionService}: AES-256-GCM with a SHA-256
+ * key-derivation from the {@code myrmec.encryption.key} property. Supports a
+ * comma-separated list of previous keys via {@code myrmec.encryption.previous-keys}
+ * for transparent key rotation on decrypt.
+ *
+ * <p>Registered as the default {@code EncryptionService} bean by
+ * {@code CryptoAutoConfiguration} under {@code @ConditionalOnMissingBean}, so an
+ * Enterprise jar may substitute an HSM- or KMS-backed implementation simply by
+ * publishing a different {@code EncryptionService} bean.
  */
-@Service
 @Slf4j
-public class EncryptionService {
+public class BasicEncryptionService implements EncryptionService {
 
     private static final String ALGORITHM = "AES/GCM/NoPadding";
     private static final int GCM_IV_LENGTH = 12;
@@ -30,7 +37,7 @@ public class EncryptionService {
     private final SecretKey encryptionKey;
     private final List<SecretKey> decryptionKeys;
 
-    public EncryptionService(
+    public BasicEncryptionService(
             @Value("${myrmec.encryption.key:default-encryption-key-change-me}") String key,
             @Value("${myrmec.encryption.previous-keys:}") String previousKeysCsv
     ) {
@@ -42,6 +49,7 @@ public class EncryptionService {
      * Encrypt plaintext to bytes.
      * Format: [IV (12 bytes)][encrypted data with auth tag]
      */
+    @Override
     public byte[] encrypt(String plaintext) {
         try {
             byte[] iv = new byte[GCM_IV_LENGTH];
@@ -67,6 +75,7 @@ public class EncryptionService {
     /**
      * Decrypt bytes to plaintext.
      */
+    @Override
     public String decrypt(byte[] ciphertext) {
         if (ciphertext == null || ciphertext.length <= GCM_IV_LENGTH) {
             throw new RuntimeException("Decryption failed: invalid ciphertext");

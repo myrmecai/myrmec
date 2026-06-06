@@ -1,7 +1,7 @@
 package ai.myrmec.engine;
 
 import ai.myrmec.engine._system.security.JwtTokenProvider;
-import ai.myrmec.engine._system.crypto.EncryptionService;
+import ai.myrmec.engine.spi.crypto.EncryptionService;
 import ai.myrmec.engine.knowledge.KnowledgeDocumentRepository;
 import ai.myrmec.engine.model.Model;
 import ai.myrmec.engine.model.ModelRepository;
