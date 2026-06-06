@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Users, FolderKanban, LayoutDashboard, LogOut, Bot, ChevronDown, Settings, User, Workflow, List, Cpu, Wrench, BookOpen, ShieldCheck, KeyRound, Building2, Server } from 'lucide-react'
+import { Users, FolderKanban, LayoutDashboard, LogOut, Bot, ChevronDown, Settings, User, Workflow, List, Cpu, Wrench, BookOpen, ShieldCheck, KeyRound, Building2, Server, ScrollText } from 'lucide-react'
 
 export const Route = createFileRoute('/_authenticated')({
   beforeLoad: ({ context }) => {
@@ -150,6 +150,12 @@ function AuthenticatedLayout() {
                   <Link to="/admin/secrets" className="cursor-pointer">
                     <KeyRound className="h-4 w-4 mr-2" />
                     Global Secrets
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link to="/admin/audit-log" className="cursor-pointer">
+                    <ScrollText className="h-4 w-4 mr-2" />
+                    Audit Log
                   </Link>
                 </DropdownMenuItem>
               </DropdownMenuContent>

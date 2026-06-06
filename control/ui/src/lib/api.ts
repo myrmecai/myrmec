@@ -1165,3 +1165,54 @@ export const conversationsApi = {
       { decision, comment: comment ?? null },
     ),
 }
+
+// ==================== Audit Log (Phase 9c) ====================
+
+export interface AuditLogEntry {
+  id: string
+  actorUserId: string | null
+  action: string
+  resourceType: string | null
+  resourceId: string | null
+  scopeType: string | null
+  scopeId: string | null
+  ipAddress: string | null
+  userAgent: string | null
+  requestId: string | null
+  payloadJson: string | null
+  createdAt: string
+}
+
+export interface AuditLogPage {
+  items: AuditLogEntry[]
+  totalElements: number
+  page: number
+  size: number
+}
+
+export interface AuditLogQuery {
+  actorUserId?: string
+  action?: string
+  resourceType?: string
+  resourceId?: string
+  since?: string
+  until?: string
+  page?: number
+  size?: number
+}
+
+export const auditLogApi = {
+  search: (q: AuditLogQuery = {}) => {
+    const params = new URLSearchParams()
+    if (q.actorUserId) params.set('actorUserId', q.actorUserId)
+    if (q.action) params.set('action', q.action)
+    if (q.resourceType) params.set('resourceType', q.resourceType)
+    if (q.resourceId) params.set('resourceId', q.resourceId)
+    if (q.since) params.set('since', q.since)
+    if (q.until) params.set('until', q.until)
+    if (q.page !== undefined) params.set('page', String(q.page))
+    if (q.size !== undefined) params.set('size', String(q.size))
+    const qs = params.toString()
+    return api.get<AuditLogPage>(`/audit-log${qs ? `?${qs}` : ''}`)
+  },
+}

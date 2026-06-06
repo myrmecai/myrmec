@@ -23,6 +23,7 @@ import { Route as AuthenticatedAgentsRouteImport } from './routes/_authenticated
 import { Route as AuthenticatedAgentProfilesRouteImport } from './routes/_authenticated/agent-profiles'
 import { Route as AuthenticatedWorkflowsIndexRouteImport } from './routes/_authenticated/workflows/index'
 import { Route as AuthenticatedAdminSecretsRouteImport } from './routes/_authenticated/admin/secrets'
+import { Route as AuthenticatedAdminAuditLogRouteImport } from './routes/_authenticated/admin/audit-log'
 import { Route as AuthenticatedAdminGroupsIndexRouteImport } from './routes/_authenticated/admin/groups/index'
 import { Route as AuthenticatedWorkflowsWorkflowIdRequestsRouteImport } from './routes/_authenticated/workflows/$workflowId.requests'
 import { Route as AuthenticatedWorkflowsWorkflowIdEditRouteImport } from './routes/_authenticated/workflows/$workflowId.edit'
@@ -105,6 +106,12 @@ const AuthenticatedAdminSecretsRoute =
     path: '/admin/secrets',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedAdminAuditLogRoute =
+  AuthenticatedAdminAuditLogRouteImport.update({
+    id: '/admin/audit-log',
+    path: '/admin/audit-log',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedAdminGroupsIndexRoute =
   AuthenticatedAdminGroupsIndexRouteImport.update({
     id: '/admin/groups/',
@@ -166,6 +173,7 @@ export interface FileRoutesByFullPath {
   '/projects': typeof AuthenticatedProjectsRouteWithChildren
   '/tools': typeof AuthenticatedToolsRoute
   '/users': typeof AuthenticatedUsersRoute
+  '/admin/audit-log': typeof AuthenticatedAdminAuditLogRoute
   '/admin/secrets': typeof AuthenticatedAdminSecretsRoute
   '/workflows/': typeof AuthenticatedWorkflowsIndexRoute
   '/projects/$projectId/chat': typeof AuthenticatedProjectsProjectIdChatRoute
@@ -189,6 +197,7 @@ export interface FileRoutesByTo {
   '/projects': typeof AuthenticatedProjectsRouteWithChildren
   '/tools': typeof AuthenticatedToolsRoute
   '/users': typeof AuthenticatedUsersRoute
+  '/admin/audit-log': typeof AuthenticatedAdminAuditLogRoute
   '/admin/secrets': typeof AuthenticatedAdminSecretsRoute
   '/workflows': typeof AuthenticatedWorkflowsIndexRoute
   '/projects/$projectId/chat': typeof AuthenticatedProjectsProjectIdChatRoute
@@ -214,6 +223,7 @@ export interface FileRoutesById {
   '/_authenticated/projects': typeof AuthenticatedProjectsRouteWithChildren
   '/_authenticated/tools': typeof AuthenticatedToolsRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
+  '/_authenticated/admin/audit-log': typeof AuthenticatedAdminAuditLogRoute
   '/_authenticated/admin/secrets': typeof AuthenticatedAdminSecretsRoute
   '/_authenticated/workflows/': typeof AuthenticatedWorkflowsIndexRoute
   '/_authenticated/projects/$projectId/chat': typeof AuthenticatedProjectsProjectIdChatRoute
@@ -239,6 +249,7 @@ export interface FileRouteTypes {
     | '/projects'
     | '/tools'
     | '/users'
+    | '/admin/audit-log'
     | '/admin/secrets'
     | '/workflows/'
     | '/projects/$projectId/chat'
@@ -262,6 +273,7 @@ export interface FileRouteTypes {
     | '/projects'
     | '/tools'
     | '/users'
+    | '/admin/audit-log'
     | '/admin/secrets'
     | '/workflows'
     | '/projects/$projectId/chat'
@@ -286,6 +298,7 @@ export interface FileRouteTypes {
     | '/_authenticated/projects'
     | '/_authenticated/tools'
     | '/_authenticated/users'
+    | '/_authenticated/admin/audit-log'
     | '/_authenticated/admin/secrets'
     | '/_authenticated/workflows/'
     | '/_authenticated/projects/$projectId/chat'
@@ -404,6 +417,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminSecretsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/admin/audit-log': {
+      id: '/_authenticated/admin/audit-log'
+      path: '/admin/audit-log'
+      fullPath: '/admin/audit-log'
+      preLoaderRoute: typeof AuthenticatedAdminAuditLogRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/admin/groups/': {
       id: '/_authenticated/admin/groups/'
       path: '/admin/groups'
@@ -511,6 +531,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedProjectsRoute: typeof AuthenticatedProjectsRouteWithChildren
   AuthenticatedToolsRoute: typeof AuthenticatedToolsRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
+  AuthenticatedAdminAuditLogRoute: typeof AuthenticatedAdminAuditLogRoute
   AuthenticatedAdminSecretsRoute: typeof AuthenticatedAdminSecretsRoute
   AuthenticatedWorkflowsIndexRoute: typeof AuthenticatedWorkflowsIndexRoute
   AuthenticatedWorkflowsWorkflowIdEditRoute: typeof AuthenticatedWorkflowsWorkflowIdEditRoute
@@ -528,6 +549,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedProjectsRoute: AuthenticatedProjectsRouteWithChildren,
   AuthenticatedToolsRoute: AuthenticatedToolsRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
+  AuthenticatedAdminAuditLogRoute: AuthenticatedAdminAuditLogRoute,
   AuthenticatedAdminSecretsRoute: AuthenticatedAdminSecretsRoute,
   AuthenticatedWorkflowsIndexRoute: AuthenticatedWorkflowsIndexRoute,
   AuthenticatedWorkflowsWorkflowIdEditRoute:
