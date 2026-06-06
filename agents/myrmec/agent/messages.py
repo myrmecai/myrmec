@@ -15,6 +15,9 @@ class MessageType:
     TASK_ASSIGN = "task.assign"
     TASK_CANCEL = "task.cancel"
     PING = "ping"
+
+    # Phase 6d - conversational sessions (Engine -> Agent)
+    CONVERSATION_TURN_ASSIGN = "conversation.turn.assign"
     
     # Agent → Engine
     TASK_ACCEPT = "task.accept"

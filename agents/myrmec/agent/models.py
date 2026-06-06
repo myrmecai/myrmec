@@ -405,3 +405,48 @@ class TaskCancelledPayload(BaseModel):
     class Config:
         populate_by_name = True
 
+
+# ==================== Phase 6d - conversational turn dispatch (Engine -> Agent) ====================
+
+
+class ConversationHistoryEntry(BaseModel):
+    """One prior message in the sliding-window context.
+
+    ``role`` is the string form of the engine's
+    ``ConversationMessage.Role`` enum (``USER`` / ``ASSISTANT`` /
+    ``SYSTEM``). ``sequence_no`` is the conversation-message
+    sequence_no the row holds in the engine's database.
+    """
+    role: str
+    content: str
+    sequence_no: int = Field(alias="sequenceNo")
+
+    class Config:
+        populate_by_name = True
+
+
+class ConversationTurnAssignPayload(BaseModel):
+    """Payload for conversation.turn.assign (Engine -> Agent).
+
+    Carries everything an agent needs to run one assistant turn in a
+    conversational session: resolved system prompt, pinned facts,
+    sliding window of prior messages, and the just-arrived user
+    message. The agent runs an LLM call and streams the result back as
+    ``message.delta`` chunks followed by a final ``message.complete``,
+    all stamped with ``assistant_sequence_no`` so live viewers can
+    stitch the stream to the eventually-persisted row.
+    """
+    conversation_id: UUID = Field(alias="conversationId")
+    project_id: UUID = Field(alias="projectId")
+    agent_id: UUID = Field(alias="agentId")
+    assistant_sequence_no: int = Field(alias="assistantSequenceNo", ge=0)
+    system_prompt: str | None = Field(alias="systemPrompt", default=None)
+    pinned_facts: str | None = Field(alias="pinnedFacts", default=None)
+    history: list[ConversationHistoryEntry] = Field(default_factory=list)
+    user_message: str = Field(alias="userMessage")
+    timeout_seconds: int = Field(alias="timeoutSeconds", default=300)
+    model: ModelInfo | None = None
+
+    class Config:
+        populate_by_name = True
+

@@ -1,6 +1,7 @@
 package ai.myrmec.engine.conversation;
 
 import ai.myrmec.engine._system.security.CurrentUser;
+import ai.myrmec.engine.conversation.dispatch.ConversationTurnDispatcher;
 import ai.myrmec.engine.conversation.dto.ConversationMessageResponse;
 import ai.myrmec.engine.conversation.dto.ConversationResponse;
 import ai.myrmec.engine.conversation.dto.CreateConversationRequest;
@@ -9,6 +10,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -34,10 +36,12 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/conversations")
 @RequiredArgsConstructor
+@Slf4j
 @Tag(name = "Conversations", description = "Conversational session management (Phase 6)")
 public class ConversationController {
 
     private final ConversationService conversationService;
+    private final ConversationTurnDispatcher turnDispatcher;
 
     @PostMapping
     @Operation(summary = "Create a new conversation under a project")
@@ -84,6 +88,15 @@ public class ConversationController {
                 request.content(),
                 userId,
                 null);
+        // Phase 6d \u2014 fire-and-forget dispatch to an idle agent instance.
+        // Failures (no idle agent, no pinned agentId, etc.) are logged by
+        // the dispatcher; the REST response still reports the USER row was
+        // saved so the UI can render it optimistically.
+        try {
+            turnDispatcher.dispatch(id);
+        } catch (Exception e) {
+            log.warn("Turn dispatch threw for conversation {}: {}", id, e.getMessage(), e);
+        }
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ConversationMessageResponse.from(saved));
     }

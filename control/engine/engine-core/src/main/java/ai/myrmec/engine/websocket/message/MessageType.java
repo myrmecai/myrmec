@@ -14,6 +14,16 @@ public final class MessageType {
     
     /** Task cancellation request */
     public static final String TASK_CANCEL = "task.cancel";
+
+    /**
+     * Conversational turn assignment (Phase 6d). Sent when a USER
+     * message lands and the engine wants the agent to produce one
+     * assistant turn. Carries the full conversation context (system
+     * prompt, pinned facts, sliding window, model handle) so the agent
+     * can run an LLM call and stream the result back as
+     * {@link #MESSAGE_DELTA} + {@link #MESSAGE_COMPLETE}.
+     */
+    public static final String CONVERSATION_TURN_ASSIGN = "conversation.turn.assign";
     
     /** Task status inquiry (sent on agent reconnect) */
     public static final String TASK_STATUS_REQUEST = "task.status_request";

@@ -597,7 +597,30 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                 cancelled.getTaskId(),
                 cancelled.getConversationId(),
                 cancelled.getReason());
-        // TODO Phase 6c-2: persist partial assistant turn when partialContent != null.
+
+        // Phase 6d — persist whatever the assistant had streamed before being cancelled.
+        // This preserves the partial reply for replay viewers and gives the user something
+        // to see in the transcript even though the turn never completed.
+        if (cancelled.getConversationId() != null
+                && cancelled.getPartialContent() != null
+                && !cancelled.getPartialContent().isEmpty()) {
+            try {
+                UUID agentId = agentInstanceRepository.findById(agentInstanceId)
+                        .map(AgentInstance::getAgentId)
+                        .orElse(null);
+                ConversationMessage saved = conversationService.appendMessage(
+                        cancelled.getConversationId(),
+                        ConversationMessage.Role.ASSISTANT,
+                        cancelled.getPartialContent(),
+                        null,
+                        agentId);
+                log.debug("Persisted partial ASSISTANT message {} (conv {} seq {}) after cancel",
+                        saved.getId(), cancelled.getConversationId(), saved.getSequenceNo());
+            } catch (Exception e) {
+                log.warn("Failed to persist partial assistant turn after cancel for conv {}: {}",
+                        cancelled.getConversationId(), e.getMessage(), e);
+            }
+        }
     }
 
     private void handleDisconnect(WebSocketSession session, JsonNode payload) throws IOException {
@@ -635,6 +658,22 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                 .build();
 
         WebSocketMessage<TaskCancelPayload> message = WebSocketMessage.of(MessageType.TASK_CANCEL, payload);
+        return connectionManager.sendMessage(agentInstanceId, message);
+    }
+
+    /**
+     * Send a conversation turn assignment to an agent (Phase 6d).
+     *
+     * <p>Unlike {@link #assignTask(UUID, TaskAssignPayload)} this does not
+     * mark the agent as busy via {@code connectionManager.assignTask} —
+     * conversational turns do not block the workflow task queue and an
+     * agent is free to interleave them with workflow work in the future.
+     * For Phase 6d we still only dispatch to an idle agent (the
+     * dispatcher enforces this) so behaviour matches the workflow path.</p>
+     */
+    public boolean sendConversationTurn(UUID agentInstanceId, ConversationTurnAssignPayload payload) {
+        WebSocketMessage<ConversationTurnAssignPayload> message =
+                WebSocketMessage.of(MessageType.CONVERSATION_TURN_ASSIGN, payload);
         return connectionManager.sendMessage(agentInstanceId, message);
     }
 
