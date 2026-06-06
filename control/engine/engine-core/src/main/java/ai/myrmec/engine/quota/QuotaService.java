@@ -1,6 +1,8 @@
 package ai.myrmec.engine.quota;
 
 import ai.myrmec.engine.audit.AuditLogService;
+import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.project.ProjectRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -9,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -35,6 +38,7 @@ public class QuotaService {
 
     private final QuotaRepository quotaRepository;
     private final AuditLogService auditLogService;
+    private final ProjectRepository projectRepository;
 
     @Transactional(readOnly = true)
     public List<Quota> findByScope(Quota.Scope scope, UUID scopeId) {
@@ -88,24 +92,71 @@ public class QuotaService {
      * (ORG &gt; GROUP &gt; PROJECT &gt; USER, in that order of
      * generosity).
      *
-     * <p><b>Simplification:</b> we don't currently walk the
-     * org/group/project parent relations here &mdash; we
-     * compare against quotas where {@code scope_id} matches a
-     * known parent id, IF callers supply it via the tags map
-     * (key {@code parentScopeId}). Without that hint the check
-     * passes through. Enterprise overrides this method to do the
-     * full inheritance walk.</p>
+     * <p>Walk performed:
+     * <ul>
+     *   <li>{@code USER} &mdash; no resolvable owner in Community (users
+     *       span groups), pass through.</li>
+     *   <li>{@code PROJECT} &mdash; resolve via {@code projectRepository}
+     *       to get {@code groupId}, then check group + every ORG
+     *       quota that matches (resource, period).</li>
+     *   <li>{@code GROUP} &mdash; check every ORG quota that matches
+     *       (resource, period). Community has no Org table so we
+     *       compare against all ORG rows.</li>
+     *   <li>{@code ORG} &mdash; top of hierarchy, pass through.</li>
+     * </ul>
      */
     private void validateChildTightensOnly(Quota.Scope scope, UUID scopeId,
                                            Quota.ResourceType resource,
                                            Quota.Period period, long limitAmount) {
-        // Simplest possible v1: same-scope-same-period child cannot
-        // exceed sibling at the same scope. Full hierarchical walk
-        // is deferred until OrgGroup / GroupProject relationship
-        // tables actually carry resolvable parents. The check
-        // remains here as the seam.
-        log.debug("Quota validation pass-through (Community): scope={} scopeId={} period={} limit={}",
-                scope, scopeId, period, limitAmount);
+        switch (scope) {
+            case ORG, USER -> {
+                // No parent to check (top, or unresolvable).
+            }
+            case PROJECT -> {
+                Optional<Project> project = projectRepository.findById(scopeId);
+                if (project.isEmpty()) {
+                    // Project doesn't exist yet — let the FK validation
+                    // happen at persist time; nothing for us to check.
+                    return;
+                }
+                UUID groupId = project.get().getGroupId();
+                if (groupId != null) {
+                    enforceCeiling(scope, Quota.Scope.GROUP, groupId, resource, period, limitAmount);
+                }
+                enforceCeilingAcrossAllOrgs(scope, resource, period, limitAmount);
+            }
+            case GROUP -> {
+                enforceCeilingAcrossAllOrgs(scope, resource, period, limitAmount);
+            }
+        }
+    }
+
+    private void enforceCeiling(Quota.Scope childScope, Quota.Scope parentScope, UUID parentScopeId,
+                                Quota.ResourceType resource, Quota.Period period, long childLimit) {
+        List<Quota> parentQuotas = quotaRepository
+                .findByScopeTypeAndScopeIdAndResourceType(parentScope, parentScopeId, resource);
+        for (Quota parent : parentQuotas) {
+            if (parent.getPeriod() == period && childLimit > parent.getLimitAmount()) {
+                throw new IllegalArgumentException(String.format(
+                        "Quota %s/%d exceeds parent %s ceiling of %d for %s/%s",
+                        childScope, childLimit, parentScope,
+                        parent.getLimitAmount(), resource, period));
+            }
+        }
+    }
+
+    private void enforceCeilingAcrossAllOrgs(Quota.Scope childScope,
+                                             Quota.ResourceType resource,
+                                             Quota.Period period, long childLimit) {
+        List<Quota> orgQuotas = quotaRepository
+                .findByScopeTypeAndResourceTypeAndPeriod(Quota.Scope.ORG, resource, period);
+        for (Quota org : orgQuotas) {
+            if (childLimit > org.getLimitAmount()) {
+                throw new IllegalArgumentException(String.format(
+                        "Quota %s/%d exceeds ORG ceiling of %d for %s/%s",
+                        childScope, childLimit, org.getLimitAmount(), resource, period));
+            }
+        }
     }
 
     private void audit(String action, Quota q) {
