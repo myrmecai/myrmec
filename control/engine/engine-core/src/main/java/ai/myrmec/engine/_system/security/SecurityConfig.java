@@ -41,6 +41,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/agent/auth/**").permitAll()
                         // WebSocket endpoint - auth handled by handshake interceptor
                         .requestMatchers("/api/v1/agent/ws").permitAll()
+                        // User-facing conversation stream WS - auth in handshake interceptor
+                        .requestMatchers("/api/v1/conversations/*/stream").permitAll()
                         // Health check
                         .requestMatchers("/actuator/health").permitAll()
                         // OpenAPI documentation
