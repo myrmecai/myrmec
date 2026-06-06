@@ -23,6 +23,7 @@ public class ModelController {
 
     private final ModelService modelService;
     private final ModelProviderConfigRepository providerRepository;
+    private final ModelProviderService providerService;
 
     // ==================== Admin Endpoints ====================
 
@@ -140,5 +141,35 @@ public class ModelController {
                 .map(ModelProviderResponse::from)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    // Phase 10 #70 &mdash; admin CRUD on providers. Read endpoints
+    // above stay separate (they predate this phase); the three writers
+    // below all delegate to ModelProviderService so the audit hook +
+    // system-provider guard live in one place.
+
+    @PostMapping("/api/v1/admin/providers")
+    @Operation(summary = "Create a new provider")
+    public ResponseEntity<ModelProviderResponse> createProvider(
+            @Valid @RequestBody ai.myrmec.engine.model.dto.CreateModelProviderRequest request) {
+        ModelProviderConfig saved = providerService.create(request);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ModelProviderResponse.from(saved));
+    }
+
+    @PutMapping("/api/v1/admin/providers/{code}")
+    @Operation(summary = "Update an existing provider")
+    public ResponseEntity<ModelProviderResponse> updateProvider(
+            @PathVariable String code,
+            @Valid @RequestBody ai.myrmec.engine.model.dto.UpdateModelProviderRequest request) {
+        ModelProviderConfig saved = providerService.update(code, request);
+        return ResponseEntity.ok(ModelProviderResponse.from(saved));
+    }
+
+    @DeleteMapping("/api/v1/admin/providers/{code}")
+    @Operation(summary = "Delete a non-system provider with no attached models")
+    public ResponseEntity<Void> deleteProvider(@PathVariable String code) {
+        providerService.delete(code);
+        return ResponseEntity.noContent().build();
     }
 }

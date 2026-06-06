@@ -527,6 +527,40 @@ export const providersApi = {
   // Admin endpoints
   listAll: () => api.get<ModelProviderConfig[]>('/admin/providers'),
   getDetails: (code: string) => api.get<ModelProviderConfig>(`/admin/providers/${code}`),
+  // Phase 10 #70 — admin CRUD on providers (read endpoints above).
+  create: (req: CreateModelProviderRequest) =>
+    api.post<ModelProviderConfig>('/admin/providers', req),
+  update: (code: string, req: UpdateModelProviderRequest) =>
+    api.put<ModelProviderConfig>(`/admin/providers/${code}`, req),
+  delete: (code: string) => api.delete<void>(`/admin/providers/${code}`),
+}
+
+export interface CreateModelProviderRequest {
+  code: string
+  name: string
+  baseUrl?: string | null
+  deploymentType: DeploymentType
+  requiresAuth: boolean
+  authHeader?: string | null
+  authPrefix?: string | null
+  healthEndpoint?: string | null
+  modelsEndpoint?: string | null
+  docsUrl?: string | null
+  description?: string | null
+}
+
+export interface UpdateModelProviderRequest {
+  name?: string
+  baseUrl?: string | null
+  deploymentType?: DeploymentType
+  requiresAuth?: boolean
+  authHeader?: string | null
+  authPrefix?: string | null
+  healthEndpoint?: string | null
+  modelsEndpoint?: string | null
+  docsUrl?: string | null
+  description?: string | null
+  status?: ModelStatus
 }
 
 // Models API

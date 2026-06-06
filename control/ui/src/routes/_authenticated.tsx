@@ -165,6 +165,12 @@ function AuthenticatedLayout() {
                     Quotas
                   </Link>
                 </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link to="/admin/providers" className="cursor-pointer">
+                    <Server className="h-4 w-4 mr-2" />
+                    Model Providers
+                  </Link>
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           )}
