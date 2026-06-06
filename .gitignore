@@ -41,3 +41,5 @@ Thumbs.db
 # Credentials
 *.pem
 *.key
+
+.commit-msg.tmp
