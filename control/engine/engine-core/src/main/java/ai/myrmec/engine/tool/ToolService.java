@@ -53,6 +53,10 @@ public class ToolService {
         tool.setDocsUrl(request.docsUrl());
         tool.setSystem(false);
         tool.setStatus(ToolStatus.ACTIVE);
+        // Default to SAFE so callers who don't supply a risk class get
+        // the (HITL-bypass) behaviour they had pre-Phase 7. Conscious
+        // classification is required to opt a tool in to HITL.
+        tool.setRiskClass(request.riskClass() != null ? request.riskClass() : RiskClass.SAFE);
 
         return toResponse(toolRepository.save(tool));
     }
@@ -68,6 +72,10 @@ public class ToolService {
         tool.setConfigSchema(request.configSchema());
         tool.setDocsUrl(request.docsUrl());
         tool.setStatus(request.status());
+        if (request.riskClass() != null) {
+            // Null means "leave classification alone" — see UpdateToolRequest.
+            tool.setRiskClass(request.riskClass());
+        }
 
         return toResponse(toolRepository.save(tool));
     }
@@ -96,6 +104,7 @@ public class ToolService {
                 tool.getDocsUrl(),
                 tool.isSystem(),
                 tool.getStatus(),
+                tool.getRiskClass(),
                 tool.getCreatedAt(),
                 tool.getUpdatedAt()
         );

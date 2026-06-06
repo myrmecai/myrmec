@@ -1,5 +1,6 @@
 package ai.myrmec.engine.tool.dto;
 
+import ai.myrmec.engine.tool.RiskClass;
 import ai.myrmec.engine.tool.ToolStatus;
 import ai.myrmec.engine.tool.ToolType;
 import jakarta.validation.constraints.NotBlank;
@@ -24,6 +25,13 @@ public record UpdateToolRequest(
         String docsUrl,
 
         @NotNull(message = "Status is required")
-        ToolStatus status
+        ToolStatus status,
+
+        /**
+         * Optional. Null preserves the existing classification — admins
+         * who only want to flip status / rename a tool don't need to
+         * re-think risk.
+         */
+        RiskClass riskClass
 ) {
 }

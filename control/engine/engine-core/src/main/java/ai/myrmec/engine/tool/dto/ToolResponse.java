@@ -1,5 +1,6 @@
 package ai.myrmec.engine.tool.dto;
 
+import ai.myrmec.engine.tool.RiskClass;
 import ai.myrmec.engine.tool.ToolStatus;
 import ai.myrmec.engine.tool.ToolType;
 
@@ -15,6 +16,7 @@ public record ToolResponse(
         String docsUrl,
         boolean isSystem,
         ToolStatus status,
+        RiskClass riskClass,
         Instant createdAt,
         Instant updatedAt
 ) {

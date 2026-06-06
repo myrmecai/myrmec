@@ -1,5 +1,6 @@
 package ai.myrmec.engine.tool.dto;
 
+import ai.myrmec.engine.tool.RiskClass;
 import ai.myrmec.engine.tool.ToolType;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -26,6 +27,13 @@ public record CreateToolRequest(
         Map<String, Object> configSchema,
 
         @Size(max = 500, message = "Docs URL must not exceed 500 characters")
-        String docsUrl
+        String docsUrl,
+
+        /**
+         * Optional. Defaults to {@link RiskClass#SAFE} server-side so
+         * existing API callers stay source-compatible — HITL is opt-in
+         * via {@code projects.auto_hitl_on_destructive}.
+         */
+        RiskClass riskClass
 ) {
 }

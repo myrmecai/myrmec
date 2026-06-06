@@ -76,6 +76,9 @@ public class ProjectService {
         project.setWorkspaceRepoUrl(request.getWorkspaceRepoUrl());
         project.setWorkspaceRepoBranch(request.getWorkspaceRepoBranch() != null ? request.getWorkspaceRepoBranch() : "main");
         project.setRagConfig(request.getRagConfig());
+        // HITL policy default: false. Conscious opt-in by an admin.
+        project.setAutoHitlOnDestructive(
+                request.getAutoHitlOnDestructive() != null && request.getAutoHitlOnDestructive());
 
         project = projectRepository.save(project);
 
@@ -139,6 +142,9 @@ public class ProjectService {
         }
         if (request.getRagConfig() != null) {
             project.setRagConfig(request.getRagConfig());
+        }
+        if (request.getAutoHitlOnDestructive() != null) {
+            project.setAutoHitlOnDestructive(request.getAutoHitlOnDestructive());
         }
 
         project = projectRepository.save(project);

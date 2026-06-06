@@ -47,4 +47,11 @@ public class CreateProjectRequest {
      * External RAG configuration.
      */
     private Map<String, Object> ragConfig;
+
+    /**
+     * When true, any tool with {@code risk_class} DESTRUCTIVE or
+     * IRREVERSIBLE triggers a HITL approval before the agent may
+     * execute it. Defaults to false (Phase 6 behaviour preserved).
+     */
+    private Boolean autoHitlOnDestructive;
 }

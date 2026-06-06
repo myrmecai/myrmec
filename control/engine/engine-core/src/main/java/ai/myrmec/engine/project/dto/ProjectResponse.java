@@ -25,6 +25,7 @@ public class ProjectResponse {
     private String workspaceRepoBranch;
     private UUID workspaceCredentialSecretId;
     private Map<String, Object> ragConfig;
+    private boolean autoHitlOnDestructive;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -39,6 +40,7 @@ public class ProjectResponse {
                 .workspaceRepoBranch(project.getWorkspaceRepoBranch())
                 .workspaceCredentialSecretId(project.getWorkspaceCredentialSecretId())
                 .ragConfig(project.getRagConfig())
+                .autoHitlOnDestructive(project.isAutoHitlOnDestructive())
                 .createdAt(project.getCreatedAt())
                 .updatedAt(project.getUpdatedAt())
                 .build();
