@@ -47,6 +47,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     private final TaskAttemptRepository taskAttemptRepository;
     private final ConversationService conversationService;
     private final ConversationStreamBroker conversationStreamBroker;
+    private final ai.myrmec.engine.security.scan.SecretLeakService secretLeakService;
     private final ObjectMapper objectMapper;
 
     private static final String ATTR_AGENT_INSTANCE_ID = "agentInstanceId";
@@ -555,8 +556,47 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     private void handleMessageComplete(WebSocketSession session, JsonNode payload, String rawFrame) {
         MessageCompletePayload complete = objectMapper.convertValue(payload, MessageCompletePayload.class);
         UUID agentInstanceId = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+
+        // Phase 9e — secret-leak scan BEFORE we fan out to viewers or
+        // persist for replay. The scanner can BLOCK (drop the frame
+        // entirely) or REDACT (keep going with cleaned text). The
+        // original text is never persisted in either case.
+        ai.myrmec.engine.security.scan.SecretLeakService.Result scan =
+                secretLeakService.inspectOutbound(
+                        complete.getContent(),
+                        complete.getConversationId(),
+                        null);
+        if (scan.isBlocked()) {
+            log.warn("BLOCKED message.complete from agent {} (conv {}) — secret leak detected",
+                    agentInstanceId, complete.getConversationId());
+            return;
+        }
+        String safeText = scan.getText();
+        String safeRawFrame = rawFrame;
+        if (scan.isLeakDetected() && safeText != null
+                && !safeText.equals(complete.getContent())) {
+            // Re-serialise the envelope so viewers see the redacted text.
+            try {
+                MessageCompletePayload cleanPayload = new MessageCompletePayload();
+                cleanPayload.setConversationId(complete.getConversationId());
+                cleanPayload.setSequenceNo(complete.getSequenceNo());
+                cleanPayload.setContent(safeText);
+                cleanPayload.setModelCode(complete.getModelCode());
+                cleanPayload.setTokenCount(complete.getTokenCount());
+                WebSocketMessage<MessageCompletePayload> envelope =
+                        WebSocketMessage.of(MessageType.MESSAGE_COMPLETE, cleanPayload);
+                safeRawFrame = objectMapper.writeValueAsString(envelope);
+            } catch (Exception ex) {
+                // Re-serialisation failures fall through to the original
+                // raw frame — but that exposes the leak. Better to drop.
+                log.warn("Failed to re-serialise redacted message.complete (conv {}): {}",
+                        complete.getConversationId(), ex.getMessage());
+                return;
+            }
+        }
+
         // Fan to live viewers first — persistence below is for replay only.
-        conversationStreamBroker.broadcast(complete.getConversationId(), rawFrame);
+        conversationStreamBroker.broadcast(complete.getConversationId(), safeRawFrame);
         try {
             UUID agentId = agentInstanceRepository.findById(agentInstanceId)
                     .map(AgentInstance::getAgentId)
@@ -564,7 +604,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
             ConversationMessage saved = conversationService.appendMessage(
                     complete.getConversationId(),
                     ConversationMessage.Role.ASSISTANT,
-                    complete.getContent(),
+                    safeText,
                     null,
                     agentId);
             if (complete.getModelCode() != null) {
