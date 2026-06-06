@@ -34,7 +34,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, Pencil, Trash2, FolderOpen, FolderX, BookOpen, GitBranch, KeyRound, Users, Building2, ArrowRightLeft } from 'lucide-react'
+import { Plus, Pencil, Trash2, FolderOpen, FolderX, BookOpen, GitBranch, KeyRound, Users, Building2, ArrowRightLeft, MessageSquare } from 'lucide-react'
 
 const GIT_COMPATIBLE_TYPES: ReadonlySet<CredentialType> = new Set<CredentialType>([
   'BEARER_TOKEN',
@@ -141,8 +141,12 @@ function ProjectsLayout() {
     from: '/_authenticated/projects/$projectId/members',
     shouldThrow: false,
   })
+  const chatMatch = useMatch({
+    from: '/_authenticated/projects/$projectId/chat',
+    shouldThrow: false,
+  })
 
-  if (knowledgeMatch || secretsMatch || membersMatch) {
+  if (knowledgeMatch || secretsMatch || membersMatch || chatMatch) {
     return <Outlet />
   }
 
@@ -297,6 +301,18 @@ function ProjectsPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Chat"
+                        data-testid={`project-chat-${project.id}`}
+                        onClick={() => navigate({
+                          to: '/projects/$projectId/chat',
+                          params: { projectId: project.id },
+                        })}
+                      >
+                        <MessageSquare className="h-4 w-4" />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="icon"

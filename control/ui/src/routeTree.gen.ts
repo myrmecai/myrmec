@@ -29,6 +29,7 @@ import { Route as AuthenticatedWorkflowsWorkflowIdEditRouteImport } from './rout
 import { Route as AuthenticatedProjectsProjectIdSecretsRouteImport } from './routes/_authenticated/projects/$projectId.secrets'
 import { Route as AuthenticatedProjectsProjectIdMembersRouteImport } from './routes/_authenticated/projects/$projectId.members'
 import { Route as AuthenticatedProjectsProjectIdKnowledgeRouteImport } from './routes/_authenticated/projects/$projectId.knowledge'
+import { Route as AuthenticatedProjectsProjectIdChatRouteImport } from './routes/_authenticated/projects/$projectId.chat'
 import { Route as AuthenticatedWorkflowsWorkflowIdRequestsRequestIdRouteImport } from './routes/_authenticated/workflows/$workflowId.requests.$requestId'
 
 const LoginRoute = LoginRouteImport.update({
@@ -140,6 +141,12 @@ const AuthenticatedProjectsProjectIdKnowledgeRoute =
     path: '/$projectId/knowledge',
     getParentRoute: () => AuthenticatedProjectsRoute,
   } as any)
+const AuthenticatedProjectsProjectIdChatRoute =
+  AuthenticatedProjectsProjectIdChatRouteImport.update({
+    id: '/$projectId/chat',
+    path: '/$projectId/chat',
+    getParentRoute: () => AuthenticatedProjectsRoute,
+  } as any)
 const AuthenticatedWorkflowsWorkflowIdRequestsRequestIdRoute =
   AuthenticatedWorkflowsWorkflowIdRequestsRequestIdRouteImport.update({
     id: '/$requestId',
@@ -161,6 +168,7 @@ export interface FileRoutesByFullPath {
   '/users': typeof AuthenticatedUsersRoute
   '/admin/secrets': typeof AuthenticatedAdminSecretsRoute
   '/workflows/': typeof AuthenticatedWorkflowsIndexRoute
+  '/projects/$projectId/chat': typeof AuthenticatedProjectsProjectIdChatRoute
   '/projects/$projectId/knowledge': typeof AuthenticatedProjectsProjectIdKnowledgeRoute
   '/projects/$projectId/members': typeof AuthenticatedProjectsProjectIdMembersRoute
   '/projects/$projectId/secrets': typeof AuthenticatedProjectsProjectIdSecretsRoute
@@ -183,6 +191,7 @@ export interface FileRoutesByTo {
   '/users': typeof AuthenticatedUsersRoute
   '/admin/secrets': typeof AuthenticatedAdminSecretsRoute
   '/workflows': typeof AuthenticatedWorkflowsIndexRoute
+  '/projects/$projectId/chat': typeof AuthenticatedProjectsProjectIdChatRoute
   '/projects/$projectId/knowledge': typeof AuthenticatedProjectsProjectIdKnowledgeRoute
   '/projects/$projectId/members': typeof AuthenticatedProjectsProjectIdMembersRoute
   '/projects/$projectId/secrets': typeof AuthenticatedProjectsProjectIdSecretsRoute
@@ -207,6 +216,7 @@ export interface FileRoutesById {
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/_authenticated/admin/secrets': typeof AuthenticatedAdminSecretsRoute
   '/_authenticated/workflows/': typeof AuthenticatedWorkflowsIndexRoute
+  '/_authenticated/projects/$projectId/chat': typeof AuthenticatedProjectsProjectIdChatRoute
   '/_authenticated/projects/$projectId/knowledge': typeof AuthenticatedProjectsProjectIdKnowledgeRoute
   '/_authenticated/projects/$projectId/members': typeof AuthenticatedProjectsProjectIdMembersRoute
   '/_authenticated/projects/$projectId/secrets': typeof AuthenticatedProjectsProjectIdSecretsRoute
@@ -231,6 +241,7 @@ export interface FileRouteTypes {
     | '/users'
     | '/admin/secrets'
     | '/workflows/'
+    | '/projects/$projectId/chat'
     | '/projects/$projectId/knowledge'
     | '/projects/$projectId/members'
     | '/projects/$projectId/secrets'
@@ -253,6 +264,7 @@ export interface FileRouteTypes {
     | '/users'
     | '/admin/secrets'
     | '/workflows'
+    | '/projects/$projectId/chat'
     | '/projects/$projectId/knowledge'
     | '/projects/$projectId/members'
     | '/projects/$projectId/secrets'
@@ -276,6 +288,7 @@ export interface FileRouteTypes {
     | '/_authenticated/users'
     | '/_authenticated/admin/secrets'
     | '/_authenticated/workflows/'
+    | '/_authenticated/projects/$projectId/chat'
     | '/_authenticated/projects/$projectId/knowledge'
     | '/_authenticated/projects/$projectId/members'
     | '/_authenticated/projects/$projectId/secrets'
@@ -433,6 +446,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProjectsProjectIdKnowledgeRouteImport
       parentRoute: typeof AuthenticatedProjectsRoute
     }
+    '/_authenticated/projects/$projectId/chat': {
+      id: '/_authenticated/projects/$projectId/chat'
+      path: '/$projectId/chat'
+      fullPath: '/projects/$projectId/chat'
+      preLoaderRoute: typeof AuthenticatedProjectsProjectIdChatRouteImport
+      parentRoute: typeof AuthenticatedProjectsRoute
+    }
     '/_authenticated/workflows/$workflowId/requests/$requestId': {
       id: '/_authenticated/workflows/$workflowId/requests/$requestId'
       path: '/$requestId'
@@ -444,12 +464,15 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthenticatedProjectsRouteChildren {
+  AuthenticatedProjectsProjectIdChatRoute: typeof AuthenticatedProjectsProjectIdChatRoute
   AuthenticatedProjectsProjectIdKnowledgeRoute: typeof AuthenticatedProjectsProjectIdKnowledgeRoute
   AuthenticatedProjectsProjectIdMembersRoute: typeof AuthenticatedProjectsProjectIdMembersRoute
   AuthenticatedProjectsProjectIdSecretsRoute: typeof AuthenticatedProjectsProjectIdSecretsRoute
 }
 
 const AuthenticatedProjectsRouteChildren: AuthenticatedProjectsRouteChildren = {
+  AuthenticatedProjectsProjectIdChatRoute:
+    AuthenticatedProjectsProjectIdChatRoute,
   AuthenticatedProjectsProjectIdKnowledgeRoute:
     AuthenticatedProjectsProjectIdKnowledgeRoute,
   AuthenticatedProjectsProjectIdMembersRoute:

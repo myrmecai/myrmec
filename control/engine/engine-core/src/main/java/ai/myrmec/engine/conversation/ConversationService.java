@@ -138,4 +138,14 @@ public class ConversationService {
         return conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Conversation", conversationId));
     }
+
+    /**
+     * List conversations under a project ordered by most-recently-updated
+     * first. Used by the chat sidebar to show the user the threads they
+     * can resume.
+     */
+    @Transactional(readOnly = true)
+    public List<Conversation> listByProject(UUID projectId) {
+        return conversationRepository.findByProjectIdOrderByUpdatedAtDesc(projectId);
+    }
 }

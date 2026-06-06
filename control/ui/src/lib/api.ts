@@ -1085,3 +1085,56 @@ export const projectKnowledgeReposApi = {
   delete: (projectId: string, id: string) =>
     api.delete<void>(`/projects/${projectId}/knowledge-repos/${id}`),
 }
+
+// ============================================================================
+// Conversations API (Phase 6)
+// ============================================================================
+
+export type ConversationRole = 'USER' | 'ASSISTANT' | 'SYSTEM' | 'TOOL'
+export type ConversationStatus = 'ACTIVE' | 'ARCHIVED'
+
+export interface Conversation {
+  id: string
+  projectId: string
+  agentId: string | null
+  title: string | null
+  status: ConversationStatus | null
+  systemPromptOverride: string | null
+  createdBy: string | null
+  createdAt: string
+  updatedAt: string | null
+}
+
+export interface ConversationMessage {
+  id: string
+  conversationId: string
+  sequenceNo: number
+  role: ConversationRole
+  content: string
+  authorUserId: string | null
+  authorAgentId: string | null
+  modelCode: string | null
+  tokenCount: number | null
+  toolCallId: string | null
+  parentMessageId: string | null
+  createdAt: string
+}
+
+export interface CreateConversationRequest {
+  projectId: string
+  agentId?: string | null
+  title?: string | null
+  systemPromptOverride?: string | null
+}
+
+export const conversationsApi = {
+  listByProject: (projectId: string) =>
+    api.get<Conversation[]>(`/conversations?projectId=${projectId}`),
+  get: (id: string) => api.get<Conversation>(`/conversations/${id}`),
+  create: (data: CreateConversationRequest) =>
+    api.post<Conversation>('/conversations', data),
+  messages: (id: string) =>
+    api.get<ConversationMessage[]>(`/conversations/${id}/messages`),
+  postUserMessage: (id: string, content: string) =>
+    api.post<ConversationMessage>(`/conversations/${id}/messages`, { content }),
+}

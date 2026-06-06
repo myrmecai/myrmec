@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -63,6 +64,17 @@ public class ConversationController {
     @PreAuthorize("@conversationAccess.canView(#id, authentication)")
     public ResponseEntity<ConversationResponse> get(@PathVariable UUID id) {
         return ResponseEntity.ok(ConversationResponse.from(conversationService.findById(id)));
+    }
+
+    @GetMapping
+    @Operation(summary = "List conversations under a project (most recently updated first)")
+    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
+    public ResponseEntity<List<ConversationResponse>> listByProject(
+            @RequestParam UUID projectId) {
+        List<ConversationResponse> body = conversationService.listByProject(projectId).stream()
+                .map(ConversationResponse::from)
+                .toList();
+        return ResponseEntity.ok(body);
     }
 
     @GetMapping("/{id}/messages")
