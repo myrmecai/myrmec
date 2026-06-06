@@ -51,6 +51,7 @@ class ConversationTurnDispatcherTest {
     private AgentConnectionManager connectionManager;
     private AgentWebSocketHandler webSocketHandler;
     private ModelService modelService;
+    private ai.myrmec.engine.snapshot.SnapshotWriter snapshotWriter;
 
     private ConversationTurnDispatcher dispatcher;
 
@@ -64,6 +65,7 @@ class ConversationTurnDispatcherTest {
         connectionManager = mock(AgentConnectionManager.class);
         webSocketHandler = mock(AgentWebSocketHandler.class);
         modelService = mock(ModelService.class);
+        snapshotWriter = mock(ai.myrmec.engine.snapshot.SnapshotWriter.class);
 
         dispatcher = new ConversationTurnDispatcher(
                 conversationRepository,
@@ -73,7 +75,8 @@ class ConversationTurnDispatcherTest {
                 agentInstanceRepository,
                 connectionManager,
                 webSocketHandler,
-                modelService);
+                modelService,
+                snapshotWriter);
     }
 
     @Test

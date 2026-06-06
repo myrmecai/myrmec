@@ -84,6 +84,24 @@ public class Project {
     @Column(name = "auto_hitl_on_destructive", nullable = false)
     private boolean autoHitlOnDestructive = false;
 
+    /**
+     * Phase 9a — number of days to retain {@code execution_snapshots}
+     * rows. Default 90. The (future) pruner will use this; the writer
+     * does not.
+     */
+    @Column(name = "snapshot_retention_days", nullable = false)
+    private int snapshotRetentionDays = 90;
+
+    /**
+     * Phase 9a — probability in [0.0, 1.0] that the snapshot writer
+     * keeps any given inbound event. Default 1.0 (record everything).
+     * Persisted as numeric(4,3) so the smallest representable step is
+     * 0.001 (one in a thousand).
+     */
+    @Column(name = "snapshot_sampling_rate", nullable = false)
+    private java.math.BigDecimal snapshotSamplingRate =
+            java.math.BigDecimal.ONE.setScale(3, java.math.RoundingMode.UNNECESSARY);
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

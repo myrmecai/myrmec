@@ -77,6 +77,7 @@ public class ConversationTurnDispatcher {
     private final AgentConnectionManager connectionManager;
     private final AgentWebSocketHandler webSocketHandler;
     private final ModelService modelService;
+    private final ai.myrmec.engine.snapshot.SnapshotWriter snapshotWriter;
 
     /**
      * Assemble + dispatch one turn. Returns {@code true} if a frame was
@@ -148,6 +149,16 @@ public class ConversationTurnDispatcher {
         if (sent) {
             log.info("Dispatched conversation turn to agent instance {} (conv {} seq {})",
                     idleInstance.getId(), conversationId, assistantSequenceNo);
+            // Phase 9a — archive the dispatched payload so V2 replay has
+            // the same inputs the agent saw. Best-effort: never abort
+            // the caller on a snapshot failure.
+            snapshotWriter.write(ai.myrmec.engine.snapshot.SnapshotWriter.SnapshotRequest.builder()
+                    .projectId(conversation.getProjectId())
+                    .eventType("CONVERSATION_TURN_DISPATCHED")
+                    .agentId(agent.getId())
+                    .conversationId(conversationId)
+                    .payload(payload)
+                    .build());
         } else {
             log.warn("Failed to send conversation.turn.assign to agent instance {} (conv {})",
                     idleInstance.getId(), conversationId);
