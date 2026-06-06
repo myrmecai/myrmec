@@ -1090,8 +1090,15 @@ export const projectKnowledgeReposApi = {
 // Conversations API (Phase 6)
 // ============================================================================
 
-export type ConversationRole = 'USER' | 'ASSISTANT' | 'SYSTEM' | 'TOOL'
+export type ConversationRole =
+  | 'USER'
+  | 'ASSISTANT'
+  | 'SYSTEM'
+  | 'TOOL'
+  | 'APPROVAL_REQUEST'
+  | 'APPROVAL_RESPONSE'
 export type ConversationStatus = 'ACTIVE' | 'ARCHIVED'
+export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED'
 
 export interface Conversation {
   id: string
@@ -1117,6 +1124,10 @@ export interface ConversationMessage {
   tokenCount: number | null
   toolCallId: string | null
   parentMessageId: string | null
+  payloadJson: string | null
+  approvalStatus: ApprovalStatus | null
+  approverId: string | null
+  expiresAt: string | null
   createdAt: string
 }
 
@@ -1137,4 +1148,20 @@ export const conversationsApi = {
     api.get<ConversationMessage[]>(`/conversations/${id}/messages`),
   postUserMessage: (id: string, content: string) =>
     api.post<ConversationMessage>(`/conversations/${id}/messages`, { content }),
+  /**
+   * Phase 7c — submit a human decision (APPROVED / REJECTED) against a
+   * pending APPROVAL_REQUEST row. The engine returns the request row
+   * (refreshed with status + approver) plus the new APPROVAL_RESPONSE
+   * row so the UI can render both without a follow-up fetch.
+   */
+  submitApprovalDecision: (
+    conversationId: string,
+    messageId: string,
+    decision: 'APPROVED' | 'REJECTED',
+    comment?: string,
+  ) =>
+    api.post<ConversationMessage[]>(
+      `/conversations/${conversationId}/approvals/${messageId}`,
+      { decision, comment: comment ?? null },
+    ),
 }

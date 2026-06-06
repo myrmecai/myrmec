@@ -354,6 +354,15 @@ function ConversationView({ conversation }: { conversation: Conversation }) {
         queryClient.invalidateQueries({
           queryKey: ['conversation-messages', conversation.id],
         })
+      } else if (
+        f.type === 'approval.request' ||
+        f.type === 'approval.decision'
+      ) {
+        // Phase 7c — either frame mutates the persisted row's approval
+        // status; the REST list is the source of truth so just refetch.
+        queryClient.invalidateQueries({
+          queryKey: ['conversation-messages', conversation.id],
+        })
       }
     }
 
@@ -477,6 +486,14 @@ function ConversationView({ conversation }: { conversation: Conversation }) {
 }
 
 function MessageBubble({ message }: { message: ConversationMessage }) {
+  // Phase 7c — approval rows render through a dedicated card that picks
+  // a renderer based on payloadJson shape (diff / SQL / shell / generic).
+  if (message.role === 'APPROVAL_REQUEST') {
+    return <ApprovalCard message={message} />
+  }
+  if (message.role === 'APPROVAL_RESPONSE') {
+    return <ApprovalResponseBubble message={message} />
+  }
   const isUser = message.role === 'USER'
   return (
     <div
@@ -547,8 +564,250 @@ function mergeHistory(
     tokenCount: (payload.tokenCount as number | null) ?? null,
     toolCallId: null,
     parentMessageId: null,
+    payloadJson: (payload.payloadJson as string | null) ?? null,
+    approvalStatus:
+      (payload.approvalStatus as ConversationMessage['approvalStatus']) ?? null,
+    approverId: (payload.approverId as string | null) ?? null,
+    expiresAt: (payload.expiresAt as string | null) ?? null,
     createdAt: String(payload.createdAt ?? new Date().toISOString()),
   }
   if (current.some((m) => m.id === incoming.id)) return current
   return [...current, incoming].sort((a, b) => a.sequenceNo - b.sequenceNo)
 }
+
+// ============================================================================
+// Phase 7c — HITL approval card
+// ============================================================================
+
+/**
+ * Parsed shape of a Phase 7c approval payload. The agent SDK is free to
+ * push arbitrary JSON; we render whichever known shape is present, or
+ * fall back to a pretty-printed JSON block. {@code clientRequestId} is
+ * stripped before rendering because it's plumbing, not user content.
+ */
+type ApprovalPayloadShape =
+  | { kind: 'diff'; oldText: string; newText: string; title?: string }
+  | { kind: 'sql'; sql: string }
+  | { kind: 'shell'; command: string }
+  | { kind: 'json'; data: unknown }
+  | { kind: 'empty' }
+
+function parseApprovalPayload(raw: string | null): ApprovalPayloadShape {
+  if (!raw || !raw.trim()) return { kind: 'empty' }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return { kind: 'json', data: raw }
+  }
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>
+    if (typeof obj.oldText === 'string' && typeof obj.newText === 'string') {
+      return {
+        kind: 'diff',
+        oldText: obj.oldText,
+        newText: obj.newText,
+        title: typeof obj.title === 'string' ? obj.title : undefined,
+      }
+    }
+    if (typeof obj.sql === 'string') return { kind: 'sql', sql: obj.sql }
+    if (typeof obj.command === 'string')
+      return { kind: 'shell', command: obj.command }
+    // Strip plumbing keys before showing as generic JSON.
+    const cleaned = { ...obj }
+    delete cleaned.clientRequestId
+    return { kind: 'json', data: cleaned }
+  }
+  return { kind: 'json', data: parsed }
+}
+
+function ApprovalCard({ message }: { message: ConversationMessage }) {
+  const queryClient = useQueryClient()
+  const [comment, setComment] = useState('')
+  const status = message.approvalStatus ?? 'PENDING'
+  const shape = useMemo(
+    () => parseApprovalPayload(message.payloadJson),
+    [message.payloadJson],
+  )
+
+  const decisionMutation = useMutation({
+    mutationFn: (decision: 'APPROVED' | 'REJECTED') =>
+      conversationsApi.submitApprovalDecision(
+        message.conversationId,
+        message.id,
+        decision,
+        comment.trim() || undefined,
+      ),
+    onSuccess: () => {
+      setComment('')
+      queryClient.invalidateQueries({
+        queryKey: ['conversation-messages', message.conversationId],
+      })
+    },
+  })
+
+  const statusBadge = (() => {
+    switch (status) {
+      case 'APPROVED':
+        return <Badge className="bg-emerald-600 text-white">Approved</Badge>
+      case 'REJECTED':
+        return <Badge variant="destructive">Rejected</Badge>
+      case 'EXPIRED':
+        return <Badge variant="outline">Expired</Badge>
+      default:
+        return <Badge className="bg-amber-500 text-white">Pending</Badge>
+    }
+  })()
+
+  return (
+    <div
+      className="flex gap-3 justify-center"
+      data-testid="message-approval-request"
+      data-message-id={message.id}
+      data-seq={message.sequenceNo}
+      data-status={status}
+    >
+      <Card className="w-full max-w-[90%] border-amber-300">
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold flex items-center gap-2">
+                Approval required
+                {statusBadge}
+              </div>
+              {message.content && (
+                <p
+                  className="text-sm text-muted-foreground mt-1"
+                  data-testid="approval-summary"
+                >
+                  {message.content}
+                </p>
+              )}
+            </div>
+            {message.expiresAt && status === 'PENDING' && (
+              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                expires {new Date(message.expiresAt).toLocaleString()}
+              </span>
+            )}
+          </div>
+
+          <ApprovalPayloadView shape={shape} />
+
+          {status === 'PENDING' && (
+            <div className="space-y-2 pt-1">
+              <Textarea
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                placeholder="Optional comment for the agent (required for reject in many flows)"
+                className="min-h-[44px] resize-none text-sm"
+                data-testid="approval-comment"
+              />
+              <div className="flex gap-2 justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={decisionMutation.isPending}
+                  onClick={() => decisionMutation.mutate('REJECTED')}
+                  data-testid="approval-reject"
+                >
+                  Reject
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={decisionMutation.isPending}
+                  onClick={() => decisionMutation.mutate('APPROVED')}
+                  data-testid="approval-approve"
+                >
+                  Approve
+                </Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+function ApprovalPayloadView({ shape }: { shape: ApprovalPayloadShape }) {
+  if (shape.kind === 'empty') return null
+  if (shape.kind === 'diff') {
+    return (
+      <div
+        className="rounded border bg-muted/40 text-xs font-mono overflow-hidden"
+        data-testid="approval-payload-diff"
+      >
+        {shape.title && (
+          <div className="px-3 py-1 border-b bg-muted/60 text-[11px] uppercase tracking-wide">
+            {shape.title}
+          </div>
+        )}
+        <div className="grid grid-cols-2 divide-x">
+          <pre
+            className="p-3 overflow-x-auto bg-red-50 text-red-900"
+            data-testid="approval-payload-diff-old"
+          >
+            {shape.oldText}
+          </pre>
+          <pre
+            className="p-3 overflow-x-auto bg-emerald-50 text-emerald-900"
+            data-testid="approval-payload-diff-new"
+          >
+            {shape.newText}
+          </pre>
+        </div>
+      </div>
+    )
+  }
+  if (shape.kind === 'sql') {
+    return (
+      <pre
+        className="rounded border bg-muted/40 p-3 text-xs font-mono overflow-x-auto"
+        data-testid="approval-payload-sql"
+      >
+        {shape.sql}
+      </pre>
+    )
+  }
+  if (shape.kind === 'shell') {
+    return (
+      <pre
+        className="rounded border bg-zinc-900 text-zinc-100 p-3 text-xs font-mono overflow-x-auto"
+        data-testid="approval-payload-shell"
+      >
+        $ {shape.command}
+      </pre>
+    )
+  }
+  return (
+    <pre
+      className="rounded border bg-muted/40 p-3 text-xs font-mono overflow-x-auto"
+      data-testid="approval-payload-json"
+    >
+      {typeof shape.data === 'string'
+        ? shape.data
+        : JSON.stringify(shape.data, null, 2)}
+    </pre>
+  )
+}
+
+function ApprovalResponseBubble({
+  message,
+}: {
+  message: ConversationMessage
+}) {
+  return (
+    <div
+      className="flex gap-3 justify-center"
+      data-testid="message-approval-response"
+      data-seq={message.sequenceNo}
+    >
+      <Card className="max-w-[70%] border-dashed">
+        <CardContent className="p-3 text-xs text-muted-foreground italic">
+          {message.content || 'Decision recorded.'}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
