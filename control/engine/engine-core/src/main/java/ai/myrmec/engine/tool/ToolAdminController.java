@@ -52,4 +52,22 @@ public class ToolAdminController {
         toolService.delete(code);
         return ResponseEntity.noContent().build();
     }
+
+    /**
+     * Phase 9f &mdash; admin re-approval of the current description.
+     * Pins the SHA-256 of {@code Tool.description} alongside the
+     * actor + timestamp; subsequent edits invalidate the approval
+     * automatically. Restricted to PLATFORM_ADMIN.
+     */
+    @PostMapping("/{code}/approve-description")
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ToolResponse approveDescription(@PathVariable String code) {
+        org.springframework.security.core.Authentication auth =
+                org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        java.util.UUID actorId = null;
+        if (auth != null && auth.getPrincipal() instanceof ai.myrmec.engine.user.UserPrincipal up) {
+            actorId = up.getUserId();
+        }
+        return toolService.approveDescription(code, actorId);
+    }
 }

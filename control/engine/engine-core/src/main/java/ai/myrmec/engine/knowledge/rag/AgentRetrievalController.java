@@ -32,6 +32,7 @@ import java.util.Map;
 public class AgentRetrievalController {
 
     private final RetrievalDispatcher retrievalDispatcher;
+    private final ai.myrmec.engine.security.injection.UntrustedContentWrapper untrustedContentWrapper;
 
     @Operation(
             summary = "Run a retrieval query",
@@ -49,7 +50,12 @@ public class AgentRetrievalController {
                 filters);
         try {
             List<RetrievalResult> hits = retrievalDispatcher.dispatch(query);
-            return ResponseEntity.ok(hits.stream().map(RetrievalResponse::from).toList());
+            // Phase 9f — wrap each passage in <untrusted> envelope so a
+            // prompt-injection attempt embedded in a retrieved
+            // document cannot escape into the trusted system frame.
+            return ResponseEntity.ok(hits.stream()
+                    .map(h -> RetrievalResponse.from(h, untrustedContentWrapper))
+                    .toList());
         } catch (RetrievalException e) {
             // Per RetrievalProvider contract, treat provider failure as
             // empty result + log; agents may then answer without RAG grounding.

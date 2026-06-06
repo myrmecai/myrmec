@@ -9,7 +9,14 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -57,6 +64,9 @@ public class ToolService {
         // the (HITL-bypass) behaviour they had pre-Phase 7. Conscious
         // classification is required to opt a tool in to HITL.
         tool.setRiskClass(request.riskClass() != null ? request.riskClass() : RiskClass.SAFE);
+        // Phase 9f — first save records "drift" (no approval) until an
+        // admin explicitly approves the description. UIs should surface
+        // a "needs review" badge so this never goes unnoticed.
 
         return toResponse(toolRepository.save(tool));
     }
@@ -65,6 +75,16 @@ public class ToolService {
     public ToolResponse update(String code, UpdateToolRequest request) {
         Tool tool = toolRepository.findById(code)
                 .orElseThrow(() -> new ResourceNotFoundException("Tool", code));
+
+        // Phase 9f — clear approval if description has changed. If the
+        // admin just renamed/re-categorised but kept the description,
+        // the existing approval still holds.
+        String newHash = sha256Hex(request.description());
+        if (!Objects.equals(newHash, tool.getDescriptionHash())
+                && !Objects.equals(tool.getDescriptionApprovedAt(), null)) {
+            tool.setDescriptionApprovedAt(null);
+            tool.setDescriptionApprovedBy(null);
+        }
 
         tool.setName(request.name());
         tool.setDescription(request.description());
@@ -80,6 +100,42 @@ public class ToolService {
         return toResponse(toolRepository.save(tool));
     }
 
+    /**
+     * Phase 9f — admin re-approves the current description. Pins the
+     * SHA-256 of {@link Tool#getDescription()} alongside the actor and
+     * timestamp; subsequent description edits will clear the approval
+     * automatically. Caller must enforce its own AuthZ
+     * (PLATFORM_ADMIN).
+     *
+     * @return updated {@link ToolResponse}.
+     */
+    @Transactional
+    public ToolResponse approveDescription(String code, UUID approverUserId) {
+        Tool tool = toolRepository.findById(code)
+                .orElseThrow(() -> new ResourceNotFoundException("Tool", code));
+        tool.setDescriptionHash(sha256Hex(tool.getDescription()));
+        tool.setDescriptionApprovedAt(Instant.now());
+        tool.setDescriptionApprovedBy(approverUserId);
+        return toResponse(toolRepository.save(tool));
+    }
+
+    /**
+     * Phase 9f — drift check used by callers that wire tool descriptions
+     * into a model prompt. Returns {@code true} when the live
+     * description SHA-256 matches the pinned hash and an admin has
+     * approved it. {@code false} means: never approved, hash drifted,
+     * or description was edited after approval.
+     */
+    @Transactional(readOnly = true)
+    public boolean isDescriptionApproved(String code) {
+        Tool tool = toolRepository.findById(code)
+                .orElseThrow(() -> new ResourceNotFoundException("Tool", code));
+        if (tool.getDescriptionHash() == null || tool.getDescriptionApprovedAt() == null) {
+            return false;
+        }
+        return Objects.equals(sha256Hex(tool.getDescription()), tool.getDescriptionHash());
+    }
+
     @Transactional
     public void delete(String code) {
         Tool tool = toolRepository.findById(code)
@@ -92,6 +148,19 @@ public class ToolService {
         // TODO: Check if tool is in use by any agent profiles before deletion
 
         toolRepository.delete(tool);
+    }
+
+    /** SHA-256 hex of UTF-8 bytes; null in → null out. */
+    static String sha256Hex(String value) {
+        if (value == null) return null;
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(value.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            // Java guarantees SHA-256 is available; this can never fire.
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
     }
 
     private ToolResponse toResponse(Tool tool) {

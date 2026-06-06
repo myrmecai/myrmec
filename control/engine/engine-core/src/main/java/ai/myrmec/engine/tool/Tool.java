@@ -68,6 +68,24 @@ public class Tool {
     @Column(name = "risk_class", nullable = false, length = 20)
     private RiskClass riskClass = RiskClass.SAFE;
 
+    /**
+     * Phase 9f &mdash; SHA-256 (lower-case hex) of the tool's description
+     * at the time an admin approved it. {@code null} means "never
+     * approved" (or upgraded from a pre-9f schema). When the live
+     * description SHA-256 differs, the tool is considered "drifted"
+     * and execution is gated until an admin re-approves.
+     */
+    @Column(name = "description_hash", length = 64)
+    private String descriptionHash;
+
+    /** Phase 9f &mdash; when the current {@link #descriptionHash} was approved. */
+    @Column(name = "description_approved_at")
+    private Instant descriptionApprovedAt;
+
+    /** Phase 9f &mdash; user id of the admin that approved the current hash. */
+    @Column(name = "description_approved_by")
+    private java.util.UUID descriptionApprovedBy;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
