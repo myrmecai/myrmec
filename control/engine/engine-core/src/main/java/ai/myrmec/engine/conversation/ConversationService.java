@@ -36,10 +36,27 @@ public class ConversationService {
             UUID projectId,
             UUID createdBy,
             String title) {
+        return createConversation(projectId, createdBy, title, null, null);
+    }
+
+    /**
+     * Full-form create — used by the REST endpoint. {@code agentId} is
+     * optional (pinned when null on first agent turn); same for
+     * {@code systemPromptOverride}.
+     */
+    @Transactional
+    public Conversation createConversation(
+            UUID projectId,
+            UUID createdBy,
+            String title,
+            UUID agentId,
+            String systemPromptOverride) {
         Conversation conversation = new Conversation();
         conversation.setProjectId(projectId);
         conversation.setCreatedBy(createdBy);
         conversation.setTitle(title);
+        conversation.setAgentId(agentId);
+        conversation.setSystemPromptOverride(systemPromptOverride);
         conversation.setStatus(Conversation.Status.ACTIVE);
         conversation = conversationRepository.save(conversation);
 
@@ -114,5 +131,11 @@ public class ConversationService {
     @Transactional(readOnly = true)
     public List<ConversationMessage> listMessages(UUID conversationId) {
         return messageRepository.findByConversationIdOrderBySequenceNoAsc(conversationId);
+    }
+
+    @Transactional(readOnly = true)
+    public Conversation findById(UUID conversationId) {
+        return conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Conversation", conversationId));
     }
 }

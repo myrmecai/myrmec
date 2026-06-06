@@ -114,6 +114,22 @@ public class GlobalExceptionHandler {
                 .body(ErrorResponse.of("SECRET_TYPE_MISMATCH", ex.getMessage()));
     }
 
+    /**
+     * Surface Spring Security's authorisation failures as 403 rather than
+     * letting them fall through to the generic handler (which would turn
+     * a routine permission denial into a 500 + alert noise).
+     */
+    @ExceptionHandler({
+            org.springframework.security.authorization.AuthorizationDeniedException.class,
+            org.springframework.security.access.AccessDeniedException.class
+    })
+    public ResponseEntity<ErrorResponse> handleAccessDenied(Exception ex) {
+        log.debug("Access denied: {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(ErrorResponse.of("FORBIDDEN", "Access denied"));
+    }
+
     // ==================== Technical Exceptions ====================
 
     @ExceptionHandler(Exception.class)

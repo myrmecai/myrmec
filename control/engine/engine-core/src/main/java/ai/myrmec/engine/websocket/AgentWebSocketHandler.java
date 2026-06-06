@@ -5,6 +5,7 @@ import ai.myrmec.engine.agent.AgentInstance;
 import ai.myrmec.engine.agent.AgentInstanceRepository;
 import ai.myrmec.engine.conversation.ConversationMessage;
 import ai.myrmec.engine.conversation.ConversationService;
+import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
 import ai.myrmec.engine.websocket.message.CloseCode;
 import ai.myrmec.engine.websocket.message.MessageType;
 import ai.myrmec.engine.websocket.message.WebSocketMessage;
@@ -45,6 +46,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     private final TaskAttemptService taskAttemptService;
     private final TaskAttemptRepository taskAttemptRepository;
     private final ConversationService conversationService;
+    private final ConversationStreamBroker conversationStreamBroker;
     private final ObjectMapper objectMapper;
 
     private static final String ATTR_AGENT_INSTANCE_ID = "agentInstanceId";
@@ -164,9 +166,9 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                 case MessageType.TOOL_RESULT -> handleToolResult(session, payloadNode);
                 case MessageType.TOKEN_USAGE -> handleTokenUsage(session, payloadNode);
                 case MessageType.TASK_METRICS -> handleTaskMetrics(session, payloadNode);
-                case MessageType.MESSAGE_DELTA -> handleMessageDelta(session, payloadNode);
-                case MessageType.MESSAGE_COMPLETE -> handleMessageComplete(session, payloadNode);
-                case MessageType.TASK_CANCELLED -> handleTaskCancelled(session, payloadNode);
+                case MessageType.MESSAGE_DELTA -> handleMessageDelta(session, payloadNode, payload);
+                case MessageType.MESSAGE_COMPLETE -> handleMessageComplete(session, payloadNode, payload);
+                case MessageType.TASK_CANCELLED -> handleTaskCancelled(session, payloadNode, payload);
                 case MessageType.PONG -> handlePong(session);
                 case MessageType.DISCONNECT -> handleDisconnect(session, payloadNode);
                 default -> log.warn("Unknown message type: {}", type);
@@ -530,15 +532,17 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
      * persists nothing; Phase 6c will fan out to viewers via the broker.
      * Logged at debug so the inbound rate stays visible during development.
      */
-    private void handleMessageDelta(WebSocketSession session, JsonNode payload) {
+    private void handleMessageDelta(WebSocketSession session, JsonNode payload, String rawFrame) {
         MessageDeltaPayload delta = objectMapper.convertValue(payload, MessageDeltaPayload.class);
         UUID agentInstanceId = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
-        log.debug("Agent {} streamed delta for conversation {} seq {}#{} ({} chars)",
+        int delivered = conversationStreamBroker.broadcast(delta.getConversationId(), rawFrame);
+        log.debug("Agent {} streamed delta for conversation {} seq {}#{} ({} chars) -> {} viewer(s)",
                 agentInstanceId,
                 delta.getConversationId(),
                 delta.getSequenceNo(),
                 delta.getDeltaIndex(),
-                delta.getContent() == null ? 0 : delta.getContent().length());
+                delta.getContent() == null ? 0 : delta.getContent().length(),
+                delivered);
     }
 
     /**
@@ -547,9 +551,11 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
      * role=ASSISTANT. Persistence is decoupled from streaming so a late
      * viewer that missed the deltas still gets the full text on replay.
      */
-    private void handleMessageComplete(WebSocketSession session, JsonNode payload) {
+    private void handleMessageComplete(WebSocketSession session, JsonNode payload, String rawFrame) {
         MessageCompletePayload complete = objectMapper.convertValue(payload, MessageCompletePayload.class);
         UUID agentInstanceId = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+        // Fan to live viewers first — persistence below is for replay only.
+        conversationStreamBroker.broadcast(complete.getConversationId(), rawFrame);
         try {
             UUID agentId = agentInstanceRepository.findById(agentInstanceId)
                     .map(AgentInstance::getAgentId)
@@ -580,15 +586,18 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
      * captures who cancelled and when. Phase 6c will broadcast a
      * cancellation frame to all conversation viewers.
      */
-    private void handleTaskCancelled(WebSocketSession session, JsonNode payload) {
+    private void handleTaskCancelled(WebSocketSession session, JsonNode payload, String rawFrame) {
         TaskCancelledPayload cancelled = objectMapper.convertValue(payload, TaskCancelledPayload.class);
         UUID agentInstanceId = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+        if (cancelled.getConversationId() != null) {
+            conversationStreamBroker.broadcast(cancelled.getConversationId(), rawFrame);
+        }
         log.info("Agent {} acknowledged cancellation of task {} (conv {}, reason: {})",
                 agentInstanceId,
                 cancelled.getTaskId(),
                 cancelled.getConversationId(),
                 cancelled.getReason());
-        // Phase 6c will: broker.broadcastCancelled(cancelled); + persist partial assistant turn.
+        // TODO Phase 6c-2: persist partial assistant turn when partialContent != null.
     }
 
     private void handleDisconnect(WebSocketSession session, JsonNode payload) throws IOException {

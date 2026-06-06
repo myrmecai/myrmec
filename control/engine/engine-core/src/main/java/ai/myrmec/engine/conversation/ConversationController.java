@@ -1,0 +1,90 @@
+package ai.myrmec.engine.conversation;
+
+import ai.myrmec.engine._system.security.CurrentUser;
+import ai.myrmec.engine.conversation.dto.ConversationMessageResponse;
+import ai.myrmec.engine.conversation.dto.ConversationResponse;
+import ai.myrmec.engine.conversation.dto.CreateConversationRequest;
+import ai.myrmec.engine.conversation.dto.PostUserMessageRequest;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * User-facing REST surface for conversational sessions.
+ *
+ * <p>Phase 6c-1 ships create + list-messages + post-user-message; the
+ * agent reads inbound user messages by polling its existing task queue
+ * (a separate dispatcher will land in Phase 6c-2 to push them through
+ * the agent WebSocket). The WebSocket stream endpoint for live viewers
+ * also lands in Phase 6c-2.</p>
+ */
+@RestController
+@RequestMapping("/api/v1/conversations")
+@RequiredArgsConstructor
+@Tag(name = "Conversations", description = "Conversational session management (Phase 6)")
+public class ConversationController {
+
+    private final ConversationService conversationService;
+
+    @PostMapping
+    @Operation(summary = "Create a new conversation under a project")
+    @PreAuthorize("@projectAccess.canView(#request.projectId, authentication)")
+    public ResponseEntity<ConversationResponse> create(
+            @Valid @RequestBody CreateConversationRequest request,
+            @CurrentUser UUID userId) {
+        Conversation c = conversationService.createConversation(
+                request.projectId(),
+                userId,
+                request.title(),
+                request.agentId(),
+                request.systemPromptOverride());
+        return ResponseEntity.status(HttpStatus.CREATED).body(ConversationResponse.from(c));
+    }
+
+    @GetMapping("/{id}")
+    @Operation(summary = "Get a conversation by id")
+    @PreAuthorize("@conversationAccess.canView(#id, authentication)")
+    public ResponseEntity<ConversationResponse> get(@PathVariable UUID id) {
+        return ResponseEntity.ok(ConversationResponse.from(conversationService.findById(id)));
+    }
+
+    @GetMapping("/{id}/messages")
+    @Operation(summary = "List all messages in a conversation, in sequence order")
+    @PreAuthorize("@conversationAccess.canView(#id, authentication)")
+    public ResponseEntity<List<ConversationMessageResponse>> messages(@PathVariable UUID id) {
+        List<ConversationMessageResponse> body = conversationService.listMessages(id).stream()
+                .map(ConversationMessageResponse::from)
+                .toList();
+        return ResponseEntity.ok(body);
+    }
+
+    @PostMapping("/{id}/messages")
+    @Operation(summary = "Append a USER message to a conversation")
+    @PreAuthorize("@conversationAccess.canEdit(#id, authentication)")
+    public ResponseEntity<ConversationMessageResponse> postUserMessage(
+            @PathVariable UUID id,
+            @Valid @RequestBody PostUserMessageRequest request,
+            @CurrentUser UUID userId) {
+        ConversationMessage saved = conversationService.appendMessage(
+                id,
+                ConversationMessage.Role.USER,
+                request.content(),
+                userId,
+                null);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ConversationMessageResponse.from(saved));
+    }
+}
