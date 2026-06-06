@@ -94,6 +94,14 @@ public class WorkflowTask {
     private Instant completedAt;
 
     /**
+     * Phase 10 #71 — earliest instant at which the dispatcher may pick
+     * the task up again. Set by the rate-limit retry path; null means
+     * always eligible.
+     */
+    @Column(name = "next_eligible_at")
+    private Instant nextEligibleAt;
+
+    /**
      * Aggregated execution metrics (token usage, timing breakdown, cost).
      * Written by the engine on task completion from TOKEN_USAGE / TASK_METRICS events.
      * Shape (best-effort, all fields optional):

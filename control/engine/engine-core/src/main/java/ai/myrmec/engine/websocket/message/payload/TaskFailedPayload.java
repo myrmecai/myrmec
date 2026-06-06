@@ -21,4 +21,13 @@ public class TaskFailedPayload {
     
     /** Optional error code */
     private String errorCode;
+
+    /**
+     * Phase 10 #71 — when {@link #errorCode} is
+     * {@code MODEL_RATE_LIMITED}, hints how long the engine should
+     * wait before re-dispatching. Sourced from the upstream provider's
+     * {@code Retry-After} header by the agent SDK. Ignored for other
+     * error codes.
+     */
+    private Integer retryAfterSeconds;
 }

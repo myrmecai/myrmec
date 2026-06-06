@@ -295,7 +295,8 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         // Mark the attempt as failed
         if (attemptId != null) {
             try {
-                taskAttemptService.completeFailed(attemptId, failed.getError(), failed.getErrorCode());
+                taskAttemptService.completeFailed(attemptId, failed.getError(),
+                        failed.getErrorCode(), failed.getRetryAfterSeconds());
             } catch (Exception e) {
                 log.error("Failed to record task failure: {}", e.getMessage(), e);
             }

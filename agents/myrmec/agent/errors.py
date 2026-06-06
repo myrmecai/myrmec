@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from enum import Enum
+from typing import NamedTuple, Optional
 
 
 class ErrorCode(str, Enum):
@@ -114,4 +115,45 @@ def classify_exception(exc: BaseException) -> ErrorCode:
     return ErrorCode.INTERNAL
 
 
-__all__ = ["ErrorCode", "ToolExecutionError", "classify_exception"]
+class ClassifiedError(NamedTuple):
+    """Result of :func:`classify_exception_with_hint`.
+
+    ``retry_after_seconds`` is non-``None`` only when the underlying
+    error carried a ``Retry-After`` header (typically alongside a
+    :attr:`ErrorCode.MODEL_RATE_LIMITED` classification). The engine
+    consumes this on the ``task.failed`` payload to schedule a
+    targeted retry instead of failing the workflow.
+    """
+
+    code: ErrorCode
+    retry_after_seconds: Optional[int]
+
+
+def classify_exception_with_hint(exc: BaseException) -> ClassifiedError:
+    """Like :func:`classify_exception` but also extracts the
+    provider's ``Retry-After`` hint (in seconds, rounded up).
+
+    The :mod:`myrmec.agent.retry` module owns the parsing logic;
+    we import it lazily to keep this module free of optional
+    dependencies.
+    """
+    code = classify_exception(exc)
+    retry_after: Optional[int] = None
+    if code is ErrorCode.MODEL_RATE_LIMITED:
+        from myrmec.agent.retry import extract_retry_after  # local import: avoid cycles
+        raw = extract_retry_after(exc)
+        if raw is not None:
+            # Round up so a fractional hint never schedules the retry
+            # before the provider's window has actually closed.
+            import math
+            retry_after = max(1, int(math.ceil(raw)))
+    return ClassifiedError(code=code, retry_after_seconds=retry_after)
+
+
+__all__ = [
+    "ClassifiedError",
+    "ErrorCode",
+    "ToolExecutionError",
+    "classify_exception",
+    "classify_exception_with_hint",
+]

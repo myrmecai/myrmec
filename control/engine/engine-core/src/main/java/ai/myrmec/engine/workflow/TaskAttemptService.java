@@ -22,6 +22,25 @@ import java.util.UUID;
 @Slf4j
 public class TaskAttemptService {
 
+    /**
+     * Error code emitted by the agent SDK when an upstream LLM
+     * provider returns 429. The engine reacts to this code by
+     * scheduling a deferred retry instead of marking the task failed.
+     */
+    public static final String ERROR_CODE_RATE_LIMITED = "MODEL_RATE_LIMITED";
+
+    /**
+     * Hard cap on rate-limit retries before the task is given up on.
+     * Counted via {@link #countRetryableAttempts(UUID)}.
+     */
+    public static final int MAX_RATE_LIMIT_RETRIES = 5;
+
+    /** Floor for the scheduled retry delay if the agent didn't hint one. */
+    public static final int DEFAULT_RATE_LIMIT_BACKOFF_SECONDS = 30;
+
+    /** Absolute ceiling on Retry-After we'll honour from a provider. */
+    public static final int MAX_RATE_LIMIT_BACKOFF_SECONDS = 600;
+
     private final TaskAttemptRepository taskAttemptRepository;
     private final WorkflowTaskRepository workflowTaskRepository;
     private final ExecutionEventRepository executionEventRepository;
@@ -89,6 +108,19 @@ public class TaskAttemptService {
      */
     @Transactional
     public TaskAttempt completeFailed(UUID attemptId, String errorMessage, String errorCode) {
+        return completeFailed(attemptId, errorMessage, errorCode, null);
+    }
+
+    /**
+     * Mark an attempt as failed; honour the {@code retryAfterSeconds}
+     * hint (Phase 10 #71) on {@link #ERROR_CODE_RATE_LIMITED} so the
+     * task gets re-dispatched after the upstream provider's window.
+     */
+    @Transactional
+    public TaskAttempt completeFailed(UUID attemptId,
+                                      String errorMessage,
+                                      String errorCode,
+                                      Integer retryAfterSeconds) {
         TaskAttempt attempt = getAttempt(attemptId);
         attempt.markFailed(errorMessage, errorCode);
         
@@ -96,7 +128,28 @@ public class TaskAttemptService {
         WorkflowTask task = attempt.getTask();
         task.setErrorMessage(errorMessage);
         task.setCompletedAt(Instant.now());
-        // Note: task status/result updated by retry logic in TaskDispatcherService
+
+        boolean rateLimited = ERROR_CODE_RATE_LIMITED.equals(errorCode);
+        boolean retriable = rateLimited && canRetry(task.getId(), MAX_RATE_LIMIT_RETRIES);
+        if (retriable) {
+            int backoffSeconds = clampBackoff(retryAfterSeconds);
+            Instant nextEligible = Instant.now().plusSeconds(backoffSeconds);
+            task.setStatus(TaskStatus.PENDING);
+            task.setResult(null);
+            task.setStartedAt(null);
+            task.setCompletedAt(null);
+            task.setAgentInstance(null);
+            task.setAttempt(task.getAttempt() + 1);
+            task.setNextEligibleAt(nextEligible);
+            log.warn("Task {} hit MODEL_RATE_LIMITED; scheduling retry #{} in {}s (at {})",
+                    task.getId(), task.getAttempt(), backoffSeconds, nextEligible);
+        } else if (rateLimited) {
+            // Rate-limited but retries exhausted — give up.
+            task.setStatus(TaskStatus.COMPLETED);
+            task.setResult(TaskResult.FAILURE);
+            log.warn("Task {} hit MODEL_RATE_LIMITED but retries exhausted; failing",
+                    task.getId());
+        }
         workflowTaskRepository.save(task);
 
         // Aggregate observability metrics even on failure.
@@ -108,7 +161,18 @@ public class TaskAttemptService {
         }
 
         log.debug("Attempt {} completed with FAILURE: {}", attemptId, errorCode);
-        return taskAttemptRepository.save(attempt);
+        attempt = taskAttemptRepository.save(attempt);
+        if (rateLimited && !retriable) {
+            workflowProgressionService.onTaskFailed(task);
+        }
+        return attempt;
+    }
+
+    private static int clampBackoff(Integer hint) {
+        if (hint == null || hint <= 0) {
+            return DEFAULT_RATE_LIMIT_BACKOFF_SECONDS;
+        }
+        return Math.min(hint, MAX_RATE_LIMIT_BACKOFF_SECONDS);
     }
 
     /**

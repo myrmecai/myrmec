@@ -66,6 +66,13 @@ public class TaskDispatcherService {
                         || reqStatus == RequestStatus.FAILED) {
                     continue;
                 }
+                // Phase 10 #71 — honour rate-limit backoff. The task was
+                // pushed back to PENDING by the retry path with a wall
+                // clock at which it becomes eligible again.
+                if (task.getNextEligibleAt() != null
+                        && task.getNextEligibleAt().isAfter(Instant.now())) {
+                    continue;
+                }
                 dispatchTask(task);
             } catch (Exception e) {
                 log.error("Failed to dispatch task {}: {}", task.getId(), e.getMessage());
