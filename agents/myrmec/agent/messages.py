@@ -38,6 +38,10 @@ class MessageType:
     MESSAGE_COMPLETE = "message.complete"
     TASK_CANCELLED = "task.cancelled"
 
+    # Phase 7c - HITL approvals
+    APPROVAL_REQUEST = "approval.request"  # Agent -> Engine
+    APPROVAL_DECISION = "approval.decision"  # Engine -> Agent
+
 
 T = TypeVar("T")
 

@@ -5,7 +5,10 @@ from uuid import uuid4
 
 import pytest
 
-from myrmec.agent.conversation import EchoConversationTurnHandler
+from myrmec.agent.conversation import (
+    ConversationTurnContext,
+    EchoConversationTurnHandler,
+)
 from myrmec.agent.messages import MessageType, WebSocketMessage
 from myrmec.agent.models import (
     ConversationTurnAssignPayload,
@@ -41,7 +44,7 @@ async def test_echo_handler_streams_deltas_then_complete_with_matching_sequence(
     payload = _payload("ping")
     recorder = _Recorder()
 
-    await handler.execute(payload, recorder)
+    await handler.execute(ConversationTurnContext(payload=payload, send_message=recorder))
 
     # At least one delta + a final complete.
     assert len(recorder.messages) >= 2
@@ -75,7 +78,7 @@ async def test_echo_handler_round_trip_payloads_validate() -> None:
     recorder = _Recorder()
     payload = _payload("schema check", seq=12)
 
-    await handler.execute(payload, recorder)
+    await handler.execute(ConversationTurnContext(payload=payload, send_message=recorder))
 
     for msg in recorder.messages[:-1]:
         # Validates camelCase aliases + numeric typing on deltaIndex/sequenceNo.
@@ -87,7 +90,9 @@ async def test_echo_handler_round_trip_payloads_validate() -> None:
 async def test_echo_handler_template_can_be_customised() -> None:
     handler = EchoConversationTurnHandler(template="REPLY[{user_message}]")
     recorder = _Recorder()
-    await handler.execute(_payload("xyz"), recorder)
+    await handler.execute(
+        ConversationTurnContext(payload=_payload("xyz"), send_message=recorder)
+    )
 
     final = recorder.messages[-1].payload["content"]
     assert final == "REPLY[xyz]"

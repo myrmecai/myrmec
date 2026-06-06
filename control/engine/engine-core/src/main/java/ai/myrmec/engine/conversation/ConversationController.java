@@ -44,6 +44,7 @@ public class ConversationController {
 
     private final ConversationService conversationService;
     private final ConversationTurnDispatcher turnDispatcher;
+    private final ApprovalDecisionDispatcher approvalDecisionDispatcher;
 
     @PostMapping
     @Operation(summary = "Create a new conversation under a project")
@@ -125,6 +126,16 @@ public class ConversationController {
         ConversationService.ApprovalDecisionResult result =
                 conversationService.submitApprovalDecision(
                         id, messageId, userId, body.decision(), body.comment());
+        // Phase 7c — best-effort push to the conversation's pinned
+        // agent so the SDK can resolve its blocking request_approval()
+        // call. Decision is already persisted; dispatcher failures are
+        // logged but don't fail the request.
+        try {
+            approvalDecisionDispatcher.dispatch(id, result);
+        } catch (Exception e) {
+            log.warn("approval.decision dispatch threw for conv {} msg {}: {}",
+                    id, messageId, e.getMessage(), e);
+        }
         // Return both rows so the UI can refresh the request card AND the
         // appended response row in one network call.
         List<ConversationMessageResponse> out = List.of(

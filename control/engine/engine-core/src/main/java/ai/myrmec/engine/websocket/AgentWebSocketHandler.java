@@ -169,6 +169,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                 case MessageType.MESSAGE_DELTA -> handleMessageDelta(session, payloadNode, payload);
                 case MessageType.MESSAGE_COMPLETE -> handleMessageComplete(session, payloadNode, payload);
                 case MessageType.TASK_CANCELLED -> handleTaskCancelled(session, payloadNode, payload);
+                case MessageType.APPROVAL_REQUEST -> handleApprovalRequest(session, payloadNode);
                 case MessageType.PONG -> handlePong(session);
                 case MessageType.DISCONNECT -> handleDisconnect(session, payloadNode);
                 default -> log.warn("Unknown message type: {}", type);
@@ -633,6 +634,70 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         session.close(CloseStatus.NORMAL);
     }
 
+    // ==================== Phase 7c — HITL approval (agent-initiated) ====================
+
+    /**
+     * {@code approval.request} \u2014 the agent is gating a side-effecting
+     * action behind a human decision. Persist the APPROVAL_REQUEST row
+     * via {@link ConversationService#appendApprovalRequest} (so it
+     * shows in replay) then broadcast an enriched envelope to viewers
+     * carrying both the engine-assigned {@code messageId} and the
+     * agent's {@code clientRequestId}. The decision arrives later
+     * through the REST surface; the controller routes it back via
+     * {@link #sendApprovalDecision(UUID, ApprovalDecisionPayload)}.
+     */
+    private void handleApprovalRequest(WebSocketSession session, JsonNode payload) {
+        ApprovalRequestPayload req = objectMapper.convertValue(payload, ApprovalRequestPayload.class);
+        UUID agentInstanceId = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+        if (req.getConversationId() == null || req.getClientRequestId() == null) {
+            log.warn("Discarding approval.request from agent {} \u2014 conversationId/clientRequestId required",
+                    agentInstanceId);
+            return;
+        }
+        UUID agentId = agentInstanceRepository.findById(agentInstanceId)
+                .map(AgentInstance::getAgentId)
+                .orElse(null);
+        if (agentId == null) {
+            log.warn("Agent instance {} sent approval.request but no Agent row \u2014 dropping", agentInstanceId);
+            return;
+        }
+        ConversationMessage persisted;
+        try {
+            persisted = conversationService.appendApprovalRequest(
+                    req.getConversationId(),
+                    agentId,
+                    req.getContent(),
+                    req.getPayloadJson(),
+                    req.getExpiresAt());
+        } catch (Exception e) {
+            log.warn("Failed to persist approval.request for conv {} from agent {}: {}",
+                    req.getConversationId(), agentInstanceId, e.getMessage(), e);
+            return;
+        }
+        // Broadcast to viewers with both ids populated so the UI knows
+        // which row to render and the originating agent's other viewers
+        // (multi-tab admin) see the same envelope.
+        ApprovalRequestPayload broadcast = ApprovalRequestPayload.builder()
+                .conversationId(req.getConversationId())
+                .clientRequestId(req.getClientRequestId())
+                .messageId(persisted.getId())
+                .content(persisted.getContent())
+                .payloadJson(persisted.getPayloadJson())
+                .expiresAt(persisted.getExpiresAt())
+                .build();
+        WebSocketMessage<ApprovalRequestPayload> envelope =
+                WebSocketMessage.of(MessageType.APPROVAL_REQUEST, broadcast);
+        try {
+            String json = objectMapper.writeValueAsString(envelope);
+            conversationStreamBroker.broadcast(req.getConversationId(), json);
+        } catch (JsonProcessingException e) {
+            log.warn("Failed to serialise approval.request envelope for conv {}: {}",
+                    req.getConversationId(), e.getMessage());
+        }
+        log.info("Agent {} requested approval on conv {} (clientId {}, persisted as {})",
+                agentInstanceId, req.getConversationId(), req.getClientRequestId(), persisted.getId());
+    }
+
     // ==================== Outbound Messages ====================
 
     /**
@@ -674,6 +739,17 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     public boolean sendConversationTurn(UUID agentInstanceId, ConversationTurnAssignPayload payload) {
         WebSocketMessage<ConversationTurnAssignPayload> message =
                 WebSocketMessage.of(MessageType.CONVERSATION_TURN_ASSIGN, payload);
+        return connectionManager.sendMessage(agentInstanceId, message);
+    }
+
+    /**
+     * Phase 7c — push the APPROVAL_DECISION frame back to a specific
+     * agent instance. The {@code clientRequestId} on the payload lets
+     * the agent SDK resolve the matching pending future.
+     */
+    public boolean sendApprovalDecision(UUID agentInstanceId, ApprovalDecisionPayload payload) {
+        WebSocketMessage<ApprovalDecisionPayload> message =
+                WebSocketMessage.of(MessageType.APPROVAL_DECISION, payload);
         return connectionManager.sendMessage(agentInstanceId, message);
     }
 

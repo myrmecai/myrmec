@@ -12,7 +12,9 @@ from uuid import UUID
 
 from myrmec.agent.connection import ReconnectingConnection, WebSocketConnection
 from myrmec.agent.context import TaskContext
+from myrmec.agent.approvals import ApprovalClient
 from myrmec.agent.conversation import (
+    ConversationTurnContext,
     ConversationTurnHandler,
     EchoConversationTurnHandler,
 )
@@ -22,6 +24,7 @@ from myrmec.agent.http_client import EngineHttpClient
 from myrmec.agent.logging_handler import AgentLoggingHandler, OutputCapture
 from myrmec.agent.messages import CloseCode, MessageType, WebSocketMessage
 from myrmec.agent.models import (
+    ApprovalDecisionPayload,
     ConversationTurnAssignPayload,
     Task,
     TaskAcceptPayload,
@@ -93,6 +96,7 @@ class Agent:
         self._metadata = metadata
         self._sdk_version = sdk_version
         self._conversation_handler = conversation_handler or EchoConversationTurnHandler()
+        self._approval_client = ApprovalClient(self._send_message)
         
         # Clients
         self._http_client = EngineHttpClient(
@@ -272,6 +276,8 @@ class Agent:
             await self._handle_task_cancel(payload)
         elif msg_type == MessageType.CONVERSATION_TURN_ASSIGN:
             await self._handle_conversation_turn_assign(payload)
+        elif msg_type == MessageType.APPROVAL_DECISION:
+            await self._handle_approval_decision(payload)
         else:
             logger.warning("Unknown message type: %s", msg_type)
     
@@ -332,12 +338,37 @@ class Agent:
             "Received conversation turn for conv %s seq %s",
             turn.conversation_id, turn.assistant_sequence_no,
         )
+        ctx = ConversationTurnContext(
+            payload=turn,
+            send_message=self._send_message,
+            approval_client=self._approval_client,
+        )
         try:
-            await self._conversation_handler.execute(turn, self._send_message)
+            await self._conversation_handler.execute(ctx)
         except Exception:  # noqa: BLE001
             logger.exception(
                 "Conversation handler raised for conv %s seq %s",
                 turn.conversation_id, turn.assistant_sequence_no,
+            )
+
+    async def _handle_approval_decision(self, payload: dict[str, Any]) -> None:
+        """Route an ``approval.decision`` frame to the pending future.
+
+        Phase 7c. The engine pushes one of these after a human submits
+        a decision through the REST surface. The
+        :class:`ApprovalClient` keeps a per-request future keyed by
+        ``clientRequestId`` and wakes the right caller.
+        """
+        try:
+            decision = ApprovalDecisionPayload.model_validate(payload)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Invalid approval.decision payload: %s", exc)
+            return
+        resolved = self._approval_client.resolve(decision)
+        if not resolved:
+            logger.debug(
+                "approval.decision (conv %s) did not match any pending future",
+                decision.conversation_id,
             )
     
     # ==================== Task Execution ====================

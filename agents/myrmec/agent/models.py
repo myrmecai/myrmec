@@ -450,3 +450,47 @@ class ConversationTurnAssignPayload(BaseModel):
     class Config:
         populate_by_name = True
 
+
+# ==================== Phase 7c - HITL approvals ====================
+
+
+class ApprovalRequestPayload(BaseModel):
+    """Payload for ``approval.request`` (Agent -> Engine).
+
+    The agent generates ``client_request_id`` so it can key the
+    pending-future on it; the engine echoes that value verbatim back in
+    the eventual ``approval.decision`` frame. ``message_id`` is unset
+    on outbound frames and populated by the engine on the broadcast
+    envelope sent to viewers.
+    """
+    conversation_id: UUID = Field(alias="conversationId")
+    client_request_id: UUID = Field(alias="clientRequestId")
+    message_id: UUID | None = Field(alias="messageId", default=None)
+    content: str | None = None
+    payload_json: str | None = Field(alias="payloadJson", default=None)
+    expires_at: datetime | None = Field(alias="expiresAt", default=None)
+
+    class Config:
+        populate_by_name = True
+
+
+class ApprovalDecisionPayload(BaseModel):
+    """Payload for ``approval.decision`` (Engine -> Agent).
+
+    Echoes ``client_request_id`` from the originating request so the
+    SDK can resolve the right pending future. ``decision`` is the
+    string form of ``ConversationMessage.ApprovalStatus`` — APPROVED,
+    REJECTED or EXPIRED.
+    """
+    conversation_id: UUID = Field(alias="conversationId")
+    request_message_id: UUID | None = Field(alias="requestMessageId", default=None)
+    client_request_id: UUID | None = Field(alias="clientRequestId", default=None)
+    decision: str
+    comment: str | None = None
+    response_message_id: UUID | None = Field(alias="responseMessageId", default=None)
+    approver_user_id: UUID | None = Field(alias="approverUserId", default=None)
+
+    class Config:
+        populate_by_name = True
+
+

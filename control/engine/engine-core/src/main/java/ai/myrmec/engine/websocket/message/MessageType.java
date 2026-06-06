@@ -98,4 +98,23 @@ public final class MessageType {
      * authoritative confirmation that the cancellation took effect.
      */
     public static final String TASK_CANCELLED = "task.cancelled";
+
+    // ==================== Phase 7c — HITL approvals ====================
+
+    /**
+     * Agent → Engine. The agent is about to perform a side-effecting
+     * action and is asking the human in the loop for permission before
+     * proceeding. Engine persists this as an APPROVAL_REQUEST row on
+     * the conversation and broadcasts the same frame to viewers (so
+     * the chat UI can render an approval card).
+     */
+    public static final String APPROVAL_REQUEST = "approval.request";
+
+    /**
+     * Engine → Agent. The decision corresponding to a previously
+     * submitted {@link #APPROVAL_REQUEST}. {@code clientRequestId}
+     * echoes the agent-supplied id so the SDK can resolve the matching
+     * future.
+     */
+    public static final String APPROVAL_DECISION = "approval.decision";
 }
