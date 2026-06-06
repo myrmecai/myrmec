@@ -1,6 +1,9 @@
 package ai.myrmec.engine;
 
 import ai.myrmec.engine._system.security.JwtTokenProvider;
+import ai.myrmec.engine.conversation.ConversationMessageRepository;
+import ai.myrmec.engine.conversation.ConversationParticipantRepository;
+import ai.myrmec.engine.conversation.ConversationRepository;
 import ai.myrmec.engine.spi.crypto.EncryptionService;
 import ai.myrmec.engine.knowledge.KnowledgeDocumentRepository;
 import ai.myrmec.engine.model.Model;
@@ -51,6 +54,15 @@ public abstract class IntegrationTestBase {
     @Autowired
     protected EncryptionService encryptionService;
 
+    @Autowired
+    protected ConversationMessageRepository conversationMessageRepository;
+
+    @Autowired
+    protected ConversationParticipantRepository conversationParticipantRepository;
+
+    @Autowired
+    protected ConversationRepository conversationRepository;
+
     /**
      * Test admin - retrieved or created for E2E tests.
      */
@@ -79,7 +91,11 @@ public abstract class IntegrationTestBase {
      */
     @BeforeEach
     void cleanupTestData() {
-        // Delete in correct order to avoid FK violations
+        // Delete in correct order to avoid FK violations.
+        // Conversation tables reference projects, so they must go first.
+        conversationMessageRepository.deleteAllInBatch();
+        conversationParticipantRepository.deleteAllInBatch();
+        conversationRepository.deleteAllInBatch();
         knowledgeDocumentRepository.deleteAll();
         projectRepository.deleteAll();
 

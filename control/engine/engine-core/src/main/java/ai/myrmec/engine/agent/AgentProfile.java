@@ -28,6 +28,15 @@ public class AgentProfile {
         ACTIVE, INACTIVE
     }
 
+    /**
+     * Whether agents using this profile participate in conversational
+     * sessions (Phase 6) or execute one-shot workflows (legacy path).
+     * Default ONE_SHOT preserves pre-Phase-6 behaviour.
+     */
+    public enum InteractionMode {
+        ONE_SHOT, CONVERSATIONAL
+    }
+
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     @Column(name = "id", nullable = false, updatable = false)
@@ -91,6 +100,10 @@ public class AgentProfile {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private Status status = Status.ACTIVE;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "interaction_mode", nullable = false, length = 20)
+    private InteractionMode interactionMode = InteractionMode.ONE_SHOT;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
