@@ -49,3 +49,8 @@ control/ui/test-results/
 control/ui/playwright-report/
 control/ui/playwright/.cache/
 control/ui/playwright-run.log
+
+# Promptfoo (Tier 4 evals)
+evals/.promptfoo/
+evals/promptfoo-output.*
+evals/.cache/
