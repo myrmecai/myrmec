@@ -40,6 +40,12 @@ public class ConversationMessage {
 
     public enum Role { USER, ASSISTANT, SYSTEM, TOOL, APPROVAL_REQUEST, APPROVAL_RESPONSE }
 
+    /**
+     * Lifecycle of an HITL approval row. Set only on rows whose
+     * {@link Role} is {@link Role#APPROVAL_REQUEST}.
+     */
+    public enum ApprovalStatus { PENDING, APPROVED, REJECTED, EXPIRED, CANCELLED }
+
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     @Column(name = "id", nullable = false, updatable = false)
@@ -84,6 +90,26 @@ public class ConversationMessage {
     /** For branched / regenerated turns. */
     @Column(name = "parent_message_id")
     private UUID parentMessageId;
+
+    /**
+     * Set ONLY on {@link Role#APPROVAL_REQUEST} rows. Drives the HITL
+     * card state machine. Null on every other role.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "approval_status", length = 20)
+    private ApprovalStatus approvalStatus;
+
+    /**
+     * The user pinned to decide this approval, if any. Null until the
+     * policy engine assigns one (Phase 7e) — currently any project
+     * editor may decide.
+     */
+    @Column(name = "approver_id")
+    private UUID approverId;
+
+    /** Hard wall-clock cap; the row flips to EXPIRED past this point. */
+    @Column(name = "expires_at")
+    private Instant expiresAt;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

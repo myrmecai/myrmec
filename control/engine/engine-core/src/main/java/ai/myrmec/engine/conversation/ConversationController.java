@@ -2,6 +2,7 @@ package ai.myrmec.engine.conversation;
 
 import ai.myrmec.engine._system.security.CurrentUser;
 import ai.myrmec.engine.conversation.dispatch.ConversationTurnDispatcher;
+import ai.myrmec.engine.conversation.dto.ApprovalDecisionRequest;
 import ai.myrmec.engine.conversation.dto.ConversationMessageResponse;
 import ai.myrmec.engine.conversation.dto.ConversationResponse;
 import ai.myrmec.engine.conversation.dto.CreateConversationRequest;
@@ -111,5 +112,24 @@ public class ConversationController {
         }
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ConversationMessageResponse.from(saved));
+    }
+
+    @PostMapping("/{id}/approvals/{messageId}")
+    @Operation(summary = "Submit a human decision (APPROVED / REJECTED) for an APPROVAL_REQUEST row")
+    @PreAuthorize("@conversationAccess.canEdit(#id, authentication)")
+    public ResponseEntity<List<ConversationMessageResponse>> submitApprovalDecision(
+            @PathVariable UUID id,
+            @PathVariable UUID messageId,
+            @Valid @RequestBody ApprovalDecisionRequest body,
+            @CurrentUser UUID userId) {
+        ConversationService.ApprovalDecisionResult result =
+                conversationService.submitApprovalDecision(
+                        id, messageId, userId, body.decision(), body.comment());
+        // Return both rows so the UI can refresh the request card AND the
+        // appended response row in one network call.
+        List<ConversationMessageResponse> out = List.of(
+                ConversationMessageResponse.from(result.request()),
+                ConversationMessageResponse.from(result.response()));
+        return ResponseEntity.ok(out);
     }
 }

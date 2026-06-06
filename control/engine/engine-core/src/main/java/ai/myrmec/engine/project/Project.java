@@ -75,6 +75,15 @@ public class Project {
     @Column(name = "rag_config")
     private Map<String, Object> ragConfig;
 
+    /**
+     * HITL policy switch (Phase 7b). When true, the dispatcher must
+     * request human approval before executing any tool whose
+     * {@code risk_class} is DESTRUCTIVE or IRREVERSIBLE. Defaults to
+     * false on existing rows (preserves Phase 6 behaviour).
+     */
+    @Column(name = "auto_hitl_on_destructive", nullable = false)
+    private boolean autoHitlOnDestructive = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

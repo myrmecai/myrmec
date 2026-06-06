@@ -57,6 +57,17 @@ public class Tool {
     @Column(name = "status", nullable = false, length = 20)
     private ToolStatus status = ToolStatus.ACTIVE;
 
+    /**
+     * Tool risk class (Phase 7b). Drives HITL gating: when a project has
+     * {@code autoHitlOnDestructive=true}, any tool with class
+     * {@link RiskClass#DESTRUCTIVE} or {@link RiskClass#IRREVERSIBLE}
+     * triggers an APPROVAL_REQUEST before execution. Defaults to
+     * {@link RiskClass#SAFE} so existing seeded rows are explicit.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "risk_class", nullable = false, length = 20)
+    private RiskClass riskClass = RiskClass.SAFE;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

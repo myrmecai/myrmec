@@ -17,6 +17,10 @@ public record ConversationMessageResponse(
         Integer tokenCount,
         String toolCallId,
         UUID parentMessageId,
+        String payloadJson,
+        String approvalStatus,
+        UUID approverId,
+        Instant expiresAt,
         Instant createdAt
 ) {
     public static ConversationMessageResponse from(ConversationMessage m) {
@@ -32,6 +36,10 @@ public record ConversationMessageResponse(
                 m.getTokenCount(),
                 m.getToolCallId(),
                 m.getParentMessageId(),
+                m.getPayloadJson(),
+                m.getApprovalStatus() == null ? null : m.getApprovalStatus().name(),
+                m.getApproverId(),
+                m.getExpiresAt(),
                 m.getCreatedAt()
         );
     }
