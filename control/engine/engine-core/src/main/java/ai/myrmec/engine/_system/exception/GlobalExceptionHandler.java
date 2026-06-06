@@ -114,6 +114,21 @@ public class GlobalExceptionHandler {
                 .body(ErrorResponse.of("SECRET_TYPE_MISMATCH", ex.getMessage()));
     }
 
+    @ExceptionHandler(QuotaExceededException.class)
+    public ResponseEntity<ErrorResponse> handleQuotaExceeded(QuotaExceededException ex) {
+        log.warn("Quota exceeded: {}", ex.getMessage());
+        ErrorResponse body = ErrorResponse.of(
+                "QUOTA_EXCEEDED",
+                String.format(
+                        "%s quota exceeded at %s scope (used %d of %d).",
+                        ex.getResourceType(), ex.getScope(),
+                        ex.getConsumedAmount(), ex.getLimitAmount()));
+        return ResponseEntity
+                .status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", "60")
+                .body(body);
+    }
+
     /**
      * Surface Spring Security's authorisation failures as 403 rather than
      * letting them fall through to the generic handler (which would turn

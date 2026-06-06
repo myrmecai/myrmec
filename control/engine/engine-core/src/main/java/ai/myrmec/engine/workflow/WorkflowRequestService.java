@@ -3,6 +3,10 @@ package ai.myrmec.engine.workflow;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileRepository;
+import ai.myrmec.engine.spi.quota.QuotaDecision;
+import ai.myrmec.engine.spi.quota.QuotaPolicyEngine;
+import ai.myrmec.engine.spi.quota.QuotaResourceType;
+import ai.myrmec.engine.spi.quota.QuotaScope;
 import ai.myrmec.engine.user.User;
 import ai.myrmec.engine.user.UserRepository;
 import ai.myrmec.engine.workflow.dto.StartWorkflowRequest;
@@ -25,6 +29,7 @@ public class WorkflowRequestService {
     private final WorkflowTaskRepository taskRepository;
     private final AgentProfileRepository agentProfileRepository;
     private final UserRepository userRepository;
+    private final QuotaPolicyEngine quotaPolicyEngine;
 
     @Transactional(readOnly = true)
     public List<WorkflowRequestResponse> findByWorkflow(UUID workflowId) {
@@ -62,6 +67,23 @@ public class WorkflowRequestService {
 
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", userId.toString()));
+
+        // Phase 8c: pre-flight token quota at PROJECT scope. Token spend on
+        // workflow execution is hard to predict, so we charge a nominal cost
+        // up-front and let downstream LLM calls record their actual usage.
+        UUID projectId = workflow.getProject() != null ? workflow.getProject().getId() : null;
+        if (projectId != null) {
+            QuotaDecision decision = quotaPolicyEngine.check(
+                    QuotaScope.PROJECT, projectId, QuotaResourceType.TOKENS, 0L);
+            if (decision.isBlocked()) {
+                throw new ai.myrmec.engine._system.exception.QuotaExceededException(
+                        decision.getScopeHit() != null ? decision.getScopeHit() : QuotaScope.PROJECT,
+                        projectId,
+                        QuotaResourceType.TOKENS,
+                        decision.getLimitAmount(),
+                        decision.getConsumedAmount());
+            }
+        }
 
         WorkflowRequest wfRequest = new WorkflowRequest();
         wfRequest.setWorkflow(workflow);

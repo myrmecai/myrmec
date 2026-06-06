@@ -12,6 +12,10 @@ import ai.myrmec.engine.conversation.ConversationRepository;
 import ai.myrmec.engine.conversation.ConversationService;
 import ai.myrmec.engine.model.Model;
 import ai.myrmec.engine.model.ModelService;
+import ai.myrmec.engine.spi.quota.QuotaDecision;
+import ai.myrmec.engine.spi.quota.QuotaPolicyEngine;
+import ai.myrmec.engine.spi.quota.QuotaResourceType;
+import ai.myrmec.engine.spi.quota.QuotaScope;
 import ai.myrmec.engine.websocket.AgentConnectionManager;
 import ai.myrmec.engine.websocket.AgentWebSocketHandler;
 import ai.myrmec.engine.websocket.message.payload.ConversationTurnAssignPayload;
@@ -78,6 +82,7 @@ public class ConversationTurnDispatcher {
     private final AgentWebSocketHandler webSocketHandler;
     private final ModelService modelService;
     private final ai.myrmec.engine.snapshot.SnapshotWriter snapshotWriter;
+    private final QuotaPolicyEngine quotaPolicyEngine;
 
     /**
      * Assemble + dispatch one turn. Returns {@code true} if a frame was
@@ -94,6 +99,28 @@ public class ConversationTurnDispatcher {
         if (conversation.getAgentId() == null) {
             log.warn("Cannot dispatch turn \u2014 conversation {} has no agentId pinned", conversationId);
             return false;
+        }
+
+        // Phase 8c: pre-flight quota check at PROJECT scope. We charge 0
+        // tokens (the LLM hasn't run yet) and rely on prior consumption
+        // to drive the block. A hard block raises QuotaExceededException
+        // which the REST layer translates to 429; for WS we just refuse
+        // to dispatch and let the client surface the error.
+        UUID dispatchProjectId = conversation.getProjectId();
+        if (dispatchProjectId != null) {
+            QuotaDecision decision = quotaPolicyEngine.check(
+                    QuotaScope.PROJECT, dispatchProjectId, QuotaResourceType.TOKENS, 0L);
+            if (decision.isBlocked()) {
+                log.warn("Conversation turn blocked by quota \u2014 conv {} project {} (used {} of {})",
+                        conversationId, dispatchProjectId,
+                        decision.getConsumedAmount(), decision.getLimitAmount());
+                throw new ai.myrmec.engine._system.exception.QuotaExceededException(
+                        decision.getScopeHit() != null ? decision.getScopeHit() : QuotaScope.PROJECT,
+                        dispatchProjectId,
+                        QuotaResourceType.TOKENS,
+                        decision.getLimitAmount(),
+                        decision.getConsumedAmount());
+            }
         }
 
         Optional<Agent> agentOpt = agentRepository.findById(conversation.getAgentId());

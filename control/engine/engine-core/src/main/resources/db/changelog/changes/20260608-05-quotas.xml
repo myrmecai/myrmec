@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!--
+      Phase 8a - quotas + quota_consumption.
+
+      Quota row scopes a numeric ceiling to ONE of: org, group, project, user.
+      Resource units are tokens or USD-cents. Period drives bucket reset:
+        DAILY                 - boundary = local-midnight UTC.
+        MONTHLY_CALENDAR      - boundary = 1st of month UTC.
+        LIFETIME              - never resets (one bucket).
+      `tags` is JSON for free-form labels (cost-centre, customer-id) so we
+      can roll up cross-cuts later without schema changes.
+
+      quota_consumption is the per-period bucket. We deliberately keep
+      one bucket per (quota_id, period_start) rather than mutating a
+      running total on quotas — it makes "show me the last 30 days of
+      spend" a single SELECT and makes the kill-switch percentage math
+      trivial.
+
+      No FKs from quota.scope_id (it's polymorphic across users/groups/
+      projects/orgs); enforce in service code instead.
+    -->
+
+    <changeSet id="20260608-05-quotas" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="quotas"/>
+            </not>
+        </preConditions>
+        <createTable tableName="quotas">
+            <column name="id" type="uuid" defaultValueComputed="gen_random_uuid()">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="scope_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="scope_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="resource_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="period" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="limit_amount" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="enforced" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="tags" type="clob"/>
+            <column name="created_by" type="uuid"/>
+            <column name="created_at" type="timestamp" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="20260608-05-quotas-idx-scope" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_quotas_scope"/>
+            </not>
+        </preConditions>
+        <createIndex tableName="quotas" indexName="idx_quotas_scope">
+            <column name="scope_type"/>
+            <column name="scope_id"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="20260608-05-quota-consumption" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="quota_consumption"/>
+            </not>
+        </preConditions>
+        <createTable tableName="quota_consumption">
+            <column name="id" type="uuid" defaultValueComputed="gen_random_uuid()">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="quota_id" type="uuid">
+                <constraints nullable="false"
+                             foreignKeyName="fk_quota_consumption_quota"
+                             references="quotas(id)"/>
+            </column>
+            <column name="period_start" type="timestamp">
+                <constraints nullable="false"/>
+            </column>
+            <column name="amount_used" type="bigint" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="20260608-05-quota-consumption-uq" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="uq_quota_consumption_quota_period"/>
+            </not>
+        </preConditions>
+        <createIndex tableName="quota_consumption" indexName="uq_quota_consumption_quota_period" unique="true">
+            <column name="quota_id"/>
+            <column name="period_start"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

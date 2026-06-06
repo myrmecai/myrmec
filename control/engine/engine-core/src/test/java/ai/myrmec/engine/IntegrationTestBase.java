@@ -69,6 +69,12 @@ public abstract class IntegrationTestBase {
     @Autowired
     protected ai.myrmec.engine.audit.AuditLogEntryRepository auditLogEntryRepository;
 
+    @Autowired
+    protected ai.myrmec.engine.quota.QuotaConsumptionRepository quotaConsumptionRepository;
+
+    @Autowired
+    protected ai.myrmec.engine.quota.QuotaRepository quotaRepository;
+
     /**
      * Test admin - retrieved or created for E2E tests.
      */
@@ -101,6 +107,8 @@ public abstract class IntegrationTestBase {
         // Conversation tables reference projects, so they must go first.
         executionSnapshotRepository.deleteAllInBatch();
         auditLogEntryRepository.deleteAllInBatch();
+        quotaConsumptionRepository.deleteAllInBatch();
+        quotaRepository.deleteAllInBatch();
         conversationMessageRepository.deleteAllInBatch();
         conversationParticipantRepository.deleteAllInBatch();
         conversationRepository.deleteAllInBatch();

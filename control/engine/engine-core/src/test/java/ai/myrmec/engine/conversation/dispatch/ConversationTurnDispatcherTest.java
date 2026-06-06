@@ -25,6 +25,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -66,6 +67,10 @@ class ConversationTurnDispatcherTest {
         webSocketHandler = mock(AgentWebSocketHandler.class);
         modelService = mock(ModelService.class);
         snapshotWriter = mock(ai.myrmec.engine.snapshot.SnapshotWriter.class);
+        ai.myrmec.engine.spi.quota.QuotaPolicyEngine quotaPolicyEngine =
+                mock(ai.myrmec.engine.spi.quota.QuotaPolicyEngine.class);
+        when(quotaPolicyEngine.check(any(), any(), any(), anyLong()))
+                .thenReturn(ai.myrmec.engine.spi.quota.QuotaDecision.unconstrained());
 
         dispatcher = new ConversationTurnDispatcher(
                 conversationRepository,
@@ -76,7 +81,8 @@ class ConversationTurnDispatcherTest {
                 connectionManager,
                 webSocketHandler,
                 modelService,
-                snapshotWriter);
+                snapshotWriter,
+                quotaPolicyEngine);
     }
 
     @Test
