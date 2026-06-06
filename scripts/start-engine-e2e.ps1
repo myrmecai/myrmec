@@ -136,7 +136,7 @@ Write-Step "Using: $mvnVersion"
 
 # Move to engine directory
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$EngineDir = Join-Path $ScriptDir "..\control\engine"
+$EngineDir = Join-Path $ScriptDir "..\control\engine\engine-core"
 
 if (-not (Test-Path $EngineDir)) {
     Write-Host "Engine directory not found: $EngineDir" -ForegroundColor Red
@@ -150,5 +150,8 @@ Write-Host "API: http://localhost:9090/api/v1" -ForegroundColor Yellow
 Write-Host "Swagger UI: http://localhost:9090/swagger-ui.html" -ForegroundColor Yellow
 Write-Host ""
 
-# Start Spring Boot with e2e profile (engine-core is the runnable module)
-mvn -pl engine-core -am spring-boot:run -D"spring-boot.run.profiles=e2e"
+# Start Spring Boot from inside engine-core with the e2e profile. Running
+# spring-boot:run from the multi-module root resolves the plugin on the
+# parent pom (no mainClass) and fails — must invoke from within the runnable
+# module directory.
+mvn spring-boot:run -D"spring-boot.run.profiles=e2e"

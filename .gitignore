@@ -43,3 +43,9 @@ Thumbs.db
 *.key
 
 .commit-msg.tmp
+
+# Playwright
+control/ui/test-results/
+control/ui/playwright-report/
+control/ui/playwright/.cache/
+control/ui/playwright-run.log

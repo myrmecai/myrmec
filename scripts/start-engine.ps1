@@ -151,7 +151,7 @@ if (-not $env:MYRMEC_ADMIN_PASSWORD) {
 
 # Change to engine directory
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$EngineDir = Join-Path $ScriptDir "..\control\engine"
+$EngineDir = Join-Path $ScriptDir "..\control\engine\engine-core"
 
 if (-not (Test-Path $EngineDir)) {
     Write-Host "Engine directory not found: $EngineDir" -ForegroundColor Red
@@ -165,5 +165,7 @@ Write-Host "API: http://localhost:9090/api/v1" -ForegroundColor Yellow
 Write-Host "Swagger UI: http://localhost:9090/swagger-ui.html" -ForegroundColor Yellow
 Write-Host ""
 
-# Start Spring Boot (engine-core is the runnable module in the multi-module build)
-mvn -pl engine-core -am spring-boot:run
+# Start Spring Boot from inside engine-core. Running spring-boot:run from the
+# multi-module root resolves the plugin on the parent pom (no mainClass) and
+# fails — must invoke from within the runnable module directory.
+mvn spring-boot:run
