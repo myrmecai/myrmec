@@ -3,6 +3,8 @@ package ai.myrmec.engine.websocket;
 import ai.myrmec.engine._system.security.JwtTokenProvider;
 import ai.myrmec.engine.agent.AgentInstance;
 import ai.myrmec.engine.agent.AgentInstanceRepository;
+import ai.myrmec.engine.conversation.ConversationMessage;
+import ai.myrmec.engine.conversation.ConversationService;
 import ai.myrmec.engine.websocket.message.CloseCode;
 import ai.myrmec.engine.websocket.message.MessageType;
 import ai.myrmec.engine.websocket.message.WebSocketMessage;
@@ -42,6 +44,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     private final ExecutionEventService executionEventService;
     private final TaskAttemptService taskAttemptService;
     private final TaskAttemptRepository taskAttemptRepository;
+    private final ConversationService conversationService;
     private final ObjectMapper objectMapper;
 
     private static final String ATTR_AGENT_INSTANCE_ID = "agentInstanceId";
@@ -161,6 +164,9 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                 case MessageType.TOOL_RESULT -> handleToolResult(session, payloadNode);
                 case MessageType.TOKEN_USAGE -> handleTokenUsage(session, payloadNode);
                 case MessageType.TASK_METRICS -> handleTaskMetrics(session, payloadNode);
+                case MessageType.MESSAGE_DELTA -> handleMessageDelta(session, payloadNode);
+                case MessageType.MESSAGE_COMPLETE -> handleMessageComplete(session, payloadNode);
+                case MessageType.TASK_CANCELLED -> handleTaskCancelled(session, payloadNode);
                 case MessageType.PONG -> handlePong(session);
                 case MessageType.DISCONNECT -> handleDisconnect(session, payloadNode);
                 default -> log.warn("Unknown message type: {}", type);
@@ -515,6 +521,74 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                 agentInstanceRepository.save(instance);
             });
         }
+    }
+
+    // ==================== Phase 6b — conversational sessions ====================
+
+    /**
+     * {@code message.delta} — streamed assistant token chunk. Phase 6b
+     * persists nothing; Phase 6c will fan out to viewers via the broker.
+     * Logged at debug so the inbound rate stays visible during development.
+     */
+    private void handleMessageDelta(WebSocketSession session, JsonNode payload) {
+        MessageDeltaPayload delta = objectMapper.convertValue(payload, MessageDeltaPayload.class);
+        UUID agentInstanceId = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+        log.debug("Agent {} streamed delta for conversation {} seq {}#{} ({} chars)",
+                agentInstanceId,
+                delta.getConversationId(),
+                delta.getSequenceNo(),
+                delta.getDeltaIndex(),
+                delta.getContent() == null ? 0 : delta.getContent().length());
+    }
+
+    /**
+     * {@code message.complete} — final assistant turn. Persists the
+     * canonical text as a {@code ConversationMessage} row with
+     * role=ASSISTANT. Persistence is decoupled from streaming so a late
+     * viewer that missed the deltas still gets the full text on replay.
+     */
+    private void handleMessageComplete(WebSocketSession session, JsonNode payload) {
+        MessageCompletePayload complete = objectMapper.convertValue(payload, MessageCompletePayload.class);
+        UUID agentInstanceId = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+        try {
+            UUID agentId = agentInstanceRepository.findById(agentInstanceId)
+                    .map(AgentInstance::getAgentId)
+                    .orElse(null);
+            ConversationMessage saved = conversationService.appendMessage(
+                    complete.getConversationId(),
+                    ConversationMessage.Role.ASSISTANT,
+                    complete.getContent(),
+                    null,
+                    agentId);
+            if (complete.getModelCode() != null) {
+                saved.setModelCode(complete.getModelCode());
+            }
+            if (complete.getTokenCount() != null) {
+                saved.setTokenCount(complete.getTokenCount());
+            }
+            log.debug("Persisted ASSISTANT message {} (conv {} seq {})",
+                    saved.getId(), complete.getConversationId(), saved.getSequenceNo());
+        } catch (Exception e) {
+            log.warn("Failed to persist message.complete from agent {}: {}",
+                    agentInstanceId, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * {@code task.cancelled} — agent acknowledged a {@code task.cancel}.
+     * Phase 6b: log + record an execution event so the audit trail
+     * captures who cancelled and when. Phase 6c will broadcast a
+     * cancellation frame to all conversation viewers.
+     */
+    private void handleTaskCancelled(WebSocketSession session, JsonNode payload) {
+        TaskCancelledPayload cancelled = objectMapper.convertValue(payload, TaskCancelledPayload.class);
+        UUID agentInstanceId = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+        log.info("Agent {} acknowledged cancellation of task {} (conv {}, reason: {})",
+                agentInstanceId,
+                cancelled.getTaskId(),
+                cancelled.getConversationId(),
+                cancelled.getReason());
+        // Phase 6c will: broker.broadcastCancelled(cancelled); + persist partial assistant turn.
     }
 
     private void handleDisconnect(WebSocketSession session, JsonNode payload) throws IOException {

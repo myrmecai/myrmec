@@ -351,3 +351,57 @@ class ToolResultPayload(BaseModel):
 class DisconnectPayload(BaseModel):
     """Payload for disconnect message to Engine."""
     reason: str
+
+
+# ==================== Phase 6b - conversational sessions ====================
+
+
+class MessageDeltaPayload(BaseModel):
+    """Payload for message.delta (Agent -> Engine).
+
+    One chunk of a streamed assistant turn. ``sequence_no`` is the
+    pre-allocated assistant-message sequence number (stable across all
+    deltas of the same turn); ``delta_index`` is the 0-based per-turn
+    counter used by the broker to drop out-of-order frames.
+    """
+    conversation_id: UUID = Field(alias="conversationId")
+    sequence_no: int = Field(alias="sequenceNo", ge=0)
+    delta_index: int = Field(alias="deltaIndex", ge=0)
+    content: str
+
+    class Config:
+        populate_by_name = True
+
+
+class MessageCompletePayload(BaseModel):
+    """Payload for message.complete (Agent -> Engine).
+
+    Final marker for a streamed assistant turn. Carries the full
+    canonical text so the engine can persist a ConversationMessage row
+    even if a late viewer reconnected after the deltas finished.
+    """
+    conversation_id: UUID = Field(alias="conversationId")
+    sequence_no: int = Field(alias="sequenceNo", ge=0)
+    content: str
+    model_code: str | None = Field(alias="modelCode", default=None)
+    token_count: int | None = Field(alias="tokenCount", default=None)
+
+    class Config:
+        populate_by_name = True
+
+
+class TaskCancelledPayload(BaseModel):
+    """Payload for task.cancelled (Agent -> Engine).
+
+    Sent after the agent stops streaming and releases resources, in
+    response to a task.cancel from the engine.
+    """
+    task_id: UUID = Field(alias="taskId")
+    conversation_id: UUID | None = Field(alias="conversationId", default=None)
+    sequence_no: int | None = Field(alias="sequenceNo", default=None)
+    partial_content: str | None = Field(alias="partialContent", default=None)
+    reason: str = "user_request"
+
+    class Config:
+        populate_by_name = True
+

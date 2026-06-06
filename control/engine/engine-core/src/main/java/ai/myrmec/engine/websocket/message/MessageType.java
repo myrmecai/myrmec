@@ -64,4 +64,28 @@ public final class MessageType {
 
     /** Per-task aggregated metrics summary (sent before task.complete/task.failed) */
     public static final String TASK_METRICS = "task.metrics";
+
+    // ==================== Phase 6b — Conversational sessions (Agent → Engine) ====================
+
+    /**
+     * Streamed assistant token delta during a CONVERSATIONAL turn. The agent
+     * emits zero-or-more of these between a USER message landing and the
+     * final {@link #MESSAGE_COMPLETE}. Engine fans them out to every WS
+     * viewer (Phase 6c broker).
+     */
+    public static final String MESSAGE_DELTA = "message.delta";
+
+    /**
+     * Final marker for an assistant turn. Carries the full canonical text
+     * (sum of deltas) plus an optional token-count summary. Engine persists
+     * this as a {@code ConversationMessage} row with role=ASSISTANT.
+     */
+    public static final String MESSAGE_COMPLETE = "message.complete";
+
+    /**
+     * Agent acknowledgement of a {@link #TASK_CANCEL}. Sent after the agent
+     * has stopped streaming and released resources. Engine treats this as
+     * authoritative confirmation that the cancellation took effect.
+     */
+    public static final String TASK_CANCELLED = "task.cancelled";
 }

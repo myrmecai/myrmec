@@ -30,6 +30,11 @@ class MessageType:
     PONG = "pong"
     DISCONNECT = "disconnect"
 
+    # Phase 6b - conversational sessions (Agent -> Engine)
+    MESSAGE_DELTA = "message.delta"
+    MESSAGE_COMPLETE = "message.complete"
+    TASK_CANCELLED = "task.cancelled"
+
 
 T = TypeVar("T")
 
