@@ -119,6 +119,15 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
+                    <!--
+                        Publish the executable Spring Boot jar with the "exec" classifier
+                        so the plain (library) jar remains the default artifact. Downstream
+                        Maven consumers (e.g. engine-enterprise tests) must depend on the
+                        library jar so they can resolve classes like ControlEngineApplication.
+                        Without a classifier, repackage REPLACES the plain jar with the
+                        BOOT-INF/-wrapped fat jar and breaks Maven dependent compilation.
+                    -->
+                    <classifier>exec</classifier>
                     <excludes>
                         <exclude>
                             <groupId>org.projectlombok</groupId>
