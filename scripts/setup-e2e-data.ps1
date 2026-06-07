@@ -824,6 +824,119 @@ foreach ($doc in $projectDocs) {
 Write-Host ""
 
 # ============================================================
+# STEP 11: Enable HITL on Destructive Actions (Phase 7)
+# ============================================================
+# Flips the project's autoHitlOnDestructive flag so any agent attempt
+# to invoke a DESTRUCTIVE or IRREVERSIBLE tool pauses for explicit
+# approval. The UI's approval card surfaces these requests.
+Write-Host "11. Enabling autoHitlOnDestructive on project..." -ForegroundColor Yellow
+
+$hitlBody = @{
+    autoHitlOnDestructive = $true
+}
+$updated = Invoke-Api -Method PUT -Uri "$ApiUrl/projects/$projectId" -Headers $adminHeaders -Body $hitlBody -IgnoreError
+if ($updated) {
+    Write-Host "   autoHitlOnDestructive = true" -ForegroundColor Green
+} else {
+    Write-Host "   (skipped or failed)" -ForegroundColor Yellow
+}
+Write-Host ""
+
+# ============================================================
+# STEP 12: Create a Model Provider (Phase 10 #70)
+# ============================================================
+# Demonstrates the new /admin/providers CRUD surface. System
+# providers (openai, anthropic, ollama) are Liquibase-seeded; here
+# we add a custom one so admins can see the UI flow end-to-end.
+Write-Host "12. Creating non-system model provider..." -ForegroundColor Yellow
+
+$providerBody = @{
+    code = "local-vllm"
+    name = "Local vLLM"
+    baseUrl = "http://localhost:8000/v1"
+    deploymentType = "ON_PREMISE"
+    requiresAuth = $false
+    healthEndpoint = "/health"
+    modelsEndpoint = "/v1/models"
+    docsUrl = "https://docs.vllm.ai"
+    description = "Self-hosted vLLM inference server for OSS models"
+}
+
+$createdProvider = Invoke-Api -Method POST -Uri "$ApiUrl/admin/providers" -Headers $adminHeaders -Body $providerBody -IgnoreError
+if ($createdProvider) {
+    Write-Host "   Created provider: $($createdProvider.code) ($($createdProvider.name))" -ForegroundColor Green
+} else {
+    Write-Host "   Provider already exists (or skipped)" -ForegroundColor Gray
+}
+Write-Host ""
+
+# ============================================================
+# STEP 13: Create Quotas (Phase 8 — token + cost caps)
+# ============================================================
+# One TOKENS quota and one COST_USD_CENTS quota at PROJECT scope.
+# Both run in enforced mode so the 429 banner is exercised when the
+# project burns through its allowance.
+Write-Host "13. Creating project quotas..." -ForegroundColor Yellow
+
+$quotas = @(
+    @{
+        scopeType    = "PROJECT"
+        scopeId      = $projectId
+        resourceType = "TOKENS"
+        period       = "DAILY"
+        limitAmount  = 500000
+        enforced     = $true
+        tags         = @{ source = "setup-e2e-data" }
+    },
+    @{
+        scopeType    = "PROJECT"
+        scopeId      = $projectId
+        resourceType = "COST_USD_CENTS"
+        period       = "MONTHLY_CALENDAR"
+        limitAmount  = 5000   # $50.00
+        enforced     = $true
+        tags         = @{ source = "setup-e2e-data" }
+    }
+)
+
+foreach ($q in $quotas) {
+    Write-Host "   Creating $($q.resourceType) $($q.period) quota (limit=$($q.limitAmount))..." -NoNewline
+    $result = Invoke-Api -Method POST -Uri "$ApiUrl/admin/quotas" -Headers $adminHeaders -Body $q -IgnoreError
+    if ($result) {
+        Write-Host " created (ID: $($result.id))" -ForegroundColor Green
+    }
+}
+Write-Host ""
+
+# ============================================================
+# STEP 14: Verify audit log + agent health endpoints (Phase 9b/9c/9d)
+# ============================================================
+# Read-only sanity checks. The audit log should already contain
+# entries from the role-grant, secret-CRUD, and quota-CRUD operations
+# performed above. Agent health gives the dispatcher's view of the
+# registered agent.
+Write-Host "14. Verifying audit log + agent health endpoints..." -ForegroundColor Yellow
+
+$auditEntries = Invoke-Api -Method GET -Uri "$ApiUrl/audit-log?size=5" -Headers $adminHeaders -IgnoreError
+if ($auditEntries) {
+    $count = if ($auditEntries.totalElements) { $auditEntries.totalElements } else { ($auditEntries.content | Measure-Object).Count }
+    Write-Host "   Audit log reachable. Recent entries: $count" -ForegroundColor Green
+} else {
+    Write-Host "   Audit log endpoint not reachable (may not be wired in this build)" -ForegroundColor Yellow
+}
+
+if ($agentIds["Addressbook Fullstack Agent"]) {
+    $agentId = $agentIds["Addressbook Fullstack Agent"]
+    $health = Invoke-Api -Method GET -Uri "$ApiUrl/admin/agents/$agentId/health" -Headers $adminHeaders -IgnoreError
+    if ($health) {
+        Write-Host "   Agent health: status=$($health.status) instances=$($health.instanceCount)" -ForegroundColor Green
+    } else {
+        Write-Host "   Agent health endpoint not reachable" -ForegroundColor Yellow
+    }
+}
+Write-Host ""
+
+# ============================================================
 # Summary
 # ============================================================
 Write-Host "=============================================" -ForegroundColor Cyan
@@ -841,6 +954,10 @@ Write-Host "  - 1 Published Workflow (Feature Implementation - 3 steps)"
 Write-Host "  - 1 Workflow Execution (Contact Search feature)"
 Write-Host "  - 2 Org-level Knowledge Docs (Coding Standards, Security Guidelines)"
 Write-Host "  - 4 Project-level Knowledge Docs (Java, React, REST API, Architecture)"
+Write-Host "  - autoHitlOnDestructive enabled on project (Phase 7)"
+Write-Host "  - 1 Custom Model Provider (local-vllm) (Phase 10 #70)"
+Write-Host "  - 2 Project Quotas: 500k TOKENS/day + `$50/month (Phase 8)"
+Write-Host "  - Audit log + agent health endpoints verified (Phase 9b/9c/9d)"
 Write-Host ""
 Write-Host "IDs:" -ForegroundColor Yellow
 Write-Host "  Project ID:   $projectId"

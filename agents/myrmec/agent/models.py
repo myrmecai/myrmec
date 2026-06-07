@@ -263,7 +263,11 @@ class TaskFailedPayload(BaseModel):
     task_id: UUID = Field(alias="taskId")
     error: str
     error_code: str | None = Field(alias="errorCode", default=None)
-    
+    # Phase 10 #71 — when error_code is MODEL_RATE_LIMITED, hints the
+    # provider's Retry-After value (seconds) so the engine can schedule
+    # a deferred retry rather than failing the workflow.
+    retry_after_seconds: int | None = Field(alias="retryAfterSeconds", default=None)
+
     class Config:
         populate_by_name = True
 

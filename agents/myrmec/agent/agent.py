@@ -18,7 +18,7 @@ from myrmec.agent.conversation import (
     ConversationTurnHandler,
     EchoConversationTurnHandler,
 )
-from myrmec.agent.errors import classify_exception
+from myrmec.agent.errors import classify_exception_with_hint
 from myrmec.agent.executor import TaskExecutor
 from myrmec.agent.http_client import EngineHttpClient
 from myrmec.agent.logging_handler import AgentLoggingHandler, OutputCapture
@@ -452,10 +452,12 @@ class Agent:
                 logger.warning("Failed to emit task metrics for %s", task.task_id, exc_info=True)
 
             # Send failure
+            classified = classify_exception_with_hint(e)
             failed = TaskFailedPayload(
                 task_id=task.task_id,
                 error=str(e),
-                error_code=classify_exception(e).value,
+                error_code=classified.code.value,
+                retry_after_seconds=classified.retry_after_seconds,
             )
             await self._send_message(WebSocketMessage.create(
                 MessageType.TASK_FAILED,
