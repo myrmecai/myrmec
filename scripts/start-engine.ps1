@@ -149,29 +149,47 @@ if (-not $env:MYRMEC_ADMIN_PASSWORD) {
     Write-Host "Using default admin password (CHANGE IN PRODUCTION!)" -ForegroundColor Yellow
 }
 
-# Move to the engine reactor root (parent of engine-spi + engine-core). We must
-# build from the reactor so the sibling engine-spi module is compiled/installed
-# before engine-core's spring-boot:run resolves its dependencies. Running
-# spring-boot:run directly inside engine-core picks up a stale (or missing)
-# engine-spi from the local repo and fails with "package ai.myrmec.engine.spi.*
-# does not exist" whenever the SPI has new types.
+# We need to (a) install the sibling engine-spi module into the local Maven
+# repo so engine-core can resolve its new types, then (b) invoke
+# spring-boot:run from inside engine-core only. Running 'spring-boot:run' from
+# the reactor parent fails because the goal is executed on every project
+# including the pom-packaged parent (which has no mainClass), and running
+# 'mvn -pl engine-core -am spring-boot:run' has the same effect because -am
+# makes the goal run on every selected project including engine-spi/the
+# parent.
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$EngineDir = Join-Path $ScriptDir "..\control\engine"
+$ReactorDir = Join-Path $ScriptDir "..\control\engine"
+$EngineCoreDir = Join-Path $ReactorDir "engine-core"
 
-if (-not (Test-Path $EngineDir)) {
-    Write-Host "Engine reactor directory not found: $EngineDir" -ForegroundColor Red
+if (-not (Test-Path $ReactorDir)) {
+    Write-Host "Engine reactor directory not found: $ReactorDir" -ForegroundColor Red
+    exit 1
+}
+if (-not (Test-Path $EngineCoreDir)) {
+    Write-Host "engine-core directory not found: $EngineCoreDir" -ForegroundColor Red
     exit 1
 }
 
-Set-Location $EngineDir
+# Step 1: install engine-spi (and parent pom) into local repo, skip tests.
+Write-Host "Installing engine-spi into local Maven repo (so engine-core can resolve new SPI types)..." -ForegroundColor Cyan
+Push-Location $ReactorDir
+try {
+    mvn -pl engine-spi -am install -DskipTests -q
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "engine-spi install failed (exit $LASTEXITCODE). Aborting." -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
+}
+finally {
+    Pop-Location
+}
+
+# Step 2: run engine-core.
+Set-Location $EngineCoreDir
 
 Write-Host "Starting Myrmec Control Engine..." -ForegroundColor Green
 Write-Host "API: http://localhost:9090/api/v1" -ForegroundColor Yellow
 Write-Host "Swagger UI: http://localhost:9090/swagger-ui.html" -ForegroundColor Yellow
 Write-Host ""
 
-# -pl engine-core -am  -> build engine-spi (and any future sibling deps) first,
-# then invoke spring-boot:run on engine-core (the module that actually has a
-# main class). This is the canonical Maven invocation for a runnable submodule
-# in a multi-module reactor.
-mvn -pl engine-core -am spring-boot:run
+mvn spring-boot:run
