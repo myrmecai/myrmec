@@ -134,12 +134,17 @@ if (-not $mvnVersion) {
 }
 Write-Step "Using: $mvnVersion"
 
-# Move to engine directory
+# Move to the engine reactor root (parent of engine-spi + engine-core). We must
+# build from the reactor so the sibling engine-spi module is compiled/installed
+# before engine-core's spring-boot:run resolves its dependencies. Running
+# spring-boot:run directly inside engine-core picks up a stale (or missing)
+# engine-spi from the local repo and fails with "package ai.myrmec.engine.spi.*
+# does not exist" whenever the SPI has new types.
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$EngineDir = Join-Path $ScriptDir "..\control\engine\engine-core"
+$EngineDir = Join-Path $ScriptDir "..\control\engine"
 
 if (-not (Test-Path $EngineDir)) {
-    Write-Host "Engine directory not found: $EngineDir" -ForegroundColor Red
+    Write-Host "Engine reactor directory not found: $EngineDir" -ForegroundColor Red
     exit 1
 }
 
@@ -150,8 +155,8 @@ Write-Host "API: http://localhost:9090/api/v1" -ForegroundColor Yellow
 Write-Host "Swagger UI: http://localhost:9090/swagger-ui.html" -ForegroundColor Yellow
 Write-Host ""
 
-# Start Spring Boot from inside engine-core with the e2e profile. Running
-# spring-boot:run from the multi-module root resolves the plugin on the
-# parent pom (no mainClass) and fails — must invoke from within the runnable
-# module directory.
-mvn spring-boot:run -D"spring-boot.run.profiles=e2e"
+# -pl engine-core -am  -> build engine-spi (and any future sibling deps) first,
+# then invoke spring-boot:run on engine-core (the module that actually has a
+# main class). This is the canonical Maven invocation for a runnable submodule
+# in a multi-module reactor.
+mvn -pl engine-core -am spring-boot:run -D"spring-boot.run.profiles=e2e"
