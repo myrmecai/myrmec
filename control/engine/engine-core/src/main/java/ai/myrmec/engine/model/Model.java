@@ -75,6 +75,14 @@ public class Model {
     private boolean requiresAuth = true;
 
     /**
+     * Whether the model accepts image inputs (vision / multimodal). Gates
+     * whether image attachments may be conveyed to an agent backed by this
+     * model (#103/#104). Defaults to false (text-only).
+     */
+    @Column(name = "supports_vision", nullable = false)
+    private boolean supportsVision = false;
+
+    /**
      * Infrastructure configuration for on-premise deployments.
      * Contains GPU type, memory, quantization, health endpoint, etc.
      */

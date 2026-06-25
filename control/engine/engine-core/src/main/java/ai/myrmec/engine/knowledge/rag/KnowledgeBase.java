@@ -56,6 +56,25 @@ public class KnowledgeBase {
     @Column(name = "provider_config", columnDefinition = "text")
     private String providerConfig;
 
+    /** Lifecycle status (#92, §4.4). Non-ACTIVE KBs are greyed in the Assistant KB picker. */
+    public enum Status { ACTIVE, SYNCING, DISABLED, ARCHIVED }
+
+    /** Pinned embedding model for chunk vectors; null until first embed run. */
+    @Column(name = "embedding_model", length = 80)
+    private String embeddingModel;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private Status status = Status.ACTIVE;
+
+    /** Free-form classification label (V1 schema seam; V1.1 ACL enforcement #33). */
+    @Column(name = "classification", length = 40)
+    private String classification;
+
+    /** Platform/admin can hide a KB from Assistant designers even if it exists. */
+    @Column(name = "allow_assistant_binding", nullable = false)
+    private boolean allowAssistantBinding = true;
+
     @Column(name = "created_by")
     private UUID createdBy;
 

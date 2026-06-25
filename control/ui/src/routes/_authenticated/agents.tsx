@@ -7,6 +7,8 @@ import {
   projectsApi,
   type Agent,
   type AgentWithKey,
+  type AgentWorker,
+  type AgentWorkerStatus,
   type CreateAgentRequest,
   type UpdateAgentRequest,
   type AgentProfile,
@@ -51,6 +53,7 @@ import {
   Bot,
   Activity,
   AlertCircle,
+  Server,
 } from 'lucide-react'
 
 export const Route = createFileRoute('/_authenticated/agents')({
@@ -63,6 +66,7 @@ function AgentsPage() {
   const [editAgent, setEditAgent] = useState<Agent | null>(null)
   const [createdAgent, setCreatedAgent] = useState<AgentWithKey | null>(null)
   const [regeneratedKey, setRegeneratedKey] = useState<{ agentName: string; key: string } | null>(null)
+  const [workersAgent, setWorkersAgent] = useState<Agent | null>(null)
 
   const { data: agents, isLoading, error } = useQuery({
     queryKey: ['agents'],
@@ -206,7 +210,7 @@ function AgentsPage() {
                     <div className="flex items-center gap-1">
                       <Activity className="h-3 w-3" />
                       <span className={agent.activeInstanceCount > 0 ? 'text-green-600' : 'text-muted-foreground'}>
-                        {agent.activeInstanceCount} / {agent.maxInstances}
+                        {agent.activeInstanceCount} / {agent.maxAgents}
                       </span>
                     </div>
                   </TableCell>
@@ -219,6 +223,14 @@ function AgentsPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="View workers"
+                        onClick={() => setWorkersAgent(agent)}
+                      >
+                        <Server className="h-4 w-4" />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -281,6 +293,15 @@ function AgentsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Worker Replicas Dialog */}
+      <Dialog open={!!workersAgent} onOpenChange={(open) => !open && setWorkersAgent(null)}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          {workersAgent && (
+            <WorkersDialog agent={workersAgent} />
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Registration Key Dialog (shown after create) */}
       <Dialog open={!!createdAgent} onOpenChange={(open) => !open && setCreatedAgent(null)}>
         <DialogContent>
@@ -307,6 +328,151 @@ function AgentsPage() {
   )
 }
 
+const WORKER_STATUS_STYLES: Record<AgentWorkerStatus, string> = {
+  IDLE: 'bg-slate-500',
+  RESERVED: 'bg-amber-500',
+  CONNECTING: 'bg-blue-500',
+  BOUND: 'bg-green-600',
+  DRAINING: 'bg-orange-500',
+  DEAD: 'bg-red-600',
+}
+
+function WorkerStatusBadge({ status }: { status: AgentWorkerStatus | null }) {
+  if (!status) return <Badge variant="secondary">Unknown</Badge>
+  return <Badge className={WORKER_STATUS_STYLES[status]}>{status}</Badge>
+}
+
+function formatTimestamp(value: string | null): string {
+  if (!value) return '—'
+  return new Date(value).toLocaleString()
+}
+
+function WorkersDialog({ agent }: { agent: Agent }) {
+  const { data: workers, isLoading, error } = useQuery({
+    queryKey: ['agent-workers', agent.id],
+    queryFn: () => agentsApi.workers(agent.id),
+    refetchInterval: 5000,
+  })
+
+  const { data: health } = useQuery({
+    queryKey: ['agent-health', agent.id],
+    queryFn: () => agentsApi.health(agent.id),
+    refetchInterval: 5000,
+  })
+
+  const staleByInstance = new Map(
+    (health?.instances ?? []).map((i) => [i.instanceId, i.stale]),
+  )
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>Workers — {agent.name}</DialogTitle>
+        <DialogDescription>
+          Ephemeral worker replicas and their runtime state. Refreshes every 5s.
+        </DialogDescription>
+      </DialogHeader>
+
+      {health && health.totalInstances > 0 && (
+        <div
+          className="grid grid-cols-3 gap-2 sm:grid-cols-6"
+          data-testid="agent-health-summary"
+        >
+          <HealthStat label="Online" value={health.onlineInstances} />
+          <HealthStat label="Idle" value={health.idleInstances} />
+          <HealthStat label="Busy" value={health.busyInstances} />
+          <HealthStat
+            label="Stale"
+            value={health.staleInstances}
+            tone={health.staleInstances > 0 ? 'warn' : 'default'}
+          />
+          <HealthStat label="Queue depth" value={health.queueDepth} />
+          <HealthStat
+            label="Last heartbeat"
+            value={formatTimestamp(health.latestHeartbeatAt)}
+          />
+        </div>
+      )}
+
+      {isLoading && (
+        <div className="text-muted-foreground py-6">Loading workers…</div>
+      )}
+      {error && (
+        <div className="text-destructive py-6">Failed to load workers</div>
+      )}
+      {workers && (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Status</TableHead>
+              <TableHead>Hostname</TableHead>
+              <TableHead>Conversation</TableHead>
+              <TableHead>Runtime</TableHead>
+              <TableHead>Last heartbeat</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {workers.map((w: AgentWorker) => (
+              <TableRow key={w.id}>
+                <TableCell>
+                  <div className="flex items-center gap-1.5">
+                    <WorkerStatusBadge status={w.status} />
+                    {staleByInstance.get(w.id) && (
+                      <Badge variant="outline" className="border-amber-500 text-amber-600">
+                        Stale
+                      </Badge>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell className="text-sm">{w.hostname || '—'}</TableCell>
+                <TableCell className="font-mono text-xs">
+                  {w.conversationId ? w.conversationId.slice(0, 8) : '—'}
+                </TableCell>
+                <TableCell className="text-sm">{w.runtimeVersion || '—'}</TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {formatTimestamp(w.lastHeartbeatAt)}
+                </TableCell>
+              </TableRow>
+            ))}
+            {workers.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                  No worker replicas have registered for this host yet.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      )}
+    </>
+  )
+}
+
+function HealthStat({
+  label,
+  value,
+  tone = 'default',
+}: {
+  label: string
+  value: string | number
+  tone?: 'default' | 'warn'
+}) {
+  return (
+    <div className="rounded-md border bg-card px-3 py-2">
+      <div className="text-muted-foreground text-xs">{label}</div>
+      <div
+        className={
+          tone === 'warn'
+            ? 'text-amber-600 text-sm font-semibold'
+            : 'text-sm font-semibold'
+        }
+      >
+        {value}
+      </div>
+    </div>
+  )
+}
+
 interface AgentFormProps {
   profiles: AgentProfile[]
   projects: Project[]
@@ -329,7 +495,7 @@ function AgentForm({ profiles, projects, onSubmit, isLoading, error }: AgentForm
       description: description || undefined,
       profileId,
       projectId: projectId || undefined,
-      maxInstances: parseInt(maxInstances) || 1,
+      maxAgents: parseInt(maxInstances) || 1,
     })
   }
 
@@ -441,7 +607,7 @@ function AgentEditForm({ agent, profiles, projects, onSubmit, isLoading, error }
   const [description, setDescription] = useState(agent.description || '')
   const [profileId, setProfileId] = useState(agent.profileId)
   const [projectId, setProjectId] = useState(agent.projectId || '')
-  const [maxInstances, setMaxInstances] = useState(String(agent.maxInstances))
+  const [maxInstances, setMaxInstances] = useState(String(agent.maxAgents))
   const [status, setStatus] = useState(agent.status)
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -451,7 +617,7 @@ function AgentEditForm({ agent, profiles, projects, onSubmit, isLoading, error }
       description: description || undefined,
       profileId,
       projectId: projectId || undefined,
-      maxInstances: parseInt(maxInstances) || 1,
+      maxAgents: parseInt(maxInstances) || 1,
       status,
     })
   }

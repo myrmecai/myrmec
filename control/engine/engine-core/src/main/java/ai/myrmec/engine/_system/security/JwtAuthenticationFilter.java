@@ -1,9 +1,9 @@
 package ai.myrmec.engine._system.security;
 
+import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.Agent;
-import ai.myrmec.engine.agent.AgentInstance;
-import ai.myrmec.engine.agent.AgentInstanceRepository;
 import ai.myrmec.engine.agent.AgentRepository;
+import ai.myrmec.engine.agent.AgentHostRepository;
 import ai.myrmec.engine.registration.RegistrationKeyService;
 import ai.myrmec.engine.user.User;
 import ai.myrmec.engine.user.UserPrincipal;
@@ -31,8 +31,8 @@ import java.util.UUID;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenProvider jwtTokenProvider;
-    private final AgentRepository agentRepository;
-    private final AgentInstanceRepository agentInstanceRepository;
+    private final AgentHostRepository agentRepository;
+    private final AgentRepository agentInstanceRepository;
     private final UserRepository userRepository;
     private final RegistrationKeyService registrationKeyService;
 
@@ -62,7 +62,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private void authenticateAgent(String token) {
         UUID instanceId = jwtTokenProvider.getSubjectId(token);
         String agentName = jwtTokenProvider.getName(token);
-        AgentInstance instance = agentInstanceRepository.findById(instanceId).orElse(null);
+        Agent instance = agentInstanceRepository.findById(instanceId).orElse(null);
 
         if (instance != null && !isRegistrationKeyRevoked(instance)) {
             AgentPrincipal principal = new AgentPrincipal(instance, agentName);
@@ -137,9 +137,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      * Check if the agent's registration key has been revoked.
      * This provides token revocation via registration key revocation.
      */
-    private boolean isRegistrationKeyRevoked(AgentInstance instance) {
+    private boolean isRegistrationKeyRevoked(Agent instance) {
         // Look up the agent definition to get the registration key
-        Agent agent = agentRepository.findById(instance.getAgentId()).orElse(null);
+        AgentHost agent = agentRepository.findById(instance.getAgentHostId()).orElse(null);
         if (agent == null || agent.getRegistrationKey() == null) {
             return false;
         }

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!--
+      Phase 8c - Per-execution cost ceiling (#40).
+      
+      Hard cap on a single workflow run or session turn, independent of
+      the periodic quota. Used to prevent runaway costs in a single
+      invocation. Null means no per-execution cap.
+      
+      Value is in USD cents, matching the rest of the quota cost columns.
+    -->
+
+    <changeSet id="20260622-02-quota-per-execution-cost" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="quotas" columnName="max_execution_cost_cents"/>
+            </not>
+        </preConditions>
+        <addColumn tableName="quotas">
+            <column name="max_execution_cost_cents" type="bigint"/>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>

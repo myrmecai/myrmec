@@ -24,7 +24,15 @@ public final class MessageType {
      * {@link #MESSAGE_DELTA} + {@link #MESSAGE_COMPLETE}.
      */
     public static final String CONVERSATION_TURN_ASSIGN = "conversation.turn.assign";
-    
+
+    /**
+     * Engine → Agent (conversation socket). Cancel the in-flight assistant
+     * turn for a conversation. The bound worker breaks out of its streaming /
+     * tool loop and acknowledges with {@link #TASK_CANCELLED}, carrying any
+     * partial text it had already generated.
+     */
+    public static final String CONVERSATION_TURN_CANCEL = "conversation.turn.cancel";
+
     /** Task status inquiry (sent on agent reconnect) */
     public static final String TASK_STATUS_REQUEST = "task.status_request";
     
@@ -117,4 +125,66 @@ public final class MessageType {
      * future.
      */
     public static final String APPROVAL_DECISION = "approval.decision";
+
+    // ==================== Slice 2 — Agent Host control (Host → Engine) ====================
+
+    /**
+     * Agent Host → Engine. The Supervisor advertises its installed
+     * capabilities ({@code provisions}: tools + runtime) and the CPU/RAM it
+     * auto-sized from ({@code reportedCapacity}). Sent on each control-socket
+     * (re)connect; the host is the source of truth, so the engine overwrites
+     * the AgentHost's provisions/capacity each time.
+     */
+    public static final String HOST_ANNOUNCE = "host.announce";
+
+    // ==================== Slice 3 — reserve-time binding (Engine → Agent) ====================
+
+    /**
+     * Engine → Agent. Reserve-time binding: the engine has atomically
+     * claimed this warm worker for a specific conversation and pinned a
+     * profile version. The frame tells the worker which conversation it is
+     * now serving and which profile version to load (agent-concurrency
+     * §9.5). Single-node strangler: the binding rides the worker's existing
+     * control socket; the dedicated conversation socket + node addressing
+     * arrive in a later slice.
+     */
+    public static final String AGENT_BIND = "agent.bind";
+
+    /**
+     * Engine → Agent. Release this worker from its current binding back into
+     * the warm pool. Sent when the engine tears a binding down (turn done,
+     * cancelled, or timed out); the worker drops its conversation context
+     * and returns to {@code IDLE}.
+     */
+    public static final String AGENT_RELEASE = "agent.release";
+
+    // ==================== Slice 4c — conversation socket (Agent → Engine) ====================
+
+    /**
+     * Agent → Engine. First frame on a freshly-opened, conversation-scoped
+     * WebSocket. A worker that received {@link #AGENT_BIND} dials the named
+     * home node directly and sends this to attach its conversation socket;
+     * the engine authenticates it, registers it in the local
+     * {@code conversationId → socket} map, and flips the worker to
+     * {@code BOUND} (agent-concurrency §9.4/§9.5).
+     */
+    public static final String CONVERSATION_ATTACH = "conversation.attach";
+
+    // ==================== Slice 4d — bind handshake (Host → Engine) ====================
+
+    /**
+     * Agent Host → Engine. The host received an {@link #AGENT_BIND} and its
+     * worker is now dialing the home node to open its conversation socket.
+     * The engine advances the reserved worker {@code RESERVED -> CONNECTING}
+     * and restarts the connect-timeout reaper clock (agent-concurrency §9.5).
+     */
+    public static final String AGENT_BIND_ACK = "agent.bind.ack";
+
+    /**
+     * Agent Host → Engine. The host cannot serve an {@link #AGENT_BIND}
+     * (worker spawn failed, capacity gone, etc.). The engine releases the
+     * reserved worker straight back to {@code IDLE} so the dispatcher can
+     * re-pick another candidate (agent-concurrency §9.5).
+     */
+    public static final String AGENT_BIND_NACK = "agent.bind.nack";
 }

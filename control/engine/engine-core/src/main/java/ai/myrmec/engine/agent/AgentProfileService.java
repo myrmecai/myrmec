@@ -22,7 +22,7 @@ import java.util.UUID;
 public class AgentProfileService {
 
     private final AgentProfileRepository profileRepository;
-    private final AgentRepository agentRepository;
+    private final AgentHostRepository agentRepository;
     private final ToolRepository toolRepository;
 
     /**
@@ -170,7 +170,7 @@ public class AgentProfileService {
      * Get agents using a profile.
      */
     @Transactional(readOnly = true)
-    public List<Agent> getAgentsForProfile(UUID profileId) {
+    public List<AgentHost> getAgentsForProfile(UUID profileId) {
         return agentRepository.findByProfileId(profileId);
     }
 }

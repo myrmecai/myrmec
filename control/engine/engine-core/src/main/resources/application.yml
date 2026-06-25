@@ -19,6 +19,14 @@ spring:
   liquibase:
     change-log: classpath:db/changelog/db.changelog-master.yaml
 
+  servlet:
+    multipart:
+      # Attachment uploads (#103). The fine-grained per-file cap is enforced
+      # in AttachmentService from the attachment_max_file_size_bytes setting;
+      # these are coarse transport guards a bit above that default (10 MiB).
+      max-file-size: ${MYRMEC_ATTACHMENT_MAX_FILE_SIZE:12MB}
+      max-request-size: ${MYRMEC_ATTACHMENT_MAX_REQUEST_SIZE:16MB}
+
 server:
   port: 9090
 
@@ -37,6 +45,24 @@ myrmec:
   encryption:
     key: ${MYRMEC_ENCRYPTION_KEY:default-encryption-key-change-in-production}
     previous-keys: ${MYRMEC_ENCRYPTION_PREVIOUS_KEYS:}
+  # Engine replica registry (slice 4a). Defaults resolve node id + address
+  # from the local hostname so a single node works with no configuration; in
+  # k8s set MYRMEC_NODE_ID to the pod name and MYRMEC_NODE_ADDRESS to the pod
+  # address:port reachable in-cluster.
+  node:
+    id: ${MYRMEC_NODE_ID:}
+    address: ${MYRMEC_NODE_ADDRESS:}
+    registry:
+      enabled: ${MYRMEC_NODE_REGISTRY_ENABLED:true}
+      heartbeat-interval-ms: ${MYRMEC_NODE_HEARTBEAT_INTERVAL_MS:10000}
+      reaper-interval-ms: ${MYRMEC_NODE_REAPER_INTERVAL_MS:15000}
+      stale-threshold-ms: ${MYRMEC_NODE_STALE_THRESHOLD_MS:30000}
+    # Node-to-node control-frame relay (slice 4b). Off by default: a single
+    # replica never relays (every worker is homed on "self"). Enable with a
+    # shared mesh secret only in a multi-replica deployment.
+    relay:
+      enabled: ${MYRMEC_NODE_RELAY_ENABLED:false}
+      secret: ${MYRMEC_NODE_RELAY_SECRET:}
 
 # API Documentation
 springdoc:

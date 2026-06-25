@@ -157,6 +157,7 @@ public class WorkflowRequestService {
         task.setStepId(stepId);
         task.setAgentProfile(profile);
         task.setInput(taskInput);
+        task.setKnowledgeSourceIds(parseKnowledgeSourceIds(step.get("knowledgeSourceIds")));
         task.setStatus(TaskStatus.PENDING);
         task.setAttempt(1);
 
@@ -223,6 +224,26 @@ public class WorkflowRequestService {
         }
 
         return "myrmec/" + shortId;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> parseKnowledgeSourceIds(Object raw) {
+        if (raw == null) {
+            return List.of();
+        }
+        if (raw instanceof List<?> list) {
+            List<String> ids = new ArrayList<>();
+            for (Object value : list) {
+                if (value != null && !value.toString().isBlank()) {
+                    ids.add(value.toString());
+                }
+            }
+            return ids;
+        }
+        if (raw.toString().isBlank()) {
+            return List.of();
+        }
+        return List.of(raw.toString());
     }
 
     private WorkflowRequestResponse toResponse(WorkflowRequest request) {

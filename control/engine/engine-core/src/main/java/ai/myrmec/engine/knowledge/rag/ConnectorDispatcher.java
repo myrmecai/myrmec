@@ -1,6 +1,7 @@
 package ai.myrmec.engine.knowledge.rag;
 
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
+import ai.myrmec.engine.secret.SecretResolverService;
 import ai.myrmec.engine.spi.connector.ConnectorContext;
 import ai.myrmec.engine.spi.connector.ConnectorException;
 import ai.myrmec.engine.spi.connector.EmittedChunk;
@@ -34,8 +35,9 @@ import java.util.function.Consumer;
  * <p>Connectors register themselves as Spring {@code @Component} beans;
  * collisions on {@code type()} fail boot. Secret resolution + the chunk
  * sink are provided through {@link ConnectorContext}; the secret resolver
- * is wired with a no-op placeholder for now and gets replaced when the
- * secrets feature work lands (out of Phase 5 scope).</p>
+ * delegates to {@link SecretResolverService}, scoped to the source's owning
+ * project so a project source may use its own secrets or globals while a
+ * SYSTEM/GROUP source may only use globals.</p>
  *
  * <p>Chunk persistence is upsert-by-locator: re-running a sync overwrites
  * the {@code content} + {@code metadata_json} for the same
@@ -52,6 +54,8 @@ public class ConnectorDispatcher implements InitializingBean {
     private final List<KnowledgeSourceConnector> connectors;
     private final KnowledgeSourceRepository knowledgeSourceRepository;
     private final KnowledgeChunkRepository knowledgeChunkRepository;
+    private final KnowledgeBaseRepository knowledgeBaseRepository;
+    private final SecretResolverService secretResolverService;
 
     private Map<String, KnowledgeSourceConnector> connectorsByType;
 
@@ -92,7 +96,9 @@ public class ConnectorDispatcher implements InitializingBean {
 
         SourceLocator locator = new SourceLocator(source.getUri(), parseConfig(source.getConfigJson()));
         Consumer<EmittedChunk> sink = chunk -> persistChunk(source.getId(), chunk);
-        ConnectorContext ctx = new SimpleConnectorContext(source.getId(), sink);
+        UUID projectId = resolveProjectScope(source.getKnowledgeBaseId());
+        ConnectorContext ctx = new SimpleConnectorContext(
+                source.getId(), projectId, secretResolverService, sink);
 
         SyncResult result;
         try {
@@ -103,6 +109,20 @@ public class ConnectorDispatcher implements InitializingBean {
         }
         persistResultBookkeeping(source, result);
         return result;
+    }
+
+    /**
+     * Owning project of the knowledge base, or {@code null} for SYSTEM/GROUP
+     * scope. Used to scope secret resolution: a project source may use its own
+     * secrets or globals; a SYSTEM/GROUP source may only use globals.
+     */
+    private UUID resolveProjectScope(UUID knowledgeBaseId) {
+        if (knowledgeBaseId == null) {
+            return null;
+        }
+        return knowledgeBaseRepository.findById(knowledgeBaseId)
+                .map(KnowledgeBase::getProjectId)
+                .orElse(null);
     }
 
     private void persistChunk(UUID sourceId, EmittedChunk chunk) {
@@ -173,16 +193,28 @@ public class ConnectorDispatcher implements InitializingBean {
         return connectorsByType;
     }
 
+    /** Registered connector type ids (e.g. {@code git}, {@code manual}) for UI pickers. */
+    public java.util.Set<String> connectorTypes() {
+        return connectorsByType.keySet();
+    }
+
     /**
-     * Minimal {@link ConnectorContext} implementation. Secret resolution is a
-     * no-op for now — wired up when the secrets feature ships.
+     * Minimal {@link ConnectorContext} implementation. Secret tokens are
+     * resolved against {@link SecretResolverService}, scoped to the source's
+     * owning project ({@code null} = globals only). A token may be a secret
+     * UUID or a secret name; an unresolved token yields {@code null}.
      */
     private record SimpleConnectorContext(UUID knowledgeSourceId,
+                                          UUID projectId,
+                                          SecretResolverService secretResolver,
                                           Consumer<EmittedChunk> chunkSink) implements ConnectorContext {
 
         @Override
         public String resolveSecret(String token) {
-            return null;
+            if (token == null || token.isBlank()) {
+                return null;
+            }
+            return secretResolver.resolveReferenceString(token, projectId).orElse(null);
         }
     }
 

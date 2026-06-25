@@ -21,6 +21,12 @@ public record ConversationMessageResponse(
         String approvalStatus,
         UUID approverId,
         Instant expiresAt,
+        boolean pinned,
+        String feedbackRating,
+        String feedbackReason,
+        UUID feedbackBy,
+        Instant feedbackAt,
+        boolean superseded,
         Instant createdAt
 ) {
     public static ConversationMessageResponse from(ConversationMessage m) {
@@ -40,6 +46,12 @@ public record ConversationMessageResponse(
                 m.getApprovalStatus() == null ? null : m.getApprovalStatus().name(),
                 m.getApproverId(),
                 m.getExpiresAt(),
+                m.isPinned(),
+                m.getFeedbackRating() == null ? null : m.getFeedbackRating().name(),
+                m.getFeedbackReason(),
+                m.getFeedbackBy(),
+                m.getFeedbackAt(),
+                m.isSuperseded(),
                 m.getCreatedAt()
         );
     }

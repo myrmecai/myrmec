@@ -1,6 +1,6 @@
 package ai.myrmec.engine._system.security;
 
-import ai.myrmec.engine.agent.AgentInstance;
+import ai.myrmec.engine.agent.Agent;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 
@@ -14,7 +14,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AgentPrincipal implements Principal {
 
-    private final AgentInstance instance;
+    private final Agent instance;
     private final String agentName;
 
     @Override
@@ -27,6 +27,6 @@ public class AgentPrincipal implements Principal {
     }
 
     public UUID getAgentId() {
-        return instance.getAgentId();
+        return instance.getAgentHostId();
     }
 }

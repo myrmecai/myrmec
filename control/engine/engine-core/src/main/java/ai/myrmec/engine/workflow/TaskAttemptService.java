@@ -1,7 +1,7 @@
 package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
-import ai.myrmec.engine.agent.AgentInstance;
+import ai.myrmec.engine.agent.Agent;
 import ai.myrmec.engine.workflow.dto.TaskAttemptResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -51,7 +51,7 @@ public class TaskAttemptService {
      * Create a new attempt for a task.
      */
     @Transactional
-    public TaskAttempt createAttempt(WorkflowTask task, AgentInstance agentInstance) {
+    public TaskAttempt createAttempt(WorkflowTask task, Agent agentInstance) {
         TaskAttempt attempt = new TaskAttempt();
         attempt.setTask(task);
         attempt.setAttemptNumber(task.getAttempt());

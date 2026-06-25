@@ -1,9 +1,9 @@
 package ai.myrmec.engine.agent.health;
 
 import ai.myrmec.engine.IntegrationTestBase;
+import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.Agent;
-import ai.myrmec.engine.agent.AgentInstance;
-import ai.myrmec.engine.agent.AgentInstanceRepository;
+import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.websocket.AgentConnectionManager;
@@ -29,7 +29,7 @@ import static org.springframework.test.util.ReflectionTestUtils.setField;
 class AgentHealthServiceTest extends IntegrationTestBase {
 
     @Autowired private TestDataBuilder data;
-    @Autowired private AgentInstanceRepository instanceRepository;
+    @Autowired private AgentRepository instanceRepository;
 
     @Test
     void aggregatesInstanceStateAndQueueDepth() {
@@ -38,19 +38,19 @@ class AgentHealthServiceTest extends IntegrationTestBase {
                 .named("agent-health-profile")
                 .withSystemPrompt("test")
                 .create();
-        Agent agent = data.agent()
+        AgentHost agent = data.agent()
                 .named("agent-health-agent")
                 .withProfile(profile)
                 .inProject(project)
                 .create()
                 .agent();
 
-        // Two ONLINE instances, one fresh + one stale; one OFFLINE.
-        AgentInstance fresh = newInstance(agent, AgentInstance.Status.ONLINE,
+        // Two IDLE instances, one fresh + one stale; one DEAD.
+        Agent fresh = newInstance(agent, Agent.Status.IDLE,
                 Instant.now().minus(5, ChronoUnit.SECONDS));
-        AgentInstance stale = newInstance(agent, AgentInstance.Status.ONLINE,
+        Agent stale = newInstance(agent, Agent.Status.IDLE,
                 Instant.now().minus(10, ChronoUnit.MINUTES));
-        AgentInstance offline = newInstance(agent, AgentInstance.Status.OFFLINE,
+        Agent offline = newInstance(agent, Agent.Status.DEAD,
                 Instant.now().minus(2, ChronoUnit.HOURS));
 
         AgentConnectionManager mockManager = mock(AgentConnectionManager.class);
@@ -85,13 +85,13 @@ class AgentHealthServiceTest extends IntegrationTestBase {
                 .findFirst().orElseThrow();
         assertThat(freshRow.isStale()).isFalse();
         assertThat(freshRow.isIdle()).isTrue();
-        assertThat(freshRow.getStatus()).isEqualTo("ONLINE");
+        assertThat(freshRow.getStatus()).isEqualTo("IDLE");
         assertThat(freshRow.getSecondsSinceHeartbeat()).isLessThanOrEqualTo(30L);
     }
 
-    private AgentInstance newInstance(Agent agent, AgentInstance.Status status, Instant heartbeat) {
-        AgentInstance inst = new AgentInstance();
-        inst.setAgentId(agent.getId());
+    private Agent newInstance(AgentHost agent, Agent.Status status, Instant heartbeat) {
+        Agent inst = new Agent();
+        inst.setAgentHostId(agent.getId());
         inst.setHostname("host-" + heartbeat);
         inst.setRuntimeVersion("0.0.0");
         inst.setStatus(status);

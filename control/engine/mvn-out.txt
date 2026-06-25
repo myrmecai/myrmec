@@ -1,0 +1,919 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -----------------------< ai.myrmec:engine-core >------------------------
+[INFO] Building Myrmec Engine Core 0.1.0-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- maven-resources-plugin:3.3.1:resources (default-resources) @ engine-core ---
+[INFO] Copying 2 resources from src\main\resources to target\classes
+[INFO] Copying 57 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- maven-compiler-plugin:3.13.0:compile (default-compile) @ engine-core ---
+[INFO] Recompiling the module because of added or removed source files.
+[INFO] Compiling 449 source files with javac [debug parameters release 21] to target\classes
+[INFO] Annotation processing is enabled because one or more processors were found
+  on the class path. A future release of javac may disable annotation processing
+  unless at least one processor is specified by name (-processor), or a search
+  path is specified (--processor-path, --processor-module-path), or annotation
+  processing is enabled explicitly (-proc:only, -proc:full).
+  Use -Xlint:-options to suppress this message.
+  Use -proc:none to disable annotation processing.
+[WARNING] /C:/gitrepos/myrmecai/myrmec/control/engine/engine-core/src/main/java/ai/myrmec/engine/agent/AgentProfile.java:[69,26] deprecated item is not annotated with @Deprecated
+[WARNING] /C:/gitrepos/myrmecai/myrmec/control/engine/engine-core/src/main/java/ai/myrmec/engine/agent/dto/AgentProfileCreateRequest.java:[34,26] deprecated item is not annotated with @Deprecated
+[WARNING] /C:/gitrepos/myrmecai/myrmec/control/engine/engine-core/src/main/java/ai/myrmec/engine/agent/dto/AgentProfileUpdateRequest.java:[34,26] deprecated item is not annotated with @Deprecated
+[INFO] /C:/gitrepos/myrmecai/myrmec/control/engine/engine-core/src/main/java/ai/myrmec/engine/agent/AgentProfileService.java: Some input files use or override a deprecated API.
+[INFO] /C:/gitrepos/myrmecai/myrmec/control/engine/engine-core/src/main/java/ai/myrmec/engine/agent/AgentProfileService.java: Recompile with -Xlint:deprecation for details.
+[INFO] 
+[INFO] --- maven-resources-plugin:3.3.1:testResources (default-testResources) @ engine-core ---
+[INFO] Copying 7 resources from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- maven-compiler-plugin:3.13.0:testCompile (default-testCompile) @ engine-core ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 72 source files with javac [debug parameters release 21] to target\test-classes
+[INFO] Annotation processing is enabled because one or more processors were found
+  on the class path. A future release of javac may disable annotation processing
+  unless at least one processor is specified by name (-processor), or a search
+  path is specified (--processor-path, --processor-module-path), or annotation
+  processing is enabled explicitly (-proc:only, -proc:full).
+  Use -Xlint:-options to suppress this message.
+  Use -proc:none to disable annotation processing.
+[INFO] 
+[INFO] --- maven-surefire-plugin:3.2.5:test (default-test) @ engine-core ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running ai.myrmec.engine.knowledge.rag.ConfluenceConnectorTest
+Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+11:05:02.445 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [ai.myrmec.engine.knowledge.rag.ConfluenceConnectorTest]: ConfluenceConnectorTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+11:05:02.635 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration ai.myrmec.engine.ControlEngineApplication for test class ai.myrmec.engine.knowledge.rag.ConfluenceConnectorTest
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.3.0)
+
+2026-06-22T11:05:03.073+02:00  INFO 25980 --- [myrmec-control-engine] [           main] a.m.e.k.rag.ConfluenceConnectorTest      : Starting ConfluenceConnectorTest using Java 21.0.6 with PID 25980 (started by Joga Singh in C:\gitrepos\myrmecai\myrmec\control\engine\engine-core)
+2026-06-22T11:05:03.074+02:00 DEBUG 25980 --- [myrmec-control-engine] [           main] a.m.e.k.rag.ConfluenceConnectorTest      : Running with Spring Boot v3.3.0, Spring v6.1.8
+2026-06-22T11:05:03.075+02:00  INFO 25980 --- [myrmec-control-engine] [           main] a.m.e.k.rag.ConfluenceConnectorTest      : The following 1 profile is active: "e2e"
+2026-06-22T11:05:04.709+02:00  INFO 25980 --- [myrmec-control-engine] [           main] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-06-22T11:05:04.960+02:00  INFO 25980 --- [myrmec-control-engine] [           main] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 244 ms. Found 38 JPA repository interfaces.
+2026-06-22T11:05:06.817+02:00  INFO 25980 --- [myrmec-control-engine] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 0 (http)
+2026-06-22T11:05:06.835+02:00  INFO 25980 --- [myrmec-control-engine] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-06-22T11:05:06.836+02:00  INFO 25980 --- [myrmec-control-engine] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.24]
+2026-06-22T11:05:06.946+02:00  INFO 25980 --- [myrmec-control-engine] [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-06-22T11:05:06.949+02:00  INFO 25980 --- [myrmec-control-engine] [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 3853 ms
+Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+2026-06-22T11:05:07.254+02:00  INFO 25980 --- [myrmec-control-engine] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-06-22T11:05:07.518+02:00  INFO 25980 --- [myrmec-control-engine] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection conn0: url=jdbc:h2:mem:e2edb user=SA
+2026-06-22T11:05:07.520+02:00  INFO 25980 --- [myrmec-control-engine] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-06-22T11:05:07.535+02:00  INFO 25980 --- [myrmec-control-engine] [           main] o.s.b.a.h2.H2ConsoleAutoConfiguration    : H2 console available at '/h2-console'. Database available at 'jdbc:h2:mem:e2edb'
+2026-06-22T11:05:08.046+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.database                       : Set default schema name to PUBLIC
+2026-06-22T11:05:08.611+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260402-01-registration-keys.xml
+2026-06-22T11:05:08.770+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260403-01-users.xml
+2026-06-22T11:05:08.803+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260403-02-user-roles.xml
+2026-06-22T11:05:08.828+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260403-03-users-is-system.xml
+2026-06-22T11:05:08.848+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260403-04-projects.xml
+2026-06-22T11:05:08.865+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260403-05-models.xml
+2026-06-22T11:05:08.883+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260403-06-model-providers.xml
+2026-06-22T11:05:08.916+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260404-01-agent-profiles-agents-instances.xml
+2026-06-22T11:05:08.940+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260405-01-tools.xml
+2026-06-22T11:05:08.961+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260405-02-agent-profile-tools.xml
+2026-06-22T11:05:08.976+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260405-03-secrets.xml
+2026-06-22T11:05:08.999+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260405-04-workflows.xml
+2026-06-22T11:05:09.020+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260405-05-requests.xml
+2026-06-22T11:05:09.042+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260405-06-tasks.xml
+2026-06-22T11:05:09.071+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260407-01-knowledge-documents.xml
+2026-06-22T11:05:09.091+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260411-01-execution-events.xml
+2026-06-22T11:05:09.110+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260412-01-execution-event-source.xml
+2026-06-22T11:05:09.124+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260412-02-task-attempts-artifacts.xml
+2026-06-22T11:05:09.154+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260413-01-file-tools.xml
+2026-06-22T11:05:09.172+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260413-02-git-tool.xml
+2026-06-22T11:05:09.189+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260419-01-workflow-request-branch.xml
+2026-06-22T11:05:09.203+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260420-01-knowledge-repos.xml
+2026-06-22T11:05:09.221+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260525-01-model-pricing.xml
+2026-06-22T11:05:09.250+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260525-02-task-metrics.xml
+2026-06-22T11:05:09.267+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260530-01-groups.xml
+2026-06-22T11:05:09.288+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260530-02-projects-group-id.xml
+2026-06-22T11:05:09.304+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260530-03-user-roles-scope.xml
+2026-06-22T11:05:09.321+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260530-04-user-roles-scope-indexes.xml
+2026-06-22T11:05:09.333+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml
+2026-06-22T11:05:09.364+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260607-01-conversations.xml
+2026-06-22T11:05:09.390+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260608-01-hitl.xml
+2026-06-22T11:05:09.407+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260608-02-execution-snapshots.xml
+2026-06-22T11:05:09.426+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260608-03-audit-log.xml
+2026-06-22T11:05:09.440+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260608-04-task-retry-backoff.xml
+2026-06-22T11:05:09.453+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260608-04-tool-description-hash.xml
+2026-06-22T11:05:09.464+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260608-05-quotas.xml
+2026-06-22T11:05:09.478+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260620-01-engine-nodes.xml
+2026-06-22T11:05:09.495+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260620-02-agents-state-changed-at.xml
+2026-06-22T11:05:09.506+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260620-03-conversation-events.xml
+2026-06-22T11:05:09.517+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260620-04-conversation-message-pinned.xml
+2026-06-22T11:05:09.529+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260620-05-system-settings.xml
+2026-06-22T11:05:09.547+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260620-06-conversation-message-feedback.xml
+2026-06-22T11:05:09.560+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260621-01-edit-resend-regenerate.xml
+2026-06-22T11:05:09.571+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260621-02-conversation-message-attachments.xml
+2026-06-22T11:05:09.583+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260621-03-attachment-settings.xml
+2026-06-22T11:05:09.595+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260621-04-model-supports-vision.xml
+2026-06-22T11:05:09.607+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260621-05-summarisation-settings.xml
+2026-06-22T11:05:09.620+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260621-06-assistant-entity.xml
+2026-06-22T11:05:09.638+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260621-07-assistant-companion-columns.xml
+2026-06-22T11:05:09.655+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260621-08-conversation-version-pinning.xml
+2026-06-22T11:05:09.668+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260621-09-conversation-external-seams.xml
+2026-06-22T11:05:09.686+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260621-10-execution-snapshot-attribution.xml
+2026-06-22T11:05:09.704+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260621-11-project-allowed-service-types.xml
+2026-06-22T11:05:09.718+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260621-12-service-accounts.xml
+2026-06-22T11:05:09.733+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading resource: db/changelog/changes/20260622-01-knowledge-source-sync-requested.xml
+2026-06-22T11:05:09.846+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Creating database history table with name: PUBLIC.DATABASECHANGELOG
+2026-06-22T11:05:10.008+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading from PUBLIC.DATABASECHANGELOG
+2026-06-22T11:05:10.394+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.lockservice                    : Successfully acquired change log lock
+2026-06-22T11:05:10.396+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.command                        : Using deploymentId: 2119110395
+2026-06-22T11:05:10.398+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Reading from PUBLIC.DATABASECHANGELOG
+2026-06-22T11:05:10.607+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260402-01-registration-keys.xml::20260402-01-create-registration-keys::myrmec
+2026-06-22T11:05:10.611+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:10.655+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table registration_keys created
+2026-06-22T11:05:10.658+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_registration_keys_key_hash created
+2026-06-22T11:05:10.658+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260402-01-registration-keys.xml::20260402-01-create-registration-keys::myrmec ran successfully in 49ms
+2026-06-22T11:05:10.668+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260403-01-users.xml::20260403-01-create-authentication-providers::myrmec
+2026-06-22T11:05:10.669+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:10.678+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table authentication_providers created
+2026-06-22T11:05:10.684+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into authentication_providers
+2026-06-22T11:05:10.685+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into authentication_providers
+2026-06-22T11:05:10.687+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into authentication_providers
+2026-06-22T11:05:10.689+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into authentication_providers
+2026-06-22T11:05:10.692+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_authentication_providers_type created
+2026-06-22T11:05:10.693+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_authentication_providers_enabled created
+2026-06-22T11:05:10.694+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260403-01-users.xml::20260403-01-create-authentication-providers::myrmec ran successfully in 24ms
+2026-06-22T11:05:10.696+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260403-01-users.xml::20260403-01-create-users::myrmec
+2026-06-22T11:05:10.697+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:10.705+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table users created
+2026-06-22T11:05:10.718+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to users (provider_code)
+2026-06-22T11:05:10.739+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Custom SQL executed
+2026-06-22T11:05:10.741+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_users_email created
+2026-06-22T11:05:10.745+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_users_provider_code created
+2026-06-22T11:05:10.746+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260403-01-users.xml::20260403-01-create-users::myrmec ran successfully in 49ms
+2026-06-22T11:05:10.753+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260403-02-user-roles.xml::20260403-02-create-user-roles::myrmec
+2026-06-22T11:05:10.754+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:10.761+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table user_roles created
+2026-06-22T11:05:10.763+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to user_roles (user_id)
+2026-06-22T11:05:10.764+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to user_roles (granted_by_user_id)
+2026-06-22T11:05:10.767+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Unique constraint added to user_roles(user_id, role, project_id)
+2026-06-22T11:05:10.771+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Custom SQL executed
+2026-06-22T11:05:10.772+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_user_roles_user_id created
+2026-06-22T11:05:10.774+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_user_roles_project_id created
+2026-06-22T11:05:10.774+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260403-02-user-roles.xml::20260403-02-create-user-roles::myrmec ran successfully in 21ms
+2026-06-22T11:05:10.777+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260403-03-users-is-system.xml::20260403-03-users-add-is-system::myrmec
+2026-06-22T11:05:10.803+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns is_system(boolean) added to users
+2026-06-22T11:05:10.806+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Custom SQL executed
+2026-06-22T11:05:10.807+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260403-03-users-is-system.xml::20260403-03-users-add-is-system::myrmec ran successfully in 29ms
+2026-06-22T11:05:10.810+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260403-04-projects.xml::20260403-04-create-projects::myrmec
+2026-06-22T11:05:10.811+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:10.817+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table projects created
+2026-06-22T11:05:10.818+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_projects_status created
+2026-06-22T11:05:10.818+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260403-04-projects.xml::20260403-04-create-projects::myrmec ran successfully in 8ms
+2026-06-22T11:05:10.821+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260403-05-models.xml::20260403-05-create-models::myrmec
+2026-06-22T11:05:10.822+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:10.831+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table models created
+2026-06-22T11:05:10.832+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260403-05-models.xml::20260403-05-create-models::myrmec ran successfully in 11ms
+2026-06-22T11:05:10.834+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260403-05-models.xml::20260403-05-seed-github-gpt4o::myrmec
+2026-06-22T11:05:10.838+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into models
+2026-06-22T11:05:10.838+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260403-05-models.xml::20260403-05-seed-github-gpt4o::myrmec ran successfully in 4ms
+2026-06-22T11:05:10.841+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260403-06-model-providers.xml::20260403-06-create-model-providers::myrmec
+2026-06-22T11:05:10.842+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:10.851+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table model_providers created
+2026-06-22T11:05:10.852+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260403-06-model-providers.xml::20260403-06-create-model-providers::myrmec ran successfully in 11ms
+2026-06-22T11:05:10.861+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260403-06-model-providers.xml::20260403-06-seed-model-providers::myrmec
+2026-06-22T11:05:10.864+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into model_providers
+2026-06-22T11:05:10.865+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into model_providers
+2026-06-22T11:05:10.867+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into model_providers
+2026-06-22T11:05:10.868+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into model_providers
+2026-06-22T11:05:10.869+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into model_providers
+2026-06-22T11:05:10.871+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into model_providers
+2026-06-22T11:05:10.873+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into model_providers
+2026-06-22T11:05:10.874+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into model_providers
+2026-06-22T11:05:10.877+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into model_providers
+2026-06-22T11:05:10.880+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into model_providers
+2026-06-22T11:05:10.882+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into model_providers
+2026-06-22T11:05:10.884+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into model_providers
+2026-06-22T11:05:10.886+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into model_providers
+2026-06-22T11:05:10.887+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into model_providers
+2026-06-22T11:05:10.890+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into model_providers
+2026-06-22T11:05:10.893+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into model_providers
+2026-06-22T11:05:10.895+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into model_providers
+2026-06-22T11:05:10.896+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into model_providers
+2026-06-22T11:05:10.896+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260403-06-model-providers.xml::20260403-06-seed-model-providers::myrmec ran successfully in 34ms
+2026-06-22T11:05:10.898+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260403-06-model-providers.xml::20260403-06-add-provider-fk::myrmec
+2026-06-22T11:05:10.901+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:10.916+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to models (provider)
+2026-06-22T11:05:10.917+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260403-06-model-providers.xml::20260403-06-add-provider-fk::myrmec ran successfully in 19ms
+2026-06-22T11:05:10.919+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260404-01-agent-profiles-agents-instances.xml::20260404-01-create-agent-profiles::myrmec
+2026-06-22T11:05:10.920+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:10.927+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table agent_profiles created
+2026-06-22T11:05:10.928+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_agent_profiles_status created
+2026-06-22T11:05:10.930+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to agent_profiles (default_model)
+2026-06-22T11:05:10.930+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260404-01-agent-profiles-agents-instances.xml::20260404-01-create-agent-profiles::myrmec ran successfully in 11ms
+2026-06-22T11:05:10.934+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260404-01-agent-profiles-agents-instances.xml::20260404-02-create-agent-hosts::myrmec
+2026-06-22T11:05:10.935+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:10.942+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table agent_hosts created
+2026-06-22T11:05:10.943+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_agent_hosts_profile_id created
+2026-06-22T11:05:10.943+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_agent_hosts_project_id created
+2026-06-22T11:05:10.944+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_agent_hosts_status created
+2026-06-22T11:05:10.946+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to agent_hosts (profile_id)
+2026-06-22T11:05:10.949+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to agent_hosts (project_id)
+2026-06-22T11:05:10.951+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to agent_hosts (model_override)
+2026-06-22T11:05:10.951+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260404-01-agent-profiles-agents-instances.xml::20260404-02-create-agent-hosts::myrmec ran successfully in 17ms
+2026-06-22T11:05:10.954+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260404-01-agent-profiles-agents-instances.xml::20260404-03-create-agents::myrmec
+2026-06-22T11:05:10.955+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:10.961+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table agents created
+2026-06-22T11:05:10.962+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_agents_agent_host_id created
+2026-06-22T11:05:10.963+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_agents_status created
+2026-06-22T11:05:10.964+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_agents_last_heartbeat created
+2026-06-22T11:05:10.965+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to agents (agent_host_id)
+2026-06-22T11:05:10.965+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260404-01-agent-profiles-agents-instances.xml::20260404-03-create-agents::myrmec ran successfully in 11ms
+2026-06-22T11:05:10.968+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-01-tools.xml::20260405-01-01::myrmec
+2026-06-22T11:05:10.969+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:10.975+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table tools created
+2026-06-22T11:05:10.975+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-01-tools.xml::20260405-01-01::myrmec ran successfully in 7ms
+2026-06-22T11:05:10.977+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-01-tools.xml::20260405-01-02::myrmec
+2026-06-22T11:05:10.983+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.014+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_tools_tool_type created
+2026-06-22T11:05:11.015+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-01-tools.xml::20260405-01-02::myrmec ran successfully in 38ms
+2026-06-22T11:05:11.018+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-01-tools.xml::20260405-01-03::myrmec
+2026-06-22T11:05:11.020+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.042+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_tools_status created
+2026-06-22T11:05:11.042+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-01-tools.xml::20260405-01-03::myrmec ran successfully in 24ms
+2026-06-22T11:05:11.046+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-01-tools.xml::20260405-01-04::myrmec
+2026-06-22T11:05:11.049+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:11.050+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:11.051+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:11.052+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:11.053+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:11.054+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-01-tools.xml::20260405-01-04::myrmec ran successfully in 7ms
+2026-06-22T11:05:11.056+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-02-agent-profile-tools.xml::20260405-02-01::myrmec
+2026-06-22T11:05:11.057+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.061+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table agent_profile_tools created
+2026-06-22T11:05:11.064+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Primary key added to agent_profile_tools (profile_id, tool_code)
+2026-06-22T11:05:11.066+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to agent_profile_tools (profile_id)
+2026-06-22T11:05:11.067+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to agent_profile_tools (tool_code)
+2026-06-22T11:05:11.068+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_agent_profile_tools_tool_code created
+2026-06-22T11:05:11.068+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-02-agent-profile-tools.xml::20260405-02-01::myrmec ran successfully in 12ms
+2026-06-22T11:05:11.070+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-02-agent-profile-tools.xml::20260405-02-02::myrmec
+2026-06-22T11:05:11.080+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns system_prompt(text) added to agent_profiles
+2026-06-22T11:05:11.080+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-02-agent-profile-tools.xml::20260405-02-02::myrmec ran successfully in 10ms
+2026-06-22T11:05:11.083+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-03-secrets.xml::20260405-03-01::myrmec
+2026-06-22T11:05:11.084+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.091+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table secrets created
+2026-06-22T11:05:11.092+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-03-secrets.xml::20260405-03-01::myrmec ran successfully in 9ms
+2026-06-22T11:05:11.093+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-03-secrets.xml::20260405-03-02::myrmec
+2026-06-22T11:05:11.094+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.105+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to secrets (project_id)
+2026-06-22T11:05:11.106+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-03-secrets.xml::20260405-03-02::myrmec ran successfully in 13ms
+2026-06-22T11:05:11.108+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-03-secrets.xml::20260405-03-03::myrmec
+2026-06-22T11:05:11.110+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.125+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to secrets (created_by)
+2026-06-22T11:05:11.125+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-03-secrets.xml::20260405-03-03::myrmec ran successfully in 17ms
+2026-06-22T11:05:11.127+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-03-secrets.xml::20260405-03-04::myrmec
+2026-06-22T11:05:11.130+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.168+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_secrets_project_id created
+2026-06-22T11:05:11.168+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-03-secrets.xml::20260405-03-04::myrmec ran successfully in 40ms
+2026-06-22T11:05:11.171+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-04-workflows.xml::20260405-04-01::myrmec
+2026-06-22T11:05:11.176+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.199+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table workflows created
+2026-06-22T11:05:11.205+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-04-workflows.xml::20260405-04-01::myrmec ran successfully in 29ms
+2026-06-22T11:05:11.214+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-04-workflows.xml::20260405-04-02::myrmec
+2026-06-22T11:05:11.242+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.307+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Unique constraint added to workflows(project_id, name)
+2026-06-22T11:05:11.308+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-04-workflows.xml::20260405-04-02::myrmec ran successfully in 93ms
+2026-06-22T11:05:11.314+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-04-workflows.xml::20260405-04-03::myrmec
+2026-06-22T11:05:11.317+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.337+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to workflows (project_id)
+2026-06-22T11:05:11.338+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-04-workflows.xml::20260405-04-03::myrmec ran successfully in 22ms
+2026-06-22T11:05:11.341+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-04-workflows.xml::20260405-04-04::myrmec
+2026-06-22T11:05:11.343+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.359+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to workflows (created_by)
+2026-06-22T11:05:11.359+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-04-workflows.xml::20260405-04-04::myrmec ran successfully in 17ms
+2026-06-22T11:05:11.362+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-04-workflows.xml::20260405-04-05::myrmec
+2026-06-22T11:05:11.366+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.409+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_workflows_project_id created
+2026-06-22T11:05:11.410+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-04-workflows.xml::20260405-04-05::myrmec ran successfully in 47ms
+2026-06-22T11:05:11.412+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-04-workflows.xml::20260405-04-06::myrmec
+2026-06-22T11:05:11.417+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.451+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_workflows_status created
+2026-06-22T11:05:11.452+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-04-workflows.xml::20260405-04-06::myrmec ran successfully in 39ms
+2026-06-22T11:05:11.456+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-05-requests.xml::20260405-05-01::myrmec
+2026-06-22T11:05:11.457+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.464+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table workflow_requests created
+2026-06-22T11:05:11.466+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-05-requests.xml::20260405-05-01::myrmec ran successfully in 10ms
+2026-06-22T11:05:11.470+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-05-requests.xml::20260405-05-02::myrmec
+2026-06-22T11:05:11.472+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.489+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to workflow_requests (workflow_id)
+2026-06-22T11:05:11.491+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-05-requests.xml::20260405-05-02::myrmec ran successfully in 19ms
+2026-06-22T11:05:11.496+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-05-requests.xml::20260405-05-03::myrmec
+2026-06-22T11:05:11.499+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.525+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to workflow_requests (created_by)
+2026-06-22T11:05:11.526+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-05-requests.xml::20260405-05-03::myrmec ran successfully in 29ms
+2026-06-22T11:05:11.528+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-05-requests.xml::20260405-05-04::myrmec
+2026-06-22T11:05:11.534+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.559+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_workflow_requests_workflow_id created
+2026-06-22T11:05:11.560+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-05-requests.xml::20260405-05-04::myrmec ran successfully in 28ms
+2026-06-22T11:05:11.565+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-05-requests.xml::20260405-05-05::myrmec
+2026-06-22T11:05:11.570+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.590+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_workflow_requests_status created
+2026-06-22T11:05:11.591+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-05-requests.xml::20260405-05-05::myrmec ran successfully in 25ms
+2026-06-22T11:05:11.595+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-05-requests.xml::20260405-05-06::myrmec
+2026-06-22T11:05:11.597+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.619+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_workflow_requests_created_at created
+2026-06-22T11:05:11.619+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-05-requests.xml::20260405-05-06::myrmec ran successfully in 23ms
+2026-06-22T11:05:11.622+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-06-tasks.xml::20260405-06-01::myrmec
+2026-06-22T11:05:11.624+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.632+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table workflow_tasks created
+2026-06-22T11:05:11.633+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-06-tasks.xml::20260405-06-01::myrmec ran successfully in 10ms
+2026-06-22T11:05:11.636+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-06-tasks.xml::20260405-06-02::myrmec
+2026-06-22T11:05:11.637+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.663+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Unique constraint added to workflow_tasks(request_id, step_id, attempt)
+2026-06-22T11:05:11.663+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-06-tasks.xml::20260405-06-02::myrmec ran successfully in 27ms
+2026-06-22T11:05:11.665+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-06-tasks.xml::20260405-06-03::myrmec
+2026-06-22T11:05:11.667+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.680+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to workflow_tasks (request_id)
+2026-06-22T11:05:11.681+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-06-tasks.xml::20260405-06-03::myrmec ran successfully in 15ms
+2026-06-22T11:05:11.683+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-06-tasks.xml::20260405-06-04::myrmec
+2026-06-22T11:05:11.686+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.702+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to workflow_tasks (agent_profile_id)
+2026-06-22T11:05:11.703+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-06-tasks.xml::20260405-06-04::myrmec ran successfully in 20ms
+2026-06-22T11:05:11.704+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-06-tasks.xml::20260405-06-05::myrmec
+2026-06-22T11:05:11.706+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.720+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to workflow_tasks (agent_instance_id)
+2026-06-22T11:05:11.720+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-06-tasks.xml::20260405-06-05::myrmec ran successfully in 15ms
+2026-06-22T11:05:11.722+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-06-tasks.xml::20260405-06-06::myrmec
+2026-06-22T11:05:11.724+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.747+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_workflow_tasks_request_id created
+2026-06-22T11:05:11.748+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-06-tasks.xml::20260405-06-06::myrmec ran successfully in 26ms
+2026-06-22T11:05:11.750+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-06-tasks.xml::20260405-06-07::myrmec
+2026-06-22T11:05:11.754+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.776+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_workflow_tasks_status created
+2026-06-22T11:05:11.776+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-06-tasks.xml::20260405-06-07::myrmec ran successfully in 25ms
+2026-06-22T11:05:11.779+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260405-06-tasks.xml::20260405-06-08::myrmec
+2026-06-22T11:05:11.782+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.806+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_workflow_tasks_agent_instance_id created
+2026-06-22T11:05:11.806+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260405-06-tasks.xml::20260405-06-08::myrmec ran successfully in 26ms
+2026-06-22T11:05:11.810+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260407-01-knowledge-documents.xml::20260407-01-01::myrmec
+2026-06-22T11:05:11.814+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.826+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table knowledge_documents created
+2026-06-22T11:05:11.826+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260407-01-knowledge-documents.xml::20260407-01-01::myrmec ran successfully in 14ms
+2026-06-22T11:05:11.828+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260407-01-knowledge-documents.xml::20260407-01-02::myrmec
+2026-06-22T11:05:11.831+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.857+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Unique constraint added to knowledge_documents(scope, project_id, name)
+2026-06-22T11:05:11.857+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260407-01-knowledge-documents.xml::20260407-01-02::myrmec ran successfully in 29ms
+2026-06-22T11:05:11.861+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260407-01-knowledge-documents.xml::20260407-01-03::myrmec
+2026-06-22T11:05:11.866+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.890+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_knowledge_scope_project_active created
+2026-06-22T11:05:11.891+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260407-01-knowledge-documents.xml::20260407-01-03::myrmec ran successfully in 29ms
+2026-06-22T11:05:11.893+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260407-01-knowledge-documents.xml::20260407-01-04::myrmec
+2026-06-22T11:05:11.895+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.916+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_knowledge_category created
+2026-06-22T11:05:11.917+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260407-01-knowledge-documents.xml::20260407-01-04::myrmec ran successfully in 24ms
+2026-06-22T11:05:11.923+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260407-01-knowledge-documents.xml::20260407-01-05::myrmec
+2026-06-22T11:05:11.938+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Custom SQL executed
+2026-06-22T11:05:11.939+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260407-01-knowledge-documents.xml::20260407-01-05::myrmec ran successfully in 16ms
+2026-06-22T11:05:11.943+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260411-01-execution-events.xml::20260411-01-execution-events::myrmec
+2026-06-22T11:05:11.945+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:11.959+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table execution_events created
+2026-06-22T11:05:11.960+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_execution_events_task_id created
+2026-06-22T11:05:11.967+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to execution_events (task_id)
+2026-06-22T11:05:11.969+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260411-01-execution-events.xml::20260411-01-execution-events::myrmec ran successfully in 24ms
+2026-06-22T11:05:11.972+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260412-01-execution-event-source.xml::20260412-01-add-source-to-execution-events::myrmec
+2026-06-22T11:05:11.991+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns source(varchar(20)) added to execution_events
+2026-06-22T11:05:11.992+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260412-01-execution-event-source.xml::20260412-01-add-source-to-execution-events::myrmec ran successfully in 20ms
+2026-06-22T11:05:11.994+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-01-task-attempts::myrmec
+2026-06-22T11:05:11.994+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.000+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table task_attempts created
+2026-06-22T11:05:12.000+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-01-task-attempts::myrmec ran successfully in 6ms
+2026-06-22T11:05:12.004+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-02-task-attempts-unique::myrmec
+2026-06-22T11:05:12.006+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.041+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Unique constraint added to task_attempts(task_id, attempt_number)
+2026-06-22T11:05:12.041+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-02-task-attempts-unique::myrmec ran successfully in 37ms
+2026-06-22T11:05:12.042+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-03-task-attempts-fk-task::myrmec
+2026-06-22T11:05:12.044+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.060+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to task_attempts (task_id)
+2026-06-22T11:05:12.061+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-03-task-attempts-fk-task::myrmec ran successfully in 17ms
+2026-06-22T11:05:12.063+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-04-task-attempts-fk-agent::myrmec
+2026-06-22T11:05:12.064+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.077+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to task_attempts (agent_instance_id)
+2026-06-22T11:05:12.077+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-04-task-attempts-fk-agent::myrmec ran successfully in 14ms
+2026-06-22T11:05:12.081+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-05-task-attempts-idx::myrmec
+2026-06-22T11:05:12.084+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.120+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_task_attempts_task_id created
+2026-06-22T11:05:12.120+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-05-task-attempts-idx::myrmec ran successfully in 39ms
+2026-06-22T11:05:12.122+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-06-workflows-artifacts-repo::myrmec
+2026-06-22T11:05:12.141+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns artifacts_repo(TEXT) added to workflows
+2026-06-22T11:05:12.141+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-06-workflows-artifacts-repo::myrmec ran successfully in 18ms
+2026-06-22T11:05:12.143+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-07-tasks-current-attempt::myrmec
+2026-06-22T11:05:12.153+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns current_attempt_id(UUID) added to workflow_tasks
+2026-06-22T11:05:12.153+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-07-tasks-current-attempt::myrmec ran successfully in 10ms
+2026-06-22T11:05:12.155+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-08-tasks-current-attempt-fk::myrmec
+2026-06-22T11:05:12.155+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.168+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to workflow_tasks (current_attempt_id)
+2026-06-22T11:05:12.168+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-08-tasks-current-attempt-fk::myrmec ran successfully in 13ms
+2026-06-22T11:05:12.170+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-09-events-attempt-id::myrmec
+2026-06-22T11:05:12.176+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns attempt_id(UUID) added to execution_events
+2026-06-22T11:05:12.176+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-09-events-attempt-id::myrmec ran successfully in 6ms
+2026-06-22T11:05:12.178+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-10-events-attempt-fk::myrmec
+2026-06-22T11:05:12.179+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.191+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to execution_events (attempt_id)
+2026-06-22T11:05:12.191+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-10-events-attempt-fk::myrmec ran successfully in 13ms
+2026-06-22T11:05:12.193+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-11-events-attempt-idx::myrmec
+2026-06-22T11:05:12.195+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.219+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_execution_events_attempt_id created
+2026-06-22T11:05:12.220+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260412-02-task-attempts-artifacts.xml::20260412-02-11-events-attempt-idx::myrmec ran successfully in 26ms
+2026-06-22T11:05:12.223+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260413-01-file-tools.xml::20260413-01-01::myrmec
+2026-06-22T11:05:12.225+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:12.226+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:12.228+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:12.229+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:12.230+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:12.231+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:12.232+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:12.240+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:12.241+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260413-01-file-tools.xml::20260413-01-01::myrmec ran successfully in 18ms
+2026-06-22T11:05:12.243+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260413-02-git-tool.xml::20260413-02-01::myrmec
+2026-06-22T11:05:12.247+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:12.248+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260413-02-git-tool.xml::20260413-02-01::myrmec ran successfully in 5ms
+2026-06-22T11:05:12.253+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260413-02-git-tool.xml::20260413-02-02::myrmec
+2026-06-22T11:05:12.255+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:12.257+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260413-02-git-tool.xml::20260413-02-02::myrmec ran successfully in 2ms
+2026-06-22T11:05:12.261+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260413-02-git-tool.xml::20260413-02-03::myrmec
+2026-06-22T11:05:12.263+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:12.266+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:12.267+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:12.269+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:12.270+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:12.270+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:12.271+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:12.271+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260413-02-git-tool.xml::20260413-02-03::myrmec ran successfully in 10ms
+2026-06-22T11:05:12.273+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260419-01-workflow-request-branch.xml::20260419-01-01::myrmec
+2026-06-22T11:05:12.280+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns branch(varchar(200)) added to workflow_requests
+2026-06-22T11:05:12.280+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260419-01-workflow-request-branch.xml::20260419-01-01::myrmec ran successfully in 7ms
+2026-06-22T11:05:12.285+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260419-01-workflow-request-branch.xml::20260419-01-02::myrmec
+2026-06-22T11:05:12.288+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into tools
+2026-06-22T11:05:12.288+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260419-01-workflow-request-branch.xml::20260419-01-02::myrmec ran successfully in 3ms
+2026-06-22T11:05:12.290+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260420-01-knowledge-repos.xml::20260420-01-01::myrmec
+2026-06-22T11:05:12.290+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.295+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table project_knowledge_repos created
+2026-06-22T11:05:12.295+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260420-01-knowledge-repos.xml::20260420-01-01::myrmec ran successfully in 5ms
+2026-06-22T11:05:12.297+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260420-01-knowledge-repos.xml::20260420-01-02::myrmec
+2026-06-22T11:05:12.299+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.324+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to project_knowledge_repos (project_id)
+2026-06-22T11:05:12.324+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260420-01-knowledge-repos.xml::20260420-01-02::myrmec ran successfully in 26ms
+2026-06-22T11:05:12.327+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260420-01-knowledge-repos.xml::20260420-01-03::myrmec
+2026-06-22T11:05:12.328+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.346+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Unique constraint added to project_knowledge_repos(project_id, name)
+2026-06-22T11:05:12.346+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260420-01-knowledge-repos.xml::20260420-01-03::myrmec ran successfully in 19ms
+2026-06-22T11:05:12.353+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260420-01-knowledge-repos.xml::20260420-01-04::myrmec
+2026-06-22T11:05:12.354+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.365+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to project_knowledge_repos (credential_secret_id)
+2026-06-22T11:05:12.365+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260420-01-knowledge-repos.xml::20260420-01-04::myrmec ran successfully in 12ms
+2026-06-22T11:05:12.366+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260420-01-knowledge-repos.xml::20260420-01-05::myrmec
+2026-06-22T11:05:12.367+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.378+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to projects (workspace_credential_secret_id)
+2026-06-22T11:05:12.379+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260420-01-knowledge-repos.xml::20260420-01-05::myrmec ran successfully in 11ms
+2026-06-22T11:05:12.380+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260525-01-model-pricing.xml::20260525-01-models-add-pricing::myrmec
+2026-06-22T11:05:12.400+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns input_price_per_1k_tokens(decimal(10,6)),output_price_per_1k_tokens(decimal(10,6)),currency(varchar(3)) added to models
+2026-06-22T11:05:12.400+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260525-01-model-pricing.xml::20260525-01-models-add-pricing::myrmec ran successfully in 19ms
+2026-06-22T11:05:12.402+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260525-01-model-pricing.xml::20260525-01-seed-github-gpt4o-pricing::myrmec
+2026-06-22T11:05:12.407+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Data updated in models
+2026-06-22T11:05:12.407+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260525-01-model-pricing.xml::20260525-01-seed-github-gpt4o-pricing::myrmec ran successfully in 5ms
+2026-06-22T11:05:12.409+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260525-02-task-metrics.xml::20260525-02-workflow-tasks-add-metrics::myrmec
+2026-06-22T11:05:12.418+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns metrics(text) added to workflow_tasks
+2026-06-22T11:05:12.418+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260525-02-task-metrics.xml::20260525-02-workflow-tasks-add-metrics::myrmec ran successfully in 9ms
+2026-06-22T11:05:12.421+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260530-01-groups.xml::20260530-01-create-groups::myrmec
+2026-06-22T11:05:12.422+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.428+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table groups created
+2026-06-22T11:05:12.429+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to groups (parent_group_id)
+2026-06-22T11:05:12.430+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_groups_parent_group_id created
+2026-06-22T11:05:12.430+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260530-01-groups.xml::20260530-01-create-groups::myrmec ran successfully in 9ms
+2026-06-22T11:05:12.431+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260530-01-groups.xml::20260530-01-seed-default-group::myrmec
+2026-06-22T11:05:12.433+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into groups
+2026-06-22T11:05:12.433+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260530-01-groups.xml::20260530-01-seed-default-group::myrmec ran successfully in 2ms
+2026-06-22T11:05:12.434+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260530-02-projects-group-id.xml::20260530-02-projects-group-id::myrmec
+2026-06-22T11:05:12.441+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns group_id(uuid) added to projects
+2026-06-22T11:05:12.441+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Data updated in projects
+2026-06-22T11:05:12.443+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : NOT NULL constraint has been added to projects.group_id
+2026-06-22T11:05:12.445+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to projects (group_id)
+2026-06-22T11:05:12.446+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_projects_group_id created
+2026-06-22T11:05:12.446+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260530-02-projects-group-id.xml::20260530-02-projects-group-id::myrmec ran successfully in 11ms
+2026-06-22T11:05:12.449+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260530-03-user-roles-scope.xml::20260530-03-user-roles-scope::myrmec
+2026-06-22T11:05:12.451+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Data deleted from user_roles
+2026-06-22T11:05:12.453+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Unique constraint uq_user_roles_user_role_project dropped from user_roles
+2026-06-22T11:05:12.454+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Custom SQL executed
+2026-06-22T11:05:12.461+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns scope_type(varchar(10)),group_id(uuid) added to user_roles
+2026-06-22T11:05:12.462+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Data updated in user_roles
+2026-06-22T11:05:12.462+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Data updated in user_roles
+2026-06-22T11:05:12.463+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : NOT NULL constraint has been added to user_roles.scope_type
+2026-06-22T11:05:12.465+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to user_roles (group_id)
+2026-06-22T11:05:12.466+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_user_roles_group_id created
+2026-06-22T11:05:12.473+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Custom SQL executed
+2026-06-22T11:05:12.474+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260530-03-user-roles-scope.xml::20260530-03-user-roles-scope::myrmec ran successfully in 25ms
+2026-06-22T11:05:12.475+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml::20260606-01-create-knowledge-bases::myrmec
+2026-06-22T11:05:12.475+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.484+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table knowledge_bases created
+2026-06-22T11:05:12.484+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml::20260606-01-create-knowledge-bases::myrmec ran successfully in 9ms
+2026-06-22T11:05:12.485+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml::20260606-01-knowledge-bases-scope-check::myrmec
+2026-06-22T11:05:12.492+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Custom SQL executed
+2026-06-22T11:05:12.492+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml::20260606-01-knowledge-bases-scope-check::myrmec ran successfully in 6ms
+2026-06-22T11:05:12.493+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml::20260606-01-knowledge-bases-name-uniqueness::myrmec
+2026-06-22T11:05:12.496+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.517+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index uq_knowledge_base_scope_owner_name created
+2026-06-22T11:05:12.517+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml::20260606-01-knowledge-bases-name-uniqueness::myrmec ran successfully in 24ms
+2026-06-22T11:05:12.518+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml::20260606-01-knowledge-bases-lookup-indexes::myrmec
+2026-06-22T11:05:12.520+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.547+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_knowledge_base_project_id created
+2026-06-22T11:05:12.547+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_knowledge_base_group_id created
+2026-06-22T11:05:12.547+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml::20260606-01-knowledge-bases-lookup-indexes::myrmec ran successfully in 29ms
+2026-06-22T11:05:12.551+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml::20260606-01-create-knowledge-sources::myrmec
+2026-06-22T11:05:12.551+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.560+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table knowledge_sources created
+2026-06-22T11:05:12.560+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml::20260606-01-create-knowledge-sources::myrmec ran successfully in 9ms
+2026-06-22T11:05:12.563+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml::20260606-01-knowledge-sources-name-uniqueness::myrmec
+2026-06-22T11:05:12.565+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.584+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index uq_knowledge_source_kb_name created
+2026-06-22T11:05:12.585+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml::20260606-01-knowledge-sources-name-uniqueness::myrmec ran successfully in 22ms
+2026-06-22T11:05:12.586+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml::20260606-01-knowledge-sources-enabled-index::myrmec
+2026-06-22T11:05:12.587+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.605+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_knowledge_source_enabled created
+2026-06-22T11:05:12.605+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml::20260606-01-knowledge-sources-enabled-index::myrmec ran successfully in 19ms
+2026-06-22T11:05:12.606+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml::20260606-01-create-knowledge-chunks::myrmec
+2026-06-22T11:05:12.607+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.613+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table knowledge_chunks created
+2026-06-22T11:05:12.613+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml::20260606-01-create-knowledge-chunks::myrmec ran successfully in 6ms
+2026-06-22T11:05:12.615+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml::20260606-01-knowledge-chunks-source-locator-uniqueness::myrmec
+2026-06-22T11:05:12.617+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.638+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index uq_knowledge_chunk_source_locator created
+2026-06-22T11:05:12.639+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260606-01-knowledge-bases-sources-chunks.xml::20260606-01-knowledge-chunks-source-locator-uniqueness::myrmec ran successfully in 24ms
+2026-06-22T11:05:12.642+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260607-01-conversations.xml::20260607-01-create-conversations::myrmec
+2026-06-22T11:05:12.643+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.651+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table conversations created
+2026-06-22T11:05:12.651+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260607-01-conversations.xml::20260607-01-create-conversations::myrmec ran successfully in 9ms
+2026-06-22T11:05:12.654+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260607-01-conversations.xml::20260607-01-conversations-indexes::myrmec
+2026-06-22T11:05:12.657+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.686+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_conversation_project_id created
+2026-06-22T11:05:12.687+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_conversation_created_by created
+2026-06-22T11:05:12.688+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_conversation_status_updated created
+2026-06-22T11:05:12.688+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260607-01-conversations.xml::20260607-01-conversations-indexes::myrmec ran successfully in 33ms
+2026-06-22T11:05:12.691+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260607-01-conversations.xml::20260607-01-create-conversation-messages::myrmec
+2026-06-22T11:05:12.691+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.700+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table conversation_messages created
+2026-06-22T11:05:12.700+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260607-01-conversations.xml::20260607-01-create-conversation-messages::myrmec ran successfully in 9ms
+2026-06-22T11:05:12.701+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260607-01-conversations.xml::20260607-01-conversation-messages-indexes::myrmec
+2026-06-22T11:05:12.703+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.725+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index uq_message_conversation_sequence created
+2026-06-22T11:05:12.727+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_message_conversation_created created
+2026-06-22T11:05:12.727+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260607-01-conversations.xml::20260607-01-conversation-messages-indexes::myrmec ran successfully in 26ms
+2026-06-22T11:05:12.728+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260607-01-conversations.xml::20260607-01-create-conversation-participants::myrmec
+2026-06-22T11:05:12.729+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.736+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table conversation_participants created
+2026-06-22T11:05:12.737+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260607-01-conversations.xml::20260607-01-create-conversation-participants::myrmec ran successfully in 8ms
+2026-06-22T11:05:12.739+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260607-01-conversations.xml::20260607-01-conversation-participants-indexes::myrmec
+2026-06-22T11:05:12.741+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.763+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index uq_participant_conversation_user created
+2026-06-22T11:05:12.763+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_participant_user_id created
+2026-06-22T11:05:12.763+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260607-01-conversations.xml::20260607-01-conversation-participants-indexes::myrmec ran successfully in 24ms
+2026-06-22T11:05:12.765+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260607-01-conversations.xml::20260607-01-agent-profiles-interaction-mode::myrmec
+2026-06-22T11:05:12.769+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns interaction_mode(varchar(20)) added to agent_profiles
+2026-06-22T11:05:12.769+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260607-01-conversations.xml::20260607-01-agent-profiles-interaction-mode::myrmec ran successfully in 4ms
+2026-06-22T11:05:12.771+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-01-hitl.xml::20260608-01-01::myrmec
+2026-06-22T11:05:12.786+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns approval_status(varchar(20)),approver_id(uuid),expires_at(timestamp with time zone) added to conversation_messages
+2026-06-22T11:05:12.786+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-01-hitl.xml::20260608-01-01::myrmec ran successfully in 15ms
+2026-06-22T11:05:12.788+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-01-hitl.xml::20260608-01-02::myrmec
+2026-06-22T11:05:12.790+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.820+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_conv_messages_approval_status created
+2026-06-22T11:05:12.820+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-01-hitl.xml::20260608-01-02::myrmec ran successfully in 32ms
+2026-06-22T11:05:12.821+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-01-hitl.xml::20260608-01-03::myrmec
+2026-06-22T11:05:12.845+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns risk_class(varchar(20)) added to tools
+2026-06-22T11:05:12.845+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-01-hitl.xml::20260608-01-03::myrmec ran successfully in 23ms
+2026-06-22T11:05:12.851+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-01-hitl.xml::20260608-01-04::myrmec
+2026-06-22T11:05:12.879+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns auto_hitl_on_destructive(boolean) added to projects
+2026-06-22T11:05:12.879+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-01-hitl.xml::20260608-01-04::myrmec ran successfully in 27ms
+2026-06-22T11:05:12.891+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-02-execution-snapshots.xml::20260608-02-01::myrmec
+2026-06-22T11:05:12.893+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.908+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table execution_snapshots created
+2026-06-22T11:05:12.908+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-02-execution-snapshots.xml::20260608-02-01::myrmec ran successfully in 17ms
+2026-06-22T11:05:12.912+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-02-execution-snapshots.xml::20260608-02-02::myrmec
+2026-06-22T11:05:12.914+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.945+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_exec_snap_project_created created
+2026-06-22T11:05:12.945+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-02-execution-snapshots.xml::20260608-02-02::myrmec ran successfully in 33ms
+2026-06-22T11:05:12.948+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-02-execution-snapshots.xml::20260608-02-03::myrmec
+2026-06-22T11:05:12.952+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:12.977+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_exec_snap_conv_created created
+2026-06-22T11:05:12.977+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-02-execution-snapshots.xml::20260608-02-03::myrmec ran successfully in 28ms
+2026-06-22T11:05:12.978+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-02-execution-snapshots.xml::20260608-02-04::myrmec
+2026-06-22T11:05:12.980+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.002+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_exec_snap_event_type created
+2026-06-22T11:05:13.003+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-02-execution-snapshots.xml::20260608-02-04::myrmec ran successfully in 25ms
+2026-06-22T11:05:13.004+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-02-execution-snapshots.xml::20260608-02-05::myrmec
+2026-06-22T11:05:13.021+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns snapshot_retention_days(int),snapshot_sampling_rate(numeric(4,3)) added to projects
+2026-06-22T11:05:13.022+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-02-execution-snapshots.xml::20260608-02-05::myrmec ran successfully in 18ms
+2026-06-22T11:05:13.025+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-03-audit-log.xml::20260608-03-01::myrmec
+2026-06-22T11:05:13.026+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.030+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table audit_log created
+2026-06-22T11:05:13.030+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-03-audit-log.xml::20260608-03-01::myrmec ran successfully in 5ms
+2026-06-22T11:05:13.033+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-03-audit-log.xml::20260608-03-02::myrmec
+2026-06-22T11:05:13.036+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.066+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_audit_log_actor_created created
+2026-06-22T11:05:13.066+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-03-audit-log.xml::20260608-03-02::myrmec ran successfully in 33ms
+2026-06-22T11:05:13.068+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-03-audit-log.xml::20260608-03-03::myrmec
+2026-06-22T11:05:13.071+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.096+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_audit_log_resource created
+2026-06-22T11:05:13.096+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-03-audit-log.xml::20260608-03-03::myrmec ran successfully in 27ms
+2026-06-22T11:05:13.098+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-03-audit-log.xml::20260608-03-04::myrmec
+2026-06-22T11:05:13.100+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.129+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_audit_log_action_created created
+2026-06-22T11:05:13.130+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-03-audit-log.xml::20260608-03-04::myrmec ran successfully in 32ms
+2026-06-22T11:05:13.132+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-04-task-retry-backoff.xml::20260608-04-01::myrmec
+2026-06-22T11:05:13.138+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns next_eligible_at(timestamp with time zone) added to workflow_tasks
+2026-06-22T11:05:13.138+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-04-task-retry-backoff.xml::20260608-04-01::myrmec ran successfully in 6ms
+2026-06-22T11:05:13.139+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-04-task-retry-backoff.xml::20260608-04-02::myrmec
+2026-06-22T11:05:13.142+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.167+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_workflow_tasks_status_next_eligible created
+2026-06-22T11:05:13.167+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-04-task-retry-backoff.xml::20260608-04-02::myrmec ran successfully in 28ms
+2026-06-22T11:05:13.168+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-04-tool-description-hash.xml::20260608-04-tool-description-hash::myrmec
+2026-06-22T11:05:13.180+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns description_hash(varchar(64)),description_approved_at(timestamp),description_approved_by(uuid) added to tools
+2026-06-22T11:05:13.181+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-04-tool-description-hash.xml::20260608-04-tool-description-hash::myrmec ran successfully in 13ms
+2026-06-22T11:05:13.183+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-05-quotas.xml::20260608-05-quotas::myrmec
+2026-06-22T11:05:13.185+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.191+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table quotas created
+2026-06-22T11:05:13.191+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-05-quotas.xml::20260608-05-quotas::myrmec ran successfully in 8ms
+2026-06-22T11:05:13.193+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-05-quotas.xml::20260608-05-quotas-idx-scope::myrmec
+2026-06-22T11:05:13.195+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.221+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_quotas_scope created
+2026-06-22T11:05:13.221+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-05-quotas.xml::20260608-05-quotas-idx-scope::myrmec ran successfully in 28ms
+2026-06-22T11:05:13.223+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-05-quotas.xml::20260608-05-quota-consumption::myrmec
+2026-06-22T11:05:13.224+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.229+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table quota_consumption created
+2026-06-22T11:05:13.229+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-05-quotas.xml::20260608-05-quota-consumption::myrmec ran successfully in 5ms
+2026-06-22T11:05:13.231+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260608-05-quotas.xml::20260608-05-quota-consumption-uq::myrmec
+2026-06-22T11:05:13.233+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.260+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index uq_quota_consumption_quota_period created
+2026-06-22T11:05:13.260+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260608-05-quotas.xml::20260608-05-quota-consumption-uq::myrmec ran successfully in 29ms
+2026-06-22T11:05:13.262+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260620-01-engine-nodes.xml::20260620-01-create-engine-nodes::myrmec
+2026-06-22T11:05:13.262+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.265+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table engine_nodes created
+2026-06-22T11:05:13.266+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_engine_nodes_status_heartbeat created
+2026-06-22T11:05:13.266+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260620-01-engine-nodes.xml::20260620-01-create-engine-nodes::myrmec ran successfully in 4ms
+2026-06-22T11:05:13.267+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260620-01-engine-nodes.xml::20260620-01-agent-hosts-control-node::myrmec
+2026-06-22T11:05:13.272+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns control_node_id(varchar(255)) added to agent_hosts
+2026-06-22T11:05:13.273+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to agent_hosts (control_node_id)
+2026-06-22T11:05:13.275+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_agent_hosts_control_node created
+2026-06-22T11:05:13.275+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260620-01-engine-nodes.xml::20260620-01-agent-hosts-control-node::myrmec ran successfully in 7ms
+2026-06-22T11:05:13.277+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260620-01-engine-nodes.xml::20260620-01-agents-home-node::myrmec
+2026-06-22T11:05:13.282+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns home_node_id(varchar(255)) added to agents
+2026-06-22T11:05:13.285+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to agents (home_node_id)
+2026-06-22T11:05:13.286+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_agents_home_node created
+2026-06-22T11:05:13.286+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260620-01-engine-nodes.xml::20260620-01-agents-home-node::myrmec ran successfully in 9ms
+2026-06-22T11:05:13.288+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260620-01-engine-nodes.xml::20260620-01-conversations-home-node::myrmec
+2026-06-22T11:05:13.296+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns home_node_id(varchar(255)),agent_host_id(uuid) added to conversations
+2026-06-22T11:05:13.298+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to conversations (home_node_id)
+2026-06-22T11:05:13.299+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to conversations (agent_host_id)
+2026-06-22T11:05:13.300+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_conversations_home_node created
+2026-06-22T11:05:13.300+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260620-01-engine-nodes.xml::20260620-01-conversations-home-node::myrmec ran successfully in 12ms
+2026-06-22T11:05:13.301+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260620-02-agents-state-changed-at.xml::20260620-02-agents-state-changed-at::myrmec
+2026-06-22T11:05:13.306+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns state_changed_at(timestamp with time zone) added to agents
+2026-06-22T11:05:13.307+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_agents_status_state_changed_at created
+2026-06-22T11:05:13.308+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260620-02-agents-state-changed-at.xml::20260620-02-agents-state-changed-at::myrmec ran successfully in 6ms
+2026-06-22T11:05:13.309+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260620-03-conversation-events.xml::20260620-03-create-conversation-events::myrmec
+2026-06-22T11:05:13.310+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.314+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table conversation_events created
+2026-06-22T11:05:13.315+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Unique constraint added to conversation_events(conversation_id, seq)
+2026-06-22T11:05:13.316+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_conversation_events_reason_code created
+2026-06-22T11:05:13.316+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_conversation_events_agent_host_id created
+2026-06-22T11:05:13.318+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to conversation_events (conversation_id)
+2026-06-22T11:05:13.318+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260620-03-conversation-events.xml::20260620-03-create-conversation-events::myrmec ran successfully in 9ms
+2026-06-22T11:05:13.319+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260620-04-conversation-message-pinned.xml::20260620-04-01::myrmec
+2026-06-22T11:05:13.325+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns pinned(boolean) added to conversation_messages
+2026-06-22T11:05:13.325+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260620-04-conversation-message-pinned.xml::20260620-04-01::myrmec ran successfully in 5ms
+2026-06-22T11:05:13.326+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260620-04-conversation-message-pinned.xml::20260620-04-02::myrmec
+2026-06-22T11:05:13.328+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.350+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_conv_messages_pinned created
+2026-06-22T11:05:13.351+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260620-04-conversation-message-pinned.xml::20260620-04-02::myrmec ran successfully in 25ms
+2026-06-22T11:05:13.352+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260620-05-system-settings.xml::20260620-05-system-settings::myrmec
+2026-06-22T11:05:13.352+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.356+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table system_settings created
+2026-06-22T11:05:13.356+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260620-05-system-settings.xml::20260620-05-system-settings::myrmec ran successfully in 4ms
+2026-06-22T11:05:13.359+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260620-05-system-settings.xml::20260620-05-system-settings-seed::myrmec
+2026-06-22T11:05:13.360+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into system_settings
+2026-06-22T11:05:13.361+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into system_settings
+2026-06-22T11:05:13.361+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into system_settings
+2026-06-22T11:05:13.361+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into system_settings
+2026-06-22T11:05:13.361+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into system_settings
+2026-06-22T11:05:13.362+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into system_settings
+2026-06-22T11:05:13.362+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into system_settings
+2026-06-22T11:05:13.362+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into system_settings
+2026-06-22T11:05:13.363+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into system_settings
+2026-06-22T11:05:13.363+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into system_settings
+2026-06-22T11:05:13.363+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260620-05-system-settings.xml::20260620-05-system-settings-seed::myrmec ran successfully in 4ms
+2026-06-22T11:05:13.363+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260620-06-conversation-message-feedback.xml::20260620-06-01::myrmec
+2026-06-22T11:05:13.378+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns feedback_rating(varchar(10)),feedback_reason(text),feedback_by(uuid),feedback_at(timestamp with time zone) added to conversation_messages
+2026-06-22T11:05:13.379+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260620-06-conversation-message-feedback.xml::20260620-06-01::myrmec ran successfully in 13ms
+2026-06-22T11:05:13.380+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-01-edit-resend-regenerate.xml::20260621-01-01::myrmec
+2026-06-22T11:05:13.387+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns superseded(boolean) added to conversation_messages
+2026-06-22T11:05:13.387+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-01-edit-resend-regenerate.xml::20260621-01-01::myrmec ran successfully in 6ms
+2026-06-22T11:05:13.389+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-02-conversation-message-attachments.xml::20260621-02-create-conversation-message-attachments::myrmec
+2026-06-22T11:05:13.390+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.395+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table conversation_message_attachments created
+2026-06-22T11:05:13.395+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_cma_conversation_id created
+2026-06-22T11:05:13.396+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_cma_message_id created
+2026-06-22T11:05:13.397+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to conversation_message_attachments (conversation_id)
+2026-06-22T11:05:13.398+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to conversation_message_attachments (message_id)
+2026-06-22T11:05:13.398+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-02-conversation-message-attachments.xml::20260621-02-create-conversation-message-attachments::myrmec ran successfully in 8ms
+2026-06-22T11:05:13.400+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-03-attachment-settings.xml::20260621-03-attachment-max-file-size::myrmec
+2026-06-22T11:05:13.404+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into system_settings
+2026-06-22T11:05:13.405+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-03-attachment-settings.xml::20260621-03-attachment-max-file-size::myrmec ran successfully in 4ms
+2026-06-22T11:05:13.406+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-03-attachment-settings.xml::20260621-03-attachment-inline-token-limit::myrmec
+2026-06-22T11:05:13.408+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into system_settings
+2026-06-22T11:05:13.408+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-03-attachment-settings.xml::20260621-03-attachment-inline-token-limit::myrmec ran successfully in 2ms
+2026-06-22T11:05:13.409+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-04-model-supports-vision.xml::20260621-04-model-supports-vision::myrmec
+2026-06-22T11:05:13.415+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns supports_vision(boolean) added to models
+2026-06-22T11:05:13.415+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-04-model-supports-vision.xml::20260621-04-model-supports-vision::myrmec ran successfully in 6ms
+2026-06-22T11:05:13.417+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-05-summarisation-settings.xml::20260621-05-summary-trigger-message-count::myrmec
+2026-06-22T11:05:13.420+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : New row inserted into system_settings
+2026-06-22T11:05:13.421+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-05-summarisation-settings.xml::20260621-05-summary-trigger-message-count::myrmec ran successfully in 4ms
+2026-06-22T11:05:13.422+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-06-assistant-entity.xml::20260621-06-create-assistants::myrmec
+2026-06-22T11:05:13.423+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.430+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table assistants created
+2026-06-22T11:05:13.431+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-06-assistant-entity.xml::20260621-06-create-assistants::myrmec ran successfully in 9ms
+2026-06-22T11:05:13.433+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-06-assistant-entity.xml::20260621-06-create-assistant-version::myrmec
+2026-06-22T11:05:13.434+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.442+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table assistant_version created
+2026-06-22T11:05:13.442+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-06-assistant-entity.xml::20260621-06-create-assistant-version::myrmec ran successfully in 9ms
+2026-06-22T11:05:13.443+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-06-assistant-entity.xml::20260621-06-assistant-current-version-fk::myrmec
+2026-06-22T11:05:13.445+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.462+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to assistants (current_version_id)
+2026-06-22T11:05:13.462+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-06-assistant-entity.xml::20260621-06-assistant-current-version-fk::myrmec ran successfully in 19ms
+2026-06-22T11:05:13.465+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-06-assistant-entity.xml::20260621-06-assistant-indexes::myrmec
+2026-06-22T11:05:13.468+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.494+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_assistant_project_id created
+2026-06-22T11:05:13.495+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_assistant_project_name created
+2026-06-22T11:05:13.495+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_assistant_version_assistant created
+2026-06-22T11:05:13.496+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_assistant_version_assistant_status created
+2026-06-22T11:05:13.497+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-06-assistant-entity.xml::20260621-06-assistant-indexes::myrmec ran successfully in 32ms
+2026-06-22T11:05:13.499+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-06-assistant-entity.xml::20260621-06-create-assistant-grants::myrmec
+2026-06-22T11:05:13.499+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.505+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table assistant_grants created
+2026-06-22T11:05:13.507+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Unique constraint added to assistant_grants(assistant_id, principal_type, principal_id, permission)
+2026-06-22T11:05:13.508+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_assistant_grant_assistant created
+2026-06-22T11:05:13.508+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-06-assistant-entity.xml::20260621-06-create-assistant-grants::myrmec ran successfully in 9ms
+2026-06-22T11:05:13.517+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-07-assistant-companion-columns.xml::20260621-07-agent-profile-addendum-allowed::myrmec
+2026-06-22T11:05:13.522+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns addendum_allowed(boolean) added to agent_profiles
+2026-06-22T11:05:13.522+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-07-assistant-companion-columns.xml::20260621-07-agent-profile-addendum-allowed::myrmec ran successfully in 5ms
+2026-06-22T11:05:13.523+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-07-assistant-companion-columns.xml::20260621-07-agent-profile-tools-disable-allowed::myrmec
+2026-06-22T11:05:13.527+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns assistant_disable_allowed(boolean) added to agent_profile_tools
+2026-06-22T11:05:13.527+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-07-assistant-companion-columns.xml::20260621-07-agent-profile-tools-disable-allowed::myrmec ran successfully in 4ms
+2026-06-22T11:05:13.528+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-07-assistant-companion-columns.xml::20260621-07-knowledge-bases-embedding-model::myrmec
+2026-06-22T11:05:13.534+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns embedding_model(varchar(80)) added to knowledge_bases
+2026-06-22T11:05:13.535+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-07-assistant-companion-columns.xml::20260621-07-knowledge-bases-embedding-model::myrmec ran successfully in 7ms
+2026-06-22T11:05:13.536+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-07-assistant-companion-columns.xml::20260621-07-knowledge-bases-status::myrmec
+2026-06-22T11:05:13.540+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns status(varchar(20)) added to knowledge_bases
+2026-06-22T11:05:13.540+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-07-assistant-companion-columns.xml::20260621-07-knowledge-bases-status::myrmec ran successfully in 4ms
+2026-06-22T11:05:13.541+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-07-assistant-companion-columns.xml::20260621-07-knowledge-bases-classification::myrmec
+2026-06-22T11:05:13.548+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns classification(varchar(40)) added to knowledge_bases
+2026-06-22T11:05:13.548+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-07-assistant-companion-columns.xml::20260621-07-knowledge-bases-classification::myrmec ran successfully in 7ms
+2026-06-22T11:05:13.551+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-07-assistant-companion-columns.xml::20260621-07-knowledge-bases-allow-assistant-binding::myrmec
+2026-06-22T11:05:13.556+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns allow_assistant_binding(boolean) added to knowledge_bases
+2026-06-22T11:05:13.556+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-07-assistant-companion-columns.xml::20260621-07-knowledge-bases-allow-assistant-binding::myrmec ran successfully in 5ms
+2026-06-22T11:05:13.558+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-08-conversation-version-pinning.xml::20260621-08-conversation-assistant-id::myrmec
+2026-06-22T11:05:13.569+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns assistant_id(uuid) added to conversations
+2026-06-22T11:05:13.569+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-08-conversation-version-pinning.xml::20260621-08-conversation-assistant-id::myrmec ran successfully in 11ms
+2026-06-22T11:05:13.569+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-08-conversation-version-pinning.xml::20260621-08-conversation-assistant-version-id::myrmec
+2026-06-22T11:05:13.576+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns assistant_version_id(uuid) added to conversations
+2026-06-22T11:05:13.578+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-08-conversation-version-pinning.xml::20260621-08-conversation-assistant-version-id::myrmec ran successfully in 5ms
+2026-06-22T11:05:13.579+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-08-conversation-version-pinning.xml::20260621-08-conversation-agent-profile-version-id::myrmec
+2026-06-22T11:05:13.586+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns agent_profile_version_id(uuid) added to conversations
+2026-06-22T11:05:13.586+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-08-conversation-version-pinning.xml::20260621-08-conversation-agent-profile-version-id::myrmec ran successfully in 7ms
+2026-06-22T11:05:13.587+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-09-conversation-external-seams.xml::20260621-09-conversation-source::myrmec
+2026-06-22T11:05:13.595+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns source(varchar(20)) added to conversations
+2026-06-22T11:05:13.595+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-09-conversation-external-seams.xml::20260621-09-conversation-source::myrmec ran successfully in 7ms
+2026-06-22T11:05:13.596+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-09-conversation-external-seams.xml::20260621-09-conversation-external-user-ref::myrmec
+2026-06-22T11:05:13.601+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns external_user_ref(varchar(255)) added to conversations
+2026-06-22T11:05:13.601+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-09-conversation-external-seams.xml::20260621-09-conversation-external-user-ref::myrmec ran successfully in 4ms
+2026-06-22T11:05:13.603+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-09-conversation-external-seams.xml::20260621-09-conversation-service-account-id::myrmec
+2026-06-22T11:05:13.607+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns service_account_id(uuid) added to conversations
+2026-06-22T11:05:13.607+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-09-conversation-external-seams.xml::20260621-09-conversation-service-account-id::myrmec ran successfully in 4ms
+2026-06-22T11:05:13.608+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-09-conversation-external-seams.xml::20260621-09-conversation-parent-conversation-id::myrmec
+2026-06-22T11:05:13.615+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns parent_conversation_id(uuid) added to conversations
+2026-06-22T11:05:13.615+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-09-conversation-external-seams.xml::20260621-09-conversation-parent-conversation-id::myrmec ran successfully in 7ms
+2026-06-22T11:05:13.618+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-09-conversation-external-seams.xml::20260621-09-conversation-role-in-thread::myrmec
+2026-06-22T11:05:13.625+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns role_in_thread(varchar(30)) added to conversations
+2026-06-22T11:05:13.625+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-09-conversation-external-seams.xml::20260621-09-conversation-role-in-thread::myrmec ran successfully in 7ms
+2026-06-22T11:05:13.626+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-10-execution-snapshot-attribution.xml::20260621-10-exec-snap-source::myrmec
+2026-06-22T11:05:13.631+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns source(varchar(20)) added to execution_snapshots
+2026-06-22T11:05:13.631+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-10-execution-snapshot-attribution.xml::20260621-10-exec-snap-source::myrmec ran successfully in 4ms
+2026-06-22T11:05:13.632+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-10-execution-snapshot-attribution.xml::20260621-10-exec-snap-service-account-id::myrmec
+2026-06-22T11:05:13.636+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns service_account_id(uuid) added to execution_snapshots
+2026-06-22T11:05:13.636+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-10-execution-snapshot-attribution.xml::20260621-10-exec-snap-service-account-id::myrmec ran successfully in 3ms
+2026-06-22T11:05:13.637+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-10-execution-snapshot-attribution.xml::20260621-10-exec-snap-external-user-ref::myrmec
+2026-06-22T11:05:13.641+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns external_user_ref(varchar(255)) added to execution_snapshots
+2026-06-22T11:05:13.641+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-10-execution-snapshot-attribution.xml::20260621-10-exec-snap-external-user-ref::myrmec ran successfully in 4ms
+2026-06-22T11:05:13.642+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-10-execution-snapshot-attribution.xml::20260621-10-exec-snap-user-id::myrmec
+2026-06-22T11:05:13.646+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns user_id(uuid) added to execution_snapshots
+2026-06-22T11:05:13.646+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-10-execution-snapshot-attribution.xml::20260621-10-exec-snap-user-id::myrmec ran successfully in 4ms
+2026-06-22T11:05:13.648+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-11-project-allowed-service-types.xml::20260621-11-project-allowed-service-types::myrmec
+2026-06-22T11:05:13.653+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns allowed_service_types(text) added to projects
+2026-06-22T11:05:13.653+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-11-project-allowed-service-types.xml::20260621-11-project-allowed-service-types::myrmec ran successfully in 5ms
+2026-06-22T11:05:13.656+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-12-service-accounts.xml::20260621-12-create-service-accounts::myrmec
+2026-06-22T11:05:13.657+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.662+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Table service_accounts created
+2026-06-22T11:05:13.662+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-12-service-accounts.xml::20260621-12-create-service-accounts::myrmec ran successfully in 6ms
+2026-06-22T11:05:13.663+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-12-service-accounts.xml::20260621-12-service-accounts-project-idx::myrmec
+2026-06-22T11:05:13.666+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.696+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_service_account_project created
+2026-06-22T11:05:13.696+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-12-service-accounts.xml::20260621-12-service-accounts-project-idx::myrmec ran successfully in 33ms
+2026-06-22T11:05:13.697+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260621-12-service-accounts.xml::20260621-12-conversation-service-account-fk::myrmec
+2026-06-22T11:05:13.699+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.719+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Foreign key constraint added to conversations (service_account_id)
+2026-06-22T11:05:13.719+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260621-12-service-accounts.xml::20260621-12-conversation-service-account-fk::myrmec ran successfully in 22ms
+2026-06-22T11:05:13.720+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260622-01-knowledge-source-sync-requested.xml::20260622-01-knowledge-sources-sync-requested-at::myrmec
+2026-06-22T11:05:13.725+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Columns sync_requested_at(TIMESTAMP WITH TIME ZONE) added to knowledge_sources
+2026-06-22T11:05:13.725+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260622-01-knowledge-source-sync-requested.xml::20260622-01-knowledge-sources-sync-requested-at::myrmec ran successfully in 5ms
+2026-06-22T11:05:13.726+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Running Changeset: db/changelog/changes/20260622-01-knowledge-source-sync-requested.xml::20260622-01-knowledge-sources-sync-requested-index::myrmec
+2026-06-22T11:05:13.728+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.snapshot                       : Creating snapshot
+2026-06-22T11:05:13.763+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : Index idx_knowledge_source_sync_requested created
+2026-06-22T11:05:13.763+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.changelog                      : ChangeSet db/changelog/changes/20260622-01-knowledge-source-sync-requested.xml::20260622-01-knowledge-sources-sync-requested-index::myrmec ran successfully in 37ms
+2026-06-22T11:05:13.779+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.util                           : UPDATE SUMMARY
+2026-06-22T11:05:13.780+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.util                           : Run:                        162
+2026-06-22T11:05:13.780+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.util                           : Previously run:               0
+2026-06-22T11:05:13.780+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.util                           : Filtered out:                 5
+2026-06-22T11:05:13.780+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.util                           : -------------------------------
+2026-06-22T11:05:13.780+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.util                           : Total change sets:          167
+2026-06-22T11:05:13.780+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.util                           : FILTERED CHANGE SETS SUMMARY
+2026-06-22T11:05:13.780+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.util                           : DBMS mismatch:                5
+2026-06-22T11:05:13.785+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.util                           : Update summary generated
+2026-06-22T11:05:13.792+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.command                        : Update command completed successfully.
+2026-06-22T11:05:13.792+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.ui                             : Liquibase: Update has been successful. Rows affected: 223
+2026-06-22T11:05:13.793+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.lockservice                    : Successfully released change log lock
+2026-06-22T11:05:13.796+02:00  INFO 25980 --- [myrmec-control-engine] [           main] liquibase.command                        : Command execution complete
+2026-06-22T11:05:13.996+02:00  INFO 25980 --- [myrmec-control-engine] [           main] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
+2026-06-22T11:05:14.091+02:00  INFO 25980 --- [myrmec-control-engine] [           main] org.hibernate.Version                    : HHH000412: Hibernate ORM core version 6.5.2.Final
+2026-06-22T11:05:14.137+02:00  INFO 25980 --- [myrmec-control-engine] [           main] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
+2026-06-22T11:05:14.486+02:00  INFO 25980 --- [myrmec-control-engine] [           main] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-06-22T11:05:14.542+02:00  WARN 25980 --- [myrmec-control-engine] [           main] org.hibernate.orm.deprecation            : HHH90000025: H2Dialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
+2026-06-22T11:05:16.570+02:00  INFO 25980 --- [myrmec-control-engine] [           main] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-06-22T11:05:16.572+02:00  INFO 25980 --- [myrmec-control-engine] [           main] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-06-22T11:05:16.977+02:00  INFO 25980 --- [myrmec-control-engine] [           main] o.s.d.j.r.query.QueryEnhancerFactory     : Hibernate is in classpath; If applicable, HQL parser will be used.
+2026-06-22T11:05:17.821+02:00 DEBUG 25980 --- [myrmec-control-engine] [           main] a.m.e._.s.JwtAuthenticationFilter        : Filter 'jwtAuthenticationFilter' configured for use
+2026-06-22T11:05:17.823+02:00 DEBUG 25980 --- [myrmec-control-engine] [           main] o.s.w.f.ServerHttpObservationFilter      : Filter 'webMvcObservationFilter' configured for use
+2026-06-22T11:05:18.801+02:00  INFO 25980 --- [myrmec-control-engine] [           main] a.m.e.a.s.LocalFilesystemBlobStore       : Local attachment blob store rooted at C:\gitrepos\myrmecai\myrmec\control\engine\engine-core\data\attachments
+2026-06-22T11:05:19.773+02:00  INFO 25980 --- [myrmec-control-engine] [           main] a.m.e.knowledge.KnowledgeRepoFetcher     : KnowledgeRepoFetcher cache directory: C:\Users\JOGASI~1\AppData\Local\Temp\myrmec-knowledge-cache
+2026-06-22T11:05:19.815+02:00  INFO 25980 --- [myrmec-control-engine] [           main] a.m.e.knowledge.rag.RetrievalDispatcher  : RetrievalDispatcher initialised with 1 provider(s): [stub]
+2026-06-22T11:05:19.849+02:00  INFO 25980 --- [myrmec-control-engine] [           main] a.m.e.knowledge.rag.ConnectorDispatcher  : ConnectorDispatcher initialised with 8 connector(s): [confluence, manual, notion, git, db-schema, s3, jira, web-crawl]
+2026-06-22T11:05:20.162+02:00 DEBUG 25980 --- [myrmec-control-engine] [           main] o.s.w.s.s.s.WebSocketHandlerMapping      : Patterns [/api/v1/agent/ws, /api/v1/agent/conversation] in 'webSocketHandlerMapping'
+2026-06-22T11:05:20.595+02:00 DEBUG 25980 --- [myrmec-control-engine] [           main] s.w.s.m.m.a.RequestMappingHandlerMapping : 221 mappings in 'requestMappingHandlerMapping'
+2026-06-22T11:05:20.716+02:00 DEBUG 25980 --- [myrmec-control-engine] [           main] o.s.w.s.handler.SimpleUrlHandlerMapping  : Patterns [/webjars/**, /**, /swagger-ui*/*swagger-initializer.js, /swagger-ui*/**] in 'resourceHandlerMapping'
+2026-06-22T11:05:20.876+02:00  INFO 25980 --- [myrmec-control-engine] [           main] o.s.b.a.e.web.EndpointLinksResolver      : Exposing 1 endpoint beneath base path '/actuator'
+2026-06-22T11:05:20.990+02:00  INFO 25980 --- [myrmec-control-engine] [           main] o.s.s.web.DefaultSecurityFilterChain     : Will secure any request with [org.springframework.security.web.session.DisableEncodeUrlFilter@1c0ff117, org.springframework.security.web.context.request.async.WebAsyncManagerIntegrationFilter@2940e5f0, org.springframework.security.web.context.SecurityContextHolderFilter@60f6a081, org.springframework.security.web.header.HeaderWriterFilter@3a4af9a7, org.springframework.web.filter.CorsFilter@6bdb83c1, org.springframework.security.web.authentication.logout.LogoutFilter@18a564a7, ai.myrmec.engine._system.security.JwtAuthenticationFilter@40478af8, org.springframework.security.web.savedrequest.RequestCacheAwareFilter@1b3ea198, org.springframework.security.web.servletapi.SecurityContextHolderAwareRequestFilter@6b4483a4, org.springframework.security.web.authentication.AnonymousAuthenticationFilter@3556d066, org.springframework.security.web.session.SessionManagementFilter@56b7fcf6, org.springframework.security.web.access.ExceptionTranslationFilter@445d26fd, org.springframework.security.web.access.intercept.AuthorizationFilter@4bc8b617]
+2026-06-22T11:05:21.131+02:00 DEBUG 25980 --- [myrmec-control-engine] [           main] s.w.s.m.m.a.RequestMappingHandlerAdapter : ControllerAdvice beans: 0 @ModelAttribute, 0 @InitBinder, 1 RequestBodyAdvice, 1 ResponseBodyAdvice
+2026-06-22T11:05:21.172+02:00 DEBUG 25980 --- [myrmec-control-engine] [           main] .m.m.a.ExceptionHandlerExceptionResolver : ControllerAdvice beans: 2 @ExceptionHandler, 1 ResponseBodyAdvice
+2026-06-22T11:05:21.754+02:00  INFO 25980 --- [myrmec-control-engine] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 58894 (http) with context path '/'
+2026-06-22T11:05:21.776+02:00  INFO 25980 --- [myrmec-control-engine] [           main] a.m.e.k.rag.ConfluenceConnectorTest      : Started ConfluenceConnectorTest in 18.999 seconds (process running for 20.016)
+2026-06-22T11:05:22.101+02:00  INFO 25980 --- [myrmec-control-engine] [           main] ai.myrmec.engine.user.UserService        : Created LOCAL user: admin@e2e-test.local (created by: null)
+2026-06-22T11:05:22.148+02:00  INFO 25980 --- [myrmec-control-engine] [           main] ai.myrmec.engine.user.UserService        : Assigned role PLATFORM_ADMIN (SYSTEM) to user bf92d8e3-6b5d-4245-9f70-fd8284735b5c (group=null, project=null, granted by=null)
+2026-06-22T11:05:22.181+02:00  INFO 25980 --- [myrmec-control-engine] [           main] ai.myrmec.engine.user.UserService        : Assigned role ORG_ADMIN (SYSTEM) to user bf92d8e3-6b5d-4245-9f70-fd8284735b5c (group=null, project=null, granted by=null)
+2026-06-22T11:05:22.185+02:00  INFO 25980 --- [myrmec-control-engine] [           main] a.m.e._.bootstrap.AdminUserBootstrap     : ========================================
+2026-06-22T11:05:22.186+02:00  INFO 25980 --- [myrmec-control-engine] [           main] a.m.e._.bootstrap.AdminUserBootstrap     : Created initial PLATFORM_ADMIN + ORG_ADMIN user: admin@e2e-test.local
+2026-06-22T11:05:22.186+02:00  INFO 25980 --- [myrmec-control-engine] [           main] a.m.e._.bootstrap.AdminUserBootstrap     : ========================================
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+WARNING: A Java agent has been loaded dynamically (C:\Users\Joga Singh\.m2\repository\net\bytebuddy\byte-buddy-agent\1.14.16\byte-buddy-agent-1.14.16.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+2026-06-22T11:05:23.208+02:00  INFO 25980 --- [myrmec-control-engine] [           main] a.m.e.knowledge.rag.ConfluenceConnector  : confluence sync emitted 3 page chunk(s) from space ENG (0 error(s))
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 20.93 s -- in ai.myrmec.engine.knowledge.rag.ConfluenceConnectorTest
+[INFO] Running ai.myrmec.engine.knowledge.rag.ConnectorDispatcherTest
+2026-06-22T11:05:23.233+02:00  INFO 25980 --- [myrmec-control-engine] [           main] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [ai.myrmec.engine.knowledge.rag.ConnectorDispatcherTest]: ConnectorDispatcherTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-06-22T11:05:23.235+02:00  INFO 25980 --- [myrmec-control-engine] [           main] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration ai.myrmec.engine.ControlEngineApplication for test class ai.myrmec.engine.knowledge.rag.ConnectorDispatcherTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.142 s -- in ai.myrmec.engine.knowledge.rag.ConnectorDispatcherTest
+[INFO] Running ai.myrmec.engine.knowledge.rag.JiraConnectorTest
+2026-06-22T11:05:23.376+02:00  INFO 25980 --- [myrmec-control-engine] [           main] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [ai.myrmec.engine.knowledge.rag.JiraConnectorTest]: JiraConnectorTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-06-22T11:05:23.378+02:00  INFO 25980 --- [myrmec-control-engine] [           main] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration ai.myrmec.engine.ControlEngineApplication for test class ai.myrmec.engine.knowledge.rag.JiraConnectorTest
+2026-06-22T11:05:23.485+02:00  INFO 25980 --- [myrmec-control-engine] [           main] a.m.engine.knowledge.rag.JiraConnector   : jira sync emitted 3 issue chunk(s) for jql='project = "ENG" ORDER BY created ASC' (0 error(s))
+2026-06-22T11:05:23.535+02:00  INFO 25980 --- [myrmec-control-engine] [           main] a.m.engine.knowledge.rag.JiraConnector   : jira sync emitted 3 issue chunk(s) for jql='project = "ENG" ORDER BY created ASC' (0 error(s))
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.209 s -- in ai.myrmec.engine.knowledge.rag.JiraConnectorTest
+[INFO] Running ai.myrmec.engine.knowledge.rag.NotionConnectorTest
+2026-06-22T11:05:23.587+02:00  INFO 25980 --- [myrmec-control-engine] [           main] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [ai.myrmec.engine.knowledge.rag.NotionConnectorTest]: NotionConnectorTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-06-22T11:05:23.588+02:00  INFO 25980 --- [myrmec-control-engine] [           main] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration ai.myrmec.engine.ControlEngineApplication for test class ai.myrmec.engine.knowledge.rag.NotionConnectorTest
+2026-06-22T11:05:23.649+02:00  INFO 25980 --- [myrmec-control-engine] [           main] a.m.e.knowledge.rag.NotionConnector      : notion sync emitted 3 page chunk(s) (0 error(s))
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.157 s -- in ai.myrmec.engine.knowledge.rag.NotionConnectorTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 17, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  38.163 s
+[INFO] Finished at: 2026-06-22T11:05:24+02:00
+[INFO] ------------------------------------------------------------------------

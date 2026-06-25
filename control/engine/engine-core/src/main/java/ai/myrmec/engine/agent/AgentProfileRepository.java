@@ -29,6 +29,6 @@ public interface AgentProfileRepository extends JpaRepository<AgentProfile, UUID
     @Query("SELECT p FROM AgentProfile p WHERE p.status = 'ACTIVE' ORDER BY p.name")
     List<AgentProfile> findAllActive();
 
-    @Query("SELECT COUNT(a) FROM Agent a WHERE a.profileId = :profileId")
+    @Query("SELECT COUNT(a) FROM AgentHost a WHERE a.profileId = :profileId")
     long countAgentsByProfileId(UUID profileId);
 }

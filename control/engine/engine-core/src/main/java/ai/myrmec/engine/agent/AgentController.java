@@ -58,7 +58,7 @@ public class AgentController {
     })
     @GetMapping("/me")
     public ResponseEntity<AgentInfoResponse> me(@AuthenticationPrincipal AgentPrincipal principal) {
-        AgentInstance instance = agentService.getInstance(principal.getInstanceId());
+        Agent instance = agentService.getInstance(principal.getInstanceId());
         return ResponseEntity.ok(AgentInfoResponse.from(instance));
     }
 }

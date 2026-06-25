@@ -63,6 +63,23 @@ public class ProjectAccessEvaluator {
         return user.isOrgAdmin();
     }
 
+    /**
+     * Service-type gate (#77): does this project allow hosting services of the
+     * given type? Wired via
+     * {@code @PreAuthorize("@projectAccess.allowsServiceType(#projectId, 'WORKFLOW')")}
+     * on every create of a service of type T. Unlike the role checks this is a
+     * pure project-configuration gate — it does not consult the authenticated
+     * principal. A missing project or an unknown type is denied (fail closed).
+     */
+    public boolean allowsServiceType(UUID projectId, String serviceType) {
+        if (projectId == null || serviceType == null) return false;
+        return projectRepository.findById(projectId)
+                .map(Project::getAllowedServiceTypes)
+                .map(types -> types.stream()
+                        .anyMatch(t -> t != null && t.equalsIgnoreCase(serviceType.trim())))
+                .orElse(false);
+    }
+
     private boolean hasAccess(UUID projectId, Authentication authentication, UserRole.Role minimum) {
         UserPrincipal user = principalOf(authentication);
         if (user == null || projectId == null) return false;

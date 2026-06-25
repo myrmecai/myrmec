@@ -75,6 +75,18 @@ public abstract class IntegrationTestBase {
     @Autowired
     protected ai.myrmec.engine.quota.QuotaRepository quotaRepository;
 
+    @Autowired
+    protected ai.myrmec.engine.serviceaccount.ServiceAccountRepository serviceAccountRepository;
+
+    @Autowired
+    protected ai.myrmec.engine.knowledge.rag.KnowledgeChunkRepository knowledgeChunkRepository;
+
+    @Autowired
+    protected ai.myrmec.engine.knowledge.rag.KnowledgeSourceRepository knowledgeSourceRepository;
+
+    @Autowired
+    protected ai.myrmec.engine.knowledge.rag.KnowledgeBaseRepository knowledgeBaseRepository;
+
     /**
      * Test admin - retrieved or created for E2E tests.
      */
@@ -112,6 +124,12 @@ public abstract class IntegrationTestBase {
         conversationMessageRepository.deleteAllInBatch();
         conversationParticipantRepository.deleteAllInBatch();
         conversationRepository.deleteAllInBatch();
+        // service_accounts references projects(id); clear before projects.
+        serviceAccountRepository.deleteAllInBatch();
+        // RAG knowledge tables: chunks -> sources -> bases (bases FK projects).
+        knowledgeChunkRepository.deleteAllInBatch();
+        knowledgeSourceRepository.deleteAllInBatch();
+        knowledgeBaseRepository.deleteAllInBatch();
         knowledgeDocumentRepository.deleteAll();
         projectRepository.deleteAll();
 

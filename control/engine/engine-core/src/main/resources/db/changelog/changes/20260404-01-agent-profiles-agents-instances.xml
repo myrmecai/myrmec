@@ -60,20 +60,20 @@
             onDelete="SET NULL"/>
     </changeSet>
 
-    <changeSet id="20260404-02-create-agents" author="myrmec">
+    <changeSet id="20260404-02-create-agent-hosts" author="myrmec">
         <preConditions onFail="MARK_RAN">
             <not>
-                <tableExists tableName="agents"/>
+                <tableExists tableName="agent_hosts"/>
             </not>
         </preConditions>
-        <comment>Create agents table - deployable agent definitions with registration keys</comment>
+        <comment>Create agent_hosts table - the machine (Supervisor) that hosts agents, with registration key</comment>
 
-        <createTable tableName="agents">
+        <createTable tableName="agent_hosts">
             <column name="id" type="uuid">
                 <constraints primaryKey="true" nullable="false"/>
             </column>
             <column name="name" type="varchar(100)">
-                <constraints nullable="false" unique="true" uniqueConstraintName="uk_agents_name"/>
+                <constraints nullable="false" unique="true" uniqueConstraintName="uk_agent_hosts_name"/>
             </column>
             <column name="description" type="text"/>
             <column name="profile_id" type="uuid">
@@ -81,13 +81,15 @@
             </column>
             <column name="project_id" type="uuid"/>
             <column name="registration_key" type="varchar(255)">
-                <constraints nullable="false" unique="true" uniqueConstraintName="uk_agents_registration_key"/>
+                <constraints nullable="false" unique="true" uniqueConstraintName="uk_agent_hosts_registration_key"/>
             </column>
             <column name="model_override" type="varchar(50)"/>
             <column name="config" type="text"/>
-            <column name="max_instances" type="integer" defaultValueNumeric="1">
+            <column name="provisions" type="text"/>
+            <column name="max_agents" type="integer" defaultValueNumeric="1">
                 <constraints nullable="false"/>
             </column>
+            <column name="reported_capacity" type="text"/>
             <column name="status" type="varchar(20)" defaultValue="ACTIVE">
                 <constraints nullable="false"/>
             </column>
@@ -97,56 +99,56 @@
             <column name="updated_at" type="timestamp with time zone"/>
         </createTable>
 
-        <createIndex tableName="agents" indexName="idx_agents_profile_id">
+        <createIndex tableName="agent_hosts" indexName="idx_agent_hosts_profile_id">
             <column name="profile_id"/>
         </createIndex>
 
-        <createIndex tableName="agents" indexName="idx_agents_project_id">
+        <createIndex tableName="agent_hosts" indexName="idx_agent_hosts_project_id">
             <column name="project_id"/>
         </createIndex>
 
-        <createIndex tableName="agents" indexName="idx_agents_status">
+        <createIndex tableName="agent_hosts" indexName="idx_agent_hosts_status">
             <column name="status"/>
         </createIndex>
 
         <addForeignKeyConstraint
-            baseTableName="agents"
+            baseTableName="agent_hosts"
             baseColumnNames="profile_id"
             referencedTableName="agent_profiles"
             referencedColumnNames="id"
-            constraintName="fk_agents_profile"
+            constraintName="fk_agent_hosts_profile"
             onDelete="RESTRICT"/>
 
         <addForeignKeyConstraint
-            baseTableName="agents"
+            baseTableName="agent_hosts"
             baseColumnNames="project_id"
             referencedTableName="projects"
             referencedColumnNames="id"
-            constraintName="fk_agents_project"
+            constraintName="fk_agent_hosts_project"
             onDelete="SET NULL"/>
 
         <addForeignKeyConstraint
-            baseTableName="agents"
+            baseTableName="agent_hosts"
             baseColumnNames="model_override"
             referencedTableName="models"
             referencedColumnNames="code"
-            constraintName="fk_agents_model"
+            constraintName="fk_agent_hosts_model"
             onDelete="SET NULL"/>
     </changeSet>
 
-    <changeSet id="20260404-03-create-agent-instances" author="myrmec">
+    <changeSet id="20260404-03-create-agents" author="myrmec">
         <preConditions onFail="MARK_RAN">
             <not>
-                <tableExists tableName="agent_instances"/>
+                <tableExists tableName="agents"/>
             </not>
         </preConditions>
-        <comment>Create agent_instances table - running agent containers/runtimes</comment>
+        <comment>Create agents table - the single-session worker hosted by an agent host</comment>
 
-        <createTable tableName="agent_instances">
+        <createTable tableName="agents">
             <column name="id" type="uuid">
                 <constraints primaryKey="true" nullable="false"/>
             </column>
-            <column name="agent_id" type="uuid">
+            <column name="agent_host_id" type="uuid">
                 <constraints nullable="false"/>
             </column>
             <column name="hostname" type="varchar(255)"/>
@@ -159,27 +161,29 @@
             <column name="registered_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
                 <constraints nullable="false"/>
             </column>
+            <column name="conversation_id" type="uuid"/>
+            <column name="profile_version_id" type="uuid"/>
             <column name="metadata" type="text"/>
         </createTable>
 
-        <createIndex tableName="agent_instances" indexName="idx_agent_instances_agent_id">
-            <column name="agent_id"/>
+        <createIndex tableName="agents" indexName="idx_agents_agent_host_id">
+            <column name="agent_host_id"/>
         </createIndex>
 
-        <createIndex tableName="agent_instances" indexName="idx_agent_instances_status">
+        <createIndex tableName="agents" indexName="idx_agents_status">
             <column name="status"/>
         </createIndex>
 
-        <createIndex tableName="agent_instances" indexName="idx_agent_instances_last_heartbeat">
+        <createIndex tableName="agents" indexName="idx_agents_last_heartbeat">
             <column name="last_heartbeat_at"/>
         </createIndex>
 
         <addForeignKeyConstraint
-            baseTableName="agent_instances"
-            baseColumnNames="agent_id"
-            referencedTableName="agents"
+            baseTableName="agents"
+            baseColumnNames="agent_host_id"
+            referencedTableName="agent_hosts"
             referencedColumnNames="id"
-            constraintName="fk_agent_instances_agent"
+            constraintName="fk_agents_host"
             onDelete="CASCADE"/>
     </changeSet>
 

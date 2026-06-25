@@ -102,6 +102,7 @@ public class ModelService {
         }
         
         model.setRequiresAuth(request.getRequiresAuth() != null ? request.getRequiresAuth() : providerConfig.isRequiresAuth());
+        model.setSupportsVision(request.getSupportsVision() != null && request.getSupportsVision());
         model.setInfraConfig(request.getInfraConfig());
         model.setDefaultParams(request.getDefaultParams());
         model.setStatus(ModelStatus.ACTIVE);
@@ -141,6 +142,10 @@ public class ModelService {
 
         if (request.getRequiresAuth() != null) {
             model.setRequiresAuth(request.getRequiresAuth());
+        }
+
+        if (request.getSupportsVision() != null) {
+            model.setSupportsVision(request.getSupportsVision());
         }
 
         if (request.getInfraConfig() != null) {

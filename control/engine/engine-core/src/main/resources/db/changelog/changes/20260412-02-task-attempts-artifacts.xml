@@ -98,7 +98,7 @@
         <addForeignKeyConstraint
             baseTableName="task_attempts"
             baseColumnNames="agent_instance_id"
-            referencedTableName="agent_instances"
+            referencedTableName="agents"
             referencedColumnNames="id"
             constraintName="fk_task_attempts_agent_instance"
             onDelete="SET NULL"/>

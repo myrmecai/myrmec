@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+      Wave 1 #113 Execution Approvals (Phase 2): Merge execution-source approvals
+      (DESTRUCTIVE tool calls) into the unified My Work queue alongside conversation
+      approvals. This changeset adds approval tracking columns to workflow_tasks table
+      to parallel ConversationMessage approval fields.
+
+      New columns:
+      - requires_approval: Flag set when tool marked DESTRUCTIVE
+      - approval_status: PENDING | APPROVED | REJECTED | EXPIRED (tracks approval FSM)
+      - approval_payload: JSONB with tool call details for approvers
+      - approval_requested_at: When approval workflow initiated
+      - approval_expires_at: Optional expiry; null = never expires
+    -->
+
+    <changeSet id="20260623-02-execution-approvals" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="workflow_tasks"/>
+            <not>
+                <columnExists tableName="workflow_tasks" columnName="requires_approval"/>
+            </not>
+        </preConditions>
+        <addColumn tableName="workflow_tasks">
+            <column name="requires_approval" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="approval_status" type="varchar(20)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="approval_payload" type="text"/>
+            <column name="approval_requested_at" type="timestamp with time zone"/>
+            <column name="approval_expires_at" type="timestamp with time zone"/>
+        </addColumn>
+    </changeSet>
+
+    <!-- Index for querying pending approvals (for My Work approvals tab) -->
+    <changeSet id="20260623-02-01-approval-status-index" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_workflow_tasks_approval_status"/>
+            </not>
+        </preConditions>
+        <createIndex tableName="workflow_tasks" indexName="idx_workflow_tasks_approval_status">
+            <column name="approval_status"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

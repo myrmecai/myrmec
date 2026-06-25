@@ -84,6 +84,28 @@ public class QuotaAdminController {
     }
 
     /**
+     * Phase 8c &mdash; pause a quota at 120% consumption. Requires admin to manually resume.
+     */
+    @PostMapping("/{id}/pause")
+    public QuotaResponse pause(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal UserPrincipal principal) {
+        Quota paused = quotaService.pause(id, principal != null ? principal.getUserId() : null);
+        return QuotaResponse.from(paused);
+    }
+
+    /**
+     * Phase 8c &mdash; resume a paused quota, re-enabling consumption checks.
+     */
+    @PostMapping("/{id}/resume")
+    public QuotaResponse resume(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal UserPrincipal principal) {
+        Quota resumed = quotaService.resume(id, principal != null ? principal.getUserId() : null);
+        return QuotaResponse.from(resumed);
+    }
+
+    /**
      * Returns the policy decision for the given scope/resource as if we
      * were about to charge {@code amount}. The UI uses this for the
      * 80% warning band and the 100% red banner.

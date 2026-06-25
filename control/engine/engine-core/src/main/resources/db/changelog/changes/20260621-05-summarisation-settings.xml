@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+      Context-window summarisation trigger (#8). The summariser model itself
+      reuses the pre-existing `summarizer_model_code` seed (empty = fall back to
+      the conversation's own model); only the trigger threshold is new here.
+
+      A message-count trigger (not the aspirational `summary_trigger_ratio`,
+      which would need a per-model context-window column the `models` registry
+      doesn't carry yet) keeps V1 self-contained. Standalone idempotent insert
+      (guarded per-key) so it lands on existing installs whose system_settings
+      seed has already run.
+    -->
+    <changeSet id="20260621-05-summary-trigger-message-count" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="system_settings"/>
+            <sqlCheck expectedResult="0">
+                SELECT COUNT(*) FROM system_settings WHERE setting_key = 'summary_trigger_message_count'
+            </sqlCheck>
+        </preConditions>
+        <insert tableName="system_settings">
+            <column name="setting_key" value="summary_trigger_message_count"/>
+            <column name="value_type" value="INT"/>
+            <column name="setting_value" value="40"/>
+            <column name="description" value="Number of active, un-pinned, not-yet-summarised messages beyond which the engine compacts the older overflow (everything past the recent window) into a single CONTEXT_SUMMARY. 0 disables automatic summarisation. Default 40 (2x the recent window)."/>
+        </insert>
+    </changeSet>
+
+</databaseChangeLog>

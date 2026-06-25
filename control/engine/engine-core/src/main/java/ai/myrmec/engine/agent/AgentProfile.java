@@ -97,6 +97,14 @@ public class AgentProfile {
     @Column(name = "is_system", nullable = false)
     private boolean isSystem = false;
 
+    /**
+     * Whether an Assistant built on this profile may supply an addendum prompt
+     * (#92, assistant-entity.md §4.2). FALSE greys the addendum field in the
+     * Assistant form and fails the publish gate if an addendum is set.
+     */
+    @Column(name = "addendum_allowed", nullable = false)
+    private boolean addendumAllowed = true;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private Status status = Status.ACTIVE;

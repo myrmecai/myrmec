@@ -1,10 +1,10 @@
 package ai.myrmec.engine.websocket;
 
 import ai.myrmec.engine._system.security.JwtTokenProvider;
+import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.Agent;
-import ai.myrmec.engine.agent.AgentInstance;
-import ai.myrmec.engine.agent.AgentInstanceRepository;
 import ai.myrmec.engine.agent.AgentRepository;
+import ai.myrmec.engine.agent.AgentHostRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.server.ServerHttpRequest;
@@ -27,11 +27,11 @@ import java.util.UUID;
 public class AgentWebSocketHandshakeInterceptor implements HandshakeInterceptor {
 
     private final JwtTokenProvider jwtTokenProvider;
-    private final AgentInstanceRepository agentInstanceRepository;
-    private final AgentRepository agentRepository;
+    private final AgentRepository agentInstanceRepository;
+    private final AgentHostRepository agentRepository;
 
-    private static final String ATTR_AGENT_INSTANCE_ID = "agentInstanceId";
-    private static final String ATTR_AGENT_NAME = "agentName";
+    public static final String ATTR_AGENT_INSTANCE_ID = "agentInstanceId";
+    public static final String ATTR_AGENT_NAME = "agentName";
 
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
@@ -60,16 +60,16 @@ public class AgentWebSocketHandshakeInterceptor implements HandshakeInterceptor 
         UUID agentInstanceId = jwtTokenProvider.getSubjectId(token);
 
         // Verify agent instance exists and agent is active
-        AgentInstance instance = agentInstanceRepository.findById(agentInstanceId).orElse(null);
+        Agent instance = agentInstanceRepository.findById(agentInstanceId).orElse(null);
         if (instance == null) {
             log.warn("WebSocket handshake rejected: agent instance {} not found", agentInstanceId);
             return false;
         }
 
         // Verify parent agent is active
-        Agent agent = agentRepository.findById(instance.getAgentId()).orElse(null);
-        if (agent == null || agent.getStatus() != Agent.Status.ACTIVE) {
-            log.warn("WebSocket handshake rejected: agent {} is not active", instance.getAgentId());
+        AgentHost agent = agentRepository.findById(instance.getAgentHostId()).orElse(null);
+        if (agent == null || agent.getStatus() != AgentHost.Status.ACTIVE) {
+            log.warn("WebSocket handshake rejected: agent {} is not active", instance.getAgentHostId());
             return false;
         }
 

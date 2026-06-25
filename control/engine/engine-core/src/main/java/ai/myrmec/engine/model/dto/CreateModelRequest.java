@@ -43,6 +43,8 @@ public class CreateModelRequest {
 
     private Boolean requiresAuth;
 
+    private Boolean supportsVision;
+
     private Map<String, Object> infraConfig;
 
     private Map<String, Object> defaultParams;

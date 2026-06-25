@@ -7,7 +7,7 @@ spring:
     name: myrmec-control-engine
 
   datasource:
-    url: jdbc:h2:mem:e2edb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    url: jdbc:h2:mem:e2edb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL;LOCK_TIMEOUT=30000
     driver-class-name: org.h2.Driver
     username: sa
     password:
@@ -46,6 +46,23 @@ myrmec:
   encryption:
     key: e2e-test-encryption-key-32-bytes!
     previous-keys: ""
+  # Node registry is a production multi-replica concern. Every test context
+  # shares the one in-memory H2 db and resolves the same hostname, so leaving
+  # self-registration on would collide on the engine_nodes PK across cached
+  # contexts. The table/entity still exist (Liquibase builds them); the timers
+  # just don't run under test.
+  node:
+    registry:
+      enabled: false
+  # Warm-worker FSM reaper (slice 4d). Off under test so an async timer does
+  # not yank RESERVED/CONNECTING/BOUND workers that a test is driving by hand.
+  agent:
+    reaper:
+      enabled: false
+    # Home-node failover sweep (slice #106a). Off under test for the same
+    # reason as the reaper — a test re-homes BOUND/CONNECTING workers by hand.
+    failover:
+      enabled: false
 
 # API Documentation
 springdoc:

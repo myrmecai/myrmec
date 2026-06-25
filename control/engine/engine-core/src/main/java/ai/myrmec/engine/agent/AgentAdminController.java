@@ -3,6 +3,7 @@ package ai.myrmec.engine.agent;
 import ai.myrmec.engine._system.exception.ErrorResponse;
 import ai.myrmec.engine.agent.dto.AgentResponse;
 import ai.myrmec.engine.agent.dto.AgentWithKeyResponse;
+import ai.myrmec.engine.agent.dto.AgentWorkerResponse;
 import ai.myrmec.engine.agent.dto.CreateAgentRequest;
 import ai.myrmec.engine.agent.dto.UpdateAgentRequest;
 import ai.myrmec.engine.project.Project;
@@ -47,7 +48,7 @@ public class AgentAdminController {
     })
     @GetMapping
     public ResponseEntity<List<AgentResponse>> listAgents() {
-        List<Agent> agents = agentService.findAll();
+        List<AgentHost> agents = agentService.findAll();
 
         // Fetch profile names
         Map<UUID, String> profileNames = profileService.getAllProfiles().stream()
@@ -77,7 +78,7 @@ public class AgentAdminController {
     })
     @GetMapping("/{id}")
     public ResponseEntity<AgentResponse> getAgent(@PathVariable UUID id) {
-        Agent agent = agentService.getAgent(id);
+        AgentHost agent = agentService.getAgent(id);
         AgentProfile profile = profileService.getProfile(agent.getProfileId());
         String projectName = null;
         if (agent.getProjectId() != null) {
@@ -91,6 +92,22 @@ public class AgentAdminController {
                 projectName,
                 agentService.countOnlineInstances(agent.getId())
         ));
+    }
+
+    @Operation(summary = "List the worker replicas (instances) of an agent host, with their runtime FSM status")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "List of worker replicas"),
+            @ApiResponse(responseCode = "404", description = "Agent not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @GetMapping("/{id}/workers")
+    public ResponseEntity<List<AgentWorkerResponse>> listWorkers(@PathVariable UUID id) {
+        // Validates the host exists (throws 404 otherwise) before listing.
+        agentService.getAgent(id);
+        List<AgentWorkerResponse> workers = agentService.getInstancesForAgent(id).stream()
+                .map(AgentWorkerResponse::from)
+                .toList();
+        return ResponseEntity.ok(workers);
     }
 
     @Operation(summary = "Create a new agent")
@@ -112,7 +129,7 @@ public class AgentAdminController {
                 request.getProjectId(),
                 request.getModelOverride(),
                 request.getConfig(),
-                request.getMaxInstances()
+                request.getMaxAgents()
         );
 
         AgentProfile profile = profileService.getProfile(result.agent().getProfileId());
@@ -145,7 +162,7 @@ public class AgentAdminController {
             @PathVariable UUID id,
             @Valid @RequestBody UpdateAgentRequest request) {
 
-        Agent agent = agentService.updateAgent(
+        AgentHost agent = agentService.updateAgent(
                 id,
                 request.getName(),
                 request.getDescription(),
@@ -153,7 +170,7 @@ public class AgentAdminController {
                 request.getProjectId(),
                 request.getModelOverride(),
                 request.getConfig(),
-                request.getMaxInstances(),
+                request.getMaxAgents(),
                 request.getStatus()
         );
 

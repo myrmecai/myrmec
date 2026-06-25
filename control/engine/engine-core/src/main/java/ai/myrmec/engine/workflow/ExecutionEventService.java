@@ -146,6 +146,23 @@ public class ExecutionEventService {
     }
 
     /**
+     * Record a RAG retrieval audit event (feature #32). Captures the query
+     * and returned chunk/source IDs + scores so an AUDITOR can replay which
+     * knowledge fed an answer. IDs and scores only, never passage text.
+     */
+    @Transactional
+    public ExecutionEvent recordRetrieval(UUID taskId, UUID attemptId, UUID knowledgeBaseId,
+                                          String query, int topK,
+                                          List<UUID> chunkIds, List<UUID> sourceIds,
+                                          List<Double> scores) {
+        ExecutionEvent event = ExecutionEvent.retrieval(
+                taskId, attemptId, knowledgeBaseId, query, topK, chunkIds, sourceIds, scores);
+        event = eventRepository.save(event);
+        publishEvent(event);
+        return event;
+    }
+
+    /**
      * Record a status change.
      */
     @Transactional

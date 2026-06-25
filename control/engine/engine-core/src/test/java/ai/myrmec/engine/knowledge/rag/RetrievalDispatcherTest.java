@@ -1,6 +1,7 @@
 package ai.myrmec.engine.knowledge.rag;
 
 import ai.myrmec.engine.IntegrationTestBase;
+import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine.spi.retrieval.RetrievalException;
 import ai.myrmec.engine.spi.retrieval.RetrievalQuery;
 import ai.myrmec.engine.spi.retrieval.RetrievalResult;
@@ -12,6 +13,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Integration test proving the full Phase 5 RAG chain wires up cleanly:
@@ -90,5 +92,81 @@ class RetrievalDispatcherTest extends IntegrationTestBase {
     @Test
     void dispatcherRegistersStubProvider() {
         assertThat(dispatcher.providersById()).containsKey(StubRetrievalProvider.PROVIDER_ID);
+    }
+
+    @Test
+    void dispatcherRegistersRagflowProvider() {
+        assertThat(dispatcher.providersById())
+                .containsKey(RagflowRetrievalProvider.PROVIDER_ID);
+        assertThat(dispatcher.providersById().get(RagflowRetrievalProvider.PROVIDER_ID))
+                .isInstanceOf(RagflowRetrievalProvider.class);
+    }
+
+    @Test
+    void ragflowKbRoutesToRagflowProvider() {
+        // A KB pinned to provider_id=ragflow must reach the ragflow bean. With no
+        // resolvable secret in the test DB the provider fails fast with a
+        // RetrievalException (proving it routed there, not a 404 from the dispatcher).
+        KnowledgeBase kb = knowledgeBaseService.createSystemBase(
+                "ragflow-route-kb-" + UUID.randomUUID().toString().substring(0, 8),
+                "Routed to ragflow",
+                RagflowRetrievalProvider.PROVIDER_ID,
+                """
+                {
+                  "baseUrl": "http://127.0.0.1:1",
+                  "datasetId": "ds-1",
+                  "apiKeySecretRef": "missing-secret"
+                }""");
+
+        RetrievalQuery query = new RetrievalQuery(kb.getId(), "anything", 5, Map.of());
+        assertThatThrownBy(() -> dispatcher.dispatch(query))
+                .isInstanceOf(RetrievalException.class);
+    }
+
+    @Test
+    void dispatcherRegistersHttpProvider() {
+        assertThat(dispatcher.providersById())
+                .containsKey(HttpRetrievalProvider.PROVIDER_ID);
+        assertThat(dispatcher.providersById().get(HttpRetrievalProvider.PROVIDER_ID))
+                .isInstanceOf(HttpRetrievalProvider.class);
+    }
+
+    @Test
+    void httpKbRoutesToHttpProvider() {
+        // A KB pinned to provider_id=http must reach the http bean. With no
+        // resolvable secret in the test DB the provider fails fast with a
+        // RetrievalException (proving it routed there, not a 404 from the dispatcher).
+        KnowledgeBase kb = knowledgeBaseService.createSystemBase(
+                "http-route-kb-" + UUID.randomUUID().toString().substring(0, 8),
+                "Routed to http",
+                HttpRetrievalProvider.PROVIDER_ID,
+                """
+                {
+                  "endpoint": "http://127.0.0.1:1/search",
+                  "authSecretRef": "missing-secret",
+                  "responseMapping": {
+                    "hitsPath": "$.results",
+                    "passagePath": "$.text",
+                    "sourceNamePath": "$.source",
+                    "locatorPath": "$.url"
+                  }
+                }""");
+
+        RetrievalQuery query = new RetrievalQuery(kb.getId(), "anything", 5, Map.of());
+        assertThatThrownBy(() -> dispatcher.dispatch(query))
+                .isInstanceOf(RetrievalException.class);
+    }
+
+    @Test
+    void unknownProviderIdIsNotFound() {
+        KnowledgeBase kb = knowledgeBaseService.createSystemBase(
+                "unknown-provider-kb-" + UUID.randomUUID().toString().substring(0, 8),
+                "Routed to a non-existent provider",
+                "does-not-exist",
+                null);
+
+        RetrievalQuery query = new RetrievalQuery(kb.getId(), "anything", 5, Map.of());
+        assertThatThrownBy(() -> dispatcher.dispatch(query))
+                .isInstanceOf(ResourceNotFoundException.class);
     }
 }

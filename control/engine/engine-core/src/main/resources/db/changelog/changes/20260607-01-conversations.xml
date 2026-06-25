@@ -39,7 +39,7 @@
             </column>
             <column name="agent_id" type="uuid">
                 <constraints nullable="true" foreignKeyName="fk_conversation_agent"
-                             references="agents(id)"/>
+                             references="agent_hosts(id)"/>
             </column>
             <column name="title" type="varchar(500)"/>
             <!-- ACTIVE / ARCHIVED / DELETED -->
@@ -114,7 +114,7 @@
             </column>
             <column name="author_agent_id" type="uuid">
                 <constraints nullable="true" foreignKeyName="fk_message_author_agent"
-                             references="agents(id)"/>
+                             references="agent_hosts(id)"/>
             </column>
             <column name="content" type="text"/>
             <!-- model_code is informational — actual usage rolls up via task_metrics. -->

@@ -24,6 +24,7 @@ public record WorkflowTaskResponse(
         Instant createdAt,
         Instant startedAt,
         Instant completedAt,
+        List<String> knowledgeSourceIds,
         // New: attempts support
         UUID currentAttemptId,
         List<TaskAttemptResponse> attempts,
@@ -48,11 +49,12 @@ public record WorkflowTaskResponse(
             Integer attempt,
             Instant createdAt,
             Instant startedAt,
-            Instant completedAt
+                        Instant completedAt,
+                        List<String> knowledgeSourceIds
     ) {
         this(id, requestId, stepId, agentProfileId, agentProfileName, agentInstanceId,
                 input, output, status, result, errorMessage, attempt,
-                createdAt, startedAt, completedAt, null, null, null);
+                                createdAt, startedAt, completedAt, knowledgeSourceIds, null, null, null);
     }
 
     /**
@@ -74,10 +76,11 @@ public record WorkflowTaskResponse(
             Instant createdAt,
             Instant startedAt,
             Instant completedAt,
+                        List<String> knowledgeSourceIds,
             Map<String, Object> metrics
     ) {
         this(id, requestId, stepId, agentProfileId, agentProfileName, agentInstanceId,
                 input, output, status, result, errorMessage, attempt,
-                createdAt, startedAt, completedAt, null, null, metrics);
+                                createdAt, startedAt, completedAt, knowledgeSourceIds, null, null, metrics);
     }
 }

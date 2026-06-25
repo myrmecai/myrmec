@@ -1,7 +1,7 @@
 package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine._system.common.JsonMapConverter;
-import ai.myrmec.engine.agent.AgentInstance;
+import ai.myrmec.engine.agent.Agent;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -55,7 +55,7 @@ public class TaskAttempt {
      */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "agent_instance_id")
-    private AgentInstance agentInstance;
+    private Agent agentInstance;
 
     /**
      * Status of this attempt.

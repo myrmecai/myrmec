@@ -3,10 +3,10 @@ package ai.myrmec.engine.auth;
 import ai.myrmec.engine._system.exception.InvalidRegistrationKeyException;
 import ai.myrmec.engine._system.exception.InvalidTokenException;
 import ai.myrmec.engine._system.security.JwtTokenProvider;
+import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.Agent;
-import ai.myrmec.engine.agent.AgentInstance;
-import ai.myrmec.engine.agent.AgentInstanceRepository;
 import ai.myrmec.engine.agent.AgentRepository;
+import ai.myrmec.engine.agent.AgentHostRepository;
 import ai.myrmec.engine.agent.AgentService;
 import ai.myrmec.engine.auth.dto.RefreshRequest;
 import ai.myrmec.engine.auth.dto.RefreshResponse;
@@ -28,8 +28,8 @@ public class AuthService {
 
     private final RegistrationKeyService registrationKeyService;
     private final AgentService agentService;
-    private final AgentRepository agentRepository;
-    private final AgentInstanceRepository agentInstanceRepository;
+    private final AgentHostRepository agentRepository;
+    private final AgentRepository agentInstanceRepository;
     private final JwtTokenProvider jwtTokenProvider;
 
     /**
@@ -42,10 +42,10 @@ public class AuthService {
         String keyValue = request.getRegistrationKey();
 
         // Find the agent definition by registration key
-        Agent agent = agentRepository.findByRegistrationKey(keyValue)
+        AgentHost agent = agentRepository.findByRegistrationKey(keyValue)
                 .orElseThrow(() -> new InvalidRegistrationKeyException("Invalid registration key"));
 
-        if (agent.getStatus() != Agent.Status.ACTIVE) {
+        if (agent.getStatus() != AgentHost.Status.ACTIVE) {
             throw new InvalidRegistrationKeyException("Agent definition is not active");
         }
 
@@ -57,7 +57,7 @@ public class AuthService {
                 });
 
         // Create agent instance
-        AgentInstance instance = agentService.createInstance(
+        Agent instance = agentService.createInstance(
                 agent.getId(),
                 request.getHostname(),
                 request.getIpAddress(),
@@ -102,11 +102,11 @@ public class AuthService {
         UUID instanceId = jwtTokenProvider.getSubjectId(refreshToken);
 
         // Verify instance exists
-        AgentInstance instance = agentInstanceRepository.findById(instanceId)
+        Agent instance = agentInstanceRepository.findById(instanceId)
                 .orElseThrow(() -> new InvalidTokenException("Agent instance not found"));
 
         // Load the agent and verify registration key is still valid
-        Agent agent = agentRepository.findById(instance.getAgentId())
+        AgentHost agent = agentRepository.findById(instance.getAgentHostId())
                 .orElseThrow(() -> new InvalidTokenException("Agent definition not found"));
 
         // Check if registration key has been revoked

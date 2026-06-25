@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Slice 4d — agent FSM reaper clock.
+
+        ``state_changed_at`` records the moment a warm worker last changed
+        FSM status. The reserve/connect-timeout reapers (AgentReaperService)
+        measure age from here: a worker stuck in RESERVED or CONNECTING past
+        the cutoff is reclaimed to IDLE (agent-concurrency §9.5). Distinct
+        from ``last_heartbeat_at`` (liveness, not lifecycle progress).
+    -->
+
+    <changeSet id="20260620-02-agents-state-changed-at" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="agents" columnName="state_changed_at"/>
+            </not>
+        </preConditions>
+        <comment>When this worker last changed FSM status (reserve/connect-timeout reaper clock).</comment>
+
+        <addColumn tableName="agents">
+            <column name="state_changed_at" type="timestamp with time zone"/>
+        </addColumn>
+
+        <createIndex indexName="idx_agents_status_state_changed_at" tableName="agents">
+            <column name="status"/>
+            <column name="state_changed_at"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

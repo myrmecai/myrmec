@@ -1,6 +1,6 @@
 package ai.myrmec.engine.agent.dto;
 
-import ai.myrmec.engine.agent.AgentInstance;
+import ai.myrmec.engine.agent.Agent;
 import lombok.Builder;
 import lombok.Data;
 
@@ -25,10 +25,10 @@ public class AgentInfoResponse {
     private Instant lastHeartbeatAt;
     private Map<String, Object> metadata;
 
-    public static AgentInfoResponse from(AgentInstance instance) {
+    public static AgentInfoResponse from(Agent instance) {
         return AgentInfoResponse.builder()
                 .instanceId(instance.getId())
-                .agentId(instance.getAgentId())
+                .agentId(instance.getAgentHostId())
                 .hostname(instance.getHostname())
                 .ipAddress(instance.getIpAddress())
                 .runtimeVersion(instance.getRuntimeVersion())

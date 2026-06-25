@@ -175,6 +175,31 @@ public class AgentConnectionManager {
             return false;
         }
     }
+
+    /**
+     * Deliver an already-serialized message frame to a locally-connected
+     * worker (slice 4b). Used by the node-relay endpoint when a peer replica
+     * forwards a control message destined for a worker homed on this node:
+     * the JSON is treated as an opaque frame and pushed straight to the
+     * socket, so no untrusted payload is ever deserialized into typed
+     * objects here.
+     *
+     * @return {@code true} if a local socket received the frame, {@code false}
+     *         if no such worker is connected to this replica
+     */
+    public boolean sendRawMessage(UUID agentInstanceId, String frameJson) {
+        return getConnection(agentInstanceId)
+                .map(conn -> {
+                    try {
+                        conn.getSession().sendMessage(new TextMessage(frameJson));
+                        return true;
+                    } catch (IOException e) {
+                        log.error("Failed to relay frame to agent {}: {}", agentInstanceId, e.getMessage());
+                        return false;
+                    }
+                })
+                .orElse(false);
+    }
     
     /**
      * Send ping to all connected agents.

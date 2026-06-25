@@ -49,6 +49,14 @@ public class KnowledgeSource {
     @Column(name = "sync_schedule", length = 100)
     private String syncSchedule;
 
+    /**
+     * Set by an inbound webhook (#25a) to request an out-of-band re-sync. When
+     * non-null the {@code KnowledgeSyncScheduler} syncs this source on its next
+     * tick regardless of {@link #syncSchedule} and clears the stamp.
+     */
+    @Column(name = "sync_requested_at")
+    private Instant syncRequestedAt;
+
     @Column(name = "last_sync_at")
     private Instant lastSyncAt;
 

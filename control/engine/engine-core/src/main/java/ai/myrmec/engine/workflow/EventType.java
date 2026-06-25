@@ -41,5 +41,15 @@ public enum EventType {
      *         modelCallCount, toolCallCount,
      *         promptTokens, completionTokens, totalTokens }
      */
-    TASK_METRICS
+    TASK_METRICS,
+
+    /**
+     * RAG retrieval audit event (emitted when an agent runs a
+     * {@code ctx.retrieve()} query). Records the query and the returned
+     * chunk IDs / source IDs / scores so an AUDITOR can replay exactly
+     * which knowledge fed an answer; never the passage text itself.
+     * Data: { knowledgeBaseId, query, topK, hitCount, chunkIds[],
+     *         sourceIds[], scores[] }
+     */
+    RETRIEVAL
 }

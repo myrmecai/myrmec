@@ -142,4 +142,63 @@ class QuotaServiceTest extends IntegrationTestBase {
                 10_000_000L, true, null, null);
         assertThat(q.getLimitAmount()).isEqualTo(10_000_000L);
     }
+
+    @Test
+    void pause_setsTimestampAndPausedBy_emitsAuditRow() {
+        UUID projectId = UUID.randomUUID();
+        Quota q = quotaService.create(
+                Quota.Scope.PROJECT, projectId,
+                Quota.ResourceType.TOKENS, Quota.Period.DAILY,
+                500L, true, null, null);
+
+        UUID pausedBy = UUID.randomUUID();
+        Quota paused = quotaService.pause(q.getId(), pausedBy);
+
+        assertThat(paused.getPausedAt()).isNotNull();
+        assertThat(paused.getPausedBy()).isEqualTo(pausedBy);
+
+        long pausedAudits = auditLogEntryRepository.findAll().stream()
+                .filter(r -> "QUOTA_PAUSED".equals(r.getAction()))
+                .count();
+        assertThat(pausedAudits).isEqualTo(1L);
+    }
+
+    @Test
+    void resume_clearsTimestamp_emitsAuditRow() {
+        UUID projectId = UUID.randomUUID();
+        Quota q = quotaService.create(
+                Quota.Scope.PROJECT, projectId,
+                Quota.ResourceType.TOKENS, Quota.Period.DAILY,
+                500L, true, null, null);
+
+        UUID pausedBy = UUID.randomUUID();
+        quotaService.pause(q.getId(), pausedBy);
+
+        UUID resumedBy = UUID.randomUUID();
+        Quota resumed = quotaService.resume(q.getId(), resumedBy);
+
+        assertThat(resumed.getPausedAt()).isNull();
+        assertThat(resumed.getPausedBy()).isNull();
+
+        long resumedAudits = auditLogEntryRepository.findAll().stream()
+                .filter(r -> "QUOTA_RESUMED".equals(r.getAction()))
+                .count();
+        assertThat(resumedAudits).isEqualTo(1L);
+    }
+
+    @Test
+    void update_recordsQuotaChange_emitsQuotaLimitChangedAudit() {
+        UUID projectId = UUID.randomUUID();
+        Quota q = quotaService.create(
+                Quota.Scope.PROJECT, projectId,
+                Quota.ResourceType.TOKENS, Quota.Period.DAILY,
+                500L, true, null, null);
+
+        quotaService.update(q.getId(), 1000L, true, null);
+
+        long changeAudits = auditLogEntryRepository.findAll().stream()
+                .filter(r -> "QUOTA_LIMIT_CHANGED".equals(r.getAction()))
+                .count();
+        assertThat(changeAudits).isEqualTo(1L);
+    }
 }

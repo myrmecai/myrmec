@@ -15,6 +15,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
 import { Route as AuthenticatedToolsRouteImport } from './routes/_authenticated/tools'
 import { Route as AuthenticatedProjectsRouteImport } from './routes/_authenticated/projects'
+import { Route as AuthenticatedMyWorkRouteImport } from './routes/_authenticated/my-work'
 import { Route as AuthenticatedModelsRouteImport } from './routes/_authenticated/models'
 import { Route as AuthenticatedKnowledgeRouteImport } from './routes/_authenticated/knowledge'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
@@ -22,6 +23,9 @@ import { Route as AuthenticatedAuthProvidersRouteImport } from './routes/_authen
 import { Route as AuthenticatedAgentsRouteImport } from './routes/_authenticated/agents'
 import { Route as AuthenticatedAgentProfilesRouteImport } from './routes/_authenticated/agent-profiles'
 import { Route as AuthenticatedWorkflowsIndexRouteImport } from './routes/_authenticated/workflows/index'
+import { Route as AuthenticatedAssistantsIndexRouteImport } from './routes/_authenticated/assistants/index'
+import { Route as AuthenticatedAdminSystemSettingsRouteImport } from './routes/_authenticated/admin/system-settings'
+import { Route as AuthenticatedAdminServiceTypesRouteImport } from './routes/_authenticated/admin/service-types'
 import { Route as AuthenticatedAdminSecretsRouteImport } from './routes/_authenticated/admin/secrets'
 import { Route as AuthenticatedAdminQuotasRouteImport } from './routes/_authenticated/admin/quotas'
 import { Route as AuthenticatedAdminProvidersRouteImport } from './routes/_authenticated/admin/providers'
@@ -31,8 +35,10 @@ import { Route as AuthenticatedWorkflowsWorkflowIdRequestsRouteImport } from './
 import { Route as AuthenticatedWorkflowsWorkflowIdEditRouteImport } from './routes/_authenticated/workflows/$workflowId.edit'
 import { Route as AuthenticatedProjectsProjectIdSecretsRouteImport } from './routes/_authenticated/projects/$projectId.secrets'
 import { Route as AuthenticatedProjectsProjectIdMembersRouteImport } from './routes/_authenticated/projects/$projectId.members'
+import { Route as AuthenticatedProjectsProjectIdKnowledgeBasesRouteImport } from './routes/_authenticated/projects/$projectId.knowledge-bases'
 import { Route as AuthenticatedProjectsProjectIdKnowledgeRouteImport } from './routes/_authenticated/projects/$projectId.knowledge'
 import { Route as AuthenticatedProjectsProjectIdChatRouteImport } from './routes/_authenticated/projects/$projectId.chat'
+import { Route as AuthenticatedAssistantsAssistantIdEditRouteImport } from './routes/_authenticated/assistants/$assistantId.edit'
 import { Route as AuthenticatedWorkflowsWorkflowIdRequestsRequestIdRouteImport } from './routes/_authenticated/workflows/$workflowId.requests.$requestId'
 
 const LoginRoute = LoginRouteImport.update({
@@ -62,6 +68,11 @@ const AuthenticatedToolsRoute = AuthenticatedToolsRouteImport.update({
 const AuthenticatedProjectsRoute = AuthenticatedProjectsRouteImport.update({
   id: '/projects',
   path: '/projects',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedMyWorkRoute = AuthenticatedMyWorkRouteImport.update({
+  id: '/my-work',
+  path: '/my-work',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
 const AuthenticatedModelsRoute = AuthenticatedModelsRouteImport.update({
@@ -100,6 +111,24 @@ const AuthenticatedWorkflowsIndexRoute =
   AuthenticatedWorkflowsIndexRouteImport.update({
     id: '/workflows/',
     path: '/workflows/',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedAssistantsIndexRoute =
+  AuthenticatedAssistantsIndexRouteImport.update({
+    id: '/assistants/',
+    path: '/assistants/',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedAdminSystemSettingsRoute =
+  AuthenticatedAdminSystemSettingsRouteImport.update({
+    id: '/admin/system-settings',
+    path: '/admin/system-settings',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedAdminServiceTypesRoute =
+  AuthenticatedAdminServiceTypesRouteImport.update({
+    id: '/admin/service-types',
+    path: '/admin/service-types',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
 const AuthenticatedAdminSecretsRoute =
@@ -156,6 +185,12 @@ const AuthenticatedProjectsProjectIdMembersRoute =
     path: '/$projectId/members',
     getParentRoute: () => AuthenticatedProjectsRoute,
   } as any)
+const AuthenticatedProjectsProjectIdKnowledgeBasesRoute =
+  AuthenticatedProjectsProjectIdKnowledgeBasesRouteImport.update({
+    id: '/$projectId/knowledge-bases',
+    path: '/$projectId/knowledge-bases',
+    getParentRoute: () => AuthenticatedProjectsRoute,
+  } as any)
 const AuthenticatedProjectsProjectIdKnowledgeRoute =
   AuthenticatedProjectsProjectIdKnowledgeRouteImport.update({
     id: '/$projectId/knowledge',
@@ -167,6 +202,12 @@ const AuthenticatedProjectsProjectIdChatRoute =
     id: '/$projectId/chat',
     path: '/$projectId/chat',
     getParentRoute: () => AuthenticatedProjectsRoute,
+  } as any)
+const AuthenticatedAssistantsAssistantIdEditRoute =
+  AuthenticatedAssistantsAssistantIdEditRouteImport.update({
+    id: '/assistants/$assistantId/edit',
+    path: '/assistants/$assistantId/edit',
+    getParentRoute: () => AuthenticatedRoute,
   } as any)
 const AuthenticatedWorkflowsWorkflowIdRequestsRequestIdRoute =
   AuthenticatedWorkflowsWorkflowIdRequestsRequestIdRouteImport.update({
@@ -184,6 +225,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/knowledge': typeof AuthenticatedKnowledgeRoute
   '/models': typeof AuthenticatedModelsRoute
+  '/my-work': typeof AuthenticatedMyWorkRoute
   '/projects': typeof AuthenticatedProjectsRouteWithChildren
   '/tools': typeof AuthenticatedToolsRoute
   '/users': typeof AuthenticatedUsersRoute
@@ -191,9 +233,14 @@ export interface FileRoutesByFullPath {
   '/admin/providers': typeof AuthenticatedAdminProvidersRoute
   '/admin/quotas': typeof AuthenticatedAdminQuotasRoute
   '/admin/secrets': typeof AuthenticatedAdminSecretsRoute
+  '/admin/service-types': typeof AuthenticatedAdminServiceTypesRoute
+  '/admin/system-settings': typeof AuthenticatedAdminSystemSettingsRoute
+  '/assistants/': typeof AuthenticatedAssistantsIndexRoute
   '/workflows/': typeof AuthenticatedWorkflowsIndexRoute
+  '/assistants/$assistantId/edit': typeof AuthenticatedAssistantsAssistantIdEditRoute
   '/projects/$projectId/chat': typeof AuthenticatedProjectsProjectIdChatRoute
   '/projects/$projectId/knowledge': typeof AuthenticatedProjectsProjectIdKnowledgeRoute
+  '/projects/$projectId/knowledge-bases': typeof AuthenticatedProjectsProjectIdKnowledgeBasesRoute
   '/projects/$projectId/members': typeof AuthenticatedProjectsProjectIdMembersRoute
   '/projects/$projectId/secrets': typeof AuthenticatedProjectsProjectIdSecretsRoute
   '/workflows/$workflowId/edit': typeof AuthenticatedWorkflowsWorkflowIdEditRoute
@@ -210,6 +257,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/knowledge': typeof AuthenticatedKnowledgeRoute
   '/models': typeof AuthenticatedModelsRoute
+  '/my-work': typeof AuthenticatedMyWorkRoute
   '/projects': typeof AuthenticatedProjectsRouteWithChildren
   '/tools': typeof AuthenticatedToolsRoute
   '/users': typeof AuthenticatedUsersRoute
@@ -217,9 +265,14 @@ export interface FileRoutesByTo {
   '/admin/providers': typeof AuthenticatedAdminProvidersRoute
   '/admin/quotas': typeof AuthenticatedAdminQuotasRoute
   '/admin/secrets': typeof AuthenticatedAdminSecretsRoute
+  '/admin/service-types': typeof AuthenticatedAdminServiceTypesRoute
+  '/admin/system-settings': typeof AuthenticatedAdminSystemSettingsRoute
+  '/assistants': typeof AuthenticatedAssistantsIndexRoute
   '/workflows': typeof AuthenticatedWorkflowsIndexRoute
+  '/assistants/$assistantId/edit': typeof AuthenticatedAssistantsAssistantIdEditRoute
   '/projects/$projectId/chat': typeof AuthenticatedProjectsProjectIdChatRoute
   '/projects/$projectId/knowledge': typeof AuthenticatedProjectsProjectIdKnowledgeRoute
+  '/projects/$projectId/knowledge-bases': typeof AuthenticatedProjectsProjectIdKnowledgeBasesRoute
   '/projects/$projectId/members': typeof AuthenticatedProjectsProjectIdMembersRoute
   '/projects/$projectId/secrets': typeof AuthenticatedProjectsProjectIdSecretsRoute
   '/workflows/$workflowId/edit': typeof AuthenticatedWorkflowsWorkflowIdEditRoute
@@ -238,6 +291,7 @@ export interface FileRoutesById {
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/knowledge': typeof AuthenticatedKnowledgeRoute
   '/_authenticated/models': typeof AuthenticatedModelsRoute
+  '/_authenticated/my-work': typeof AuthenticatedMyWorkRoute
   '/_authenticated/projects': typeof AuthenticatedProjectsRouteWithChildren
   '/_authenticated/tools': typeof AuthenticatedToolsRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
@@ -245,9 +299,14 @@ export interface FileRoutesById {
   '/_authenticated/admin/providers': typeof AuthenticatedAdminProvidersRoute
   '/_authenticated/admin/quotas': typeof AuthenticatedAdminQuotasRoute
   '/_authenticated/admin/secrets': typeof AuthenticatedAdminSecretsRoute
+  '/_authenticated/admin/service-types': typeof AuthenticatedAdminServiceTypesRoute
+  '/_authenticated/admin/system-settings': typeof AuthenticatedAdminSystemSettingsRoute
+  '/_authenticated/assistants/': typeof AuthenticatedAssistantsIndexRoute
   '/_authenticated/workflows/': typeof AuthenticatedWorkflowsIndexRoute
+  '/_authenticated/assistants/$assistantId/edit': typeof AuthenticatedAssistantsAssistantIdEditRoute
   '/_authenticated/projects/$projectId/chat': typeof AuthenticatedProjectsProjectIdChatRoute
   '/_authenticated/projects/$projectId/knowledge': typeof AuthenticatedProjectsProjectIdKnowledgeRoute
+  '/_authenticated/projects/$projectId/knowledge-bases': typeof AuthenticatedProjectsProjectIdKnowledgeBasesRoute
   '/_authenticated/projects/$projectId/members': typeof AuthenticatedProjectsProjectIdMembersRoute
   '/_authenticated/projects/$projectId/secrets': typeof AuthenticatedProjectsProjectIdSecretsRoute
   '/_authenticated/workflows/$workflowId/edit': typeof AuthenticatedWorkflowsWorkflowIdEditRoute
@@ -266,6 +325,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/knowledge'
     | '/models'
+    | '/my-work'
     | '/projects'
     | '/tools'
     | '/users'
@@ -273,9 +333,14 @@ export interface FileRouteTypes {
     | '/admin/providers'
     | '/admin/quotas'
     | '/admin/secrets'
+    | '/admin/service-types'
+    | '/admin/system-settings'
+    | '/assistants/'
     | '/workflows/'
+    | '/assistants/$assistantId/edit'
     | '/projects/$projectId/chat'
     | '/projects/$projectId/knowledge'
+    | '/projects/$projectId/knowledge-bases'
     | '/projects/$projectId/members'
     | '/projects/$projectId/secrets'
     | '/workflows/$workflowId/edit'
@@ -292,6 +357,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/knowledge'
     | '/models'
+    | '/my-work'
     | '/projects'
     | '/tools'
     | '/users'
@@ -299,9 +365,14 @@ export interface FileRouteTypes {
     | '/admin/providers'
     | '/admin/quotas'
     | '/admin/secrets'
+    | '/admin/service-types'
+    | '/admin/system-settings'
+    | '/assistants'
     | '/workflows'
+    | '/assistants/$assistantId/edit'
     | '/projects/$projectId/chat'
     | '/projects/$projectId/knowledge'
+    | '/projects/$projectId/knowledge-bases'
     | '/projects/$projectId/members'
     | '/projects/$projectId/secrets'
     | '/workflows/$workflowId/edit'
@@ -319,6 +390,7 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard'
     | '/_authenticated/knowledge'
     | '/_authenticated/models'
+    | '/_authenticated/my-work'
     | '/_authenticated/projects'
     | '/_authenticated/tools'
     | '/_authenticated/users'
@@ -326,9 +398,14 @@ export interface FileRouteTypes {
     | '/_authenticated/admin/providers'
     | '/_authenticated/admin/quotas'
     | '/_authenticated/admin/secrets'
+    | '/_authenticated/admin/service-types'
+    | '/_authenticated/admin/system-settings'
+    | '/_authenticated/assistants/'
     | '/_authenticated/workflows/'
+    | '/_authenticated/assistants/$assistantId/edit'
     | '/_authenticated/projects/$projectId/chat'
     | '/_authenticated/projects/$projectId/knowledge'
+    | '/_authenticated/projects/$projectId/knowledge-bases'
     | '/_authenticated/projects/$projectId/members'
     | '/_authenticated/projects/$projectId/secrets'
     | '/_authenticated/workflows/$workflowId/edit'
@@ -387,6 +464,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProjectsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/my-work': {
+      id: '/_authenticated/my-work'
+      path: '/my-work'
+      fullPath: '/my-work'
+      preLoaderRoute: typeof AuthenticatedMyWorkRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/models': {
       id: '/_authenticated/models'
       path: '/models'
@@ -434,6 +518,27 @@ declare module '@tanstack/react-router' {
       path: '/workflows'
       fullPath: '/workflows/'
       preLoaderRoute: typeof AuthenticatedWorkflowsIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/assistants/': {
+      id: '/_authenticated/assistants/'
+      path: '/assistants'
+      fullPath: '/assistants/'
+      preLoaderRoute: typeof AuthenticatedAssistantsIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/admin/system-settings': {
+      id: '/_authenticated/admin/system-settings'
+      path: '/admin/system-settings'
+      fullPath: '/admin/system-settings'
+      preLoaderRoute: typeof AuthenticatedAdminSystemSettingsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/admin/service-types': {
+      id: '/_authenticated/admin/service-types'
+      path: '/admin/service-types'
+      fullPath: '/admin/service-types'
+      preLoaderRoute: typeof AuthenticatedAdminServiceTypesRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/admin/secrets': {
@@ -499,6 +604,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProjectsProjectIdMembersRouteImport
       parentRoute: typeof AuthenticatedProjectsRoute
     }
+    '/_authenticated/projects/$projectId/knowledge-bases': {
+      id: '/_authenticated/projects/$projectId/knowledge-bases'
+      path: '/$projectId/knowledge-bases'
+      fullPath: '/projects/$projectId/knowledge-bases'
+      preLoaderRoute: typeof AuthenticatedProjectsProjectIdKnowledgeBasesRouteImport
+      parentRoute: typeof AuthenticatedProjectsRoute
+    }
     '/_authenticated/projects/$projectId/knowledge': {
       id: '/_authenticated/projects/$projectId/knowledge'
       path: '/$projectId/knowledge'
@@ -513,6 +625,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProjectsProjectIdChatRouteImport
       parentRoute: typeof AuthenticatedProjectsRoute
     }
+    '/_authenticated/assistants/$assistantId/edit': {
+      id: '/_authenticated/assistants/$assistantId/edit'
+      path: '/assistants/$assistantId/edit'
+      fullPath: '/assistants/$assistantId/edit'
+      preLoaderRoute: typeof AuthenticatedAssistantsAssistantIdEditRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/workflows/$workflowId/requests/$requestId': {
       id: '/_authenticated/workflows/$workflowId/requests/$requestId'
       path: '/$requestId'
@@ -526,6 +645,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedProjectsRouteChildren {
   AuthenticatedProjectsProjectIdChatRoute: typeof AuthenticatedProjectsProjectIdChatRoute
   AuthenticatedProjectsProjectIdKnowledgeRoute: typeof AuthenticatedProjectsProjectIdKnowledgeRoute
+  AuthenticatedProjectsProjectIdKnowledgeBasesRoute: typeof AuthenticatedProjectsProjectIdKnowledgeBasesRoute
   AuthenticatedProjectsProjectIdMembersRoute: typeof AuthenticatedProjectsProjectIdMembersRoute
   AuthenticatedProjectsProjectIdSecretsRoute: typeof AuthenticatedProjectsProjectIdSecretsRoute
 }
@@ -535,6 +655,8 @@ const AuthenticatedProjectsRouteChildren: AuthenticatedProjectsRouteChildren = {
     AuthenticatedProjectsProjectIdChatRoute,
   AuthenticatedProjectsProjectIdKnowledgeRoute:
     AuthenticatedProjectsProjectIdKnowledgeRoute,
+  AuthenticatedProjectsProjectIdKnowledgeBasesRoute:
+    AuthenticatedProjectsProjectIdKnowledgeBasesRoute,
   AuthenticatedProjectsProjectIdMembersRoute:
     AuthenticatedProjectsProjectIdMembersRoute,
   AuthenticatedProjectsProjectIdSecretsRoute:
@@ -568,6 +690,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedKnowledgeRoute: typeof AuthenticatedKnowledgeRoute
   AuthenticatedModelsRoute: typeof AuthenticatedModelsRoute
+  AuthenticatedMyWorkRoute: typeof AuthenticatedMyWorkRoute
   AuthenticatedProjectsRoute: typeof AuthenticatedProjectsRouteWithChildren
   AuthenticatedToolsRoute: typeof AuthenticatedToolsRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
@@ -575,7 +698,11 @@ interface AuthenticatedRouteChildren {
   AuthenticatedAdminProvidersRoute: typeof AuthenticatedAdminProvidersRoute
   AuthenticatedAdminQuotasRoute: typeof AuthenticatedAdminQuotasRoute
   AuthenticatedAdminSecretsRoute: typeof AuthenticatedAdminSecretsRoute
+  AuthenticatedAdminServiceTypesRoute: typeof AuthenticatedAdminServiceTypesRoute
+  AuthenticatedAdminSystemSettingsRoute: typeof AuthenticatedAdminSystemSettingsRoute
+  AuthenticatedAssistantsIndexRoute: typeof AuthenticatedAssistantsIndexRoute
   AuthenticatedWorkflowsIndexRoute: typeof AuthenticatedWorkflowsIndexRoute
+  AuthenticatedAssistantsAssistantIdEditRoute: typeof AuthenticatedAssistantsAssistantIdEditRoute
   AuthenticatedWorkflowsWorkflowIdEditRoute: typeof AuthenticatedWorkflowsWorkflowIdEditRoute
   AuthenticatedWorkflowsWorkflowIdRequestsRoute: typeof AuthenticatedWorkflowsWorkflowIdRequestsRouteWithChildren
   AuthenticatedAdminGroupsIndexRoute: typeof AuthenticatedAdminGroupsIndexRoute
@@ -588,6 +715,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedKnowledgeRoute: AuthenticatedKnowledgeRoute,
   AuthenticatedModelsRoute: AuthenticatedModelsRoute,
+  AuthenticatedMyWorkRoute: AuthenticatedMyWorkRoute,
   AuthenticatedProjectsRoute: AuthenticatedProjectsRouteWithChildren,
   AuthenticatedToolsRoute: AuthenticatedToolsRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
@@ -595,7 +723,12 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAdminProvidersRoute: AuthenticatedAdminProvidersRoute,
   AuthenticatedAdminQuotasRoute: AuthenticatedAdminQuotasRoute,
   AuthenticatedAdminSecretsRoute: AuthenticatedAdminSecretsRoute,
+  AuthenticatedAdminServiceTypesRoute: AuthenticatedAdminServiceTypesRoute,
+  AuthenticatedAdminSystemSettingsRoute: AuthenticatedAdminSystemSettingsRoute,
+  AuthenticatedAssistantsIndexRoute: AuthenticatedAssistantsIndexRoute,
   AuthenticatedWorkflowsIndexRoute: AuthenticatedWorkflowsIndexRoute,
+  AuthenticatedAssistantsAssistantIdEditRoute:
+    AuthenticatedAssistantsAssistantIdEditRoute,
   AuthenticatedWorkflowsWorkflowIdEditRoute:
     AuthenticatedWorkflowsWorkflowIdEditRoute,
   AuthenticatedWorkflowsWorkflowIdRequestsRoute:

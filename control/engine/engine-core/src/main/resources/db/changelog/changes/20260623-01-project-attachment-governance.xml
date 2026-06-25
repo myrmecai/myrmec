@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+      #105 Project-level attachment/storage governance posture.
+
+      Adds per-project controls so attachment policy can be tightened by project
+      owners without requiring platform-wide system setting changes:
+      - attachments_enabled
+      - attachment_retention_ttl_days
+      - attachment_max_file_size_bytes
+      - attachment_type_allowlist
+    -->
+
+    <changeSet id="20260623-01-project-attachment-governance" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="projects"/>
+            <not>
+                <columnExists tableName="projects" columnName="attachments_enabled"/>
+            </not>
+        </preConditions>
+        <addColumn tableName="projects">
+            <column name="attachments_enabled" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="attachment_retention_ttl_days" type="int"/>
+            <column name="attachment_max_file_size_bytes" type="bigint"/>
+            <column name="attachment_type_allowlist" type="text"/>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>

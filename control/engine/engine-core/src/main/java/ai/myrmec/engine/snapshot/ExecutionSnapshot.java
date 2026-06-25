@@ -62,6 +62,26 @@ public class ExecutionSnapshot {
     private String eventType;
 
     /**
+     * Source attribution (#99). Copied from the conversation at write time so
+     * cost/usage reports can split internal ({@code WEB_UI}) from external
+     * ({@code EXTERNAL_API}) spend. Null for non-conversation events.
+     */
+    @Column(name = "source", length = 20)
+    private String source;
+
+    /** Integration that drove an {@code EXTERNAL_API} session (#99). No FK. */
+    @Column(name = "service_account_id")
+    private UUID serviceAccountId;
+
+    /** Opaque caller-side end-user identity for external spend attribution (#99). */
+    @Column(name = "external_user_ref", length = 255)
+    private String externalUserRef;
+
+    /** Human owner of the conversation for {@code WEB_UI} sessions (#99). No FK. */
+    @Column(name = "user_id")
+    private UUID userId;
+
+    /**
      * Inline payload (subject to {@code SnapshotWriter}'s 256KB cap).
      * Null when the row has been migrated to external storage and
      * {@link #payloadUri} is set instead.

@@ -23,6 +23,7 @@ public class ModelResponse {
     private String modelId;
     private String apiEndpoint;
     private boolean requiresAuth;
+    private boolean supportsVision;
     private Map<String, Object> infraConfig;
     private Map<String, Object> defaultParams;
     private ModelStatus status;
@@ -48,6 +49,7 @@ public class ModelResponse {
                 .modelId(model.getModelId())
                 .apiEndpoint(model.getApiEndpoint())
                 .requiresAuth(model.isRequiresAuth())
+                .supportsVision(model.isSupportsVision())
                 .infraConfig(model.getInfraConfig())
                 .defaultParams(model.getDefaultParams())
                 .status(model.getStatus())
@@ -76,6 +78,7 @@ public class ModelResponse {
                 .status(model.getStatus())
                 .healthStatus(model.getHealthStatus())
                 .defaultParams(model.getDefaultParams())
+                .supportsVision(model.isSupportsVision())
                 .build();
     }
 }

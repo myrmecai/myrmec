@@ -53,6 +53,7 @@ public class WorkflowTaskService {
                 task.getCreatedAt(),
                 task.getStartedAt(),
                 task.getCompletedAt(),
+                task.getKnowledgeSourceIds(),
                 task.getMetrics()
         );
     }

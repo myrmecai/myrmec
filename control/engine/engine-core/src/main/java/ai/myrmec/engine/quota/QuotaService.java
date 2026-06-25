@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -75,6 +76,7 @@ public class QuotaService {
                 .orElseThrow(() -> new IllegalArgumentException("Quota not found: " + id));
         validateChildTightensOnly(q.getScopeType(), q.getScopeId(), q.getResourceType(),
                 q.getPeriod(), newLimitAmount);
+        recordQuotaChange(q, newLimitAmount);
         q.setLimitAmount(newLimitAmount);
         q.setEnforced(enforced);
         q.setTags(tags);
@@ -89,6 +91,28 @@ public class QuotaService {
                 .orElseThrow(() -> new IllegalArgumentException("Quota not found: " + id));
         audit("QUOTA_DELETED", q);
         quotaRepository.delete(q);
+    }
+
+    @Transactional
+    public Quota pause(UUID id, UUID pausedBy) {
+        Quota q = quotaRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Quota not found: " + id));
+        q.setPausedAt(Instant.now());
+        q.setPausedBy(pausedBy);
+        Quota saved = quotaRepository.save(q);
+        audit("QUOTA_PAUSED", saved);
+        return saved;
+    }
+
+    @Transactional
+    public Quota resume(UUID id, UUID resumedBy) {
+        Quota q = quotaRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Quota not found: " + id));
+        q.setPausedAt(null);
+        q.setPausedBy(null);
+        Quota saved = quotaRepository.save(q);
+        audit("QUOTA_RESUMED", saved);
+        return saved;
     }
 
     /**
@@ -161,6 +185,26 @@ public class QuotaService {
                         "Quota %s/%d exceeds ORG ceiling of %d for %s/%s",
                         childScope, childLimit, org.getLimitAmount(), resource, period));
             }
+        }
+    }
+
+    private void recordQuotaChange(Quota q, long newLimitAmount) {
+        Map<String, Object> change = new LinkedHashMap<>();
+        change.put("oldLimitAmount", q.getLimitAmount());
+        change.put("newLimitAmount", newLimitAmount);
+        change.put("quotaId", q.getId().toString());
+        change.put("timestamp", Instant.now().toString());
+        try {
+            auditLogService.record(AuditLogService.AuditEvent.builder()
+                    .action("QUOTA_LIMIT_CHANGED")
+                    .resourceType("Quota")
+                    .resourceId(q.getId())
+                    .scopeType(q.getScopeType().name())
+                    .scopeId(q.getScopeId())
+                    .payload(change)
+                    .build());
+        } catch (Exception ex) {
+            log.warn("Quota change audit failed (continuing): {}", ex.getMessage());
         }
     }
 

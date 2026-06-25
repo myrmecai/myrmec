@@ -1,6 +1,6 @@
 package ai.myrmec.engine.testing;
 
-import ai.myrmec.engine.agent.Agent;
+import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentCreationResult;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileService;
@@ -220,7 +220,7 @@ public class TestDataBuilder {
     // ====================================================================
 
     /**
-     * Builder for {@link Agent} fixtures. Yields the {@link
+     * Builder for {@link AgentHost} fixtures. Yields the {@link
      * AgentCreationResult} (agent + plaintext registration key) so tests
      * that need to drive the agent SDK against the freshly-created agent
      * can read the key directly.
@@ -233,7 +233,7 @@ public class TestDataBuilder {
         private UUID profileId;
         private UUID projectId;
         private String modelOverride;
-        private Integer maxInstances = 1;
+        private Integer maxAgents = 1;
 
         public AgentBuilder named(String base) {
             this.name = base;
@@ -278,8 +278,8 @@ public class TestDataBuilder {
             return this;
         }
 
-        public AgentBuilder withMaxInstances(int max) {
-            this.maxInstances = max;
+        public AgentBuilder withMaxAgents(int max) {
+            this.maxAgents = max;
             return this;
         }
 
@@ -297,7 +297,7 @@ public class TestDataBuilder {
                     projectId,
                     modelOverride,
                     null,
-                    maxInstances
+                    maxAgents
             );
         }
     }

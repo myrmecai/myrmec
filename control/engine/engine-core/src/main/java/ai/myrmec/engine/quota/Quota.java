@@ -73,6 +73,15 @@ public class Quota {
     @Column(name = "enforced", nullable = false)
     private boolean enforced = true;
 
+    @Column(name = "max_execution_cost_cents")
+    private Long maxExecutionCostCents;
+
+    @Column(name = "paused_at")
+    private Instant pausedAt;
+
+    @Column(name = "paused_by")
+    private UUID pausedBy;
+
     /** Free-form labels (cost-centre, customer-id). JSON. */
     @Convert(converter = JsonMapConverter.class)
     @Column(name = "tags", columnDefinition = "clob")

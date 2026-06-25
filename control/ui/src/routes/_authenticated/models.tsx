@@ -342,6 +342,7 @@ function CreateModelForm({ providers, onSubmit, isLoading, error }: CreateModelF
       apiEndpoint: (formData.get('apiEndpoint') as string) || undefined,
       apiKey: (formData.get('apiKey') as string) || undefined,
       requiresAuth: formData.get('requiresAuth') === 'on',
+      supportsVision: formData.get('supportsVision') === 'on',
     }
 
     onSubmit(data)
@@ -481,6 +482,19 @@ function CreateModelForm({ providers, onSubmit, isLoading, error }: CreateModelF
           </div>
         )}
 
+        {/* Vision / multimodal capability */}
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="supportsVision"
+            name="supportsVision"
+            className="w-4 h-4"
+          />
+          <Label htmlFor="supportsVision" className="text-sm font-normal cursor-pointer">
+            Supports vision (image inputs)
+          </Label>
+        </div>
+
         {/* API Key */}
         <div className="space-y-2">
           <Label htmlFor="apiKey">
@@ -538,6 +552,7 @@ function EditModelForm({ model, onSubmit, isLoading, error }: EditModelFormProps
       apiEndpoint: (formData.get('apiEndpoint') as string) || undefined,
       apiKey: (formData.get('apiKey') as string) || undefined,
       requiresAuth: formData.get('requiresAuth') === 'on',
+      supportsVision: formData.get('supportsVision') === 'on',
       status: formData.get('status') as 'ACTIVE' | 'INACTIVE',
     }
 
@@ -605,6 +620,20 @@ function EditModelForm({ model, onSubmit, isLoading, error }: EditModelFormProps
             </Label>
           </div>
         )}
+
+        {/* Vision / multimodal capability */}
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="supportsVision"
+            name="supportsVision"
+            defaultChecked={model.supportsVision}
+            className="w-4 h-4"
+          />
+          <Label htmlFor="supportsVision" className="text-sm font-normal cursor-pointer">
+            Supports vision (image inputs)
+          </Label>
+        </div>
 
         {/* API Key */}
         <div className="space-y-2">

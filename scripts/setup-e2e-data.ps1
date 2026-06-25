@@ -9,14 +9,17 @@
 #
 # Creates:
 #   - Tools (file-system, web-browser, code-interpreter, github-api, postgresql)
-#   - Models (gpt-4-turbo, gpt-4o, claude-3-sonnet, ollama-llama3)
-#   - Agent Profile (Fullstack - Spring, Maven, React)
-#   - Agent (Addressbook Fullstack Agent)
-#   - Registration Key + agent-registration.env
+#   - Models (gpt-4-turbo, gpt-4o, claude-3-sonnet, ollama-llama3, ollama-qwen3-coder-next, ollama-llama3.2)
+#   - Agent Profiles (Fullstack - Spring/Maven/React, Chat Assistant)
+#   - Agents (Addressbook Fullstack Agent, Chat Assistant Agent)
+#   - Registration Keys (agent-registration.env, chat-agent-registration.env)
 #   - Project with repo config
 #   - Workflow with steps
 #   - Organization-level knowledge documents
 #   - Project-level knowledge documents
+#   - Sample conversations (workflow kickoff + chat-ready)
+#   - Published Assistant (Chat Assistant)
+#   - Test users (joga.singh@gmail.com, tester@e2e-test.local)
 
 param(
     [string]$BaseUrl = "http://localhost:9090",
@@ -103,9 +106,10 @@ $loginBody = @{
 
 $loginResponse = Invoke-Api -Method POST -Uri "$ApiUrl/auth/login" -Body $loginBody
 $adminToken = $loginResponse.accessToken
+$adminUserId = $loginResponse.userId
 $adminHeaders = @{ "Authorization" = "Bearer $adminToken" }
 
-Write-Host "   Authenticated as: $AdminEmail" -ForegroundColor Green
+Write-Host "   Authenticated as: $AdminEmail (ID: $adminUserId)" -ForegroundColor Green
 Write-Host ""
 
 # ============================================================
@@ -119,6 +123,13 @@ $testUsers = @(
         name = "Joga Singh"
         providerCode = "GITHUB_DEFAULT"
         role = "VIEWER"
+    },
+    @{
+        email = "tester@e2e-test.local"
+        name = "E2E Tester"
+        providerCode = "LOCAL"
+        role = "EDITOR"
+        password = "E2eTest@123!"
     }
 )
 
@@ -140,6 +151,9 @@ foreach ($u in $testUsers) {
         name = $u.name
         providerCode = $u.providerCode
     }
+    if ($u.password) {
+        $createBody.password = $u.password
+    }
     $created = Invoke-Api -Method POST -Uri "$ApiUrl/admin/users" -Headers $adminHeaders -Body $createBody -IgnoreError
     $userId = $null
     if ($created) {
@@ -159,6 +173,11 @@ foreach ($u in $testUsers) {
         }
     }
 
+    # Track the local tester user for assistant creation (needs EDITOR on project)
+    if ($u.email -eq "tester@e2e-test.local" -and $userId) {
+        $script:testerUserId = $userId
+    }
+
     if ($userId) {
         # Check whether the role is already assigned (system-wide) to avoid duplicate-409 noise.
         $hasRole = $false
@@ -167,7 +186,7 @@ foreach ($u in $testUsers) {
         }
         if (-not $hasRole) {
             Write-Host "   Assigning role $($u.role) to $($u.email)..." -NoNewline
-            $roleBody = @{ role = $u.role }
+            $roleBody = @{ role = $u.role; scopeType = "SYSTEM" }
             $roleResult = Invoke-Api -Method POST -Uri "$ApiUrl/admin/users/$userId/roles" -Headers $adminHeaders -Body $roleBody -IgnoreError
             if ($roleResult) {
                 Write-Host " assigned" -ForegroundColor Green
@@ -279,6 +298,14 @@ $models = @(
         deploymentType = "ON_PREMISE"
         modelId = "qwen3-coder-next"
         apiEndpoint = "http://localhost:11434/v1"
+    },
+    @{
+        code = "ollama-llama3_2"
+        name = "Ollama Llama 3.2"
+        provider = "ollama"
+        deploymentType = "ON_PREMISE"
+        modelId = "llama3.2"
+        apiEndpoint = "http://localhost:11434/v1"
     }
 )
 
@@ -346,6 +373,16 @@ IMPORTANT: If the repo is empty or missing expected files, CREATE them. Do NOT g
 NEVER skip steps 3-6. ALWAYS write files using tools and commit.
 "@
         defaultModel = "ollama-qwen3-coder-next"
+    },
+    @{
+        name = "Chat Assistant"
+        description = "General-purpose conversational assistant for interactive chat sessions"
+        capabilities = @("conversational")
+        toolCodes = @()
+        systemPrompt = @"
+You are a helpful, knowledgeable AI assistant. You answer questions clearly and concisely, help with brainstorming, writing, analysis, and general problem-solving. When you don't know something, say so honestly. Be friendly and professional.
+"@
+        defaultModel = "ollama-llama3_2"
     }
 )
 
@@ -409,69 +446,103 @@ if (-not $fullstackProfileId) {
 }
 Write-Host "   Using profile ID: $fullstackProfileId" -ForegroundColor Gray
 
-$agentRequest = @{
+$chatProfileId = $profileIds["Chat Assistant"]
+if (-not $chatProfileId) {
+    Write-Host "   WARNING: Could not find 'Chat Assistant' profile" -ForegroundColor Yellow
+} else {
+    Write-Host "   Chat profile ID: $chatProfileId" -ForegroundColor Gray
+}
+
+# Helper: create-or-fetch an agent and capture its registration key.
+function Create-OrFetchAgent {
+    param(
+        [hashtable]$AgentRequest,
+        [hashtable]$AgentIds,
+        [string]$ApiUrl,
+        [hashtable]$AdminHeaders
+    )
+    $name = $AgentRequest.name
+    $key = $null
+
+    Write-Host "   Creating agent: $name..." -NoNewline
+    $result = Invoke-Api -Method POST -Uri "$ApiUrl/admin/agents" -Headers $AdminHeaders -Body $AgentRequest -IgnoreError
+    if ($result -and $result.agent) {
+        $AgentIds[$name] = $result.agent.id
+        $key = $result.registrationKey
+        Write-Host " created (ID: $($result.agent.id))" -ForegroundColor Green
+        Write-Host "   Registration Key: $($key.Substring(0, 20))..." -ForegroundColor Green
+    } else {
+        Write-Host "" # Newline after "(skipped)"
+        Write-Host "   Looking up existing agent..." -NoNewline
+        $existingAgents = Invoke-Api -Method GET -Uri "$ApiUrl/admin/agents" -Headers $AdminHeaders
+        if ($existingAgents -and $existingAgents -isnot [Array]) {
+            $existingAgents = @($existingAgents)
+        }
+        $existing = $existingAgents | Where-Object { $_.name -eq $name }
+        if ($existing) {
+            $AgentIds[$name] = $existing.id
+            Write-Host " found (ID: $($existing.id))" -ForegroundColor Yellow
+            Write-Host "   Regenerating registration key..." -NoNewline
+            try {
+                $regKeyResponse = Invoke-Api -Method POST `
+                    -Uri "$ApiUrl/admin/agents/$($existing.id)/regenerate-key" `
+                    -Headers $AdminHeaders
+                if ($regKeyResponse -and $regKeyResponse.registrationKey) {
+                    $key = $regKeyResponse.registrationKey
+                    Write-Host " done" -ForegroundColor Green
+                } else {
+                    Write-Host " no key returned" -ForegroundColor Red
+                }
+            } catch {
+                Write-Host " failed: $($_.Exception.Message)" -ForegroundColor Red
+            }
+        } else {
+            Write-Host " not found" -ForegroundColor Red
+        }
+    }
+    return $key
+}
+
+$agentIds = @{}
+
+# --- Fullstack agent (workflow tasks) ---
+$fullstackAgentRequest = @{
     name = "Addressbook Fullstack Agent"
     description = "Full-stack agent for the Address Book application - handles backend, frontend, testing, and documentation"
     profileId = $fullstackProfileId
     maxInstances = 5
 }
-
-$agentIds = @{}
-$regKey = $null
-
-Write-Host "   Creating agent: $($agentRequest.name)..." -NoNewline
-$result = Invoke-Api -Method POST -Uri "$ApiUrl/admin/agents" -Headers $adminHeaders -Body $agentRequest -IgnoreError
-if ($result -and $result.agent) {
-    $agentIds[$agentRequest.name] = $result.agent.id
-    $regKey = $result.registrationKey
-    Write-Host " created (ID: $($result.agent.id))" -ForegroundColor Green
-    Write-Host "   Registration Key: $($regKey.Substring(0, 20))..." -ForegroundColor Green
-} else {
-    Write-Host "" # Newline after "(skipped)"
-    # Agent might already exist - fetch it
-    Write-Host "   Looking up existing agent..." -NoNewline
-    $existingAgents = Invoke-Api -Method GET -Uri "$ApiUrl/admin/agents" -Headers $adminHeaders
-    # Handle single object vs array
-    if ($existingAgents -and $existingAgents -isnot [Array]) {
-        $existingAgents = @($existingAgents)
-    }
-    $existing = $existingAgents | Where-Object { $_.name -eq $agentRequest.name }
-    if ($existing) {
-        $agentIds[$agentRequest.name] = $existing.id
-        Write-Host " found (ID: $($existing.id))" -ForegroundColor Yellow
-        # Need to generate a new registration key for existing agent
-        Write-Host "   Regenerating registration key..." -NoNewline
-        try {
-            $regKeyResponse = Invoke-Api -Method POST `
-                -Uri "$ApiUrl/admin/agents/$($existing.id)/regenerate-key" `
-                -Headers $adminHeaders
-            if ($regKeyResponse -and $regKeyResponse.registrationKey) {
-                $regKey = $regKeyResponse.registrationKey
-                Write-Host " done" -ForegroundColor Green
-            } else {
-                Write-Host " no key returned" -ForegroundColor Red
-            }
-        } catch {
-            Write-Host " failed: $($_.Exception.Message)" -ForegroundColor Red
-        }
-    } else {
-        Write-Host " not found" -ForegroundColor Red
-        Write-Host "   Available agents: $($existingAgents | ForEach-Object { $_.name } | Join-String -Separator ', ')" -ForegroundColor Gray
-    }
-}
+$regKey = Create-OrFetchAgent -AgentRequest $fullstackAgentRequest -AgentIds $agentIds `
+    -ApiUrl $ApiUrl -AdminHeaders $adminHeaders
 
 if (-not $regKey) {
-    Write-Host "Error: Failed to get registration key for agent" -ForegroundColor Red
+    Write-Host "Error: Failed to get registration key for fullstack agent" -ForegroundColor Red
     exit 1
+}
+
+# --- Chat agent (conversational sessions) ---
+$chatRegKey = $null
+if ($chatProfileId) {
+    $chatAgentRequest = @{
+        name = "Chat Assistant Agent"
+        description = "General-purpose conversational assistant for interactive chat testing"
+        profileId = $chatProfileId
+        maxInstances = 3
+    }
+    $chatRegKey = Create-OrFetchAgent -AgentRequest $chatAgentRequest -AgentIds $agentIds `
+        -ApiUrl $ApiUrl -AdminHeaders $adminHeaders
+    if (-not $chatRegKey) {
+        Write-Host "   WARNING: Failed to get registration key for chat agent" -ForegroundColor Yellow
+    }
 }
 Write-Host ""
 
 # ============================================================
-# STEP 6: Save Registration Key to .env file
+# STEP 6: Save Registration Keys to .env files
 # ============================================================
-Write-Host "6. Saving registration key to .env file..." -ForegroundColor Yellow
+Write-Host "6. Saving registration keys..." -ForegroundColor Yellow
 
-# Write to .env file
+# Fullstack agent key → agent-registration.env (used by start-agent.ps1 for workflow tasks)
 $envContent = @"
 # Myrmec Agent Registration Key
 # Created: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
@@ -484,7 +555,24 @@ MYRMEC_HEARTBEAT_INTERVAL=30
 "@
 
 $envContent | Out-File -FilePath $OutputPath -Encoding UTF8
-Write-Host "   Saved to: $OutputPath" -ForegroundColor Green
+Write-Host "   Fullstack agent key saved to: $OutputPath" -ForegroundColor Green
+
+# Chat agent key → chat-agent-registration.env (used by start-chat-agent.ps1)
+if ($chatRegKey) {
+    $chatEnvPath = Join-Path $ScriptDir "..\chat-agent-registration.env"
+    $chatEnvContent = @"
+# Myrmec Chat Agent Registration Key
+# Created: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+# Agent: Chat Assistant Agent
+
+MYRMEC_REGISTRATION_KEY=$chatRegKey
+MYRMEC_ENGINE_URL=$BaseUrl
+MYRMEC_AGENT_NAME=e2e-chat-agent
+"@
+
+    $chatEnvContent | Out-File -FilePath $chatEnvPath -Encoding UTF8
+    Write-Host "   Chat agent key saved to: $chatEnvPath" -ForegroundColor Green
+}
 Write-Host ""
 
 # ============================================================
@@ -499,11 +587,51 @@ $projectBody = @{
     workspaceRepoBranch = "main"
 }
 
-$project = Invoke-Api -Method POST -Uri "$ApiUrl/projects" -Headers $adminHeaders -Body $projectBody
+$project = Invoke-Api -Method POST -Uri "$ApiUrl/projects" -Headers $adminHeaders -Body $projectBody -IgnoreError
+if (-not $project -or -not $project.id) {
+    # Project already exists — look it up by listing and filtering by name
+    Write-Host "   Project already exists, looking up..." -NoNewline
+    $existingProjects = Invoke-Api -Method GET -Uri "$ApiUrl/projects" -Headers $adminHeaders
+    if ($existingProjects -and $existingProjects -isnot [Array]) { $existingProjects = @($existingProjects) }
+    $project = $existingProjects | Where-Object { $_.name -eq $projectBody.name } | Select-Object -First 1
+    if ($project) {
+        Write-Host " found (ID: $($project.id))" -ForegroundColor Yellow
+    } else {
+        Write-Host " not found" -ForegroundColor Red
+        exit 1
+    }
+}
 
 $projectId = $project.id
 Write-Host "   Project ID: $projectId" -ForegroundColor Green
 Write-Host "   Name: $($project.name)" -ForegroundColor Green
+
+# Assign PROJECT_OWNER to the tester user on this project so canEdit/canOwn
+# gates pass for Assistant creation. The bootstrap admin has PLATFORM_ADMIN +
+# ORG_ADMIN but those are intentionally isolated from data-access roles
+# (separation of duties), and system users' roles cannot be modified.
+$testerUserId = $testerUserId
+if ($testerUserId) {
+    Write-Host "   Assigning PROJECT_OWNER to tester on project..." -NoNewline
+    $roleBody = @{ role = "PROJECT_OWNER"; scopeType = "PROJECT"; projectId = $projectId }
+    $roleResult = Invoke-Api -Method POST -Uri "$ApiUrl/admin/users/$testerUserId/roles" -Headers $adminHeaders -Body $roleBody -IgnoreError
+    if ($roleResult) {
+        Write-Host " assigned" -ForegroundColor Green
+    } else {
+        Write-Host " (already assigned or failed)" -ForegroundColor Yellow
+    }
+
+    # Log in as the tester to get a token with project-scoped roles for
+    # Assistant creation (the admin token lacks EDITOR on the project).
+    Write-Host "   Logging in as tester for assistant creation..." -NoNewline
+    $testerLogin = Invoke-Api -Method POST -Uri "$ApiUrl/auth/login" -Body @{ email = "tester@e2e-test.local"; password = "E2eTest@123!" } -IgnoreError
+    if ($testerLogin -and $testerLogin.accessToken) {
+        $script:testerToken = $testerLogin.accessToken
+        Write-Host " logged in" -ForegroundColor Green
+    } else {
+        Write-Host " failed" -ForegroundColor Red
+    }
+}
 Write-Host ""
 
 # ============================================================
@@ -594,6 +722,27 @@ Respond with a brief summary of the completed workflow including the feature bra
         }
         required = @("featureName", "requirements")
     }
+} -IgnoreError
+
+if (-not $workflow -or -not $workflow.id) {
+    # Workflow already exists — look it up
+    Write-Host "   Workflow already exists, looking up..." -NoNewline
+    $existingWorkflows = Invoke-Api -Method GET -Uri "$ApiUrl/projects/$projectId/workflows" -Headers $adminHeaders -IgnoreError
+    if ($existingWorkflows) {
+        if ($existingWorkflows -isnot [Array]) { $existingWorkflows = @($existingWorkflows) }
+        $workflow = $existingWorkflows | Where-Object { $_.name -eq "Feature Implementation" } | Select-Object -First 1
+    }
+    if ($workflow) {
+        Write-Host " found (ID: $($workflow.id))" -ForegroundColor Yellow
+    } else {
+        Write-Host " not found" -ForegroundColor Red
+        $workflow = $null
+    }
+}
+
+if (-not $workflow -or -not $workflow.id) {
+    Write-Host "   ERROR: Could not create or find workflow" -ForegroundColor Red
+    exit 1
 }
 
 $workflowId = $workflow.id
@@ -601,10 +750,14 @@ Write-Host "   Workflow ID: $workflowId" -ForegroundColor Green
 Write-Host "   Name: $($workflow.name)" -ForegroundColor Green
 Write-Host "   Steps: $($workflow.steps.Count)" -ForegroundColor Green
 
-# Publish the workflow
+# Publish the workflow (ignore error if already published)
 Write-Host "   Publishing workflow..." -NoNewline
-Invoke-Api -Method POST -Uri "$ApiUrl/projects/$projectId/workflows/$workflowId/publish" -Headers $adminHeaders | Out-Null
-Write-Host " published" -ForegroundColor Green
+$publishResult = Invoke-Api -Method POST -Uri "$ApiUrl/projects/$projectId/workflows/$workflowId/publish" -Headers $adminHeaders -IgnoreError
+if ($publishResult) {
+    Write-Host " published" -ForegroundColor Green
+} else {
+    Write-Host " (already published or failed)" -ForegroundColor Yellow
+}
 
 # Start a workflow execution
 Write-Host "   Starting workflow execution..." -NoNewline
@@ -616,9 +769,13 @@ $executionRequest = @{
         targetFiles = @("src/main/java/com/example/addressbook/controller/ContactController.java", "src/main/java/com/example/addressbook/service/ContactService.java", "frontend/src/components/ContactList.tsx")
     }
 }
-$execution = Invoke-Api -Method POST -Uri "$ApiUrl/projects/$projectId/workflows/$workflowId/requests" -Headers $adminHeaders -Body $executionRequest
-$executionId = $execution.id
-Write-Host " started (ID: $executionId)" -ForegroundColor Green
+$execution = Invoke-Api -Method POST -Uri "$ApiUrl/projects/$projectId/workflows/$workflowId/requests" -Headers $adminHeaders -Body $executionRequest -IgnoreError
+$executionId = if ($execution) { $execution.id } else { "(skipped)" }
+if ($execution) {
+    Write-Host " started (ID: $executionId)" -ForegroundColor Green
+} else {
+    Write-Host " (skipped or already started)" -ForegroundColor Yellow
+}
 Write-Host ""
 
 # ============================================================
@@ -937,6 +1094,122 @@ if ($agentIds["Addressbook Fullstack Agent"]) {
 Write-Host ""
 
 # ============================================================
+# STEP 15: Create + publish an Assistant, then sample Conversations
+# ============================================================
+# The MyWork Conversations tab lists Assistants (the versioned definition
+# of a conversational service), not raw Agents. An Assistant pins an agent
+# profile + published version; a conversation session pins the Assistant.
+# Flow: create Assistant (parent + initial Draft) → publish Draft → create
+# conversation with assistantId (engine auto-resolves the agent host from
+# the pinned profile).
+Write-Host "15. Creating + publishing Assistant..." -ForegroundColor Yellow
+
+$chatAssistantId = $null
+
+# Use the tester token (has PROJECT_OWNER on the project) for Assistant
+# creation — the admin token lacks EDITOR and the Assistant create endpoint
+# requires @projectAccess.canEdit.
+$assistantHeaders = $adminHeaders
+if ($testerToken) {
+    $assistantHeaders = @{ "Authorization" = "Bearer $testerToken" }
+}
+
+if ($chatProfileId -and $agentIds["Chat Assistant Agent"]) {
+    # 15a. Create the Assistant (parent + initial Draft seeded with the chat profile)
+    $assistantBody = @{
+        projectId       = $projectId
+        name            = "Chat Assistant"
+        description     = "General-purpose conversational assistant for interactive chat testing"
+        agentProfileId  = $chatProfileId
+    }
+    $assistant = Invoke-Api -Method POST -Uri "$ApiUrl/assistants" -Headers $assistantHeaders -Body $assistantBody -IgnoreError
+    if ($assistant -and $assistant.id) {
+        $chatAssistantId = $assistant.id
+        Write-Host "   Assistant created (ID: $chatAssistantId)" -ForegroundColor Green
+    } else {
+        Write-Host "   Assistant create (skipped or failed) - looking up existing..." -ForegroundColor Yellow
+        $existingAssistants = Invoke-Api -Method GET -Uri "$ApiUrl/assistants?projectId=$projectId" -Headers $assistantHeaders -IgnoreError
+        if ($existingAssistants) {
+            if ($existingAssistants -isnot [Array]) { $existingAssistants = @($existingAssistants) }
+            $existing = $existingAssistants | Where-Object { $_.name -eq "Chat Assistant" }
+            if ($existing) {
+                $chatAssistantId = $existing.id
+                Write-Host "   Found existing Assistant (ID: $chatAssistantId)" -ForegroundColor Yellow
+            }
+        }
+    }
+
+    # 15b. Publish the Assistant (promotes the initial Draft → Published)
+    if ($chatAssistantId) {
+        Write-Host "   Publishing Assistant..." -NoNewline
+        $published = Invoke-Api -Method POST -Uri "$ApiUrl/assistants/$chatAssistantId/publish" -Headers $assistantHeaders -IgnoreError
+        if ($published -and $published.versionNumber) {
+            Write-Host " published (v$($published.versionNumber))" -ForegroundColor Green
+        } else {
+            Write-Host " (already published or publish failed)" -ForegroundColor Yellow
+        }
+    }
+} else {
+    Write-Host "   Skipped - chat profile or chat agent not available" -ForegroundColor Yellow
+}
+Write-Host ""
+
+# ============================================================
+# STEP 16: Create sample Conversations
+# ============================================================
+Write-Host "16. Creating sample conversations..." -ForegroundColor Yellow
+
+$conversationId = $null
+$chatConversationId = $null
+
+# Workflow-focused conversation (fullstack agent)
+$conversationBody = @{
+    projectId = $projectId
+    title     = "Address Book - kickoff chat"
+    agentId   = $agentIds["Addressbook Fullstack Agent"]
+}
+$conversation = Invoke-Api -Method POST -Uri "$ApiUrl/conversations" -Headers $adminHeaders -Body $conversationBody -IgnoreError
+if ($conversation -and $conversation.id) {
+    $conversationId = $conversation.id
+    Write-Host "   Workflow conversation ID: $conversationId" -ForegroundColor Green
+    Write-Host "   Title: $($conversation.title)" -ForegroundColor Green
+} else {
+    Write-Host "   Workflow conversation (skipped or failed)" -ForegroundColor Yellow
+}
+
+# Chat-ready conversation — pinned to the published Assistant. The engine
+# auto-resolves the agent host from the assistant's pinned profile.
+if ($chatAssistantId) {
+    $chatConvBody = @{
+        projectId   = $projectId
+        title       = "Chat with Assistant"
+        assistantId = $chatAssistantId
+    }
+    $chatConversation = Invoke-Api -Method POST -Uri "$ApiUrl/conversations" -Headers $adminHeaders -Body $chatConvBody -IgnoreError
+    if ($chatConversation -and $chatConversation.id) {
+        $chatConversationId = $chatConversation.id
+        Write-Host "   Chat conversation ID: $chatConversationId" -ForegroundColor Green
+        Write-Host "   Title: $($chatConversation.title)" -ForegroundColor Green
+        Write-Host "   Assistant: $chatAssistantId" -ForegroundColor Green
+    } else {
+        Write-Host "   Chat conversation (skipped or failed)" -ForegroundColor Yellow
+    }
+} elseif ($agentIds["Chat Assistant Agent"]) {
+    # Fallback: pin directly to the agent host if no assistant was created
+    $chatConvBody = @{
+        projectId = $projectId
+        title     = "Chat with Assistant"
+        agentId   = $agentIds["Chat Assistant Agent"]
+    }
+    $chatConversation = Invoke-Api -Method POST -Uri "$ApiUrl/conversations" -Headers $adminHeaders -Body $chatConvBody -IgnoreError
+    if ($chatConversation -and $chatConversation.id) {
+        $chatConversationId = $chatConversation.id
+        Write-Host "   Chat conversation ID: $chatConversationId (agent-pinned fallback)" -ForegroundColor Green
+    }
+}
+Write-Host ""
+
+# ============================================================
 # Summary
 # ============================================================
 Write-Host "=============================================" -ForegroundColor Cyan
@@ -944,11 +1217,12 @@ Write-Host "     E2E Data Setup Complete!" -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Created:" -ForegroundColor Green
+Write-Host "  - 2 Test Users (joga.singh@gmail.com [VIEWER], tester@e2e-test.local [EDITOR + PROJECT_OWNER])"
 Write-Host "  - 5 Tools (file-system, web-browser, code-interpreter, github-api, postgresql)"
-Write-Host "  - 5 Models (gpt-4-turbo, gpt-4o, claude-3-sonnet, ollama-llama3, ollama-qwen3-coder-next)"
-Write-Host "  - 1 Agent Profile (Fullstack - Spring, Maven, React)"
-Write-Host "  - 1 Agent (Addressbook Fullstack Agent)"
-Write-Host "  - 1 Registration Key (saved to $OutputPath)"
+Write-Host "  - 6 Models (gpt-4-turbo, gpt-4o, claude-3-sonnet, ollama-llama3, ollama-qwen3-coder-next, ollama-llama3.2)"
+Write-Host "  - 2 Agent Profiles (Fullstack - Spring/Maven/React, Chat Assistant)"
+Write-Host "  - 2 Agents (Addressbook Fullstack Agent, Chat Assistant Agent)"
+Write-Host "  - 2 Registration Keys (agent-registration.env, chat-agent-registration.env)"
 Write-Host "  - 1 Project with repo config (Address Book Application)"
 Write-Host "  - 1 Published Workflow (Feature Implementation - 3 steps)"
 Write-Host "  - 1 Workflow Execution (Contact Search feature)"
@@ -958,14 +1232,26 @@ Write-Host "  - autoHitlOnDestructive enabled on project (Phase 7)"
 Write-Host "  - 1 Custom Model Provider (local-vllm) (Phase 10 #70)"
 Write-Host "  - 2 Project Quotas: 500k TOKENS/day + `$50/month (Phase 8)"
 Write-Host "  - Audit log + agent health endpoints verified (Phase 9b/9c/9d)"
+Write-Host "  - 2 Sample Conversations (workflow kickoff + chat-ready)"
+Write-Host "  - 1 Published Assistant (Chat Assistant - pins the chat profile)"
 Write-Host ""
 Write-Host "IDs:" -ForegroundColor Yellow
-Write-Host "  Project ID:   $projectId"
-Write-Host "  Workflow ID:  $workflowId"
-Write-Host "  Execution ID: $executionId"
+Write-Host "  Project ID:           $projectId"
+Write-Host "  Workflow ID:          $workflowId"
+Write-Host "  Execution ID:         $executionId"
+Write-Host "  Workflow Conversation: $conversationId"
+Write-Host "  Chat Assistant:       $chatAssistantId"
+Write-Host "  Chat Conversation:    $chatConversationId"
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Yellow
-Write-Host "  1. Start agent: .\start-agent.ps1"
-Write-Host "  2. Agent will pick up tasks from the started execution"
-Write-Host "  3. Open UI: http://localhost:5173"
+Write-Host "  Manual chat testing:"
+Write-Host "    1. Start chat agent: .\start-chat-agent.ps1"
+Write-Host "    2. Open UI: http://localhost:5173"
+Write-Host "    3. Log in as tester@e2e-test.local / E2eTest@123!"
+Write-Host "    4. My Work -> Conversations tab shows the 'Chat Assistant'"
+Write-Host "    5. Click Open -> send a message (Ollama llama3.2 answers)"
+Write-Host ""
+Write-Host "  Workflow testing:"
+Write-Host "    1. Start fullstack agent: .\start-agent.ps1"
+Write-Host "    2. Agent will pick up tasks from the started execution"
 Write-Host ""

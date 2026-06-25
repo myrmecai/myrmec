@@ -1,11 +1,11 @@
 package ai.myrmec.engine.testing;
 
 import ai.myrmec.engine.IntegrationTestBase;
-import ai.myrmec.engine.agent.Agent;
+import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentCreationResult;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileRepository;
-import ai.myrmec.engine.agent.AgentRepository;
+import ai.myrmec.engine.agent.AgentHostRepository;
 import ai.myrmec.engine.project.Project;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,7 +31,7 @@ class TestDataBuilderIT extends IntegrationTestBase {
     private AgentProfileRepository agentProfileRepository;
 
     @Autowired
-    private AgentRepository agentRepository;
+    private AgentHostRepository agentRepository;
 
     @Test
     void buildsProjectProfileAndAgentChain() {
@@ -55,7 +55,7 @@ class TestDataBuilderIT extends IntegrationTestBase {
                 .inProject(project)
                 .create();
 
-        Agent agent = result.agent();
+        AgentHost agent = result.agent();
         assertThat(agent.getId()).isNotNull();
         assertThat(agent.getProfileId()).isEqualTo(profile.getId());
         assertThat(agent.getProjectId()).isEqualTo(project.getId());

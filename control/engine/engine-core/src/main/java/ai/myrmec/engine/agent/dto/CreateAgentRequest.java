@@ -42,8 +42,8 @@ public class CreateAgentRequest {
     private Map<String, Object> config;
 
     /**
-     * Maximum concurrent instances allowed.
+     * Maximum concurrent Agents (workers) this host may run.
      */
-    @Min(value = 1, message = "Max instances must be at least 1")
-    private Integer maxInstances = 1;
+    @Min(value = 1, message = "Max agents must be at least 1")
+    private Integer maxAgents = 1;
 }

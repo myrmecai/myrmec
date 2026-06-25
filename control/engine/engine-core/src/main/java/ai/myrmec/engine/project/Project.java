@@ -1,5 +1,6 @@
 package ai.myrmec.engine.project;
 
+import ai.myrmec.engine._system.common.JsonListConverter;
 import ai.myrmec.engine._system.common.JsonMapConverter;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -7,6 +8,8 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -41,6 +44,17 @@ public class Project {
 
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
+
+    /**
+     * Service types this project is allowed to host (#77). Every create of a
+     * service of type T is gated by {@code allowsServiceType(projectId, T)}.
+     * Stored as a JSON text array (see {@link JsonListConverter}); defaults to
+     * both shipped types so existing projects keep hosting everything.
+     */
+    @Convert(converter = JsonListConverter.class)
+    @Column(name = "allowed_service_types", nullable = false, columnDefinition = "text")
+    private List<String> allowedServiceTypes =
+            new ArrayList<>(List.of("WORKFLOW", "CONVERSATIONAL"));
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
@@ -83,6 +97,35 @@ public class Project {
      */
     @Column(name = "auto_hitl_on_destructive", nullable = false)
     private boolean autoHitlOnDestructive = false;
+
+    /**
+     * #105 — project-level governance posture for conversation attachments.
+     * Defaults to enabled so existing projects keep current behaviour unless
+     * explicitly tightened.
+     */
+    @Column(name = "attachments_enabled", nullable = false)
+    private boolean attachmentsEnabled = true;
+
+    /**
+     * Optional per-project retention TTL in days for attachment governance
+     * copy; null means platform default applies.
+     */
+    @Column(name = "attachment_retention_ttl_days")
+    private Integer attachmentRetentionTtlDays;
+
+    /**
+     * Optional per-project max attachment size in bytes. Null means fallback
+     * to the platform setting (attachment_max_file_size_bytes).
+     */
+    @Column(name = "attachment_max_file_size_bytes")
+    private Long attachmentMaxFileSizeBytes;
+
+    /**
+     * Optional comma-separated MIME allowlist for this project. When null/blank,
+     * the platform's built-in allowlist applies.
+     */
+    @Column(name = "attachment_type_allowlist", columnDefinition = "text")
+    private String attachmentTypeAllowlist;
 
     /**
      * Phase 9a — number of days to retain {@code execution_snapshots}

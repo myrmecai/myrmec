@@ -80,6 +80,32 @@ public class GlobalExceptionHandler {
                         String.format("%s with %s '%s' already exists.", ex.getResourceType(), ex.getField(), ex.getValue())));
     }
 
+    @ExceptionHandler(DraftConflictException.class)
+    public ResponseEntity<ErrorResponse> handleDraftConflict(DraftConflictException ex) {
+        log.warn("Draft conflict ({}): {}", ex.getKind(), ex.getMessage());
+        java.util.Map<String, Object> details = new java.util.LinkedHashMap<>();
+        details.put("kind", ex.getKind().name());
+        if (ex.getDraftId() != null) {
+            details.put("draftId", ex.getDraftId());
+        }
+        if (ex.getDraftOwnerId() != null) {
+            details.put("draftOwnerId", ex.getDraftOwnerId());
+        }
+        if (ex.getDraftStartedAt() != null) {
+            details.put("draftStartedAt", ex.getDraftStartedAt());
+        }
+        if (ex.getCurrentVersionNumber() != null) {
+            details.put("currentVersionNumber", ex.getCurrentVersionNumber());
+        }
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(ErrorResponse.builder()
+                        .errorCode("DRAFT_CONFLICT")
+                        .message(ex.getMessage())
+                        .details(details)
+                        .build());
+    }
+
     // ==================== Validation Exceptions ====================
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

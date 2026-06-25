@@ -1,7 +1,7 @@
 package ai.myrmec.engine.agent.health;
 
-import ai.myrmec.engine.agent.AgentInstance;
-import ai.myrmec.engine.agent.AgentInstanceRepository;
+import ai.myrmec.engine.agent.Agent;
+import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.websocket.AgentConnectionManager;
 import ai.myrmec.engine.workflow.AttemptStatus;
 import ai.myrmec.engine.workflow.TaskAttemptRepository;
@@ -17,7 +17,7 @@ import java.util.UUID;
 
 /**
  * Phase 9d — assembles {@link AgentHealthSnapshot} from
- * {@link AgentInstance} rows + the in-process
+ * {@link Agent} rows + the in-process
  * {@link AgentConnectionManager} idle/busy state + the queue depth
  * read from {@code task_attempts}.
  *
@@ -31,7 +31,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AgentHealthService {
 
-    private final AgentInstanceRepository instanceRepository;
+    private final AgentRepository instanceRepository;
     private final AgentConnectionManager connectionManager;
     private final TaskAttemptRepository taskAttemptRepository;
 
@@ -39,7 +39,7 @@ public class AgentHealthService {
     private long heartbeatIntervalSeconds;
 
     public AgentHealthSnapshot snapshot(UUID agentId) {
-        List<AgentInstance> instances = instanceRepository.findByAgentId(agentId);
+        List<Agent> instances = instanceRepository.findByAgentHostId(agentId);
         Instant now = Instant.now();
         long staleAfterSeconds = Math.max(2 * heartbeatIntervalSeconds, 5);
 
@@ -52,8 +52,8 @@ public class AgentHealthService {
         Instant latest = null;
         List<AgentHealthSnapshot.InstanceHealth> rows = new ArrayList<>(total);
 
-        for (AgentInstance ai : instances) {
-            boolean isOnline = ai.getStatus() == AgentInstance.Status.ONLINE;
+        for (Agent ai : instances) {
+            boolean isOnline = ai.getStatus() == Agent.Status.IDLE;
             if (isOnline) {
                 online++;
             }

@@ -1,31 +1,25 @@
 package ai.myrmec.engine.conversation;
 
 import ai.myrmec.engine.IntegrationTestBase;
-import ai.myrmec.engine.agent.Agent;
+import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
+import ai.myrmec.engine.conversation.stream.ConversationSubscriber;
 import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.socket.TextMessage;
-import org.springframework.web.socket.WebSocketSession;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.HashMap;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.mock;
 
 /**
  * Phase 7e — verifies the {@link ApprovalExpirySweeper} flips PENDING
@@ -47,7 +41,7 @@ class ApprovalExpirySweeperTest extends IntegrationTestBase {
         Project project = data.project().named("expiry-sweep").create();
         AgentProfile profile = data.agentProfile()
                 .named("expiry-profile").withSystemPrompt("p").create();
-        Agent agent = data.agent()
+        AgentHost agent = data.agent()
                 .named("expiry-agent").withProfile(profile).inProject(project)
                 .create().agent();
         Conversation conv = conversationService.createConversation(
@@ -63,7 +57,7 @@ class ApprovalExpirySweeperTest extends IntegrationTestBase {
 
         // Subscribe a stub viewer so the expiry frame can be observed.
         BlockingQueue<String> viewerInbound = new LinkedBlockingQueue<>();
-        WebSocketSession viewer = stubSession(viewerInbound);
+        ConversationSubscriber viewer = stubSubscriber(viewerInbound);
         broker.subscribe(conv.getId(), viewer);
 
         // ---------- Act ----------
@@ -102,7 +96,7 @@ class ApprovalExpirySweeperTest extends IntegrationTestBase {
         Project project = data.project().named("expiry-future").create();
         AgentProfile profile = data.agentProfile()
                 .named("expiry-future-profile").withSystemPrompt("p").create();
-        Agent agent = data.agent()
+        AgentHost agent = data.agent()
                 .named("expiry-future-agent").withProfile(profile).inProject(project)
                 .create().agent();
         Conversation conv = conversationService.createConversation(
@@ -118,16 +112,12 @@ class ApprovalExpirySweeperTest extends IntegrationTestBase {
                 .isEqualTo(ConversationMessage.ApprovalStatus.PENDING);
     }
 
-    private WebSocketSession stubSession(BlockingQueue<String> outbound) throws Exception {
-        WebSocketSession session = mock(WebSocketSession.class);
-        lenient().when(session.getId()).thenReturn("expiry-stub-" + UUID.randomUUID());
-        lenient().when(session.isOpen()).thenReturn(true);
-        lenient().when(session.getAttributes()).thenReturn(new HashMap<>());
-        doAnswer(inv -> {
-            TextMessage msg = inv.getArgument(0);
-            outbound.add(msg.getPayload());
-            return null;
-        }).when(session).sendMessage(any(TextMessage.class));
-        return session;
+    private ConversationSubscriber stubSubscriber(BlockingQueue<String> outbound) {
+        return new ConversationSubscriber() {
+            private final String id = "expiry-stub-" + UUID.randomUUID();
+            @Override public String id() { return id; }
+            @Override public boolean isOpen() { return true; }
+            @Override public void send(String jsonFrame) { outbound.add(jsonFrame); }
+        };
     }
 }

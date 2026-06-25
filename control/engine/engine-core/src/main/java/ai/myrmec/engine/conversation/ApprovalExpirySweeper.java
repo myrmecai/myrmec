@@ -1,9 +1,6 @@
 package ai.myrmec.engine.conversation;
 
-import ai.myrmec.engine.websocket.AgentConnectionManager;
-import ai.myrmec.engine.websocket.AgentWebSocketHandler;
-import ai.myrmec.engine.agent.AgentInstance;
-import ai.myrmec.engine.agent.AgentInstanceRepository;
+import ai.myrmec.engine.websocket.ConversationSocketRegistry;
 import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
 import ai.myrmec.engine.websocket.message.MessageType;
 import ai.myrmec.engine.websocket.message.WebSocketMessage;
@@ -45,11 +42,8 @@ import java.util.UUID;
 public class ApprovalExpirySweeper {
 
     private final ConversationMessageRepository messageRepository;
-    private final ConversationRepository conversationRepository;
     private final ConversationStreamBroker streamBroker;
-    private final AgentInstanceRepository agentInstanceRepository;
-    private final AgentConnectionManager connectionManager;
-    private final AgentWebSocketHandler webSocketHandler;
+    private final ConversationSocketRegistry conversationSocketRegistry;
     private final ObjectMapper objectMapper;
 
     /** Disabled by default in tests that don't want timing pressure. */
@@ -125,26 +119,11 @@ public class ApprovalExpirySweeper {
             log.warn("Expiry broadcast for approval {} failed: {}", row.getId(), e.getMessage());
         }
 
-        // Wake any agent that's currently awaiting the request_approval()
-        // future on this clientRequestId.
-        conversationRepository.findById(row.getConversationId()).ifPresent(conv -> {
-            if (conv.getAgentId() == null) {
-                return;
-            }
-            List<AgentInstance> instances =
-                    agentInstanceRepository.findByAgentIdAndStatus(
-                            conv.getAgentId(), AgentInstance.Status.ONLINE);
-            for (AgentInstance instance : instances) {
-                if (connectionManager.isConnected(instance.getId())) {
-                    try {
-                        webSocketHandler.sendApprovalDecision(instance.getId(), payload);
-                    } catch (Exception e) {
-                        log.warn("Expiry frame push to instance {} failed: {}",
-                                instance.getId(), e.getMessage());
-                    }
-                }
-            }
-        });
+        // Wake the worker awaiting the request_approval() future by
+        // pushing the EXPIRED decision over its conversation socket.
+        conversationSocketRegistry.sendMessage(
+                row.getConversationId(),
+                WebSocketMessage.of(MessageType.APPROVAL_DECISION, payload));
     }
 
     /**

@@ -1,10 +1,7 @@
 package ai.myrmec.engine.conversation.stream;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.web.socket.TextMessage;
-import org.springframework.web.socket.WebSocketSession;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -12,10 +9,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.mock;
 
 /**
  * Verifies that {@link ConversationStreamBroker} cooperates correctly with
@@ -40,8 +33,8 @@ class ConversationStreamBrokerFanoutTest {
 
         UUID convId = UUID.randomUUID();
         List<String> outbound = new ArrayList<>();
-        WebSocketSession session = stubOpenSession(outbound);
-        broker.subscribe(convId, session);
+        ConversationSubscriber subscriber = stubOpenSubscriber(outbound);
+        broker.subscribe(convId, subscriber);
 
         int delivered = broker.broadcast(convId, "{\"type\":\"message.delta\"}");
 
@@ -59,7 +52,7 @@ class ConversationStreamBrokerFanoutTest {
 
         UUID convId = UUID.randomUUID();
         List<String> outbound = new ArrayList<>();
-        broker.subscribe(convId, stubOpenSession(outbound));
+        broker.subscribe(convId, stubOpenSubscriber(outbound));
 
         // Simulate a frame arriving from a peer instance.
         fanout.remoteHandler.get().accept(convId, "{\"type\":\"message.complete\"}");
@@ -83,7 +76,7 @@ class ConversationStreamBrokerFanoutTest {
 
         UUID convId = UUID.randomUUID();
         List<String> outbound = new ArrayList<>();
-        broker.subscribe(convId, stubOpenSession(outbound));
+        broker.subscribe(convId, stubOpenSubscriber(outbound));
 
         int delivered = broker.broadcast(convId, "frame");
 
@@ -91,16 +84,14 @@ class ConversationStreamBrokerFanoutTest {
         assertThat(outbound).containsExactly("frame");
     }
 
-    private static WebSocketSession stubOpenSession(List<String> sink) throws IOException {
-        WebSocketSession session = mock(WebSocketSession.class);
-        lenient().when(session.getId()).thenReturn(UUID.randomUUID().toString());
-        lenient().when(session.isOpen()).thenReturn(true);
-        doAnswer(inv -> {
-            TextMessage msg = inv.getArgument(0, TextMessage.class);
-            sink.add(msg.getPayload());
-            return null;
-        }).when(session).sendMessage(any());
-        return session;
+    /** In-memory subscriber that records every frame it is sent. */
+    private static ConversationSubscriber stubOpenSubscriber(List<String> sink) {
+        return new ConversationSubscriber() {
+            private final String id = UUID.randomUUID().toString();
+            @Override public String id() { return id; }
+            @Override public boolean isOpen() { return true; }
+            @Override public void send(String jsonFrame) { sink.add(jsonFrame); }
+        };
     }
 
     /** Bare-hand recording fanout — no Mockito required, all state explicit. */

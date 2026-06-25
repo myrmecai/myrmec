@@ -3,8 +3,6 @@ package ai.myrmec.engine.conversation.stream;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
-import org.springframework.web.socket.WebSocketSession;
-import org.springframework.web.socket.TextMessage;
 
 import java.io.IOException;
 import java.util.Map;
@@ -15,6 +13,12 @@ import java.util.concurrent.CopyOnWriteArraySet;
 
 /**
  * In-process pub/sub for conversation events.
+ *
+ * <p>Subscribers are transport-agnostic {@link ConversationSubscriber}
+ * sinks — the live client transport is Server-Sent Events
+ * ({@link SseConversationSubscriber}), but the broker never references a
+ * concrete transport so producers and the cross-instance fan-out stay
+ * neutral.</p>
  *
  * <p>Cross-instance fan-out (Phase 6f) is delegated to a
  * {@link ConversationStreamFanout} bean: the default
@@ -30,8 +34,8 @@ import java.util.concurrent.CopyOnWriteArraySet;
 @Component
 public class ConversationStreamBroker {
 
-    /** conversationId → live WebSocket sessions tuned to that conversation. */
-    private final Map<UUID, Set<WebSocketSession>> subscribers = new ConcurrentHashMap<>();
+    /** conversationId → live sinks tuned to that conversation. */
+    private final Map<UUID, Set<ConversationSubscriber>> subscribers = new ConcurrentHashMap<>();
 
     private final ConversationStreamFanout fanout;
 
@@ -49,16 +53,16 @@ public class ConversationStreamBroker {
         fanout.setRemoteHandler(this::deliverLocal);
     }
 
-    public void subscribe(UUID conversationId, WebSocketSession session) {
+    public void subscribe(UUID conversationId, ConversationSubscriber subscriber) {
         subscribers.computeIfAbsent(conversationId, k -> new CopyOnWriteArraySet<>())
-                .add(session);
-        log.debug("Subscriber {} attached to conversation {}", session.getId(), conversationId);
+                .add(subscriber);
+        log.debug("Subscriber {} attached to conversation {}", subscriber.id(), conversationId);
     }
 
-    public void unsubscribe(UUID conversationId, WebSocketSession session) {
-        Set<WebSocketSession> set = subscribers.get(conversationId);
+    public void unsubscribe(UUID conversationId, ConversationSubscriber subscriber) {
+        Set<ConversationSubscriber> set = subscribers.get(conversationId);
         if (set != null) {
-            set.remove(session);
+            set.remove(subscriber);
             if (set.isEmpty()) {
                 subscribers.remove(conversationId, set);
             }
@@ -71,8 +75,8 @@ public class ConversationStreamBroker {
      * same. Returns the number of LOCAL recipients reached — remote
      * counts are not measured here.
      *
-     * <p>Send failures to local sessions are logged and the offending
-     * session is dropped so a single dead viewer can't poison the rest.</p>
+     * <p>Send failures to local sinks are logged and the offending
+     * subscriber is dropped so a single dead viewer can't poison the rest.</p>
      */
     public int broadcast(UUID conversationId, String jsonFrame) {
         int delivered = deliverLocal(conversationId, jsonFrame);
@@ -92,27 +96,28 @@ public class ConversationStreamBroker {
      * {@link ConversationStreamFanout} for inbound remote frames.
      */
     int deliverLocal(UUID conversationId, String jsonFrame) {
-        Set<WebSocketSession> set = subscribers.get(conversationId);
+        Set<ConversationSubscriber> set = subscribers.get(conversationId);
         if (set == null || set.isEmpty()) {
             return 0;
         }
         int delivered = 0;
-        for (WebSocketSession session : set) {
-            if (!session.isOpen()) {
-                set.remove(session);
+        for (ConversationSubscriber subscriber : set) {
+            if (!subscriber.isOpen()) {
+                set.remove(subscriber);
                 continue;
             }
             try {
-                // WebSocketSession.sendMessage is not thread-safe; synchronise
-                // per session so concurrent broadcasts don't interleave frames.
-                synchronized (session) {
-                    session.sendMessage(new TextMessage(jsonFrame));
+                // A single sink may not be safe for concurrent sends;
+                // synchronise per subscriber so concurrent broadcasts don't
+                // interleave frames.
+                synchronized (subscriber) {
+                    subscriber.send(jsonFrame);
                 }
                 delivered++;
             } catch (IOException e) {
                 log.warn("Dropping subscriber {} from conversation {} on send failure: {}",
-                        session.getId(), conversationId, e.getMessage());
-                set.remove(session);
+                        subscriber.id(), conversationId, e.getMessage());
+                set.remove(subscriber);
             }
         }
         return delivered;
@@ -120,7 +125,7 @@ public class ConversationStreamBroker {
 
     /** Test helper — count of live subscribers for a conversation. */
     public int subscriberCount(UUID conversationId) {
-        Set<WebSocketSession> set = subscribers.get(conversationId);
+        Set<ConversationSubscriber> set = subscribers.get(conversationId);
         return set == null ? 0 : set.size();
     }
 }

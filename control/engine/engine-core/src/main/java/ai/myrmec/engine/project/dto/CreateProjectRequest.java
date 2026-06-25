@@ -4,6 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -18,6 +19,12 @@ public class CreateProjectRequest {
 
     @Size(max = 3000, message = "Project description cannot exceed 3000 characters")
     private String description;
+
+    /**
+     * Service types this project may host (#77). Omit / null defaults to both
+     * shipped types ({@code WORKFLOW}, {@code CONVERSATIONAL}).
+     */
+    private List<String> allowedServiceTypes;
 
     /**
      * Group this project belongs to. Defaults to the seeded {@code Default}
@@ -54,4 +61,24 @@ public class CreateProjectRequest {
      * execute it. Defaults to false (Phase 6 behaviour preserved).
      */
     private Boolean autoHitlOnDestructive;
+
+    /**
+     * #105 — project-level attachment governance posture.
+     */
+    private Boolean attachmentsEnabled;
+
+    /**
+     * Optional per-project attachment retention TTL in days.
+     */
+    private Integer attachmentRetentionTtlDays;
+
+    /**
+     * Optional per-project maximum attachment size in bytes.
+     */
+    private Long attachmentMaxFileSizeBytes;
+
+    /**
+     * Optional comma-separated MIME allowlist for project attachments.
+     */
+    private String attachmentTypeAllowlist;
 }

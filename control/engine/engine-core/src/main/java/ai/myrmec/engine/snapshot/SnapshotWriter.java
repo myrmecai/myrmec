@@ -106,6 +106,10 @@ public class SnapshotWriter {
             row.setWorkflowId(req.getWorkflowId());
             row.setStepRunId(req.getStepRunId());
             row.setEventType(req.getEventType());
+            row.setSource(req.getSource());
+            row.setServiceAccountId(req.getServiceAccountId());
+            row.setExternalUserRef(req.getExternalUserRef());
+            row.setUserId(req.getUserId());
             row.setPayloadJson(stored);
             row.setPayloadSha256(sha);
             row.setSizeBytes(sizeBytes);
@@ -156,5 +160,10 @@ public class SnapshotWriter {
         UUID messageId;
         UUID workflowId;
         UUID stepRunId;
+        // Source attribution (#99) — copied from the conversation by the caller.
+        String source;
+        UUID serviceAccountId;
+        String externalUserRef;
+        UUID userId;
     }
 }

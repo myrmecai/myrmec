@@ -14,5 +14,8 @@ public interface KnowledgeSourceRepository extends JpaRepository<KnowledgeSource
 
     List<KnowledgeSource> findByEnabledTrueAndSyncScheduleIsNotNull();
 
+    /** Sources with a pending out-of-band re-sync request (#25a webhook). */
+    List<KnowledgeSource> findByEnabledTrueAndSyncRequestedAtIsNotNull();
+
     Optional<KnowledgeSource> findByKnowledgeBaseIdAndName(UUID knowledgeBaseId, String name);
 }

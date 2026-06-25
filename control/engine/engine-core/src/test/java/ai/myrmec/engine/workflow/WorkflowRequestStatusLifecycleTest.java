@@ -1,6 +1,7 @@
 package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
+import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileRepository;
 import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.spi.quota.QuotaDecision;
@@ -82,6 +83,8 @@ class WorkflowRequestStatusLifecycleTest {
         lenient().when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         lenient().when(quotaPolicyEngine.check(any(), any(), any(), anyLong()))
                 .thenReturn(QuotaDecision.unconstrained());
+        lenient().when(taskRepository.save(any(WorkflowTask.class)))
+            .thenAnswer(inv -> inv.getArgument(0));
         lenient().when(requestRepository.save(any(WorkflowRequest.class)))
                 .thenAnswer(inv -> {
                     WorkflowRequest r = inv.getArgument(0);
@@ -134,5 +137,27 @@ class WorkflowRequestStatusLifecycleTest {
         } catch (ResourceNotFoundException ex) {
             assertThat(ex.getMessage()).contains("Workflow");
         }
+    }
+
+    @Test
+    void startPersistsKnowledgeSourceIdsFromStepMetadata() {
+        workflow.setSteps(List.of(Map.of(
+                "id", "step-1",
+                "agentProfileId", UUID.randomUUID().toString(),
+                "knowledgeSourceIds", List.of("kb-1", "kb-2")
+        )));
+        when(agentProfileRepository.findById(any())).thenAnswer(inv -> {
+            AgentProfile profile = new AgentProfile();
+            profile.setId(inv.getArgument(0));
+            profile.setName("profile");
+            return Optional.of(profile);
+        });
+
+        workflowRequestService.start(new StartWorkflowRequest(workflowId, Map.of("name", "source-test")), userId);
+
+        ArgumentCaptor<WorkflowTask> savedCaptor = ArgumentCaptor.forClass(WorkflowTask.class);
+        org.mockito.Mockito.verify(taskRepository).save(savedCaptor.capture());
+        WorkflowTask persisted = savedCaptor.getValue();
+        assertThat(persisted.getKnowledgeSourceIds()).containsExactly("kb-1", "kb-2");
     }
 }

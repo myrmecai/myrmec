@@ -1,8 +1,8 @@
 package ai.myrmec.engine.conversation;
 
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
-import ai.myrmec.engine.agent.Agent;
-import ai.myrmec.engine.agent.AgentRepository;
+import ai.myrmec.engine.agent.AgentHost;
+import ai.myrmec.engine.agent.AgentHostRepository;
 import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.project.ProjectRepository;
 import ai.myrmec.engine.tool.RiskClass;
@@ -34,7 +34,7 @@ public class HitlPolicyService {
 
     private final ProjectRepository projectRepository;
     private final ToolRepository toolRepository;
-    private final AgentRepository agentRepository;
+    private final AgentHostRepository agentRepository;
 
     public record Decision(
             UUID projectId,
@@ -69,7 +69,7 @@ public class HitlPolicyService {
      */
     @Transactional(readOnly = true)
     public Decision evaluateForAgent(UUID agentId, String toolCode) {
-        Agent agent = agentRepository.findById(agentId)
+        AgentHost agent = agentRepository.findById(agentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Agent", agentId));
         if (agent.getProjectId() == null) {
             // Unpinned agent — there is no project policy to evaluate,

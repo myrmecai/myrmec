@@ -112,4 +112,54 @@ class SnapshotWriterTest extends IntegrationTestBase {
         assertThat(snapshotRepository.findByProjectIdOrderByCreatedAtDesc(project.getId()))
                 .isEmpty();
     }
+
+    @Test
+    void persistsSourceAttribution() {
+        Project project = data.project().named("snapshot-attribution").create();
+        java.util.UUID serviceAccountId = java.util.UUID.randomUUID();
+        java.util.UUID userId = java.util.UUID.randomUUID();
+
+        Optional<ExecutionSnapshot> written = snapshotWriter.write(
+                SnapshotWriter.SnapshotRequest.builder()
+                        .projectId(project.getId())
+                        .eventType("CONVERSATION_TURN_DISPATCHED")
+                        .source("EXTERNAL_API")
+                        .serviceAccountId(serviceAccountId)
+                        .externalUserRef("ext-user-123")
+                        .userId(userId)
+                        .payload(Map.of("x", 1))
+                        .build());
+
+        assertThat(written).isPresent();
+        ExecutionSnapshot row = written.get();
+        assertThat(row.getSource()).isEqualTo("EXTERNAL_API");
+        assertThat(row.getServiceAccountId()).isEqualTo(serviceAccountId);
+        assertThat(row.getExternalUserRef()).isEqualTo("ext-user-123");
+        assertThat(row.getUserId()).isEqualTo(userId);
+
+        ExecutionSnapshot reloaded = snapshotRepository.findById(row.getId()).orElseThrow();
+        assertThat(reloaded.getSource()).isEqualTo("EXTERNAL_API");
+        assertThat(reloaded.getServiceAccountId()).isEqualTo(serviceAccountId);
+        assertThat(reloaded.getExternalUserRef()).isEqualTo("ext-user-123");
+        assertThat(reloaded.getUserId()).isEqualTo(userId);
+    }
+
+    @Test
+    void leavesAttributionNullForNonConversationEvents() {
+        Project project = data.project().named("snapshot-no-attribution").create();
+
+        Optional<ExecutionSnapshot> written = snapshotWriter.write(
+                SnapshotWriter.SnapshotRequest.builder()
+                        .projectId(project.getId())
+                        .eventType("WORKFLOW_STEP")
+                        .payload(Map.of("x", 1))
+                        .build());
+
+        assertThat(written).isPresent();
+        ExecutionSnapshot row = written.get();
+        assertThat(row.getSource()).isNull();
+        assertThat(row.getServiceAccountId()).isNull();
+        assertThat(row.getExternalUserRef()).isNull();
+        assertThat(row.getUserId()).isNull();
+    }
 }

@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        File / document attachments (#103) + scan gate (#104).
+
+        ``conversation_message_attachments`` holds attachment metadata only —
+        the bytes live in the configured BlobStore, referenced by
+        ``storage_key``. Attachments are ephemeral-to-conversation: created
+        against a conversation, then bound to a ``conversation_messages`` row
+        (``message_id``) when the referencing USER turn is sent.
+
+        Every upload passes the synchronous scan gate (#104) before its bytes
+        are stored. A persisted row is therefore CLEAN (bytes stored,
+        ``storage_key`` + ``sha256`` set) or quarantined — INFECTED / ERROR —
+        in which case the metadata is retained for transparency + audit but no
+        bytes are stored and the attachment is never exposed to an agent.
+
+        ``extracted_text`` / ``token_estimate`` are filled by the extraction
+        pass and drive the inline-vs-tool context-injection split.
+    -->
+    <changeSet id="20260621-02-create-conversation-message-attachments" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="conversation_message_attachments"/>
+            </not>
+        </preConditions>
+        <comment>Conversation file/document attachments with scan-gate metadata.</comment>
+
+        <createTable tableName="conversation_message_attachments">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="conversation_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Null until the referencing USER turn is sent. -->
+            <column name="message_id" type="uuid"/>
+            <column name="uploaded_by" type="uuid"/>
+            <column name="filename" type="varchar(512)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="media_type" type="varchar(150)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="size_bytes" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Set only for CLEAN rows. -->
+            <column name="sha256" type="varchar(64)"/>
+            <column name="storage_key" type="varchar(512)"/>
+            <column name="scan_status" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="scan_provider" type="varchar(100)"/>
+            <column name="scan_threat" type="varchar(255)"/>
+            <column name="extracted_text" type="text"/>
+            <column name="token_estimate" type="int"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <!-- Listing a conversation's attachments. -->
+        <createIndex tableName="conversation_message_attachments"
+                     indexName="idx_cma_conversation_id">
+            <column name="conversation_id"/>
+        </createIndex>
+
+        <!-- Resolving attachments bound to a message during turn assembly. -->
+        <createIndex tableName="conversation_message_attachments"
+                     indexName="idx_cma_message_id">
+            <column name="message_id"/>
+        </createIndex>
+
+        <!-- Attachments are cascaded away when the conversation is hard-deleted. -->
+        <addForeignKeyConstraint
+            baseTableName="conversation_message_attachments"
+            baseColumnNames="conversation_id"
+            referencedTableName="conversations"
+            referencedColumnNames="id"
+            constraintName="fk_cma_conversation"
+            onDelete="CASCADE"/>
+
+        <!-- Binding FK to the message; null until sent, cleared on message delete. -->
+        <addForeignKeyConstraint
+            baseTableName="conversation_message_attachments"
+            baseColumnNames="message_id"
+            referencedTableName="conversation_messages"
+            referencedColumnNames="id"
+            constraintName="fk_cma_message"
+            onDelete="SET NULL"/>
+    </changeSet>
+
+    <!--
+        Promote-to-KB (#103-C). When a user promotes a scan-clean attachment
+        into a knowledge base, the attachment's extracted text is ingested as a
+        durable ``knowledge_sources`` row (via the ``manual`` connector path) so
+        it is retrievable on later sessions. ``attachment_promotions`` records
+        the link between the ephemeral attachment, the target knowledge base,
+        and the created source, and enforces idempotency: an attachment can be
+        promoted to a given KB at most once (the unique
+        ``(attachment_id, knowledge_base_id)`` constraint yields the 409).
+    -->
+    <changeSet id="20260621-02-create-attachment-promotions" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="attachment_promotions"/>
+            </not>
+        </preConditions>
+        <comment>Promote-to-KB link records with per-(attachment,KB) idempotency.</comment>
+
+        <createTable tableName="attachment_promotions">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="attachment_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="knowledge_base_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="knowledge_source_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="promoted_by" type="uuid"/>
+            <column name="promoted_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <!-- Idempotency: one promotion per (attachment, knowledge base). -->
+        <addUniqueConstraint
+            tableName="attachment_promotions"
+            columnNames="attachment_id, knowledge_base_id"
+            constraintName="uq_attachment_promotion_attachment_kb"/>
+
+        <!-- Listing a knowledge base's promoted attachments. -->
+        <createIndex tableName="attachment_promotions"
+                     indexName="idx_attachment_promotions_kb">
+            <column name="knowledge_base_id"/>
+        </createIndex>
+
+        <!-- Promotion records vanish when their attachment is hard-deleted. -->
+        <addForeignKeyConstraint
+            baseTableName="attachment_promotions"
+            baseColumnNames="attachment_id"
+            referencedTableName="conversation_message_attachments"
+            referencedColumnNames="id"
+            constraintName="fk_ap_attachment"
+            onDelete="CASCADE"/>
+
+        <!-- Promotion records vanish when the target knowledge base is deleted. -->
+        <addForeignKeyConstraint
+            baseTableName="attachment_promotions"
+            baseColumnNames="knowledge_base_id"
+            referencedTableName="knowledge_bases"
+            referencedColumnNames="id"
+            constraintName="fk_ap_knowledge_base"
+            onDelete="CASCADE"/>
+
+        <!-- Clearing the idempotency guard if the created source is removed. -->
+        <addForeignKeyConstraint
+            baseTableName="attachment_promotions"
+            baseColumnNames="knowledge_source_id"
+            referencedTableName="knowledge_sources"
+            referencedColumnNames="id"
+            constraintName="fk_ap_knowledge_source"
+            onDelete="CASCADE"/>
+    </changeSet>
+
+</databaseChangeLog>

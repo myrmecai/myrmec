@@ -47,7 +47,7 @@
             <column name="agent_id" type="uuid">
                 <constraints nullable="true"
                              foreignKeyName="fk_exec_snap_agent"
-                             references="agents(id)"/>
+                             references="agent_hosts(id)"/>
             </column>
             <column name="conversation_id" type="uuid">
                 <constraints nullable="true"

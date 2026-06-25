@@ -12,7 +12,16 @@ public interface KnowledgeChunkRepository extends JpaRepository<KnowledgeChunk, 
 
     List<KnowledgeChunk> findByKnowledgeSourceId(UUID knowledgeSourceId);
 
+    /**
+     * Chunks of a source in stable document order (insertion order, with the
+     * primary key as a deterministic tiebreaker). Used by the #30 chunk-context
+     * preview to locate a chunk's before/after neighbours.
+     */
+    List<KnowledgeChunk> findByKnowledgeSourceIdOrderByCreatedAtAscIdAsc(UUID knowledgeSourceId);
+
     Optional<KnowledgeChunk> findByKnowledgeSourceIdAndLocator(UUID knowledgeSourceId, String locator);
 
     long countByKnowledgeSourceId(UUID knowledgeSourceId);
+
+    void deleteByKnowledgeSourceId(UUID knowledgeSourceId);
 }

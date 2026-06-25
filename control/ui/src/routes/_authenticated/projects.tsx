@@ -34,7 +34,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, Pencil, Trash2, FolderOpen, FolderX, BookOpen, GitBranch, KeyRound, Users, Building2, ArrowRightLeft, MessageSquare } from 'lucide-react'
+import { Plus, Pencil, Trash2, FolderOpen, FolderX, BookOpen, GitBranch, KeyRound, Users, Building2, ArrowRightLeft, Database } from 'lucide-react'
 
 const GIT_COMPATIBLE_TYPES: ReadonlySet<CredentialType> = new Set<CredentialType>([
   'BEARER_TOKEN',
@@ -133,6 +133,10 @@ function ProjectsLayout() {
     from: '/_authenticated/projects/$projectId/knowledge',
     shouldThrow: false,
   })
+  const knowledgeBasesMatch = useMatch({
+    from: '/_authenticated/projects/$projectId/knowledge-bases',
+    shouldThrow: false,
+  })
   const secretsMatch = useMatch({
     from: '/_authenticated/projects/$projectId/secrets',
     shouldThrow: false,
@@ -141,12 +145,7 @@ function ProjectsLayout() {
     from: '/_authenticated/projects/$projectId/members',
     shouldThrow: false,
   })
-  const chatMatch = useMatch({
-    from: '/_authenticated/projects/$projectId/chat',
-    shouldThrow: false,
-  })
-
-  if (knowledgeMatch || secretsMatch || membersMatch || chatMatch) {
+  if (knowledgeMatch || knowledgeBasesMatch || secretsMatch || membersMatch) {
     return <Outlet />
   }
 
@@ -304,18 +303,6 @@ function ProjectsPage() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        title="Chat"
-                        data-testid={`project-chat-${project.id}`}
-                        onClick={() => navigate({
-                          to: '/projects/$projectId/chat',
-                          params: { projectId: project.id },
-                        })}
-                      >
-                        <MessageSquare className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
                         title="Knowledge"
                         onClick={() => navigate({
                           to: '/projects/$projectId/knowledge',
@@ -323,6 +310,17 @@ function ProjectsPage() {
                         })}
                       >
                         <BookOpen className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Knowledge Bases"
+                        onClick={() => navigate({
+                          to: '/projects/$projectId/knowledge-bases',
+                          params: { projectId: project.id },
+                        })}
+                      >
+                        <Database className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="ghost"
@@ -425,6 +423,76 @@ function ProjectsPage() {
   )
 }
 
+const SERVICE_TYPE_OPTIONS: { value: string; label: string; hint: string }[] = [
+  {
+    value: 'WORKFLOW',
+    label: 'Workflow',
+    hint: 'Deterministic multi-step automations (Executions).',
+  },
+  {
+    value: 'CONVERSATIONAL',
+    label: 'Conversational',
+    hint: 'Interactive assistants and chat sessions.',
+  },
+]
+
+/**
+ * Multi-select of the service types a project may host (#77). At least one
+ * type must stay selected — the last-checked box is disabled so it cannot be
+ * cleared, mirroring the backend "must allow at least one" rule.
+ */
+function ServiceTypesField({
+  idPrefix,
+  value,
+  onChange,
+}: {
+  idPrefix: string
+  value: string[]
+  onChange: (next: string[]) => void
+}) {
+  const toggle = (type: string, checked: boolean) => {
+    if (checked) {
+      onChange([...value, type].filter((v, i, a) => a.indexOf(v) === i))
+    } else {
+      onChange(value.filter((v) => v !== type))
+    }
+  }
+  return (
+    <div className="space-y-2">
+      <Label>Allowed service types</Label>
+      <div className="space-y-2">
+        {SERVICE_TYPE_OPTIONS.map((opt) => {
+          const checked = value.includes(opt.value)
+          const isLastChecked = checked && value.length === 1
+          return (
+            <label
+              key={opt.value}
+              htmlFor={`${idPrefix}-svc-${opt.value}`}
+              className="flex items-start gap-2 text-sm"
+            >
+              <input
+                type="checkbox"
+                id={`${idPrefix}-svc-${opt.value}`}
+                checked={checked}
+                disabled={isLastChecked}
+                onChange={(e) => toggle(opt.value, e.target.checked)}
+                className="h-4 w-4 mt-0.5"
+              />
+              <span>
+                <span className="font-medium">{opt.label}</span>
+                <span className="block text-xs text-muted-foreground">{opt.hint}</span>
+              </span>
+            </label>
+          )
+        })}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Controls which kinds of services can be created in this project. At least one is required.
+      </p>
+    </div>
+  )
+}
+
 interface CreateProjectFormProps {
   groups: Group[]
   onSubmit: (data: CreateProjectRequest) => void
@@ -438,6 +506,10 @@ function CreateProjectForm({ groups, onSubmit, isLoading, error }: CreateProject
   const defaultGroupId =
     groups.find((g) => g.name === 'Default')?.id ?? groups[0]?.id ?? ''
   const [groupId, setGroupId] = useState(defaultGroupId)
+  const [allowedServiceTypes, setAllowedServiceTypes] = useState<string[]>([
+    'WORKFLOW',
+    'CONVERSATIONAL',
+  ])
   const [workspaceRepoUrl, setWorkspaceRepoUrl] = useState('')
   const [workspaceRepoBranch, setWorkspaceRepoBranch] = useState('main')
   const [workspaceCredentialSecretId, setWorkspaceCredentialSecretId] = useState('')
@@ -448,6 +520,7 @@ function CreateProjectForm({ groups, onSubmit, isLoading, error }: CreateProject
       name,
       description: description || undefined,
       groupId: groupId || undefined,
+      allowedServiceTypes,
       workspaceRepoUrl: workspaceRepoUrl || undefined,
       workspaceRepoBranch: workspaceRepoBranch || undefined,
       workspaceCredentialSecretId: workspaceCredentialSecretId || undefined,
@@ -505,6 +578,12 @@ function CreateProjectForm({ groups, onSubmit, isLoading, error }: CreateProject
           </p>
         </div>
 
+        <ServiceTypesField
+          idPrefix="create"
+          value={allowedServiceTypes}
+          onChange={setAllowedServiceTypes}
+        />
+
         {/* Default Workspace Repository */}
         <div className="border-t pt-4 mt-4">
           <div className="flex items-center gap-2 mb-3">
@@ -558,6 +637,9 @@ function EditProjectForm({ project, onSubmit, isLoading, error }: EditProjectFor
   const [name, setName] = useState(project.name)
   const [description, setDescription] = useState(project.description || '')
   const [status, setStatus] = useState(project.status)
+  const [allowedServiceTypes, setAllowedServiceTypes] = useState<string[]>(
+    project.allowedServiceTypes ?? ['WORKFLOW', 'CONVERSATIONAL'],
+  )
   const [workspaceRepoUrl, setWorkspaceRepoUrl] = useState(project.workspaceRepoUrl || '')
   const [workspaceRepoBranch, setWorkspaceRepoBranch] = useState(project.workspaceRepoBranch || 'main')
   const [workspaceCredentialSecretId, setWorkspaceCredentialSecretId] = useState(
@@ -570,6 +652,7 @@ function EditProjectForm({ project, onSubmit, isLoading, error }: EditProjectFor
       name,
       description: description || undefined,
       status,
+      allowedServiceTypes,
       workspaceRepoUrl: workspaceRepoUrl || undefined,
       workspaceRepoBranch: workspaceRepoBranch || undefined,
       workspaceCredentialSecretId: workspaceCredentialSecretId || '',
@@ -616,6 +699,12 @@ function EditProjectForm({ project, onSubmit, isLoading, error }: EditProjectFor
           />
           <Label htmlFor="edit-active">Active</Label>
         </div>
+
+        <ServiceTypesField
+          idPrefix="edit"
+          value={allowedServiceTypes}
+          onChange={setAllowedServiceTypes}
+        />
 
         {/* Default Workspace Repository */}
         <div className="border-t pt-4 mt-4">

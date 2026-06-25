@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!--
+      #71a - platform System Settings store.
+
+      A typed, audited key/value store for platform-level configuration
+      that previously lived as scattered code constants / env vars. Keys
+      are well-known, stable identifiers, so the key column is the natural
+      primary key (reference/config data convention).
+
+      value_type drives parse + validation in SystemSettingService:
+        STRING    - free text
+        INT       - parseable long
+        RATIO     - double in [0, 1]
+        BOOL      - true / false
+        MODEL_REF - model code string (empty = fall back to caller default)
+        JSON      - any valid JSON document
+
+      `value` is stored as text and parsed by the typed accessors; an
+      empty/blank value means "unset, use the code-side default". Every
+      mutation is written to the audit_log (action SYSTEM_SETTING_UPDATED)
+      consistent with the quota-change history pattern (#47).
+
+      Seeded with the canonical timing constants from docs/NFRs.md so the
+      admin page is populated on first boot. Consumers are wired
+      incrementally (#8 summary, #9 max_pinned, UC-014/UC-015 timeouts);
+      until a consumer reads a key, editing it is a no-op by design.
+    -->
+
+    <changeSet id="20260620-05-system-settings" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="system_settings"/>
+            </not>
+        </preConditions>
+        <createTable tableName="system_settings">
+            <column name="setting_key" type="varchar(120)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="value_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="setting_value" type="clob"/>
+            <column name="description" type="varchar(500)"/>
+            <column name="updated_by" type="uuid"/>
+            <column name="created_at" type="timestamp" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="20260620-05-system-settings-seed" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="system_settings"/>
+            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM system_settings</sqlCheck>
+        </preConditions>
+        <!-- Canonical timing constants (docs/NFRs.md §1.1). -->
+        <insert tableName="system_settings">
+            <column name="setting_key" value="history_limit"/>
+            <column name="value_type" value="INT"/>
+            <column name="setting_value" value="20"/>
+            <column name="description" value="Sliding-window size: most-recent messages sent verbatim to the model each turn."/>
+        </insert>
+        <insert tableName="system_settings">
+            <column name="setting_key" value="bind_wait_timeout_seconds"/>
+            <column name="value_type" value="INT"/>
+            <column name="setting_value" value="30"/>
+            <column name="description" value="How long a PENDING conversation waits for agent capacity before failing with BIND_TIMEOUT_NO_CAPACITY."/>
+        </insert>
+        <insert tableName="system_settings">
+            <column name="setting_key" value="turn_timeout_seconds"/>
+            <column name="value_type" value="INT"/>
+            <column name="setting_value" value="120"/>
+            <column name="description" value="Hard cap on a single turn's generation before TURN_FAILED (timeout)."/>
+        </insert>
+        <insert tableName="system_settings">
+            <column name="setting_key" value="summary_trigger_ratio"/>
+            <column name="value_type" value="RATIO"/>
+            <column name="setting_value" value="0.75"/>
+            <column name="description" value="Fold the tail of the conversation into a CONTEXT_SUMMARY when context usage crosses this fraction of the model window."/>
+        </insert>
+        <insert tableName="system_settings">
+            <column name="setting_key" value="max_pinned"/>
+            <column name="value_type" value="INT"/>
+            <column name="setting_value" value="20"/>
+            <column name="description" value="Maximum pinned messages per conversation; further pins are rejected."/>
+        </insert>
+        <insert tableName="system_settings">
+            <column name="setting_key" value="summarizer_model_code"/>
+            <column name="value_type" value="MODEL_REF"/>
+            <column name="setting_value" value=""/>
+            <column name="description" value="Utility model code for context summaries and conversation auto-titles. Empty = fall back to the session model."/>
+        </insert>
+        <!-- Agent Host health & drain (docs/NFRs.md §1.2, ratified 2026-06-16). -->
+        <insert tableName="system_settings">
+            <column name="setting_key" value="host_heartbeat_interval_seconds"/>
+            <column name="value_type" value="INT"/>
+            <column name="setting_value" value="10"/>
+            <column name="description" value="Interval at which an Agent Host supervisor emits heartbeats to the engine."/>
+        </insert>
+        <insert tableName="system_settings">
+            <column name="setting_key" value="host_heartbeat_soft_grace_seconds"/>
+            <column name="value_type" value="INT"/>
+            <column name="setting_value" value="30"/>
+            <column name="description" value="Heartbeat soft grace before ONLINE -> DEGRADED (HEARTBEAT_LATE)."/>
+        </insert>
+        <insert tableName="system_settings">
+            <column name="setting_key" value="host_heartbeat_hard_threshold_seconds"/>
+            <column name="value_type" value="INT"/>
+            <column name="setting_value" value="90"/>
+            <column name="description" value="Heartbeat hard threshold before DEGRADED -> OFFLINE (HEARTBEAT_LOST)."/>
+        </insert>
+        <insert tableName="system_settings">
+            <column name="setting_key" value="host_drain_deadline_seconds"/>
+            <column name="value_type" value="INT"/>
+            <column name="setting_value" value="300"/>
+            <column name="description" value="Drain deadline before DRAINING -> OFFLINE forces a soft release (DRAIN_TIMEOUT)."/>
+        </insert>
+    </changeSet>
+
+</databaseChangeLog>

@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Users, FolderKanban, LayoutDashboard, LogOut, Bot, ChevronDown, Settings, User, Workflow, List, Cpu, Wrench, BookOpen, ShieldCheck, KeyRound, Building2, Server, ScrollText, Gauge } from 'lucide-react'
+import { Users, FolderKanban, LayoutDashboard, LogOut, Bot, ChevronDown, Settings, User, Workflow, Cpu, Wrench, BookOpen, ShieldCheck, KeyRound, Building2, Server, ScrollText, Gauge, MessageSquare, Layers, Inbox } from 'lucide-react'
 import { QuotaBanner } from '@/components/quota-banner'
 
 export const Route = createFileRoute('/_authenticated')({
@@ -71,22 +71,35 @@ function AuthenticatedLayout() {
             </Button>
           </Link>
 
-          {/* Workflow Management Dropdown - visible to all */}
+          <Link to="/my-work">
+            <Button variant="ghost" size="sm">
+              <Inbox className="h-4 w-4 mr-2" />
+              My Work
+            </Button>
+          </Link>
+
+          {/* Service Management Dropdown - visible to all */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm">
-                <Workflow className="h-4 w-4 mr-2" />
-                Workflow Management
+                <Layers className="h-4 w-4 mr-2" />
+                Service Management
                 <ChevronDown className="h-4 w-4 ml-1" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
-              <DropdownMenuLabel>Workflows</DropdownMenuLabel>
+              <DropdownMenuLabel>Services</DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
                 <Link to="/workflows" className="cursor-pointer">
-                  <List className="h-4 w-4 mr-2" />
-                  Workflow List
+                  <Workflow className="h-4 w-4 mr-2" />
+                  Workflows
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link to="/assistants" className="cursor-pointer">
+                  <MessageSquare className="h-4 w-4 mr-2" />
+                  Assistants
                 </Link>
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -130,6 +143,12 @@ function AuthenticatedLayout() {
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
+                  <Link to="/admin/service-types" className="cursor-pointer">
+                    <Layers className="h-4 w-4 mr-2" />
+                    Service Types
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
                   <Link to="/knowledge" className="cursor-pointer">
                     <BookOpen className="h-4 w-4 mr-2" />
                     Knowledge
@@ -169,6 +188,12 @@ function AuthenticatedLayout() {
                   <Link to="/admin/providers" className="cursor-pointer">
                     <Server className="h-4 w-4 mr-2" />
                     Model Providers
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link to="/admin/system-settings" className="cursor-pointer">
+                    <Settings className="h-4 w-4 mr-2" />
+                    System Settings
                   </Link>
                 </DropdownMenuItem>
               </DropdownMenuContent>

@@ -71,6 +71,11 @@ public interface ExecutionEventRepository extends JpaRepository<ExecutionEvent, 
     List<ExecutionEvent> findByAttemptIdAndCreatedAtAfterOrderByCreatedAtAsc(UUID attemptId, Instant after);
 
     /**
+     * Find events of a specific type for an attempt.
+     */
+    List<ExecutionEvent> findByAttemptIdAndEventType(UUID attemptId, EventType eventType);
+
+    /**
      * Count events for an attempt.
      */
     long countByAttemptId(UUID attemptId);

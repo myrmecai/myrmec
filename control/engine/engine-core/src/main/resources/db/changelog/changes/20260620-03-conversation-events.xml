@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Slice 4e — Conversation lifecycle event log
+        (conversation-observability §4).
+
+        ``conversation_events`` is the append-only, immutable source of truth
+        for "what happened to this conversation, when, and why" — the basis
+        for funnel metrics (wait-to-connect, lost-on-wait), audit, and
+        per-attempt worker attribution. The operational FSM lives in a single
+        mutable column elsewhere; analytical distinctions are *reason codes on
+        transitions here*, never extra states.
+
+        Each row records one FSM transition:
+          * ``from_state`` / ``to_state`` — the agent runtime status either
+            side of the transition (agent-concurrency §9.5). ``from_state`` is
+            null for the very first event of a conversation.
+          * ``reason_code``   — why it happened (catalog: ConversationEventReason).
+          * ``agent_id`` / ``agent_host_id`` — which ephemeral worker served
+            this attempt and the durable machine it ran on. These are bare
+            attribution stamps (NO foreign keys): the log must outlive the
+            ephemeral ``agents`` row, which is reaped on release/host-loss, so
+            it stays the authoritative per-attempt history. Only the durable
+            ``agent_host_id`` is denormalized onto ``conversations``.
+          * ``bind_attempt_no`` — ties an event to one connect attempt; a
+            resume / INSTANCE_LOST recovery reserves a NEW worker under a new
+            attempt number.
+          * ``attributes``   — low-cardinality JSON extras (e.g. latency_ms);
+            IDs + dimensions only, never message content (privacy NFR).
+
+        ``seq`` is monotonic per conversation; ``(conversation_id, seq)`` is
+        UNIQUE so retries are idempotent and never double-count. The table is
+        append-only — no UPDATE/DELETE — and doubles as the audit trail.
+        Portable types only (no DB-proprietary features); the JSON column is
+        ``text`` to stay DB-neutral, mapped via JsonMapConverter.
+    -->
+
+    <changeSet id="20260620-03-create-conversation-events" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="conversation_events"/>
+            </not>
+        </preConditions>
+        <comment>Append-only conversation lifecycle event log — metrics + audit source of truth.</comment>
+
+        <createTable tableName="conversation_events">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="conversation_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Monotonic per conversation; null from_state marks the first event. -->
+            <column name="seq" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="from_state" type="varchar(20)"/>
+            <column name="to_state" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reason_code" type="varchar(40)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="occurred_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Bare attribution stamps (no FK): the ephemeral worker is reaped. -->
+            <column name="agent_id" type="uuid"/>
+            <column name="agent_host_id" type="uuid"/>
+            <column name="bind_attempt_no" type="int" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Low-cardinality JSON extras; DB-neutral text. -->
+            <column name="attributes" type="text"/>
+        </createTable>
+
+        <!-- Idempotency + monotonic ordering: one row per (conversation, seq). -->
+        <addUniqueConstraint
+            tableName="conversation_events"
+            columnNames="conversation_id, seq"
+            constraintName="uq_conversation_events_conversation_seq"/>
+
+        <!-- Funnel/metrics queries slice by reason code. -->
+        <createIndex tableName="conversation_events" indexName="idx_conversation_events_reason_code">
+            <column name="reason_code"/>
+        </createIndex>
+
+        <!-- Host-attribution queries (sessions served by a given machine). -->
+        <createIndex tableName="conversation_events" indexName="idx_conversation_events_agent_host_id">
+            <column name="agent_host_id"/>
+        </createIndex>
+
+        <!-- The parent conversation is the only enforced FK; events are
+             cascaded away only when the whole conversation is hard-deleted. -->
+        <addForeignKeyConstraint
+            baseTableName="conversation_events"
+            baseColumnNames="conversation_id"
+            referencedTableName="conversations"
+            referencedColumnNames="id"
+            constraintName="fk_conversation_events_conversation"
+            onDelete="CASCADE"/>
+    </changeSet>
+
+</databaseChangeLog>

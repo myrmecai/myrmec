@@ -1,6 +1,6 @@
 package ai.myrmec.engine.agent.dto;
 
-import ai.myrmec.engine.agent.Agent;
+import ai.myrmec.engine.agent.AgentHost;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -42,13 +42,13 @@ public class UpdateAgentRequest {
     private Map<String, Object> config;
 
     /**
-     * Maximum concurrent instances allowed.
+     * Maximum concurrent Agents (workers) this host may run.
      */
-    @Min(value = 1, message = "Max instances must be at least 1")
-    private Integer maxInstances;
+    @Min(value = 1, message = "Max agents must be at least 1")
+    private Integer maxAgents;
 
     /**
      * Agent status.
      */
-    private Agent.Status status;
+    private AgentHost.Status status;
 }

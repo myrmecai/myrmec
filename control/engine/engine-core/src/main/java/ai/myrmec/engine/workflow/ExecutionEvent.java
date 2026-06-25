@@ -270,6 +270,38 @@ public class ExecutionEvent {
     }
 
     /**
+     * Create a RETRIEVAL audit event recording the outcome of a single
+     * {@code ctx.retrieve()} query. Stores IDs and scores only — never the
+     * retrieved passage text — so the row stays an audit/replay pointer.
+     */
+    public static ExecutionEvent retrieval(UUID taskId, UUID attemptId, UUID knowledgeBaseId,
+                                           String query, int topK,
+                                           java.util.List<UUID> chunkIds,
+                                           java.util.List<UUID> sourceIds,
+                                           java.util.List<Double> scores) {
+        ExecutionEvent event = new ExecutionEvent();
+        event.setTaskId(taskId);
+        event.setAttemptId(attemptId);
+        event.setEventType(EventType.RETRIEVAL);
+        int hitCount = chunkIds == null ? 0 : chunkIds.size();
+        event.setMessage("Retrieved " + hitCount + " chunk(s)");
+        java.util.LinkedHashMap<String, Object> data = new java.util.LinkedHashMap<>();
+        if (knowledgeBaseId != null) data.put("knowledgeBaseId", knowledgeBaseId.toString());
+        if (query != null) data.put("query", query);
+        data.put("topK", topK);
+        data.put("hitCount", hitCount);
+        data.put("chunkIds", chunkIds == null ? java.util.List.of()
+                : chunkIds.stream().map(UUID::toString).toList());
+        data.put("sourceIds", sourceIds == null ? java.util.List.of()
+                : sourceIds.stream().map(UUID::toString).toList());
+        data.put("scores", scores == null ? java.util.List.of() : scores);
+        event.setData(data);
+        event.setSource(LogSource.AGENT);
+        event.setCreatedAt(Instant.now());
+        return event;
+    }
+
+    /**
      * Create a TASK_METRICS event from a metrics map.
      */
     public static ExecutionEvent taskMetrics(UUID taskId, UUID attemptId, Map<String, Object> metrics) {

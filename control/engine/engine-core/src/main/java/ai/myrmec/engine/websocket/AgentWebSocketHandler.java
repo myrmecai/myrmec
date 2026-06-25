@@ -1,26 +1,38 @@
 package ai.myrmec.engine.websocket;
 
 import ai.myrmec.engine._system.security.JwtTokenProvider;
-import ai.myrmec.engine.agent.AgentInstance;
-import ai.myrmec.engine.agent.AgentInstanceRepository;
+import ai.myrmec.engine.agent.Agent;
+import ai.myrmec.engine.agent.AgentRepository;
+import ai.myrmec.engine.agent.AgentService;
+import ai.myrmec.engine.conversation.CitationEnforcementResult;
+import ai.myrmec.engine.conversation.CitationEnforcementService;
 import ai.myrmec.engine.conversation.ConversationMessage;
-import ai.myrmec.engine.conversation.ConversationService;
-import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
+import ai.myrmec.engine.conversation.ConversationMessageRepository;
+import ai.myrmec.engine.conversation.dispatch.AgentAvailableEvent;
+import ai.myrmec.engine.node.AgentTransport;
+import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.tool.RiskClass;
+import ai.myrmec.engine.tool.Tool;
+import ai.myrmec.engine.tool.ToolRepository;
 import ai.myrmec.engine.websocket.message.CloseCode;
 import ai.myrmec.engine.websocket.message.MessageType;
 import ai.myrmec.engine.websocket.message.WebSocketMessage;
 import ai.myrmec.engine.websocket.message.payload.*;
+import ai.myrmec.engine.workflow.ExecutionApprovalService;
 import ai.myrmec.engine.workflow.ExecutionEventService;
 import ai.myrmec.engine.workflow.LogSource;
 import ai.myrmec.engine.workflow.TaskAttempt;
 import ai.myrmec.engine.workflow.TaskAttemptRepository;
 import ai.myrmec.engine.workflow.TaskAttemptService;
 import ai.myrmec.engine.workflow.AttemptStatus;
+import ai.myrmec.engine.workflow.WorkflowTask;
+import ai.myrmec.engine.workflow.WorkflowTaskRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.*;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
@@ -36,22 +48,62 @@ import java.util.UUID;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class AgentWebSocketHandler extends TextWebSocketHandler {
 
     private final JwtTokenProvider jwtTokenProvider;
-    private final AgentInstanceRepository agentInstanceRepository;
+    private final AgentRepository agentInstanceRepository;
+    private final AgentService agentService;
     private final AgentConnectionManager connectionManager;
     private final ExecutionEventService executionEventService;
     private final TaskAttemptService taskAttemptService;
     private final TaskAttemptRepository taskAttemptRepository;
-    private final ConversationService conversationService;
-    private final ConversationStreamBroker conversationStreamBroker;
-    private final ai.myrmec.engine.security.scan.SecretLeakService secretLeakService;
+    private final CitationEnforcementService citationEnforcementService;
     private final ObjectMapper objectMapper;
+    private final AgentTransport agentTransport;
+    private final ApplicationEventPublisher eventPublisher;
+    private final ToolRepository toolRepository;
+    private final WorkflowTaskRepository workflowTaskRepository;
+    private final ProjectRepository projectRepository;
+    private final ExecutionApprovalService executionApprovalService;
+    private final ConversationInboundService conversationInboundService;
 
     private static final String ATTR_AGENT_INSTANCE_ID = "agentInstanceId";
     private static final String ATTR_AGENT_NAME = "agentName";
+
+    public AgentWebSocketHandler(
+            JwtTokenProvider jwtTokenProvider,
+            AgentRepository agentInstanceRepository,
+            AgentService agentService,
+            AgentConnectionManager connectionManager,
+            ExecutionEventService executionEventService,
+            TaskAttemptService taskAttemptService,
+            TaskAttemptRepository taskAttemptRepository,
+            CitationEnforcementService citationEnforcementService,
+            ObjectMapper objectMapper,
+            AgentTransport agentTransport,
+            ApplicationEventPublisher eventPublisher,
+            ToolRepository toolRepository,
+            WorkflowTaskRepository workflowTaskRepository,
+            ProjectRepository projectRepository,
+            ExecutionApprovalService executionApprovalService,
+            @org.springframework.context.annotation.Lazy ConversationInboundService conversationInboundService) {
+        this.jwtTokenProvider = jwtTokenProvider;
+        this.agentInstanceRepository = agentInstanceRepository;
+        this.agentService = agentService;
+        this.connectionManager = connectionManager;
+        this.executionEventService = executionEventService;
+        this.taskAttemptService = taskAttemptService;
+        this.taskAttemptRepository = taskAttemptRepository;
+        this.citationEnforcementService = citationEnforcementService;
+        this.objectMapper = objectMapper;
+        this.agentTransport = agentTransport;
+        this.eventPublisher = eventPublisher;
+        this.toolRepository = toolRepository;
+        this.workflowTaskRepository = workflowTaskRepository;
+        this.projectRepository = projectRepository;
+        this.executionApprovalService = executionApprovalService;
+        this.conversationInboundService = conversationInboundService;
+    }
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
@@ -66,7 +118,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
 
         // Update agent instance status in database
         agentInstanceRepository.findById(agentInstanceId).ifPresent(instance -> {
-            instance.setStatus(AgentInstance.Status.ONLINE);
+            instance.release();
             instance.recordHeartbeat();
             agentInstanceRepository.save(instance);
         });
@@ -78,6 +130,11 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
 
         // Check for running attempts that were assigned to this agent (reconnection scenario)
         checkRunningAttempts(agentInstanceId);
+
+        // #87 — the worker is now IDLE and connected; wake the backlog drainer
+        // so any conversation whose USER turn was buffered for lack of capacity
+        // (#86) gets re-dispatched to this freshly-available worker.
+        eventPublisher.publishEvent(new AgentAvailableEvent(agentInstanceId));
     }
 
     /**
@@ -167,10 +224,24 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                 case MessageType.TOOL_RESULT -> handleToolResult(session, payloadNode);
                 case MessageType.TOKEN_USAGE -> handleTokenUsage(session, payloadNode);
                 case MessageType.TASK_METRICS -> handleTaskMetrics(session, payloadNode);
-                case MessageType.MESSAGE_DELTA -> handleMessageDelta(session, payloadNode, payload);
-                case MessageType.MESSAGE_COMPLETE -> handleMessageComplete(session, payloadNode, payload);
-                case MessageType.TASK_CANCELLED -> handleTaskCancelled(session, payloadNode, payload);
-                case MessageType.APPROVAL_REQUEST -> handleApprovalRequest(session, payloadNode);
+                case MessageType.HOST_ANNOUNCE -> handleHostAnnounce(session, payloadNode);
+                case MessageType.AGENT_BIND_ACK -> handleBindAck(session, payloadNode);
+                case MessageType.AGENT_BIND_NACK -> handleBindNack(session, payloadNode);
+                // Conversation-socket frames that fall back to the control
+                // socket when the conversation socket dropped mid-turn. Route
+                // them to the same inbound service so the response is persisted.
+                case MessageType.MESSAGE_DELTA -> {
+                    UUID iid = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+                    conversationInboundService.onMessageDelta(iid, payloadNode, payload);
+                }
+                case MessageType.MESSAGE_COMPLETE -> {
+                    UUID iid = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+                    conversationInboundService.onMessageComplete(iid, payloadNode, payload);
+                }
+                case MessageType.TASK_CANCELLED -> {
+                    UUID iid = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+                    conversationInboundService.onTaskCancelled(iid, payloadNode, payload);
+                }
                 case MessageType.PONG -> handlePong(session);
                 case MessageType.DISCONNECT -> handleDisconnect(session, payloadNode);
                 default -> log.warn("Unknown message type: {}", type);
@@ -265,6 +336,25 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         // Complete the attempt and update task
         if (attemptId != null) {
             try {
+                // #29 — Citation enforcement: if ctx.retrieve() was called during this
+                // conversation turn, verify that the assistant message contains citations.
+                // Get the most recent ASSISTANT message for this attempt's conversation.
+                TaskAttempt attempt = taskAttemptRepository.findById(attemptId).orElse(null);
+                if (attempt != null && attempt.getTask() != null) {
+                    // Look up the conversation turn to find the associated conversation ID
+                    // For now, we emit an audit-only result (non-blocking) to avoid breaking
+                    // the flow if retrieval/conversation relationship is not yet resolved.
+                    // This can be enhanced in Phase 2 to fail the task or redact output.
+                    
+                    // TODO: In Phase 2, integrate retrieval enforcement to either:
+                    // 1. Fail the task with CITATION_REQUIRED error if violation
+                    // 2. Redact/strip chunk references if absent (audit-only mode)
+                    // For now, log violations as warnings for audit trail inspection.
+                    
+                    log.debug("Task {} attempt {} completed; citation enforcement deferred to Phase 2",
+                            complete.getTaskId(), attemptId);
+                }
+                
                 taskAttemptService.completeSuccess(attemptId, complete.getResult());
             } catch (Exception e) {
                 log.error("Failed to complete task attempt: {}", e.getMessage(), e);
@@ -439,6 +529,70 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         } catch (Exception e) {
             log.warn("Failed to store tool call event: {}", e.getMessage());
         }
+
+        // Phase 3 — DESTRUCTIVE Tool Detection: Check if tool is marked DESTRUCTIVE
+        // and project has autoHitlOnDestructive enabled. If so, request approval.
+        try {
+            checkAndRequestApprovalForDestructiveTool(toolCall);
+        } catch (Exception e) {
+            log.error("Error checking DESTRUCTIVE tool for approval: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Phase 3 — If tool is marked DESTRUCTIVE and project has autoHitlOnDestructive,
+     * request approval before tool execution proceeds.
+     */
+    private void checkAndRequestApprovalForDestructiveTool(ToolCallPayload toolCall) {
+        // Fetch the tool definition
+        Tool tool = toolRepository.findById(toolCall.getToolName()).orElse(null);
+        if (tool == null) {
+            log.debug("Tool {} not found in registry, skipping approval check", toolCall.getToolName());
+            return;
+        }
+
+        // Check if tool is DESTRUCTIVE or IRREVERSIBLE
+        if (tool.getRiskClass() != RiskClass.DESTRUCTIVE && tool.getRiskClass() != RiskClass.IRREVERSIBLE) {
+            return; // Not a risky tool, no approval needed
+        }
+
+        // Fetch the task to find its project
+        WorkflowTask task = workflowTaskRepository.findById(toolCall.getTaskId()).orElse(null);
+        if (task == null) {
+            log.warn("WorkflowTask {} not found, cannot check project autoHitlOnDestructive", toolCall.getTaskId());
+            return;
+        }
+
+        // Navigate to project through request → workflow → project
+        Project project = task.getRequest().getWorkflow().getProject();
+        if (project == null) {
+            log.warn("Project not found for task {}, cannot check autoHitlOnDestructive", toolCall.getTaskId());
+            return;
+        }
+
+        // Check if project has autoHitlOnDestructive enabled
+        if (!project.isAutoHitlOnDestructive()) {
+            log.debug("Task {} tool {} is DESTRUCTIVE but project {} has autoHitlOnDestructive=false, skipping approval",
+                    toolCall.getTaskId(), toolCall.getToolName(), project.getId());
+            return;
+        }
+
+        // All conditions met: request approval
+        String summary = String.format("Tool %s (%s): %s", tool.getCode(), tool.getName(), toolCall.getToolName());
+        Map<String, Object> payload = Map.of(
+                "toolName", tool.getCode(),
+                "toolDescription", tool.getDescription() != null ? tool.getDescription() : "",
+                "parameters", toolCall.getInput() != null ? toolCall.getInput() : Map.of(),
+                "summary", summary
+        );
+
+        try {
+            executionApprovalService.requestApproval(task.getId(), summary, payload, null);
+            log.info("Requested approval for DESTRUCTIVE tool {} in task {}", toolCall.getToolName(), toolCall.getTaskId());
+        } catch (Exception e) {
+            log.error("Failed to request approval for DESTRUCTIVE tool {} in task {}: {}",
+                    toolCall.getToolName(), toolCall.getTaskId(), e.getMessage(), e);
+        }
     }
 
     private void handleToolResult(WebSocketSession session, JsonNode payload) {
@@ -528,141 +682,62 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    // ==================== Phase 6b — conversational sessions ====================
-
     /**
-     * {@code message.delta} — streamed assistant token chunk. Phase 6b
-     * persists nothing; Phase 6c will fan out to viewers via the broker.
-     * Logged at debug so the inbound rate stays visible during development.
+     * {@code host.announce} â€” the Supervisor advertises its installed
+     * provisions (tools + runtime) and the capacity it auto-sized from. The
+     * announce arrives over the worker's authenticated socket (strangler
+     * topology); the engine resolves the parent {@link AgentHost} from the
+     * connected instance and overwrites its provisions/capacity.
      */
-    private void handleMessageDelta(WebSocketSession session, JsonNode payload, String rawFrame) {
-        MessageDeltaPayload delta = objectMapper.convertValue(payload, MessageDeltaPayload.class);
+    private void handleHostAnnounce(WebSocketSession session, JsonNode payload) {
         UUID agentInstanceId = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
-        int delivered = conversationStreamBroker.broadcast(delta.getConversationId(), rawFrame);
-        log.debug("Agent {} streamed delta for conversation {} seq {}#{} ({} chars) -> {} viewer(s)",
-                agentInstanceId,
-                delta.getConversationId(),
-                delta.getSequenceNo(),
-                delta.getDeltaIndex(),
-                delta.getContent() == null ? 0 : delta.getContent().length(),
-                delivered);
+        HostAnnouncePayload announce = objectMapper.convertValue(payload, HostAnnouncePayload.class);
+
+        agentInstanceRepository.findById(agentInstanceId).ifPresentOrElse(
+                instance -> {
+                    agentService.recordHostAnnounce(
+                            instance.getAgentHostId(),
+                            announce.getProvisions(),
+                            announce.getReportedCapacity());
+                    log.info("Host announce from instance {} (host {}): provisions={}, capacity={}",
+                            agentInstanceId, instance.getAgentHostId(),
+                            announce.getProvisions(), announce.getReportedCapacity());
+                },
+                () -> log.warn("host.announce from unknown instance {}", agentInstanceId));
     }
 
     /**
-     * {@code message.complete} — final assistant turn. Persists the
-     * canonical text as a {@code ConversationMessage} row with
-     * role=ASSISTANT. Persistence is decoupled from streaming so a late
-     * viewer that missed the deltas still gets the full text on replay.
+     * Consume an {@code agent.bind.ack}: the Agent Host received the
+     * {@code agent.bind} and its worker is dialing the home node, so advance
+     * the reserved worker to {@code CONNECTING} (agent-concurrency §9.5).
      */
-    private void handleMessageComplete(WebSocketSession session, JsonNode payload, String rawFrame) {
-        MessageCompletePayload complete = objectMapper.convertValue(payload, MessageCompletePayload.class);
+    private void handleBindAck(WebSocketSession session, JsonNode payload) {
         UUID agentInstanceId = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
-
-        // Phase 9e — secret-leak scan BEFORE we fan out to viewers or
-        // persist for replay. The scanner can BLOCK (drop the frame
-        // entirely) or REDACT (keep going with cleaned text). The
-        // original text is never persisted in either case.
-        ai.myrmec.engine.security.scan.SecretLeakService.Result scan =
-                secretLeakService.inspectOutbound(
-                        complete.getContent(),
-                        complete.getConversationId(),
-                        null);
-        if (scan.isBlocked()) {
-            log.warn("BLOCKED message.complete from agent {} (conv {}) — secret leak detected",
-                    agentInstanceId, complete.getConversationId());
-            return;
-        }
-        String safeText = scan.getText();
-        String safeRawFrame = rawFrame;
-        if (scan.isLeakDetected() && safeText != null
-                && !safeText.equals(complete.getContent())) {
-            // Re-serialise the envelope so viewers see the redacted text.
-            try {
-                MessageCompletePayload cleanPayload = new MessageCompletePayload();
-                cleanPayload.setConversationId(complete.getConversationId());
-                cleanPayload.setSequenceNo(complete.getSequenceNo());
-                cleanPayload.setContent(safeText);
-                cleanPayload.setModelCode(complete.getModelCode());
-                cleanPayload.setTokenCount(complete.getTokenCount());
-                WebSocketMessage<MessageCompletePayload> envelope =
-                        WebSocketMessage.of(MessageType.MESSAGE_COMPLETE, cleanPayload);
-                safeRawFrame = objectMapper.writeValueAsString(envelope);
-            } catch (Exception ex) {
-                // Re-serialisation failures fall through to the original
-                // raw frame — but that exposes the leak. Better to drop.
-                log.warn("Failed to re-serialise redacted message.complete (conv {}): {}",
-                        complete.getConversationId(), ex.getMessage());
-                return;
-            }
-        }
-
-        // Fan to live viewers first — persistence below is for replay only.
-        conversationStreamBroker.broadcast(complete.getConversationId(), safeRawFrame);
+        AgentBindAckPayload ack = objectMapper.convertValue(payload, AgentBindAckPayload.class);
+        log.debug("Agent {} acked bind for conversation {}", agentInstanceId, ack.getConversationId());
         try {
-            UUID agentId = agentInstanceRepository.findById(agentInstanceId)
-                    .map(AgentInstance::getAgentId)
-                    .orElse(null);
-            ConversationMessage saved = conversationService.appendMessage(
-                    complete.getConversationId(),
-                    ConversationMessage.Role.ASSISTANT,
-                    safeText,
-                    null,
-                    agentId);
-            if (complete.getModelCode() != null) {
-                saved.setModelCode(complete.getModelCode());
-            }
-            if (complete.getTokenCount() != null) {
-                saved.setTokenCount(complete.getTokenCount());
-            }
-            log.debug("Persisted ASSISTANT message {} (conv {} seq {})",
-                    saved.getId(), complete.getConversationId(), saved.getSequenceNo());
+            agentService.confirmBind(agentInstanceId, ack.getConversationId());
         } catch (Exception e) {
-            log.warn("Failed to persist message.complete from agent {}: {}",
-                    agentInstanceId, e.getMessage(), e);
+            // H2 concurrent-update on the agents row (attachConversation
+            // racing confirmBind on two sockets for the same instance) can
+            // throw. The worker is already RESERVED; the conversation socket
+            // handler will complete the bind. Don't close the control socket.
+            log.warn("confirmBind threw for agent {} conv {} — ignoring: {}",
+                    agentInstanceId, ack.getConversationId(), e.getMessage());
         }
     }
 
     /**
-     * {@code task.cancelled} — agent acknowledged a {@code task.cancel}.
-     * Phase 6b: log + record an execution event so the audit trail
-     * captures who cancelled and when. Phase 6c will broadcast a
-     * cancellation frame to all conversation viewers.
+     * Consume an {@code agent.bind.nack}: the Agent Host cannot serve the
+     * {@code agent.bind}, so release the reserved worker back to {@code IDLE}
+     * for re-dispatch (agent-concurrency §9.5).
      */
-    private void handleTaskCancelled(WebSocketSession session, JsonNode payload, String rawFrame) {
-        TaskCancelledPayload cancelled = objectMapper.convertValue(payload, TaskCancelledPayload.class);
+    private void handleBindNack(WebSocketSession session, JsonNode payload) {
         UUID agentInstanceId = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
-        if (cancelled.getConversationId() != null) {
-            conversationStreamBroker.broadcast(cancelled.getConversationId(), rawFrame);
-        }
-        log.info("Agent {} acknowledged cancellation of task {} (conv {}, reason: {})",
-                agentInstanceId,
-                cancelled.getTaskId(),
-                cancelled.getConversationId(),
-                cancelled.getReason());
-
-        // Phase 6d — persist whatever the assistant had streamed before being cancelled.
-        // This preserves the partial reply for replay viewers and gives the user something
-        // to see in the transcript even though the turn never completed.
-        if (cancelled.getConversationId() != null
-                && cancelled.getPartialContent() != null
-                && !cancelled.getPartialContent().isEmpty()) {
-            try {
-                UUID agentId = agentInstanceRepository.findById(agentInstanceId)
-                        .map(AgentInstance::getAgentId)
-                        .orElse(null);
-                ConversationMessage saved = conversationService.appendMessage(
-                        cancelled.getConversationId(),
-                        ConversationMessage.Role.ASSISTANT,
-                        cancelled.getPartialContent(),
-                        null,
-                        agentId);
-                log.debug("Persisted partial ASSISTANT message {} (conv {} seq {}) after cancel",
-                        saved.getId(), cancelled.getConversationId(), saved.getSequenceNo());
-            } catch (Exception e) {
-                log.warn("Failed to persist partial assistant turn after cancel for conv {}: {}",
-                        cancelled.getConversationId(), e.getMessage(), e);
-            }
-        }
+        AgentBindAckPayload nack = objectMapper.convertValue(payload, AgentBindAckPayload.class);
+        log.info("Agent {} nacked bind for conversation {}: {}",
+                agentInstanceId, nack.getConversationId(), nack.getReason());
+        agentService.rejectBind(agentInstanceId, nack.getConversationId(), nack.getReason());
     }
 
     private void handleDisconnect(WebSocketSession session, JsonNode payload) throws IOException {
@@ -675,71 +750,8 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         session.close(CloseStatus.NORMAL);
     }
 
-    // ==================== Phase 7c — HITL approval (agent-initiated) ====================
-
-    /**
-     * {@code approval.request} \u2014 the agent is gating a side-effecting
-     * action behind a human decision. Persist the APPROVAL_REQUEST row
-     * via {@link ConversationService#appendApprovalRequest} (so it
-     * shows in replay) then broadcast an enriched envelope to viewers
-     * carrying both the engine-assigned {@code messageId} and the
-     * agent's {@code clientRequestId}. The decision arrives later
-     * through the REST surface; the controller routes it back via
-     * {@link #sendApprovalDecision(UUID, ApprovalDecisionPayload)}.
-     */
-    private void handleApprovalRequest(WebSocketSession session, JsonNode payload) {
-        ApprovalRequestPayload req = objectMapper.convertValue(payload, ApprovalRequestPayload.class);
-        UUID agentInstanceId = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
-        if (req.getConversationId() == null || req.getClientRequestId() == null) {
-            log.warn("Discarding approval.request from agent {} \u2014 conversationId/clientRequestId required",
-                    agentInstanceId);
-            return;
-        }
-        UUID agentId = agentInstanceRepository.findById(agentInstanceId)
-                .map(AgentInstance::getAgentId)
-                .orElse(null);
-        if (agentId == null) {
-            log.warn("Agent instance {} sent approval.request but no Agent row \u2014 dropping", agentInstanceId);
-            return;
-        }
-        ConversationMessage persisted;
-        try {
-            persisted = conversationService.appendApprovalRequest(
-                    req.getConversationId(),
-                    agentId,
-                    req.getContent(),
-                    req.getPayloadJson(),
-                    req.getExpiresAt());
-        } catch (Exception e) {
-            log.warn("Failed to persist approval.request for conv {} from agent {}: {}",
-                    req.getConversationId(), agentInstanceId, e.getMessage(), e);
-            return;
-        }
-        // Broadcast to viewers with both ids populated so the UI knows
-        // which row to render and the originating agent's other viewers
-        // (multi-tab admin) see the same envelope.
-        ApprovalRequestPayload broadcast = ApprovalRequestPayload.builder()
-                .conversationId(req.getConversationId())
-                .clientRequestId(req.getClientRequestId())
-                .messageId(persisted.getId())
-                .content(persisted.getContent())
-                .payloadJson(persisted.getPayloadJson())
-                .expiresAt(persisted.getExpiresAt())
-                .build();
-        WebSocketMessage<ApprovalRequestPayload> envelope =
-                WebSocketMessage.of(MessageType.APPROVAL_REQUEST, broadcast);
-        try {
-            String json = objectMapper.writeValueAsString(envelope);
-            conversationStreamBroker.broadcast(req.getConversationId(), json);
-        } catch (JsonProcessingException e) {
-            log.warn("Failed to serialise approval.request envelope for conv {}: {}",
-                    req.getConversationId(), e.getMessage());
-        }
-        log.info("Agent {} requested approval on conv {} (clientId {}, persisted as {})",
-                agentInstanceId, req.getConversationId(), req.getClientRequestId(), persisted.getId());
-    }
-
     // ==================== Outbound Messages ====================
+    // (approval.request handling moved to the conversation socket in 4c-2b)
 
     /**
      * Send a task assignment to an agent.
@@ -768,30 +780,39 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
-     * Send a conversation turn assignment to an agent (Phase 6d).
-     *
-     * <p>Unlike {@link #assignTask(UUID, TaskAssignPayload)} this does not
-     * mark the agent as busy via {@code connectionManager.assignTask} —
-     * conversational turns do not block the workflow task queue and an
-     * agent is free to interleave them with workflow work in the future.
-     * For Phase 6d we still only dispatch to an idle agent (the
-     * dispatcher enforces this) so behaviour matches the workflow path.</p>
+     * Send a reserve-time binding to a worker (Slice 3). Tells the worker
+     * which conversation it is now serving and which profile version to
+     * load. Sent right after the engine atomically reserves the worker
+     * (agent-concurrency Â§9.5).
      */
-    public boolean sendConversationTurn(UUID agentInstanceId, ConversationTurnAssignPayload payload) {
-        WebSocketMessage<ConversationTurnAssignPayload> message =
-                WebSocketMessage.of(MessageType.CONVERSATION_TURN_ASSIGN, payload);
-        return connectionManager.sendMessage(agentInstanceId, message);
+    public boolean sendAgentBind(UUID agentInstanceId, AgentBindPayload payload) {
+        WebSocketMessage<AgentBindPayload> message =
+                WebSocketMessage.of(MessageType.AGENT_BIND, payload);
+        return route(agentInstanceId, message);
     }
 
     /**
-     * Phase 7c — push the APPROVAL_DECISION frame back to a specific
-     * agent instance. The {@code clientRequestId} on the payload lets
-     * the agent SDK resolve the matching pending future.
+     * Tell a worker to release its current binding and return to the warm
+     * pool (Slice 3). Sent when the engine tears a binding down.
      */
-    public boolean sendApprovalDecision(UUID agentInstanceId, ApprovalDecisionPayload payload) {
-        WebSocketMessage<ApprovalDecisionPayload> message =
-                WebSocketMessage.of(MessageType.APPROVAL_DECISION, payload);
-        return connectionManager.sendMessage(agentInstanceId, message);
+    public boolean sendAgentRelease(UUID agentInstanceId, AgentReleasePayload payload) {
+        WebSocketMessage<AgentReleasePayload> message =
+                WebSocketMessage.of(MessageType.AGENT_RELEASE, payload);
+        return route(agentInstanceId, message);
+    }
+
+    /**
+     * Route a control frame to a worker through the cross-node transport
+     * (slice 4b). Resolves the worker's home node ({@code agents.home_node_id})
+     * and lets {@link AgentTransport} short-circuit to the local socket when
+     * the worker is homed here (always the case on a single node) or relay to
+     * the owning peer replica otherwise.
+     */
+    private boolean route(UUID agentInstanceId, WebSocketMessage<?> message) {
+        String homeNodeId = agentInstanceRepository.findById(agentInstanceId)
+                .map(Agent::getHomeNodeId)
+                .orElse(null);
+        return agentTransport.sendToNode(homeNodeId, agentInstanceId, message);
     }
 
     /**

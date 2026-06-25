@@ -19,8 +19,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
 
     private final AgentWebSocketHandler agentWebSocketHandler;
     private final AgentWebSocketHandshakeInterceptor handshakeInterceptor;
-    private final UserConversationWebSocketHandler userConversationWebSocketHandler;
-    private final UserConversationHandshakeInterceptor userConversationHandshakeInterceptor;
+    private final AgentConversationWebSocketHandler agentConversationWebSocketHandler;
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
@@ -28,13 +27,13 @@ public class WebSocketConfig implements WebSocketConfigurer {
                 .addInterceptors(handshakeInterceptor)
                 .setAllowedOrigins("*"); // Configure properly for production
 
-        // Phase 6c-2 — user-facing live stream. Path includes {id}; the
-        // handshake interceptor parses it out of the URI and pins both
-        // the conversation id and authenticated user id into the session
-        // attributes.
-        registry.addHandler(userConversationWebSocketHandler,
-                        "/api/v1/conversations/*/stream")
-                .addInterceptors(userConversationHandshakeInterceptor)
+        // Slice 4c — conversation-scoped agent socket. A bound worker dials
+        // its home node directly and opens this socket for one conversation
+        // (agent-concurrency §9.4). Reuses the agent-control handshake
+        // interceptor (same agent JWT pins the worker's instance id); the
+        // conversation id arrives in the conversation.attach frame.
+        registry.addHandler(agentConversationWebSocketHandler, "/api/v1/agent/conversation")
+                .addInterceptors(handshakeInterceptor)
                 .setAllowedOrigins("*");
     }
 }

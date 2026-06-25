@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+      #92 — Assistant entity (Phase 1). Two-table model:
+        * assistants          — parent identity + control-plane kill switches
+        * assistant_version    — immutable-once-published behaviour contract
+        * assistant_grants     — per-assistant ACL (OWNER/EDITOR/VIEWER/USE)
+
+      See docs/design/assistant-entity.md §3-§7. Built additively beside the
+      existing conversations runtime; nothing here rewrites or drops prior
+      schema. `agent_profile_version_id` is a forward-compat seam (no FK) until
+      AgentProfile versioning lands — today the brain pins the flat
+      `agent_profile_id`.
+    -->
+
+    <changeSet id="20260621-06-create-assistants" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="assistants"/>
+            </not>
+        </preConditions>
+        <comment>Assistants — parent identity + control-plane fields (edited in place, no version bump).</comment>
+
+        <createTable tableName="assistants">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_assistant_project"
+                             references="projects(id)"/>
+            </column>
+            <column name="name" type="varchar(120)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="text"/>
+            <!-- Points at the currently-Published assistant_version. NULL until first publish. FK added below. -->
+            <column name="current_version_id" type="uuid"/>
+            <!-- Kill switch: TRUE → new sessions rejected 403; existing sessions continue. Reversible. -->
+            <column name="disabled" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Soft delete: non-null hides from listings; no hard delete in V1. Reversible by admin. -->
+            <column name="archived_at" type="timestamp with time zone"/>
+            <column name="created_by" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_assistant_created_by"
+                             references="users(id)"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="20260621-06-create-assistant-version" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="assistant_version"/>
+            </not>
+        </preConditions>
+        <comment>AssistantVersion — immutable-once-published behaviour contract pinned by every session.</comment>
+
+        <createTable tableName="assistant_version">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="assistant_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_assistant_version_assistant"
+                             references="assistants(id)"/>
+            </column>
+            <!-- semver string "1.0", "1.1", "2.0". NULL on an unpublished Draft. -->
+            <column name="version_number" type="varchar(20)"/>
+            <!-- PATCH / MINOR / MAJOR — computed at publish time. -->
+            <column name="bump_type" type="varchar(10)"/>
+            <!-- DRAFT / PUBLISHED -->
+            <column name="status" type="varchar(20)" defaultValue="DRAFT">
+                <constraints nullable="false"/>
+            </column>
+            <!-- The Published version this Draft was forked from (stale-draft gate). -->
+            <column name="parent_version_id" type="uuid"/>
+            <column name="draft_owner_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_assistant_version_draft_owner"
+                             references="users(id)"/>
+            </column>
+
+            <!-- Brain (§4.2) -->
+            <column name="agent_profile_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_assistant_version_profile"
+                             references="agent_profiles(id)"/>
+            </column>
+            <!-- Forward seam: pinned profile version once AgentProfile versioning lands. No FK yet. -->
+            <column name="agent_profile_version_id" type="uuid"/>
+            <column name="addendum" type="text"/>
+
+            <!-- Behavior (§4.3) -->
+            <column name="greeting_message" type="text" defaultValue="">
+                <constraints nullable="false"/>
+            </column>
+            <column name="max_idle_minutes" type="integer" defaultValueNumeric="60">
+                <constraints nullable="false"/>
+            </column>
+            <column name="max_session_age_hours" type="integer"/>
+
+            <!-- Knowledge (§4.4) — additive JSON list of KB ids. -->
+            <column name="kb_bindings" type="text" defaultValue="[]">
+                <constraints nullable="false"/>
+            </column>
+
+            <!-- Tools (§4.5) — subtractive JSON list of disabled tool codes + HITL override. -->
+            <column name="disabled_tools" type="text" defaultValue="[]">
+                <constraints nullable="false"/>
+            </column>
+            <column name="hitl_override_mode" type="varchar(20)" defaultValue="INHERIT">
+                <constraints nullable="false"/>
+            </column>
+
+            <!-- Reach (§4.6) — non-empty JSON set of channels. -->
+            <column name="usable_via" type="text" defaultValue='["WEB_UI"]'>
+                <constraints nullable="false"/>
+            </column>
+
+            <!-- Attachments (§4.8) — override-only / tighten-only. NULL = inherit. -->
+            <column name="attachments_enabled" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="attachment_retention_ttl" type="integer"/>
+            <column name="attachment_max_file_size" type="integer"/>
+            <column name="attachment_type_allowlist" type="text"/>
+
+            <column name="published_at" type="timestamp with time zone"/>
+            <column name="published_by" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_assistant_version_published_by"
+                             references="users(id)"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="20260621-06-assistant-current-version-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_assistant_current_version"/>
+            </not>
+        </preConditions>
+        <comment>Deferred FK: assistants.current_version_id → assistant_version.id (circular with assistant_id).</comment>
+        <addForeignKeyConstraint
+                baseTableName="assistants"
+                baseColumnNames="current_version_id"
+                referencedTableName="assistant_version"
+                referencedColumnNames="id"
+                constraintName="fk_assistant_current_version"
+                onDelete="SET NULL"/>
+    </changeSet>
+
+    <changeSet id="20260621-06-assistant-indexes" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_assistant_project_id"/>
+            </not>
+        </preConditions>
+        <createIndex indexName="idx_assistant_project_id" tableName="assistants">
+            <column name="project_id"/>
+        </createIndex>
+        <!-- Lookup support for case-insensitive name uniqueness (enforced in service layer). -->
+        <createIndex indexName="idx_assistant_project_name" tableName="assistants">
+            <column name="project_id"/>
+            <column name="name"/>
+        </createIndex>
+        <createIndex indexName="idx_assistant_version_assistant" tableName="assistant_version">
+            <column name="assistant_id"/>
+        </createIndex>
+        <createIndex indexName="idx_assistant_version_assistant_status" tableName="assistant_version">
+            <column name="assistant_id"/>
+            <column name="status"/>
+        </createIndex>
+    </changeSet>
+
+    <!--
+      Single-Draft enforcement. Partial unique indexes are PostgreSQL-only;
+      H2 (test runtime) cannot express the WHERE clause, so the same invariant
+      is enforced in AssistantVersionService for tests + as defence in depth.
+    -->
+    <changeSet id="20260621-06-assistant-one-draft-index" author="myrmec" dbms="postgresql">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="uq_one_draft_per_assistant"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE UNIQUE INDEX uq_one_draft_per_assistant
+                ON assistant_version (assistant_id)
+                WHERE status = 'DRAFT';
+        </sql>
+    </changeSet>
+
+    <changeSet id="20260621-06-create-assistant-grants" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="assistant_grants"/>
+            </not>
+        </preConditions>
+        <comment>Per-assistant ACL. Surrogate id PK (project convention) + unique on the natural key.</comment>
+
+        <createTable tableName="assistant_grants">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="assistant_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_assistant_grant_assistant"
+                             references="assistants(id)"/>
+            </column>
+            <!-- USER / ROLE / SERVICE_ACCOUNT -->
+            <column name="principal_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- UUID for USER/SERVICE_ACCOUNT, Keycloak role string for ROLE -->
+            <column name="principal_id" type="varchar(255)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- OWNER / EDITOR / VIEWER / USE -->
+            <column name="permission" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="granted_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="granted_by" type="uuid"/>
+        </createTable>
+
+        <addUniqueConstraint tableName="assistant_grants"
+                             columnNames="assistant_id, principal_type, principal_id, permission"
+                             constraintName="uq_assistant_grant"/>
+
+        <createIndex indexName="idx_assistant_grant_assistant" tableName="assistant_grants">
+            <column name="assistant_id"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

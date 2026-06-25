@@ -1,7 +1,7 @@
 package ai.myrmec.engine.conversation;
 
 import ai.myrmec.engine.IntegrationTestBase;
-import ai.myrmec.engine.agent.Agent;
+import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.conversation.dto.ApprovalDecisionRequest;
 import ai.myrmec.engine.conversation.dto.ConversationMessageResponse;
@@ -41,7 +41,7 @@ class HitlApprovalTest extends IntegrationTestBase {
     @Autowired
     private ConversationService conversationService;
 
-    private record Setup(Project project, Agent agent, Conversation conversation,
+    private record Setup(Project project, AgentHost agent, Conversation conversation,
                           ConversationMessage request) { }
 
     private Setup arrange(String suffix, Instant expiresAt) {
@@ -50,7 +50,7 @@ class HitlApprovalTest extends IntegrationTestBase {
                 .named("hitl-profile-" + suffix)
                 .withSystemPrompt("test")
                 .create();
-        Agent agent = data.agent()
+        AgentHost agent = data.agent()
                 .named("hitl-agent-" + suffix)
                 .withProfile(profile)
                 .inProject(project)

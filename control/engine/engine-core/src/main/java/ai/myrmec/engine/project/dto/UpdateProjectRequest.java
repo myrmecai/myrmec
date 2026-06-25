@@ -4,6 +4,7 @@ import ai.myrmec.engine.project.ProjectStatus;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -19,6 +20,13 @@ public class UpdateProjectRequest {
     private String description;
 
     private ProjectStatus status;
+
+    /**
+     * Service types this project may host (#77). Null preserves the current
+     * value; a non-null list replaces it (must be non-empty and contain only
+     * known service types).
+     */
+    private List<String> allowedServiceTypes;
 
     /**
      * Default workspace git repository URL.
@@ -47,4 +55,28 @@ public class UpdateProjectRequest {
      * HITL policy switch. Null preserves the current value.
      */
     private Boolean autoHitlOnDestructive;
+
+    /**
+     * #105 — project-level attachment governance posture.
+     * Null preserves the current value.
+     */
+    private Boolean attachmentsEnabled;
+
+    /**
+     * Optional per-project attachment retention TTL in days.
+     * Null preserves the current value.
+     */
+    private Integer attachmentRetentionTtlDays;
+
+    /**
+     * Optional per-project maximum attachment size in bytes.
+     * Null preserves the current value.
+     */
+    private Long attachmentMaxFileSizeBytes;
+
+    /**
+     * Optional comma-separated MIME allowlist for project attachments.
+     * Null preserves the current value.
+     */
+    private String attachmentTypeAllowlist;
 }

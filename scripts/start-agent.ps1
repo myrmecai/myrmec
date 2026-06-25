@@ -1,9 +1,11 @@
-# Start Myrmec Agent
-# Usage: .\start-agent.ps1 [-EnvFile "..\agent-registration.env"] [-AgentScript "simple_agent.py"]
+# Start Myrmec Agent (TypeScript @myrmec/agent runtime)
+# Usage: .\start-agent.ps1 [-EnvFile "..\agent-registration.env"]
+#
+# Loads the registration key from the env file and runs the headless
+# TypeScript agent supervisor (src/bin/headless.ts) via tsx.
 
 param(
-    [string]$EnvFile = "..\agent-registration.env",
-    [string]$AgentScript = "simple_agent.py"
+    [string]$EnvFile = "..\agent-registration.env"
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,13 +13,12 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $EnvPath = Join-Path $ScriptDir $EnvFile
 $AgentsDir = Join-Path $ScriptDir "..\agents"
-$ExamplesDir = Join-Path $AgentsDir "examples"
 
 # Check if env file exists
 if (-not (Test-Path $EnvPath)) {
     Write-Host "Error: Registration key file not found: $EnvPath" -ForegroundColor Red
     Write-Host ""
-    Write-Host "Run first: .\create-registration-key.ps1" -ForegroundColor Yellow
+    Write-Host "Run first: .\setup-e2e-data.ps1" -ForegroundColor Yellow
     exit 1
 }
 
@@ -39,35 +40,21 @@ if (-not $env:MYRMEC_REGISTRATION_KEY) {
     exit 1
 }
 
-# Change to agents directory and setup virtual environment
+# Change to agents directory
 Set-Location $AgentsDir
 
-# Check for virtual environment
-$VenvPath = Join-Path $AgentsDir ".venv"
-$VenvPython = Join-Path $VenvPath "Scripts\python.exe"
-
-if (-not (Test-Path $VenvPython)) {
-    Write-Host "Creating virtual environment..." -ForegroundColor Yellow
-    python -m venv .venv
+# Ensure dependencies are installed
+if (-not (Test-Path (Join-Path $AgentsDir "node_modules"))) {
+    Write-Host "Installing agent dependencies (npm install)..." -ForegroundColor Yellow
+    npm install --no-audit --no-fund
+    if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
 }
 
-# Activate virtual environment
-$ActivateScript = Join-Path $VenvPath "Scripts\Activate.ps1"
-. $ActivateScript
-
-# Install agent package in development mode
-Write-Host "Installing myrmec-agent package..." -ForegroundColor Yellow
-pip install -e . -q
-
 Write-Host ""
-Write-Host "Starting Myrmec Agent..." -ForegroundColor Green
-Write-Host "  Name: $env:MYRMEC_AGENT_NAME" -ForegroundColor Yellow
+Write-Host "Starting Myrmec Agent (TypeScript headless supervisor)..." -ForegroundColor Green
 Write-Host "  Engine URL: $env:MYRMEC_ENGINE_URL" -ForegroundColor Yellow
-Write-Host "  Heartbeat: $env:MYRMEC_HEARTBEAT_INTERVAL seconds" -ForegroundColor Yellow
-Write-Host ""
-Write-Host "Press Ctrl+C to stop" -ForegroundColor Gray
+Write-Host "  Press Ctrl+C to stop" -ForegroundColor Gray
 Write-Host ""
 
-# Run the agent
-$AgentPath = Join-Path $ExamplesDir $AgentScript
-python $AgentPath
+# Run the TypeScript headless agent via tsx
+npx tsx src/bin/headless.ts

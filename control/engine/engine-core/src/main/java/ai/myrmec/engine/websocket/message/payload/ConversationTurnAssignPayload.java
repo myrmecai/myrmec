@@ -86,6 +86,25 @@ public class ConversationTurnAssignPayload {
     /** Model handle + decrypted API key — same shape as {@link TaskAssignPayload}. */
     private TaskAssignPayload.ModelInfo model;
 
+    /**
+     * Attachments bound to the triggering user message (#103). Empty/null
+     * when the turn carried no files. Quarantined uploads are never
+     * conveyed; only scan-clean rows reach the agent.
+     */
+    private List<AttachmentDescriptor> attachments;
+
+    /**
+     * Why this turn is being dispatched (#8). {@code "CHAT"} (default) is a
+     * normal user-facing turn whose completion persists an ASSISTANT row;
+     * {@code "SUMMARY"} is an engine-orchestrated summarisation turn whose
+     * completion is routed into a {@code CONTEXT_SUMMARY} row instead and is
+     * never shown as the conversation's answer. The agent SDK ignores this
+     * field — it produces a turn identically either way; the distinction is
+     * purely engine-side completion routing.
+     */
+    @Builder.Default
+    private String purpose = "CHAT";
+
     @Data
     @Builder
     @NoArgsConstructor
@@ -97,5 +116,63 @@ public class ConversationTurnAssignPayload {
         private String content;
         /** Conversation sequence number this entry holds. */
         private long sequenceNo;
+    }
+
+    /**
+     * A single attachment conveyed to the agent. Text documents small
+     * enough to fit the inline budget carry their extracted text in
+     * {@link #inlineText}; larger ones (and binaries) carry metadata only
+     * and the agent fetches bytes on demand. Image parts are flagged via
+     * {@link #image} only when the resolved model supports vision.
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class AttachmentDescriptor {
+        /** Stable attachment id (for on-demand fetch). */
+        private UUID id;
+        /** Original client filename (sanitised). */
+        private String filename;
+        /** Normalised MIME type. */
+        private String mediaType;
+        /** Stored size in bytes. */
+        private long sizeBytes;
+        /** SHA-256 of the stored bytes. */
+        private String sha256;
+        /**
+         * True only when this is an image AND the resolved model supports
+         * vision — the agent should send it as a native image part.
+         */
+        private boolean image;
+        /**
+         * Extracted text injected inline for small text documents; null
+         * when the file is binary or exceeds the inline budget.
+         */
+        private String inlineText;
+
+        /**
+         * True when {@link #inlineText} is null specifically because the
+         * extracted text exceeded the inline token budget. False for binaries
+         * and extraction/read failures.
+         */
+        private boolean inlineTextOmittedBySize;
+
+        /**
+         * True when {@link #inlineText} is null specifically because inlining
+         * this attachment's text would have pushed the turn's aggregate inline
+         * budget past {@code attachment_inline_ratio_max × contextBudget}
+         * (#103 Slice B). Distinct from {@link #inlineTextOmittedBySize} (a
+         * per-attachment size-cap breach) so the agent and tests can tell why
+         * the text was withheld; either way the agent reads it on demand via
+         * {@link #readContentPath}.
+         */
+        private boolean inlineTextOmittedByBudget;
+
+        /**
+         * Agent-authenticated REST path for fetching raw bytes on demand.
+         * Populated for all clean attachments.
+         */
+        private String readContentPath;
     }
 }

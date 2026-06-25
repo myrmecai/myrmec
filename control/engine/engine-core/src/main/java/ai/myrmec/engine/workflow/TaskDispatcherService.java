@@ -30,8 +30,8 @@ public class TaskDispatcherService {
 
     private final WorkflowTaskRepository taskRepository;
     private final WorkflowRequestRepository requestRepository;
-    private final AgentRepository agentRepository;
-    private final AgentInstanceRepository agentInstanceRepository;
+    private final AgentHostRepository agentRepository;
+    private final AgentRepository agentInstanceRepository;
     private final AgentConnectionManager connectionManager;
     private final AgentWebSocketHandler webSocketHandler;
     private final ToolService toolService;
@@ -87,7 +87,7 @@ public class TaskDispatcherService {
         UUID profileId = task.getAgentProfile().getId();
         
         // Find agents with matching profile
-        List<Agent> matchingAgents = agentRepository.findActiveByProfileId(profileId);
+        List<AgentHost> matchingAgents = agentRepository.findActiveByProfileId(profileId);
         
         if (matchingAgents.isEmpty()) {
             log.debug("No active agents found for profile {}", profileId);
@@ -95,11 +95,11 @@ public class TaskDispatcherService {
         }
         
         // Find an available agent instance (online, idle)
-        for (Agent agent : matchingAgents) {
-            Optional<AgentInstance> availableInstance = findAvailableInstance(agent.getId());
+        for (AgentHost agent : matchingAgents) {
+            Optional<Agent> availableInstance = findAvailableInstance(agent.getId());
             
             if (availableInstance.isPresent()) {
-                AgentInstance instance = availableInstance.get();
+                Agent instance = availableInstance.get();
                 
                 // Create attempt record
                 TaskAttempt attempt = taskAttemptService.createAttempt(task, instance);
@@ -145,11 +145,11 @@ public class TaskDispatcherService {
     /**
      * Find an available agent instance (online and idle).
      */
-    private Optional<AgentInstance> findAvailableInstance(UUID agentId) {
-        List<AgentInstance> instances = agentInstanceRepository.findByAgentIdAndStatus(
-                agentId, AgentInstance.Status.ONLINE);
+    private Optional<Agent> findAvailableInstance(UUID agentId) {
+        List<Agent> instances = agentInstanceRepository.findByAgentHostIdAndStatus(
+                agentId, Agent.Status.IDLE);
         
-        for (AgentInstance instance : instances) {
+        for (Agent instance : instances) {
             // Check if instance is idle (not working on a task)
             if (connectionManager.isAgentIdle(instance.getId())) {
                 return Optional.of(instance);

@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+      #99 — conversation-session source attribution on execution snapshots so
+      cost/usage reports can answer "internal vs external?" and "which external
+      customer drove this spend?" without further schema changes. The four
+      columns mirror the conversation seams added in #96 (20260621-09) and are
+      copied onto each snapshot at write time by the dispatcher.
+
+      All nullable + additive: workflow/non-conversation snapshots leave them
+      NULL. No foreign keys — consistent with this table's existing policy that
+      a missing reference is friendlier than an aborted snapshot write, and
+      `service_accounts` does not exist until #95.
+    -->
+
+    <changeSet id="20260621-10-exec-snap-source" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="execution_snapshots" columnName="source"/>
+            </not>
+        </preConditions>
+        <addColumn tableName="execution_snapshots">
+            <!-- WEB_UI | EXTERNAL_API, copied from the conversation. NULL for non-conversation events. -->
+            <column name="source" type="varchar(20)"/>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="20260621-10-exec-snap-service-account-id" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="execution_snapshots" columnName="service_account_id"/>
+            </not>
+        </preConditions>
+        <addColumn tableName="execution_snapshots">
+            <!-- Integration that drove an EXTERNAL_API session. No FK (service_accounts lands in #95). -->
+            <column name="service_account_id" type="uuid"/>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="20260621-10-exec-snap-external-user-ref" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="execution_snapshots" columnName="external_user_ref"/>
+            </not>
+        </preConditions>
+        <addColumn tableName="execution_snapshots">
+            <!-- Opaque caller-side end-user identity for EXTERNAL_API spend attribution. -->
+            <column name="external_user_ref" type="varchar(255)"/>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="20260621-10-exec-snap-user-id" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="execution_snapshots" columnName="user_id"/>
+            </not>
+        </preConditions>
+        <addColumn tableName="execution_snapshots">
+            <!-- Human owner of the conversation (WEB_UI). No FK — missing user must not abort a snapshot. -->
+            <column name="user_id" type="uuid"/>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>

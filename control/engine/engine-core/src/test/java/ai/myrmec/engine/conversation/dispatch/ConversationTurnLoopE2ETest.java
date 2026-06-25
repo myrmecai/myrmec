@@ -1,10 +1,10 @@
 package ai.myrmec.engine.conversation.dispatch;
 
 import ai.myrmec.engine.IntegrationTestBase;
-import ai.myrmec.engine.agent.Agent;
+import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentCreationResult;
-import ai.myrmec.engine.agent.AgentInstance;
-import ai.myrmec.engine.agent.AgentInstanceRepository;
+import ai.myrmec.engine.agent.Agent;
+import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.conversation.ConversationMessage;
@@ -12,10 +12,16 @@ import ai.myrmec.engine.conversation.ConversationParticipant;
 import ai.myrmec.engine.conversation.ConversationService;
 import ai.myrmec.engine.conversation.dto.PostUserMessageRequest;
 import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
+import ai.myrmec.engine.conversation.stream.ConversationSubscriber;
+import ai.myrmec.engine.node.EngineNode;
+import ai.myrmec.engine.node.EngineNodeRepository;
+import ai.myrmec.engine.node.NodeRegistryService;
 import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.websocket.AgentConnectionManager;
+import ai.myrmec.engine.websocket.AgentConversationWebSocketHandler;
 import ai.myrmec.engine.websocket.AgentWebSocketHandler;
+import ai.myrmec.engine.websocket.ConversationSocketRegistry;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -79,13 +85,25 @@ class ConversationTurnLoopE2ETest extends IntegrationTestBase {
     private ConversationService conversationService;
 
     @Autowired
-    private AgentInstanceRepository agentInstanceRepository;
+    private AgentRepository agentInstanceRepository;
 
     @Autowired
     private AgentConnectionManager connectionManager;
 
     @Autowired
     private AgentWebSocketHandler agentWebSocketHandler;
+
+    @Autowired
+    private AgentConversationWebSocketHandler conversationHandler;
+
+    @Autowired
+    private ConversationSocketRegistry conversationSocketRegistry;
+
+    @Autowired
+    private NodeRegistryService nodeRegistry;
+
+    @Autowired
+    private EngineNodeRepository engineNodeRepository;
 
     @Autowired
     private ConversationStreamBroker broker;
@@ -96,6 +114,7 @@ class ConversationTurnLoopE2ETest extends IntegrationTestBase {
     @Test
     void userMessagePostDispatchesTurnAndAgentReplyFansOutToViewer() throws Exception {
         // ---------- Arrange ----------
+        ensureSelfNodeRegistered();
         Project project = data.project().named("turn-loop-e2e").create();
         AgentProfile profile = data.agentProfile()
                 .named("loop-profile")
@@ -106,15 +125,15 @@ class ConversationTurnLoopE2ETest extends IntegrationTestBase {
                 .withProfile(profile)
                 .inProject(project)
                 .create();
-        Agent agent = created.agent();
+        AgentHost agent = created.agent();
 
-        // Seed an ONLINE agent instance + register a stub WS session so
-        // dispatcher.findByAgentIdAndStatus(ONLINE) + isAgentIdle pass.
-        AgentInstance instance = new AgentInstance();
-        instance.setAgentId(agent.getId());
+        // Seed an IDLE agent instance + register a stub WS session so
+        // dispatcher.findByAgentIdAndStatus(IDLE) + isAgentIdle pass.
+        Agent instance = new Agent();
+        instance.setAgentHostId(agent.getId());
         instance.setHostname("loop-test");
         instance.setRuntimeVersion("0.0.0");
-        instance.setStatus(AgentInstance.Status.ONLINE);
+        instance.setStatus(Agent.Status.IDLE);
         instance.setRegisteredAt(Instant.now());
         instance = agentInstanceRepository.save(instance);
 
@@ -133,9 +152,13 @@ class ConversationTurnLoopE2ETest extends IntegrationTestBase {
         // Viewer session subscribed to the broker so the agent's replies
         // can be observed flowing through.
         BlockingQueue<String> viewerInbound = new LinkedBlockingQueue<>();
-        WebSocketSession viewerSession = buildStubSession(
-                "viewer-stub", null, null, viewerInbound);
-        broker.subscribe(conv.getId(), viewerSession);
+        ConversationSubscriber viewerSubscriber = new ConversationSubscriber() {
+            private final String id = "viewer-stub-" + UUID.randomUUID();
+            @Override public String id() { return id; }
+            @Override public boolean isOpen() { return true; }
+            @Override public void send(String jsonFrame) { viewerInbound.add(jsonFrame); }
+        };
+        broker.subscribe(conv.getId(), viewerSubscriber);
 
         // ---------- Act 1 \u2014 POST USER message via REST ----------
         ResponseEntity<String> postResponse = restTemplate.exchange(
@@ -145,10 +168,40 @@ class ConversationTurnLoopE2ETest extends IntegrationTestBase {
                 String.class);
         assertThat(postResponse.getStatusCode()).isEqualTo(HttpStatus.CREATED);
 
-        // ---------- Assert 1 \u2014 agent stub got the turn assign frame ----------
-        String assignFrame = agentOutbound.poll(3, TimeUnit.SECONDS);
+        // ---------- Assert 1a — agent stub got the bind frame first ----------
+        // Slice 3b: the dispatcher reserves the worker (IDLE → RESERVED) and
+        // sends agent.bind before the turn, pinning conversation + profile.
+        String bindFrame = agentOutbound.poll(3, TimeUnit.SECONDS);
+        assertThat(bindFrame)
+                .as("dispatcher must reserve + bind the worker before the turn")
+                .isNotNull();
+        JsonNode bindJson = objectMapper.readTree(bindFrame);
+        assertThat(bindJson.path("type").asText()).isEqualTo("agent.bind");
+        assertThat(bindJson.path("payload").path("conversationId").asText())
+                .isEqualTo(conv.getId().toString());
+        assertThat(bindJson.path("payload").path("homeNodeId").asText())
+                .as("bind tells the worker which home node to dial for its socket")
+                .isEqualTo(nodeRegistry.getSelfNodeId());
+
+        // The dispatcher reserved the worker; the turn is buffered until the
+        // conversation socket attaches.
+        assertThat(agentInstanceRepository.findById(instance.getId()).orElseThrow().getStatus())
+                .as("worker is RESERVED, turn buffered awaiting attach")
+                .isEqualTo(Agent.Status.RESERVED);
+
+        // ---------- Assert 1b — then the turn assign frame ----------
+        BlockingQueue<String> convOutbound = new LinkedBlockingQueue<>();
+        WebSocketSession convSession = buildStubSession(
+                "agent-conv-stub", instance.getId(), "loop-agent", convOutbound);
+        String attachFrame = "{\"type\":\"conversation.attach\",\"payload\":{"
+                + "\"agentId\":\"" + instance.getId() + "\","
+                + "\"conversationId\":\"" + conv.getId() + "\"}}";
+        ((WebSocketHandler) conversationHandler)
+                .handleMessage(convSession, new TextMessage(attachFrame));
+
+        String assignFrame = convOutbound.poll(3, TimeUnit.SECONDS);
         assertThat(assignFrame)
-                .as("dispatcher must push conversation.turn.assign to the idle agent")
+                .as("engine must flush the buffered turn over the conversation socket")
                 .isNotNull();
         JsonNode assignJson = objectMapper.readTree(assignFrame);
         assertThat(assignJson.path("type").asText()).isEqualTo("conversation.turn.assign");
@@ -159,6 +212,10 @@ class ConversationTurnLoopE2ETest extends IntegrationTestBase {
         assertThat(payload.path("systemPrompt").asText()).isEqualTo("You are a loop tester.");
         long pinnedSeq = payload.path("assistantSequenceNo").asLong();
         assertThat(pinnedSeq).isGreaterThan(0);
+
+        assertThat(agentInstanceRepository.findById(instance.getId()).orElseThrow().getStatus())
+                .as("attach flips the reserved worker to BOUND")
+                .isEqualTo(Agent.Status.BOUND);
 
         // ---------- Act 2 \u2014 simulate agent streaming a reply ----------
         String deltaFrame = "{\"type\":\"message.delta\",\"payload\":{"
@@ -171,12 +228,9 @@ class ConversationTurnLoopE2ETest extends IntegrationTestBase {
                 + "\"sequenceNo\":" + pinnedSeq + ","
                 + "\"content\":\"echo from agent\"}}";
 
-        // Reach into the handler the same way an incoming WS frame would.
-        // handleTextMessage is protected; the public WebSocketHandler.handleMessage
-        // entry point delegates to it identically to how Spring's WS runtime does.
-        WebSocketHandler asHandler = agentWebSocketHandler;
-        asHandler.handleMessage(agentSession, new TextMessage(deltaFrame));
-        asHandler.handleMessage(agentSession, new TextMessage(completeFrame));
+        WebSocketHandler asHandler = conversationHandler;
+        asHandler.handleMessage(convSession, new TextMessage(deltaFrame));
+        asHandler.handleMessage(convSession, new TextMessage(completeFrame));
 
         // ---------- Assert 2 \u2014 viewer received both frames verbatim ----------
         String firstSeen = viewerInbound.poll(2, TimeUnit.SECONDS);
@@ -195,8 +249,28 @@ class ConversationTurnLoopE2ETest extends IntegrationTestBase {
         assertThat(assistant.getAuthorAgentId()).isEqualTo(agent.getId());
 
         // ---------- Cleanup ----------
-        broker.unsubscribe(conv.getId(), viewerSession);
+        broker.unsubscribe(conv.getId(), viewerSubscriber);
+        conversationSocketRegistry.unregisterBySession(convSession);
         connectionManager.unregister(agentSession);
+    }
+
+    /**
+     * The e2e profile disables {@code NodeRegistryService}, so the self
+     * {@code engine_nodes} row the {@code home_node_id} FK references is never
+     * written on startup. Seed it idempotently before any attach pins a home
+     * node onto the worker / conversation.
+     */
+    private void ensureSelfNodeRegistered() {
+        String selfId = nodeRegistry.getSelfNodeId();
+        if (engineNodeRepository.findById(selfId).isEmpty()) {
+            EngineNode node = new EngineNode();
+            node.setNodeId(selfId);
+            node.setAddress(nodeRegistry.getSelfAddress());
+            node.setStatus(EngineNode.Status.UP);
+            node.setStartedAt(Instant.now());
+            node.setLastHeartbeatAt(Instant.now());
+            engineNodeRepository.save(node);
+        }
     }
 
     /**

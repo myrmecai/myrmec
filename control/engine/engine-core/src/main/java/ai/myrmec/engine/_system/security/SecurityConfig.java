@@ -3,6 +3,7 @@ package ai.myrmec.engine._system.security;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -19,7 +20,13 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
+    /**
+     * Internal chain (HS256 Myrmec JWTs). Ordered after the External-API chain
+     * (see {@link ExternalApiSecurityConfig}) since it has no security matcher
+     * and would otherwise greedily claim {@code /api/v1/external/**}.
+     */
     @Bean
+    @Order(2)
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -41,12 +48,23 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/agent/auth/**").permitAll()
                         // WebSocket endpoint - auth handled by handshake interceptor
                         .requestMatchers("/api/v1/agent/ws").permitAll()
-                        // User-facing conversation stream WS - auth in handshake interceptor
+                        // Slice 4c — conversation-scoped agent socket; auth is
+                        // performed in the WS handshake interceptor (agent JWT).
+                        .requestMatchers("/api/v1/agent/conversation").permitAll()
+                        // User-facing conversation stream (SSE) - token arrives as a
+                        // ?token= query param (EventSource can't set headers) and is
+                        // validated inside ConversationStreamController.
                         .requestMatchers("/api/v1/conversations/*/stream").permitAll()
                         // Health check
                         .requestMatchers("/actuator/health").permitAll()
                         // OpenAPI documentation
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                        // Node-to-node mesh relay - guarded by a shared secret in the
+                        // controller, not by a principal (peer replica, not a user/agent).
+                        .requestMatchers("/api/v1/internal/**").permitAll()
+                        // Knowledge source webhooks (#25a) - authenticated by an HMAC
+                        // signature over the body inside KnowledgeWebhookService, not a JWT.
+                        .requestMatchers("/api/v1/knowledge/webhooks/**").permitAll()
                         // Agent endpoints - require AGENT role
                         .requestMatchers("/api/v1/agent/**").hasRole("AGENT")
                         // Admin endpoints - PLATFORM_ADMIN (tech) or ORG_ADMIN (governance).

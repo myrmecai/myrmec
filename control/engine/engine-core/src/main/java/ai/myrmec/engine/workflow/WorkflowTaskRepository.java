@@ -21,4 +21,6 @@ public interface WorkflowTaskRepository extends JpaRepository<WorkflowTask, UUID
     List<WorkflowTask> findByRequestIdAndStepId(UUID requestId, String stepId);
 
     List<WorkflowTask> findByAgentInstanceId(UUID agentInstanceId);
+
+    List<WorkflowTask> findByApprovalStatus(String approvalStatus);
 }

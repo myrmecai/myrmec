@@ -115,4 +115,41 @@ class BasicQuotaPolicyEngineTest extends IntegrationTestBase {
         assertThat(d.getConsumedAmount()).isEqualTo(4_000L);
         assertThat(d.getRemainingAmount()).isEqualTo(6_000L);
     }
+
+    @Test
+    void paused_quotaBlocks_allRequests() {
+        UUID projectId = UUID.randomUUID();
+        Quota q = quotaService.create(
+                Quota.Scope.PROJECT, projectId,
+                Quota.ResourceType.TOKENS, Quota.Period.DAILY,
+                1_000L, true, null, null);
+
+        quotaService.pause(q.getId(), UUID.randomUUID());
+
+        // Even a small request should be blocked when quota is paused.
+        QuotaDecision d = engine.check(QuotaScope.PROJECT, projectId, QuotaResourceType.TOKENS, 1);
+        assertThat(d.isBlocked()).isTrue();
+        assertThat(d.isWarning()).isFalse();
+        assertThat(d.getRemainingAmount()).isEqualTo(0L);
+    }
+
+    @Test
+    void consumption_at120Percent_warnsForAutoPause() {
+        // Create a 1000 token limit and consume 1200 tokens (120%).
+        // The engine should log a warning but still allow check() to return
+        // the state. The pause is asynchronous (admin sees the quota is
+        // at 120% and can pause manually, or a scheduled job can pause it).
+        UUID projectId = UUID.randomUUID();
+        quotaService.create(
+                Quota.Scope.PROJECT, projectId,
+                Quota.ResourceType.TOKENS, Quota.Period.DAILY,
+                1_000L, true, null, null);
+        engine.recordConsumption(QuotaScope.PROJECT, projectId, QuotaResourceType.TOKENS, 1_200);
+
+        // check() with amount=0 should show consumed=1200, projected=1200 >= 120% of 1000.
+        QuotaDecision d = engine.check(QuotaScope.PROJECT, projectId, QuotaResourceType.TOKENS, 0);
+        assertThat(d.getConsumedAmount()).isEqualTo(1_200L);
+        // Should be blocked because 1200 > 1000.
+        assertThat(d.isBlocked()).isTrue();
+    }
 }

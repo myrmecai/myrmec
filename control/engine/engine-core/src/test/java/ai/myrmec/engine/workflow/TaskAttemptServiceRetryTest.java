@@ -1,6 +1,6 @@
 package ai.myrmec.engine.workflow;
 
-import ai.myrmec.engine.agent.AgentInstance;
+import ai.myrmec.engine.agent.Agent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -50,7 +50,7 @@ class TaskAttemptServiceRetryTest {
         task.setStatus(TaskStatus.RUNNING);
         task.setAttempt(1);
         task.setStartedAt(Instant.now().minusSeconds(5));
-        AgentInstance instance = new AgentInstance();
+        Agent instance = new Agent();
         instance.setId(UUID.randomUUID());
         task.setAgentInstance(instance);
 

@@ -1,5 +1,6 @@
 package ai.myrmec.engine._system.config;
 
+import ai.myrmec.engine._system.security.CurrentServiceAccountArgumentResolver;
 import ai.myrmec.engine._system.security.CurrentUserArgumentResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
@@ -16,9 +17,11 @@ import java.util.List;
 public class WebMvcConfig implements WebMvcConfigurer {
 
     private final CurrentUserArgumentResolver currentUserArgumentResolver;
+    private final CurrentServiceAccountArgumentResolver currentServiceAccountArgumentResolver;
 
     @Override
     public void addArgumentResolvers(List<HandlerMethodArgumentResolver> resolvers) {
         resolvers.add(currentUserArgumentResolver);
+        resolvers.add(currentServiceAccountArgumentResolver);
     }
 }

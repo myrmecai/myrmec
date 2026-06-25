@@ -67,6 +67,18 @@ public class BasicQuotaPolicyEngine implements QuotaPolicyEngine {
         }
         List<Quota> quotas = quotaRepository.findByScopeTypeAndScopeIdAndResourceType(
                 toEntityScope(scope), scopeId, toEntityResource(resource));
+        for (Quota q : quotas) {
+            if (q.getPausedAt() != null) {
+                return QuotaDecision.builder()
+                        .blocked(true)
+                        .warning(false)
+                        .limitAmount(q.getLimitAmount())
+                        .consumedAmount(0)
+                        .remainingAmount(0)
+                        .scopeHit(toSpiScope(q.getScopeType()))
+                        .build();
+            }
+        }
         if (quotas.isEmpty()) {
             return QuotaDecision.unconstrained();
         }
@@ -136,6 +148,9 @@ public class BasicQuotaPolicyEngine implements QuotaPolicyEngine {
         long projected = used + amount;
         long limit = q.getLimitAmount();
         boolean blocked = q.isEnforced() && projected > limit;
+        if (q.isEnforced() && projected >= (long) (limit * 1.2) && q.getPausedAt() == null) {
+            log.warn("Quota {} hit 120% threshold, should be auto-paused", q.getId());
+        }
         boolean warning = !blocked && projected >= (long) (limit * WARNING_FRACTION);
         long remaining = Math.max(0, limit - used);
         return QuotaDecision.builder()

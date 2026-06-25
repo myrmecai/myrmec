@@ -7,11 +7,13 @@ import ai.myrmec.engine.group.GroupRepository;
 import ai.myrmec.engine.project.dto.CreateProjectRequest;
 import ai.myrmec.engine.project.dto.UpdateProjectRequest;
 import ai.myrmec.engine.secret.SecretResolverService;
+import ai.myrmec.engine.service.ServiceType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -72,6 +74,12 @@ public class ProjectService {
         }
         project.setGroupId(groupId);
 
+        // Allowed service types (#77): default to both shipped types when omitted.
+        project.setAllowedServiceTypes(
+                normaliseServiceTypes(request.getAllowedServiceTypes(),
+                        new ArrayList<>(List.of(
+                                ServiceType.WORKFLOW.name(), ServiceType.CONVERSATIONAL.name()))));
+
         // Set workspace repo configuration
         project.setWorkspaceRepoUrl(request.getWorkspaceRepoUrl());
         project.setWorkspaceRepoBranch(request.getWorkspaceRepoBranch() != null ? request.getWorkspaceRepoBranch() : "main");
@@ -79,6 +87,20 @@ public class ProjectService {
         // HITL policy default: false. Conscious opt-in by an admin.
         project.setAutoHitlOnDestructive(
                 request.getAutoHitlOnDestructive() != null && request.getAutoHitlOnDestructive());
+        // #105 project-level attachment governance defaults to enabled.
+        project.setAttachmentsEnabled(
+            request.getAttachmentsEnabled() == null || request.getAttachmentsEnabled());
+        if (request.getAttachmentRetentionTtlDays() != null
+            && request.getAttachmentRetentionTtlDays() <= 0) {
+            throw new BadRequestException("attachmentRetentionTtlDays must be > 0");
+        }
+        if (request.getAttachmentMaxFileSizeBytes() != null
+            && request.getAttachmentMaxFileSizeBytes() <= 0) {
+            throw new BadRequestException("attachmentMaxFileSizeBytes must be > 0");
+        }
+        project.setAttachmentRetentionTtlDays(request.getAttachmentRetentionTtlDays());
+        project.setAttachmentMaxFileSizeBytes(request.getAttachmentMaxFileSizeBytes());
+        project.setAttachmentTypeAllowlist(trimToNull(request.getAttachmentTypeAllowlist()));
 
         project = projectRepository.save(project);
 
@@ -118,6 +140,11 @@ public class ProjectService {
             project.setStatus(request.getStatus());
         }
 
+        if (request.getAllowedServiceTypes() != null) {
+            project.setAllowedServiceTypes(
+                    normaliseServiceTypes(request.getAllowedServiceTypes(), null));
+        }
+
         // Update workspace repo configuration
         if (request.getWorkspaceRepoUrl() != null) {
             project.setWorkspaceRepoUrl(request.getWorkspaceRepoUrl().isEmpty() ? null : request.getWorkspaceRepoUrl());
@@ -145,6 +172,24 @@ public class ProjectService {
         }
         if (request.getAutoHitlOnDestructive() != null) {
             project.setAutoHitlOnDestructive(request.getAutoHitlOnDestructive());
+        }
+        if (request.getAttachmentsEnabled() != null) {
+            project.setAttachmentsEnabled(request.getAttachmentsEnabled());
+        }
+        if (request.getAttachmentRetentionTtlDays() != null) {
+            if (request.getAttachmentRetentionTtlDays() <= 0) {
+                throw new BadRequestException("attachmentRetentionTtlDays must be > 0");
+            }
+            project.setAttachmentRetentionTtlDays(request.getAttachmentRetentionTtlDays());
+        }
+        if (request.getAttachmentMaxFileSizeBytes() != null) {
+            if (request.getAttachmentMaxFileSizeBytes() <= 0) {
+                throw new BadRequestException("attachmentMaxFileSizeBytes must be > 0");
+            }
+            project.setAttachmentMaxFileSizeBytes(request.getAttachmentMaxFileSizeBytes());
+        }
+        if (request.getAttachmentTypeAllowlist() != null) {
+            project.setAttachmentTypeAllowlist(trimToNull(request.getAttachmentTypeAllowlist()));
         }
 
         project = projectRepository.save(project);
@@ -198,6 +243,32 @@ public class ProjectService {
     }
 
     /**
+     * Validate and canonicalise an {@code allowed_service_types} list (#77).
+     * Each entry must name a known {@link ServiceType} (case-insensitive); the
+     * result is de-duplicated and stored in canonical upper-case form. A
+     * {@code null} input falls back to {@code defaultIfNull}; an explicitly
+     * empty or all-unknown list is rejected (a project must host something).
+     */
+    private List<String> normaliseServiceTypes(List<String> requested, List<String> defaultIfNull) {
+        if (requested == null) {
+            return defaultIfNull;
+        }
+        List<String> canonical = new ArrayList<>();
+        for (String raw : requested) {
+            ServiceType type = ServiceType.fromString(raw)
+                    .orElseThrow(() -> new BadRequestException(
+                            "Unknown service type '" + raw + "'"));
+            if (!canonical.contains(type.name())) {
+                canonical.add(type.name());
+            }
+        }
+        if (canonical.isEmpty()) {
+            throw new BadRequestException("A project must allow at least one service type");
+        }
+        return canonical;
+    }
+
+    /**
      * Ensure the referenced secret exists and is resolvable for the given project
      * (either project-scoped to this project or global).
      */
@@ -205,5 +276,13 @@ public class ProjectService {
         secretResolver.findResolvable(secretId, projectId)
                 .orElseThrow(() -> new BadRequestException(
                         "Workspace credential secret '" + secretId + "' was not found or is not accessible to this project"));
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }

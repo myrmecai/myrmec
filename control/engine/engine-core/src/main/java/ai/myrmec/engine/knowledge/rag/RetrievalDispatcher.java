@@ -73,4 +73,9 @@ public class RetrievalDispatcher implements InitializingBean {
     Map<String, RetrievalProvider> providersById() {
         return providersById;
     }
+
+    /** Registered retrieval-provider ids (e.g. {@code stub}) for UI pickers. */
+    public java.util.Set<String> providerIds() {
+        return providersById.keySet();
+    }
 }

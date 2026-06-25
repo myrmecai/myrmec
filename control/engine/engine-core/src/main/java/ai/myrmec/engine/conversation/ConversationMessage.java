@@ -29,6 +29,9 @@ import java.util.UUID;
  *   <li>{@code SYSTEM} — engine-injected (system prompt, pinned facts, redactions).</li>
  *   <li>{@code TOOL} — tool call result payload, referenced by {@link #toolCallId}.</li>
  *   <li>{@code APPROVAL_REQUEST} / {@code APPROVAL_RESPONSE} — HITL turns (Phase 7).</li>
+ *   <li>{@code CONTEXT_SUMMARY} — engine-generated compaction of older turns (#8).
+ *       Folded into the context window in place of the messages it covers; the
+ *       originals are retained un-superseded so the full transcript stays intact.</li>
  * </ul>
  */
 @Entity
@@ -38,13 +41,16 @@ import java.util.UUID;
 @NoArgsConstructor
 public class ConversationMessage {
 
-    public enum Role { USER, ASSISTANT, SYSTEM, TOOL, APPROVAL_REQUEST, APPROVAL_RESPONSE }
+    public enum Role { USER, ASSISTANT, SYSTEM, TOOL, APPROVAL_REQUEST, APPROVAL_RESPONSE, CONTEXT_SUMMARY }
 
     /**
      * Lifecycle of an HITL approval row. Set only on rows whose
      * {@link Role} is {@link Role#APPROVAL_REQUEST}.
      */
     public enum ApprovalStatus { PENDING, APPROVED, REJECTED, EXPIRED, CANCELLED }
+
+    /** Participant feedback verdict on an ASSISTANT message (#104a). */
+    public enum Rating { UP, DOWN }
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -110,6 +116,45 @@ public class ConversationMessage {
     /** Hard wall-clock cap; the row flips to EXPIRED past this point. */
     @Column(name = "expires_at")
     private Instant expiresAt;
+
+    /**
+     * Participant pin flag (UI affordance). Lets a user mark salient turns
+     * and filter the transcript to "pinned only". Does not affect context
+     * assembly — {@code Conversation.pinnedFacts} is the engine mechanism
+     * for that. Defaults to false.
+     */
+    @Column(name = "pinned", nullable = false)
+    private boolean pinned = false;
+
+    /**
+     * Participant thumbs-up / thumbs-down on an ASSISTANT message (#104a).
+     * Null until rated; cleared back to null when feedback is withdrawn.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "feedback_rating", length = 10)
+    private Rating feedbackRating;
+
+    /** Optional free-text note accompanying {@link #feedbackRating}. */
+    @Column(name = "feedback_reason")
+    private String feedbackReason;
+
+    /** The user who set the current feedback. Null when un-rated. */
+    @Column(name = "feedback_by")
+    private UUID feedbackBy;
+
+    /** When the current feedback was set. Null when un-rated. */
+    @Column(name = "feedback_at")
+    private Instant feedbackAt;
+
+    /**
+     * Soft-supersede flag (#104b). Set true when a turn is replaced by an
+     * edit-resend or a regenerate: the row is retained for transparency
+     * (the superseded branch is never destroyed) but is excluded from the
+     * active branch the engine assembles into the next turn's context.
+     * Defaults to false.
+     */
+    @Column(name = "superseded", nullable = false)
+    private boolean superseded = false;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

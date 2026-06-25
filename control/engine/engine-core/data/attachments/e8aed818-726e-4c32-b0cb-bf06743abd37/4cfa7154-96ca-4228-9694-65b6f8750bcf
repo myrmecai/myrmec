@@ -1,0 +1,505 @@
+# About Myrmec
+
+Source material for website copy, decks, and overview docs. Sections are
+self-contained so they can be lifted independently into landing pages,
+feature grids, comparison tables, and so on.
+
+
+## 1. What is Myrmec
+
+Myrmec is not just a tool for developers. The whole idea is to eliminate
+developer dependency from day-to-day AI-assisted work. Once Myrmec is set up,
+anybody can use the Control Plane UI to define and execute agentic workflows
+without writing a single line of code.
+
+Myrmec sits between your people and your AI models. It gives you structured,
+repeatable, observable execution rather than ad-hoc prompting. The platform
+is built around five core concepts:
+
+- **Models and Providers** — Admin manages the list of subscribed models and
+  the providers they come from (OpenAI, Anthropic, Azure, Bedrock,
+  self-hosted). Token limits, cost caps, and access permissions are set at
+  this level.
+- **Agent Profiles** — Admin defines reusable profiles that combine a model,
+  supported tools, capabilities, a system prompt, and a sandbox image.
+  Profiles are the reusable building blocks that workflows and sessions are
+  composed from.
+- **Agents** — Admin registers and manages the actual agent instances, their
+  credentials, and their health. Agents run inside pre-built sandbox
+  containers, pull tasks over real-time channels, and execute them
+  independently.
+- **Knowledge Sources** — Admin defines organisational knowledge such as
+  coding standards, architecture guidelines, policies, runbooks, and
+  product documentation, indexed from git repositories, file uploads, web
+  sources, and connectors (Confluence, Notion, SharePoint, Jira). This
+  knowledge is retrieved on demand, with citations, so every execution
+  benefits from the organisation's accumulated truth rather than the
+  model's training data.
+- **Workflows and Sessions** — Two ways to drive work: deterministic
+  **workflows** (multi-step, scheduled or triggered) and **interactive
+  sessions** (conversational, real-time, human-in-the-loop). Both run on
+  the same governed runtime, share the same audit trail, and use the same
+  knowledge and tools.
+
+### The Myrmec wedge
+
+Myrmec is the **governed runtime where agents read your org's truth and act
+on it under audit**. Three things together make it different from anything
+else on the market:
+
+1. **Grounded in your org** — RAG over your git, docs, tickets, schemas, and
+   policies. Every answer cites its sources.
+2. **Acts safely in a sandbox** — Agents run in pre-built container images.
+   The only things they can see are the tools you give them and the project
+   workspace they are scoped to. They cannot exfiltrate, cannot reach
+   arbitrary endpoints, cannot read other projects' secrets.
+3. **Under audit, with approval gates** — Every retrieval, every tool call,
+   every model call is logged. High-risk actions pause for explicit human
+   sign-off via approval cards that show the exact diff, SQL, or command
+   before it runs. AUDITOR role can replay any past session forensically.
+
+### Platform roles
+
+- **System Admin** — Sets up infrastructure, manages models, agent profiles,
+  agents, users, and global knowledge sources.
+- **Project Editor** — Creates and manages projects, configures
+  project-level knowledge, builds workflows, and triggers executions.
+- **Project Viewer** — Monitors live and historical executions, reviews
+  logs, and audits outputs.
+
+### Workflow execution
+
+- A workflow is a sequence of steps, each assigned to an agent profile,
+  with its own input, output, and acceptance criteria.
+- When a Project Editor triggers a workflow execution the Control Plane UI
+  shows a WYSIWYG live view of the flow, streaming logs and step-level
+  status in real time.
+- Every step result and log line is persisted so teams can audit behaviour
+  and rerun failed steps without losing history.
+
+### Interactive session execution
+
+- A **session** is a conversational, real-time alternative to a scheduled
+  workflow. The user chats with an agent profile that is bound to a project
+  scope, a sandbox image, and a set of knowledge sources.
+- Token-by-token streaming surfaces the agent's thinking, tool calls, and
+  citations as it works — not a black-box "please wait".
+- Every action the agent wants to take in the sandbox (run a command,
+  execute SQL, apply a patch, hit an external API) can be gated through an
+  **approval card** that shows the exact action; an APPROVER clicks Approve
+  or Reject-with-comment.
+- Cancel mid-stream, branch into a new turn, or hand off to another user
+  — sessions are persistent, shareable within the project, and replayable
+  by an AUDITOR.
+
+
+## 2. Platform Features
+
+The capabilities Myrmec ships with, grouped for easy reuse on a features
+page or a comparison grid.
+
+### Core building blocks
+
+- **Models & Providers registry** — Centralised catalogue of subscribed
+  models with per-model token caps, cost ceilings, and access rules.
+- **Agent Profiles** — Reusable templates that bind a model, a set of
+  tools, capabilities, a system prompt, and a sandbox image.
+- **Agents** — Managed agent instances with registration, credentials,
+  health monitoring, horizontal scale-out, and **container-based sandbox
+  isolation** by default.
+- **Knowledge Sources** — Project- and org-level knowledge indexed from
+  git repositories, file uploads, web sources, and SaaS connectors
+  (Confluence, Notion, SharePoint, Jira, database schemas). Retrieved on
+  demand with **citations**, scoped by the same role model as the rest of
+  the platform so a viewer on Project A cannot retrieve from Project B.
+
+### Workflow engine
+
+- **Visual workflow authoring** — Configure multi-step agentic workflows
+  through the UI; no orchestration code required.
+- **Live WYSIWYG execution view** — Streaming step status and logs as the
+  workflow runs.
+- **Persistent execution history** — Every step result, log line, and
+  model call is stored for audit and re-run.
+- **Human-in-the-Loop checkpoints** — Define approval steps where an agent
+  pauses for explicit human sign-off before a high-risk action such as a
+  production deployment.
+
+### Interactive sessions
+
+- **Conversational task execution** — A chat-style surface bound to a
+  project, an agent profile, a sandbox image, and a knowledge scope.
+- **Token-by-token streaming** — Watch the agent reason, retrieve, and act
+  in real time; no opaque progress bar.
+- **Inline approval cards** — Agents surface high-risk actions (shell
+  commands, SQL queries, code patches, API calls) as approval requests
+  with diff/preview, expiration, and reject-with-comment.
+- **Cancel mid-stream** — Users can stop generation or tool execution at
+  any time.
+- **Session replay** — Every message, retrieval, tool call, and approval
+  is persisted; AUDITOR role can replay any past session.
+- **Shared sessions** — Sessions belong to projects, not individuals;
+  teammates can join, review, and continue a conversation.
+
+### Grounded answers (RAG)
+
+- **Multi-source ingestion** — Git repositories (auto-synced via deploy
+  keys), file uploads, web crawl, and connectors for Confluence, Notion,
+  SharePoint, Jira, and database schemas.
+- **Citations on every answer** — Responses include source pills that
+  expand to the cited passage, file:line for code, or table:column for
+  data dictionaries.
+- **Scope-aligned retrieval** — Knowledge ACLs follow the platform's
+  SYSTEM / GROUP / PROJECT scope model. A user can only retrieve chunks
+  they are authorised to read.
+- **Provider-agnostic embeddings** — Use Ollama, OpenAI, Cohere, or any
+  other embedding model; swap without re-architecting.
+- **Retrieval audit** — Every retrieval (query, chunk IDs, scores, used in
+  which message) is logged for forensic replay.
+
+### Governance & control
+
+- **Sandbox isolation by default** — Agents execute inside pre-built
+  container images. They can only see the tools you grant them and the
+  project workspace they are scoped to. No laptop access, no arbitrary
+  network egress, no cross-project secret leakage. Blast radius is bounded
+  by design.
+- **Infrastructure isolation** — Compute (GPUs, local nodes, cloud
+  endpoints) and API connections are hidden from end users; workflow
+  authors see capabilities, not credentials.
+- **Auditability & provenance** — Every action an agent takes is logged,
+  including which knowledge sources it referenced (with chunk IDs and
+  similarity scores), every tool call, every model call, and every
+  approval decision.
+- **Multi-level token & cost quotas** — Define **and monitor** token
+  budgets and spend caps at three layers that compose together: per
+  **model** (global ceiling for an LLM), per **agent profile** (limit per
+  capability/role), and per **project** (departmental or product-level
+  budget). Live dashboards show consumption against each limit in real
+  time, alerts fire as thresholds approach, and workflows are throttled
+  or stopped before runaway autonomous loops blow through a budget.
+- **Role-based access control** — Fine-grained roles at both system and
+  project level keep permissions tight.
+- **Shadow-AI mitigation** — Employees use the governed platform instead
+  of unmanaged personal AI accounts; data only flows through
+  Admin-approved models and secure knowledge sources.
+
+### Flexibility & extensibility
+
+- **Vendor-agnostic model swapping** — Swap the model behind an agent
+  profile without changing any workflow; the business is protected from
+  model lock-in.
+- **Tool specialisation via SDK** — Build specialised agents that know how
+  to talk to your internal APIs, legacy systems, or proprietary data
+  sources.
+- **Deterministic agentic flows** — Structured multi-step flows force the
+  AI to follow a defined process, increasing reliability versus single
+  prompts.
+- **Horizontal scale** — Agents are stateless and can be deployed in any
+  number of replicas across environments.
+
+
+## 3. Use Cases
+
+How organisations apply Myrmec in practice.
+
+### Interactive sessions (governed, grounded, sandboxed)
+
+These are the demoable scenarios that showcase the full Myrmec wedge —
+conversational steering, grounded retrieval, sandboxed execution, and
+approval-gated action.
+
+- **Ops Runbook Copilot** — An on-call engineer chats: *"Reset the staging
+  environment."* The agent retrieves the runbook from the `infra-docs`
+  repo, proposes four steps, and surfaces each `kubectl` / `terraform`
+  command as an approval card citing the runbook section. The engineer
+  clicks Approve four times. The full session is replayable in the audit
+  log. Nothing ran on the engineer's laptop.
+- **NL→SQL Data Analyst** — An analyst asks: *"What's our MRR by region
+  last quarter?"* The agent retrieves the data dictionary, the regional
+  join definition, and the fiscal-quarter rule. Generates SQL → approval
+  card with the query and estimated row count → approved → results stream
+  back with citations to both the schema docs and the SQL that produced
+  them. Database credentials never leave the sandbox.
+- **Compliance Q&A** — *"What's our data-retention policy for EU customers?"*
+  Agent retrieves from the policy repository, cites the GDPR clause and
+  the matching internal policy section, and produces a structured answer.
+  When the regulator asks how the answer was produced six months later,
+  the AUDITOR replays the session.
+- **Code-aware Operations** — *"Where do we handle webhook retry on Stripe
+  failures?"* Agent searches the monorepo, returns the answer with
+  file:line citations, and if asked, opens a PR fixing a bug it spots —
+  with the diff surfaced as an approval card before the push.
+- **Vendor Onboarding Assistant** — Procurement chats with an agent that
+  is grounded in vendor policy and previous vendor records. Agent walks
+  them through compliance questions, files Jira tickets via approved
+  tools, and produces a final dossier for sign-off.
+
+### Engineering & code
+
+- **Code Generation** — Bring AI coding standards, architecture decisions,
+  and review criteria into reusable workflows. Every developer benefits
+  from the same governed approach instead of relying on individual prompt
+  skill.
+- **Code Review and Quality Gates** — Run review workflows that check code
+  against your own standards, invoke static analysis agents, and produce a
+  structured report. Consistent, traceable, never blocked on a single
+  reviewer's availability.
+- **Documentation Generation** — Read source code and knowledge base
+  context, then produce API references, architecture decision records, or
+  user guides. Output is versioned and auditable.
+- **Test Generation** — Assign a test-writing agent profile to a workflow
+  step and automatically produce unit, integration, or regression tests
+  from code or specifications.
+- **Autonomous Maintenance** — Schedule a recurring workflow that scans a
+  repository for deprecated libraries, writes the upgrade code, runs the
+  tests, and submits a report — without a developer ever opening an IDE.
+- **Architectural Compliance Enforcement** — An agent reviews each new
+  module against the organisation's architecture knowledge source and
+  flags violations automatically.
+- **Legacy Code Migration** — A non-technical project manager can trigger
+  a migration workflow that transforms, for example, a Java 8 project into
+  Spring Boot 3.4 using company-approved patterns stored in Myrmec.
+
+### Operations & business
+
+- **Data Processing and Transformation** — Connect specialised agents to
+  data pipeline steps for extraction, normalisation, validation, and
+  loading tasks with full observability across every run.
+- **Compliance and Policy Checks** — Run regulatory or internal policy
+  reviews as automated workflow steps, producing evidence trails that can
+  be exported for audit purposes.
+- **Incident Analysis** — Feed logs, traces, and runbooks into an analysis
+  workflow to produce structured root cause reports faster than manual
+  investigation.
+- **Onboarding & Knowledge Transfer** — Project-level knowledge sources
+  let agents answer questions about a specific project's history, business
+  logic, and quirks, acting as a 24/7 technical lead for new joiners.
+- **Rapid Prototyping** — A product manager defines a workflow that
+  generates a boilerplate microservice from a feature list. Agents handle
+  scaffolding, Dockerisation, and CI/CD setup using the Admin's standard
+  instructions.
+
+
+## 4. Why Myrmec
+
+The value proposition for buyers and decision-makers.
+
+- **The full "read → reason → act" loop, under audit.** Most platforms do
+  one of the three. Glean reads. Copilot/Cursor act (on a laptop, without
+  oversight). Bedrock Agents audit (but only through their own SDK).
+  Myrmec is the only runtime that does all three together — grounded in
+  your org's truth, executing in a sandbox, with every step replayable.
+- **The answer to the security team's veto.** Regulated industries can't
+  use Copilot or Cursor because of data egress and audit requirements.
+  Myrmec runs agents in sandboxed containers, keeps credentials encrypted
+  inside the platform, supports on-prem and air-gapped model providers,
+  and logs every action. The CISO conversation is solved by design.
+- **Centralised governance** of AI model configuration, access, and token
+  limits. No more individual API keys scattered across developer machines.
+- **Separation of infrastructure from business.** DevOps sets up and
+  manages Myrmec; business users, analysts, and project teams use it to
+  execute tasks without needing to understand the underlying
+  infrastructure.
+- **Organisation-level intelligence.** Knowledge sources let you encode
+  your standards, architecture, and domain expertise once and apply them
+  automatically across every workflow and every session, with citations on
+  every answer so trust is verifiable, not assumed.
+- **Institutional memory.** In most companies AI knowledge stays in a
+  developer's private ChatGPT history. Myrmec captures prompt engineering
+  and system logic into agent profiles that belong to the organisation.
+- **Reduced individual dependency.** When AI-assisted work is encoded in a
+  governed workflow rather than in a person's head or local prompt
+  history, the organisation retains that capability permanently.
+- **Full auditability.** Every workflow execution, step result, log line,
+  and model call is recorded. Teams can reconstruct exactly what happened,
+  when, and why.
+- **Model flexibility.** Agent profiles are decoupled from specific
+  models. Switching from one model or provider to another is a
+  configuration change, not a code change.
+- **Extendable by design.** The SDK allows teams to create agent images
+  specialised for their own tools, data sources, and execution
+  environments. Any capability that can be packaged as an agent can be
+  plugged into Myrmec workflows.
+- **Deterministic outcomes from non-deterministic models.** Structured
+  agentic flows force the AI to follow a defined process, greatly
+  increasing the reliability of the output.
+
+
+## 4.5. Security & Compliance
+
+Myrmec is built so the security and compliance teams can sign off without
+turning AI adoption into an indefinite review cycle. The platform ships
+the controls that regulated industries actually need, on by default,
+visible to auditors.
+
+### Identity, access, scope
+
+- **Per-project access controls.** Every conversation, workflow, agent,
+  knowledge base, secret, and quota is bound to a project. Users only see
+  what their role grants on that project (`OWNER`, `EDITOR`, `VIEWER`,
+  `APPROVER`, `AUDITOR`, `ORG_ADMIN`, `PLATFORM_ADMIN`).
+- **Scope hierarchy.** SYSTEM → GROUP → PROJECT scopes apply consistently
+  across roles, quotas, retrieval, and audit. Inheritance is explicit and
+  walkable; nothing leaks across scopes by accident.
+- **First-class agent identity.** Each agent instance authenticates with a
+  scoped JWT; the engine treats agent traffic as a separate principal
+  with its own RBAC role (`AGENT`). Stolen developer tokens can't
+  impersonate agents, and stolen agent tokens can't impersonate humans.
+
+### Human-in-the-loop on destructive actions
+
+- **Risk-classified tools.** Every tool registered in Myrmec carries a
+  `riskClass` (`SAFE`, `DESTRUCTIVE`, `IRREVERSIBLE`). Projects can flip
+  on `autoHitlOnDestructive`: any agent attempting a destructive tool
+  triggers an approval card surfaced to a designated approver.
+- **Approval cards with full context.** Approvers see a diff (Monaco), the
+  SQL, the shell command, or the structured JSON — whatever the agent
+  proposes — before any side effect happens. Reject-with-comment loops
+  back to the agent so it can revise.
+- **Expiry by default.** Approval requests time out and auto-deny rather
+  than silently leaving a side-effect window open.
+
+### Quotas, rate limits, cost caps
+
+- **Token + cost ceilings per scope.** Per-project, per-group, per-org
+  quotas in either `TOKENS` or `COST_USD_CENTS`, evaluated against
+  `DAILY`, `MONTHLY_CALENDAR`, or `LIFETIME` windows.
+- **Child-tightens-only.** A project quota can never be more generous
+  than its group's; a group quota can never exceed an org's. Validation
+  fails the create/update, so a tight ceiling at the top is the hard
+  ceiling everywhere.
+- **80% warning band.** Users get a visible warning before the cap, not
+  after, so they don't lose work to surprise blocks.
+- **Telemetry mode.** `enforced=false` records consumption without
+  blocking — useful for rolling out caps and confirming they're sized
+  right before flipping enforcement on.
+- **Hard stop with HTTP 429.** Once a cap is hit, both the chat dispatch
+  and workflow start paths refuse the request with a `429 Too Many
+  Requests` and a `Retry-After` header, so clients can back off cleanly.
+- **Provider rate-limit retry.** When an upstream LLM returns 429, the
+  agent SDK propagates the provider's `Retry-After` as a
+  `MODEL_RATE_LIMITED` task failure with a retry hint, and the engine
+  re-dispatches the task once the window closes (up to 5 retries, 30 s
+  default backoff, 10 min cap). A single bursty rate limit no longer
+  fails the whole workflow.
+
+### Defence against prompt injection and data exfiltration
+
+- **Outbound secret-leak scanner.** Every assistant turn is scanned for
+  AWS keys, GitHub tokens, OpenAI keys, JWTs, and Slack tokens before
+  the message leaves the engine. Modes: `BLOCK` (drop the turn), `REDACT`
+  (replace the match with a mask), or `WARN` (audit only). Defaults to
+  `REDACT` to keep agents useful while still containing leaks.
+- **Untrusted-content wrapping.** Retrieval hits and tool outputs are
+  wrapped in `<untrusted source="…" type="…">…</untrusted>` envelopes
+  before being injected into prompts; embedded tags are neutralised so
+  a poisoned document can't close the envelope and inject new
+  instructions.
+- **Tool description hash pinning.** Each tool's description is
+  SHA-256 fingerprinted at admin-approval time. Any drift in the
+  description clears the approval, so a compromised connector can't
+  silently change a tool's persuasive text after the fact.
+
+### Audit and observability
+
+- **Append-only user-action audit log.** Logins (success and reason-coded
+  failure), role grants, secret CRUD, quota CRUD, knowledge source add /
+  remove — every privileged action lands in a separate `audit_log` table
+  with actor, IP, user-agent, request id, and payload. No foreign keys
+  on `actor_user_id` so deleting a user never wipes their history.
+- **Execution snapshots from day one.** Every conversational turn that
+  the engine dispatches writes a `CONVERSATION_TURN_DISPATCHED` snapshot
+  (256 KB cap, per-project sampling) so the V2 replay timeline has months
+  of real history to work against — not a green-field collection
+  problem.
+- **Centralised audit UI.** Platform admins filter the log by actor,
+  resource, scope, and time without grepping Postgres.
+
+### Deployment posture
+
+- **On-prem or air-gapped.** The Community engine ships as a Spring Boot
+  JAR with H2 for dev and Postgres for prod. The Enterprise build adds
+  Ed25519-signed-license loading from a directory mount (no phone-home,
+  no outbound entitlement checks). Both run in a customer's own VPC.
+- **Multi-model.** Ship-with-yours: Ollama, vLLM, OpenAI, Anthropic.
+  Mixing local and cloud is a runtime choice, not an architectural
+  fork.
+- **No vendor lock for governance.** Connectors, model providers,
+  retrieval providers, secret stores, fanout buses, and license services
+  are all SPI interfaces under `engine-spi`. The Community defaults are
+  fully usable; Enterprise overrides are drop-in beans.
+
+
+## 5. How Myrmec Compares
+
+Myrmec sits in a category nobody else fully occupies: **a governed runtime
+that grounds agents in your org's knowledge and lets them act in a
+sandbox under audit**. Most products only cover one or two of those legs.
+
+| Product category                        | Grounded in org knowledge | Acts (tools / code / data) | Sandboxed | Governed + audited | Multi-model / on-prem |
+| --------------------------------------- | :-----------------------: | :------------------------: | :-------: | :----------------: | :-------------------: |
+| Enterprise search assistants (Glean)    |            ✓✓             |             ✗              |    n/a    |      partial       |           ✗           |
+| IDE copilots (Copilot, Cursor, Cody)    |          partial          |            ✓ (laptop)            |     ✗     |         ✗          |           ✗           |
+| Autonomous coding agents (Devin)        |          partial          |             ✓              |     ✓     |      partial       |           ✗           |
+| Cloud-vendor agent runtimes (Bedrock Agents, Vertex Agent Builder) |             ✗             |             ✓              |     ✓     |         ✓          |    ✗ (vendor lock)    |
+| Low-code automation (Zapier, n8n)       |             ✗             |             ✓              |     ✗     |      partial       |        partial        |
+| Orchestration frameworks (LangChain, AutoGen, CrewAI) |           depends           |          depends           |     ✗     |         ✗          |           ✓           |
+| **Myrmec**                              |            **✓**            |            **✓**            |   **✓**   |        **✓**        |         **✓**         |
+
+In plain English:
+
+- **Unlike enterprise search assistants** (Glean) — Myrmec doesn't just
+  answer questions; it executes work, under approval, with the same
+  knowledge grounding.
+- **Unlike IDE copilots** (GitHub Copilot, Cursor, Claude Code) — Myrmec is
+  not tied to a developer's laptop. Agents run in governed sandboxes that
+  the security team can actually approve.
+- **Unlike autonomous coding agents** (Devin, Cognition) — Myrmec is
+  multi-model, supports on-prem and air-gapped deployment, and is built
+  for whole-org governance rather than a single coding loop.
+- **Unlike cloud-vendor agent runtimes** (Bedrock Agents, Vertex Agent
+  Builder) — Myrmec works across model providers and does not require
+  buying into a single cloud's ecosystem.
+- **Unlike low-code automation tools** (Zapier, n8n) — Myrmec is designed
+  for intelligent multi-step agentic execution with model governance, not
+  simple trigger-action pipelines.
+- **Unlike raw orchestration frameworks** (LangChain, AutoGen, CrewAI) —
+  Myrmec is a complete platform with UI, governance, RAG, audit, and
+  sandboxing. Frameworks are construction kits; Myrmec is the building.
+
+
+## 6. Architecture Overview
+
+Myrmec has three main components:
+
+- **Control Plane Engine** — A Spring Boot application backed by
+  PostgreSQL. Manages all configuration, workflow definitions, executions,
+  and audit records. Exposes a REST API consumed by the UI and agents.
+- **Control Plane UI** — A React Native application that provides the
+  management and execution interface. Runs in web and mobile contexts.
+- **Agents** — Lightweight Python processes that register with the Control
+  Plane, receive tasks over real-time channels, and execute them using
+  their configured tools and models. Agents are stateless and
+  horizontally scalable. Teams deploy their own agent images using the
+  Myrmec SDK.
+
+
+## 7. Website Copy Hints
+
+Action keywords and taglines for landing-page copy:
+
+- **"Read. Reason. Act. Under audit."** — the three-leg wedge in four
+  words.
+- **"The governed runtime where agents read your org's truth and act on
+  it under audit."** — the long-form one-liner.
+- **"Your copilot, but the security team approves."** — the CISO hook.
+- **"Grounded. Sandboxed. Approved."** — three-word product summary.
+- **"Orchestrate, not just Prompt."**
+- **"Decouple Logic from Infrastructure."**
+- **"The Enterprise Brain for Autonomous Work."**
+- **"Governance at Scale."**
+- **"Blue-Collar AI"** — agents that have hands (tools), not just opinions.
+- **"Factory Operating System for AI agents"** — moving from prompting to
+  orchestration turns AI into a predictable utility rather than a creative
+  experiment.

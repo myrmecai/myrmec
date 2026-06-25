@@ -1,7 +1,8 @@
 package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine._system.common.JsonMapConverter;
-import ai.myrmec.engine.agent.AgentInstance;
+import ai.myrmec.engine._system.common.JsonListConverter;
+import ai.myrmec.engine.agent.Agent;
 import ai.myrmec.engine.agent.AgentProfile;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -48,7 +49,7 @@ public class WorkflowTask {
      */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "agent_instance_id")
-    private AgentInstance agentInstance;
+    private Agent agentInstance;
 
     /**
      * Input to this task (from workflow input + previous step outputs).
@@ -116,6 +117,50 @@ public class WorkflowTask {
     @Column(name = "metrics")
     private Map<String, Object> metrics;
 
+    /** Knowledge source ids used to produce this task. */
+    @Convert(converter = JsonListConverter.class)
+    @Column(name = "knowledge_source_ids")
+    private List<String> knowledgeSourceIds = new ArrayList<>();
+
+    // ==========================================================================
+    // Wave 1 #113: Execution Approvals (Phase 2)
+    // ==========================================================================
+
+    /**
+     * Flag set when tool is marked DESTRUCTIVE and requires approval before execution.
+     */
+    @Column(name = "requires_approval", nullable = false)
+    private Boolean requiresApproval = false;
+
+    /**
+     * Approval status: PENDING | APPROVED | REJECTED | EXPIRED.
+     * Null if requires_approval is false.
+     */
+    @Column(name = "approval_status", length = 20)
+    private String approvalStatus;
+
+    /**
+     * Tool call details for approvers (JSONB):
+     * {
+     *   toolName, toolDescription, parameters, summary
+     * }
+     */
+    @Convert(converter = JsonMapConverter.class)
+    @Column(name = "approval_payload")
+    private Map<String, Object> approvalPayload;
+
+    /**
+     * When approval workflow was initiated.
+     */
+    @Column(name = "approval_requested_at")
+    private Instant approvalRequestedAt;
+
+    /**
+     * Optional expiry for approval requests; null means never expires.
+     */
+    @Column(name = "approval_expires_at")
+    private Instant approvalExpiresAt;
+
     // ==========================================================================
     // NEW: Attempts support
     // ==========================================================================
@@ -142,7 +187,7 @@ public class WorkflowTask {
     /**
      * Create a new attempt for this task.
      */
-    public TaskAttempt createAttempt(AgentInstance agentInstance) {
+    public TaskAttempt createAttempt(Agent agentInstance) {
         TaskAttempt attempt = new TaskAttempt();
         attempt.setTask(this);
         attempt.setAttemptNumber(this.attempt);

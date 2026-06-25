@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import ai.myrmec.engine.user.UserPrincipal;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -43,6 +44,7 @@ public class WorkflowController {
     }
 
     @PostMapping
+    @PreAuthorize("@projectAccess.allowsServiceType(#projectId, 'WORKFLOW')")
     public ResponseEntity<WorkflowResponse> create(
             @PathVariable UUID projectId,
             @Valid @RequestBody CreateWorkflowRequest request,

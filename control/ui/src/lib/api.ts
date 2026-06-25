@@ -75,8 +75,57 @@ class ApiClient {
     return this.request<T>('GET', path)
   }
 
+  /**
+   * GET a non-JSON (e.g. text/markdown) resource as raw text, reusing the
+   * client's bearer auth. Used for transcript export (#104d) where the
+   * engine returns a downloadable document rather than JSON.
+   */
+  async getText(path: string): Promise<string> {
+    const headers: Record<string, string> = {}
+    if (this.accessToken) {
+      headers['Authorization'] = `Bearer ${this.accessToken}`
+    }
+    const response = await fetch(`${API_BASE}${path}`, { method: 'GET', headers })
+    if (!response.ok) {
+      const error: ApiError = await response.json().catch(() => ({
+        errorCode: 'UNKNOWN_ERROR',
+        message: response.statusText,
+      }))
+      throw new ApiRequestError(response.status, error)
+    }
+    return response.text()
+  }
+
   post<T>(path: string, body?: unknown): Promise<T> {
     return this.request<T>('POST', path, body)
+  }
+
+  /**
+   * POST a multipart/form-data body (e.g. a file upload). The browser sets
+   * the `Content-Type` boundary itself, so we deliberately omit it here and
+   * only attach the bearer token. Mirrors {@link request}'s error handling.
+   */
+  async postForm<T>(path: string, form: FormData): Promise<T> {
+    const headers: Record<string, string> = {}
+    if (this.accessToken) {
+      headers['Authorization'] = `Bearer ${this.accessToken}`
+    }
+    const response = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers,
+      body: form,
+    })
+    if (!response.ok) {
+      const error: ApiError = await response.json().catch(() => ({
+        errorCode: 'UNKNOWN_ERROR',
+        message: response.statusText,
+      }))
+      throw new ApiRequestError(response.status, error)
+    }
+    if (response.status === 204) {
+      return undefined as T
+    }
+    return response.json()
   }
 
   put<T>(path: string, body?: unknown): Promise<T> {
@@ -276,6 +325,7 @@ export interface Project {
   description: string | null
   groupId: string
   status: ProjectStatus
+  allowedServiceTypes: string[]
   workspaceRepoUrl: string | null
   workspaceRepoBranch: string | null
   workspaceCredentialSecretId: string | null
@@ -288,6 +338,7 @@ export interface CreateProjectRequest {
   name: string
   description?: string
   groupId?: string
+  allowedServiceTypes?: string[]
   workspaceRepoUrl?: string
   workspaceRepoBranch?: string
   workspaceCredentialSecretId?: string | null
@@ -298,6 +349,7 @@ export interface UpdateProjectRequest {
   name?: string
   description?: string
   status?: ProjectStatus
+  allowedServiceTypes?: string[]
   workspaceRepoUrl?: string
   workspaceRepoBranch?: string
   workspaceCredentialSecretId?: string | null
@@ -497,6 +549,108 @@ export const globalSecretsApi = {
   delete: (id: string) => api.delete<void>(`/admin/secrets/${id}`),
 }
 
+// Knowledge bases (RAG) API
+export interface KnowledgeBase {
+  id: string
+  name: string
+  description: string | null
+  scope: string
+  projectId: string | null
+  providerId: string | null
+  status: string | null
+  classification: string | null
+  allowAssistantBinding: boolean
+  sourceCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateKnowledgeBaseRequest {
+  name: string
+  description?: string | null
+  providerId?: string | null
+  classification?: string | null
+}
+
+export interface KnowledgeSource {
+  id: string
+  knowledgeBaseId: string
+  connectorType: string
+  name: string
+  uri: string
+  syncSchedule: string | null
+  enabled: boolean
+  lastSyncAt: string | null
+  lastSyncStatus: string | null
+  lastSyncChunks: number | null
+  lastSyncErrorCount: number | null
+  lastSyncDurationMs: number | null
+  chunkCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateKnowledgeSourceRequest {
+  connectorType: string
+  name: string
+  uri: string
+  configJson?: string | null
+  syncSchedule?: string | null
+}
+
+export interface SyncResult {
+  status: string
+  chunksEmitted: number
+  errorCount: number
+  errors: string[]
+  durationMs: number
+  completedAt: string
+}
+
+export interface KnowledgeCapabilities {
+  connectorTypes: string[]
+  providerIds: string[]
+}
+
+// #30 — user-facing chunk-context preview for the citation side panel.
+export interface ChunkContext {
+  chunkId: string
+  sourceId: string
+  sourceName: string
+  locator: string
+  passage: string
+  before: string[]
+  after: string[]
+}
+
+export const knowledgeBasesApi = {
+  list: (projectId: string) =>
+    api.get<KnowledgeBase[]>(`/projects/${projectId}/knowledge-bases`),
+  get: (projectId: string, kbId: string) =>
+    api.get<KnowledgeBase>(`/projects/${projectId}/knowledge-bases/${kbId}`),
+  create: (projectId: string, data: CreateKnowledgeBaseRequest) =>
+    api.post<KnowledgeBase>(`/projects/${projectId}/knowledge-bases`, data),
+  delete: (projectId: string, kbId: string) =>
+    api.delete<void>(`/projects/${projectId}/knowledge-bases/${kbId}`),
+  listSources: (projectId: string, kbId: string) =>
+    api.get<KnowledgeSource[]>(`/projects/${projectId}/knowledge-bases/${kbId}/sources`),
+  addSource: (projectId: string, kbId: string, data: CreateKnowledgeSourceRequest) =>
+    api.post<KnowledgeSource>(`/projects/${projectId}/knowledge-bases/${kbId}/sources`, data),
+  deleteSource: (projectId: string, kbId: string, sourceId: string) =>
+    api.delete<void>(`/projects/${projectId}/knowledge-bases/${kbId}/sources/${sourceId}`),
+  sync: (projectId: string, kbId: string, sourceId: string) =>
+    api.post<SyncResult>(
+      `/projects/${projectId}/knowledge-bases/${kbId}/sources/${sourceId}/sync`,
+      {},
+    ),
+  capabilities: () => api.get<KnowledgeCapabilities>('/knowledge/capabilities'),
+  // #30 — fetch the cited chunk plus its neighbouring passages for the side panel.
+  chunkContext: (projectId: string, kbId: string, chunkId: string) =>
+    api.get<ChunkContext>(
+      `/projects/${projectId}/knowledge-bases/${kbId}/chunks/${chunkId}/context`,
+    ),
+}
+
 // Providers API
 export type DeploymentType = 'CLOUD' | 'ON_PREMISE'
 export type ModelStatus = 'ACTIVE' | 'INACTIVE'
@@ -573,6 +727,7 @@ export interface Model {
   modelId: string
   apiEndpoint: string | null
   requiresAuth: boolean
+  supportsVision: boolean
   infraConfig: Record<string, unknown> | null
   defaultParams: Record<string, unknown> | null
   status: ModelStatus
@@ -593,6 +748,7 @@ export interface CreateModelRequest {
   apiEndpoint?: string
   apiKey?: string
   requiresAuth?: boolean
+  supportsVision?: boolean
   infraConfig?: Record<string, unknown>
   defaultParams?: Record<string, unknown>
 }
@@ -602,6 +758,7 @@ export interface UpdateModelRequest {
   apiEndpoint?: string
   apiKey?: string
   requiresAuth?: boolean
+  supportsVision?: boolean
   infraConfig?: Record<string, unknown>
   defaultParams?: Record<string, unknown>
   status?: ModelStatus
@@ -697,7 +854,7 @@ export interface Agent {
   projectName: string | null
   modelOverride: string | null
   config: Record<string, unknown> | null
-  maxInstances: number
+  maxAgents: number
   status: AgentStatus
   activeInstanceCount: number
   createdAt: string
@@ -716,7 +873,7 @@ export interface CreateAgentRequest {
   projectId?: string
   modelOverride?: string
   config?: Record<string, unknown>
-  maxInstances?: number
+  maxAgents?: number
 }
 
 export interface UpdateAgentRequest {
@@ -726,7 +883,7 @@ export interface UpdateAgentRequest {
   projectId?: string
   modelOverride?: string
   config?: Record<string, unknown>
-  maxInstances?: number
+  maxAgents?: number
   status?: AgentStatus
 }
 
@@ -739,6 +896,64 @@ export const agentsApi = {
   delete: (id: string) => api.delete<void>(`/admin/agents/${id}`),
   regenerateKey: (id: string) =>
     api.post<{ registrationKey: string }>(`/admin/agents/${id}/regenerate-key`),
+  /**
+   * List the ephemeral worker replicas of an agent host together with their
+   * runtime FSM status (IDLE/RESERVED/CONNECTING/BOUND/DRAINING/DEAD).
+   */
+  workers: (id: string) => api.get<AgentWorker[]>(`/admin/agents/${id}/workers`),
+  /**
+   * Aggregated runtime-health snapshot for an agent host: online/idle/busy/
+   * stale instance counts, total queue depth, and heartbeat freshness (#69).
+   */
+  health: (id: string) => api.get<AgentHealthSnapshot>(`/admin/agents/${id}/health`),
+}
+
+// Aggregated agent-host health (#69). Mirrors engine AgentHealthSnapshot.
+export interface AgentInstanceHealth {
+  instanceId: string
+  hostname: string | null
+  runtimeVersion: string | null
+  status: string
+  idle: boolean
+  stale: boolean
+  registeredAt: string | null
+  lastHeartbeatAt: string | null
+  secondsSinceHeartbeat: number | null
+  activeAttempts: number
+}
+
+export interface AgentHealthSnapshot {
+  agentId: string
+  totalInstances: number
+  onlineInstances: number
+  idleInstances: number
+  busyInstances: number
+  staleInstances: number
+  queueDepth: number
+  latestHeartbeatAt: string | null
+  instances: AgentInstanceHealth[]
+}
+
+// The runtime FSM of an ephemeral worker replica (agent-concurrency §9.5).
+export type AgentWorkerStatus =
+  | 'IDLE'
+  | 'RESERVED'
+  | 'CONNECTING'
+  | 'BOUND'
+  | 'DRAINING'
+  | 'DEAD'
+
+export interface AgentWorker {
+  id: string
+  agentHostId: string
+  conversationId: string | null
+  hostname: string | null
+  ipAddress: string | null
+  runtimeVersion: string | null
+  status: AgentWorkerStatus | null
+  registeredAt: string | null
+  lastHeartbeatAt: string | null
+  stateChangedAt: string | null
 }
 
 // Tools API
@@ -784,6 +999,20 @@ export const toolsApi = {
   update: (code: string, data: UpdateToolRequest) =>
     api.put<Tool>(`/admin/tools/${code}`, data),
   delete: (code: string) => api.delete<void>(`/admin/tools/${code}`),
+}
+
+// Service Types API (#78 — read-only platform registry)
+export interface ServiceType {
+  code: string
+  displayName: string
+  description: string
+  icon: string
+  enabled: boolean
+  projectEnabledCount: number
+}
+
+export const serviceTypesApi = {
+  list: () => api.get<ServiceType[]>('/admin/service-types'),
 }
 
 // Workflows API
@@ -1038,6 +1267,144 @@ export const workflowsListApi = {
     api.get<AccessibleProject[]>('/workflows/accessible-projects'),
 }
 
+// ============================================================================
+// Assistants API (#92, #93) — the conversational service type. Parent-row CRUD
+// + kill switches, the Draft/Publish version lifecycle, and the
+// `assistant_grants` ACL. Mirrors the engine's `/api/v1/assistants` surface.
+// ============================================================================
+
+export type AssistantVersionStatus = 'DRAFT' | 'PUBLISHED'
+export type AssistantBumpType = 'PATCH' | 'MINOR' | 'MAJOR'
+export type AssistantHitlOverrideMode = 'INHERIT' | 'STRICT'
+export type AssistantUsableVia = 'WEB_UI' | 'EXTERNAL_API'
+export type AssistantGrantPrincipalType = 'USER' | 'ROLE' | 'SERVICE_ACCOUNT'
+export type AssistantGrantPermission = 'OWNER' | 'EDITOR' | 'VIEWER' | 'USE'
+
+/** Parent-row view of an assistant. */
+export interface Assistant {
+  id: string
+  projectId: string
+  name: string
+  description: string | null
+  currentVersionId: string | null
+  disabled: boolean
+  archivedAt: string | null
+  createdBy: string
+  createdAt: string
+  updatedAt: string | null
+}
+
+/** Full view of an assistant version (Draft or Published). */
+export interface AssistantVersion {
+  id: string
+  assistantId: string
+  versionNumber: string | null
+  bumpType: AssistantBumpType | null
+  status: AssistantVersionStatus | null
+  parentVersionId: string | null
+  draftOwnerId: string | null
+  agentProfileId: string | null
+  agentProfileVersionId: string | null
+  addendum: string | null
+  greetingMessage: string | null
+  maxIdleMinutes: number
+  maxSessionAgeHours: number | null
+  kbBindings: string[] | null
+  disabledTools: string[] | null
+  hitlOverrideMode: AssistantHitlOverrideMode | null
+  usableVia: string[] | null
+  attachmentsEnabled: boolean
+  attachmentRetentionTtl: number | null
+  attachmentMaxFileSize: number | null
+  attachmentTypeAllowlist: string | null
+  publishedAt: string | null
+  publishedBy: string | null
+  createdAt: string
+  updatedAt: string | null
+}
+
+/** One ACL grant entry. */
+export interface AssistantGrant {
+  id: string
+  assistantId: string
+  principalType: AssistantGrantPrincipalType
+  principalId: string
+  permission: AssistantGrantPermission
+  grantedAt: string
+  grantedBy: string | null
+}
+
+export interface CreateAssistantRequest {
+  projectId: string
+  name: string
+  description?: string
+  agentProfileId: string
+}
+
+export interface UpdateAssistantRequest {
+  name?: string
+  description?: string
+}
+
+/** Zone-2 Draft edit — every field optional; null leaves the value unchanged. */
+export interface UpdateAssistantDraftRequest {
+  agentProfileId?: string
+  addendum?: string
+  greetingMessage?: string
+  maxIdleMinutes?: number
+  maxSessionAgeHours?: number
+  kbBindings?: string[]
+  disabledTools?: string[]
+  hitlOverrideMode?: AssistantHitlOverrideMode
+  usableVia?: string[]
+  attachmentsEnabled?: boolean
+  attachmentRetentionTtl?: number
+  attachmentMaxFileSize?: number
+  attachmentTypeAllowlist?: string
+}
+
+export interface AddAssistantGrantRequest {
+  principalType: AssistantGrantPrincipalType
+  principalId: string
+  permission: AssistantGrantPermission
+}
+
+export const assistantsApi = {
+  // Parent-row CRUD + kill switches
+  list: (projectId: string) =>
+    api.get<Assistant[]>(`/assistants?projectId=${projectId}`),
+  get: (id: string) => api.get<Assistant>(`/assistants/${id}`),
+  create: (data: CreateAssistantRequest) =>
+    api.post<Assistant>('/assistants', data),
+  update: (id: string, data: UpdateAssistantRequest) =>
+    api.patch<Assistant>(`/assistants/${id}`, data),
+  setDisabled: (id: string, disabled: boolean) =>
+    api.post<Assistant>(`/assistants/${id}/disable`, { disabled }),
+  archive: (id: string) => api.post<Assistant>(`/assistants/${id}/archive`),
+  unarchive: (id: string) => api.post<Assistant>(`/assistants/${id}/unarchive`),
+  // Version lifecycle
+  listVersions: (id: string) =>
+    api.get<AssistantVersion[]>(`/assistants/${id}/versions`),
+  getDraft: (id: string) =>
+    api.get<AssistantVersion>(`/assistants/${id}/draft`),
+  openDraft: (id: string) =>
+    api.post<AssistantVersion>(`/assistants/${id}/versions`),
+  updateDraft: (id: string, data: UpdateAssistantDraftRequest) =>
+    api.patch<AssistantVersion>(`/assistants/${id}/draft`, data),
+  discardDraft: (id: string) => api.delete<void>(`/assistants/${id}/draft`),
+  takeOverDraft: (id: string) =>
+    api.post<AssistantVersion>(`/assistants/${id}/draft/takeover`),
+  publish: (id: string) =>
+    api.post<AssistantVersion>(`/assistants/${id}/publish`),
+  // Grants ACL
+  listGrants: (id: string) =>
+    api.get<AssistantGrant[]>(`/assistants/${id}/grants`),
+  addGrant: (id: string, data: AddAssistantGrantRequest) =>
+    api.post<AssistantGrant>(`/assistants/${id}/grants`, data),
+  removeGrant: (id: string, grantId: string) =>
+    api.delete<void>(`/assistants/${id}/grants/${grantId}`),
+}
+
 // Knowledge Documents API
 export type KnowledgeScope = 'ORGANIZATION' | 'PROJECT'
 export type KnowledgeCategory = 'STANDARD' | 'INSTRUCTION' | 'REQUIREMENT' | 'ARCHITECTURE'
@@ -1152,6 +1519,7 @@ export type ConversationRole =
   | 'TOOL'
   | 'APPROVAL_REQUEST'
   | 'APPROVAL_RESPONSE'
+  | 'CONTEXT_SUMMARY'
 export type ConversationStatus = 'ACTIVE' | 'ARCHIVED'
 export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED'
 
@@ -1159,6 +1527,9 @@ export interface Conversation {
   id: string
   projectId: string
   agentId: string | null
+  agentHostId: string | null
+  assistantId: string | null
+  assistantVersionId: string | null
   title: string | null
   status: ConversationStatus | null
   systemPromptOverride: string | null
@@ -1166,6 +1537,8 @@ export interface Conversation {
   createdAt: string
   updatedAt: string | null
 }
+
+export type MessageFeedbackRating = 'UP' | 'DOWN'
 
 export interface ConversationMessage {
   id: string
@@ -1183,14 +1556,106 @@ export interface ConversationMessage {
   approvalStatus: ApprovalStatus | null
   approverId: string | null
   expiresAt: string | null
+  pinned: boolean
+  feedbackRating: MessageFeedbackRating | null
+  feedbackReason: string | null
+  feedbackBy: string | null
+  feedbackAt: string | null
+  superseded: boolean
   createdAt: string
+}
+
+// #30 — a single citation surfaced under an assistant message. Parsed from the
+// message's payloadJson (the agent retrieval path persists these); a superset of
+// the engine retrieval fields plus the optional knowledgeBaseId the side-panel
+// fetch needs to build its URL.
+export interface MessageCitation {
+  chunkId: string
+  sourceId: string
+  sourceName: string
+  locator: string
+  score?: number | null
+  knowledgeBaseId?: string | null
+}
+
+// #30 — extract the citation list (if any) from an assistant message's
+// payloadJson. Returns [] for null/blank/malformed payloads or when no
+// well-formed `citations` array is present, so callers never throw on bad data.
+export function parseMessageCitations(payloadJson: string | null): MessageCitation[] {
+  if (!payloadJson) {
+    return []
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(payloadJson)
+  } catch {
+    return []
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return []
+  }
+  const raw = (parsed as { citations?: unknown }).citations
+  if (!Array.isArray(raw)) {
+    return []
+  }
+  const citations: MessageCitation[] = []
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) {
+      continue
+    }
+    const c = item as Record<string, unknown>
+    if (
+      typeof c.chunkId === 'string' &&
+      typeof c.sourceId === 'string' &&
+      typeof c.sourceName === 'string' &&
+      typeof c.locator === 'string'
+    ) {
+      citations.push({
+        chunkId: c.chunkId,
+        sourceId: c.sourceId,
+        sourceName: c.sourceName,
+        locator: c.locator,
+        score: typeof c.score === 'number' ? c.score : null,
+        knowledgeBaseId: typeof c.knowledgeBaseId === 'string' ? c.knowledgeBaseId : null,
+      })
+    }
+  }
+  return citations
 }
 
 export interface CreateConversationRequest {
   projectId: string
   agentId?: string | null
+  assistantId?: string | null
   title?: string | null
   systemPromptOverride?: string | null
+}
+
+// One row of the append-only conversation lifecycle log
+// (conversation-observability §4): a worker-FSM transition with per-attempt
+// worker/host attribution and the reason it happened.
+export type ConversationEventReason =
+  | 'RESERVED'
+  | 'BIND_ACKED'
+  | 'BIND_NACKED'
+  | 'INSTANCE_BOUND'
+  | 'RELEASED'
+  | 'RESERVE_TIMEOUT'
+  | 'CONNECT_TIMEOUT'
+  | 'HOST_LOST'
+
+export interface ConversationEvent {
+  id: string
+  conversationId: string
+  seq: number
+  fromState: string | null
+  toState: string
+  reasonCode: ConversationEventReason
+  agentId: string | null
+  agentHostId: string | null
+  bindAttemptNo: number
+  attributes: Record<string, unknown> | null
+  occurredAt: string
 }
 
 export const conversationsApi = {
@@ -1199,10 +1664,108 @@ export const conversationsApi = {
   get: (id: string) => api.get<Conversation>(`/conversations/${id}`),
   create: (data: CreateConversationRequest) =>
     api.post<Conversation>('/conversations', data),
-  messages: (id: string) =>
-    api.get<ConversationMessage[]>(`/conversations/${id}/messages`),
+  /**
+   * Owner-only partial update for the chat {@code ⋯} menu — rename and/or
+   * archive / unarchive. Both fields are optional; omit one to leave it
+   * untouched. {@code status} accepts only ACTIVE or ARCHIVED.
+   */
+  update: (
+    id: string,
+    data: { title?: string; status?: ConversationStatus },
+  ) => api.patch<Conversation>(`/conversations/${id}`, data),
+  messages: (id: string, opts?: { limit?: number; before?: number }) => {
+    const params = new URLSearchParams()
+    if (opts?.limit != null) params.set('limit', String(opts.limit))
+    if (opts?.before != null) params.set('before', String(opts.before))
+    const qs = params.toString()
+    return api.get<ConversationMessage[]>(
+      `/conversations/${id}/messages${qs ? `?${qs}` : ''}`,
+    )
+  },
+  /**
+   * Replay the append-only worker-bind lifecycle log for a conversation
+   * (reserve / bind / release / timeout transitions), oldest first.
+   */
+  events: (id: string) =>
+    api.get<ConversationEvent[]>(`/conversations/${id}/events`),
   postUserMessage: (id: string, content: string) =>
     api.post<ConversationMessage>(`/conversations/${id}/messages`, { content }),
+  /**
+   * Cancel the in-flight assistant turn (#4). The engine relays the cancel to
+   * the bound worker over the conversation socket; `delivered` is false when
+   * no worker is currently streaming (nothing to stop).
+   */
+  cancelTurn: (id: string) =>
+    api.post<{ delivered: boolean }>(`/conversations/${id}/cancel`, {}),
+  /**
+   * Explicitly summarise the conversation so far (#8) — folds the earlier
+   * turns into a running CONTEXT_SUMMARY for handoff to a fresh assistant.
+   * `dispatched` is false when a summary is already in flight or there is
+   * nothing new to fold.
+   */
+  summariseNow: (id: string) =>
+    api.post<{ dispatched: boolean }>(`/conversations/${id}/summarise`, {}),
+  /**
+   * Edit a prior USER turn and resend it (#104b), forking the active branch
+   * from that message. The replaced rows are soft-superseded (retained for
+   * transparency); a fresh USER turn is appended and a new assistant turn is
+   * dispatched. Returns the newly appended USER message.
+   */
+  editAndResend: (conversationId: string, messageId: string, content: string) =>
+    api.post<ConversationMessage>(
+      `/conversations/${conversationId}/messages/${messageId}/edit`,
+      { content },
+    ),
+  /**
+   * Regenerate an ASSISTANT answer (#104b). The assistant turn is
+   * soft-superseded and a fresh turn is dispatched against the same preceding
+   * USER turn. Returns the superseded assistant message.
+   */
+  regenerate: (conversationId: string, messageId: string) =>
+    api.post<ConversationMessage>(
+      `/conversations/${conversationId}/messages/${messageId}/regenerate`,
+      {},
+    ),
+  /**
+   * Pin or unpin a single message. Returns the updated message row.
+   */
+  pinMessage: (conversationId: string, messageId: string, pinned: boolean) =>
+    api.patch<ConversationMessage>(
+      `/conversations/${conversationId}/messages/${messageId}/pin`,
+      { pinned },
+    ),
+  /**
+   * Rate (👍 / 👎) or clear feedback on an ASSISTANT message (#104a).
+   * Pass {@code rating: null} to withdraw existing feedback. The optional
+   * {@code reason} is a short free-text note. Returns the updated row.
+   */
+  rateMessage: (
+    conversationId: string,
+    messageId: string,
+    rating: MessageFeedbackRating | null,
+    reason?: string | null,
+  ) =>
+    api.patch<ConversationMessage>(
+      `/conversations/${conversationId}/messages/${messageId}/feedback`,
+      { rating, reason: reason ?? null },
+    ),
+  /**
+   * Export the conversation transcript as Markdown (#104d). The engine
+   * enforces ACL + records an audited export event; returns the rendered
+   * document as raw text for client-side download.
+   */
+  exportMarkdown: (conversationId: string) =>
+    api.getText(`/conversations/${conversationId}/export`),
+  /**
+   * #88 — whether a worker is online to answer this conversation, so the chat
+   * UI can warn before sending that a message will be queued. `online` is true
+   * when at least one connected (non-DEAD) instance of the pinned host exists;
+   * `idleCount` distinguishes "ready now" from "all busy".
+   */
+  agentAvailability: (conversationId: string) =>
+    api.get<AgentAvailability>(
+      `/conversations/${conversationId}/agent-availability`,
+    ),
   /**
    * Phase 7c — submit a human decision (APPROVED / REJECTED) against a
    * pending APPROVAL_REQUEST row. The engine returns the request row
@@ -1218,6 +1781,80 @@ export const conversationsApi = {
     api.post<ConversationMessage[]>(
       `/conversations/${conversationId}/approvals/${messageId}`,
       { decision, comment: comment ?? null },
+    ),
+}
+
+// #88 — conversation-scoped agent availability for the chat header indicator.
+export interface AgentAvailability {
+  online: boolean
+  connectedCount: number
+  idleCount: number
+}
+
+// ==================== Attachments (#103) ====================
+
+export type AttachmentScanStatus = 'CLEAN' | 'INFECTED' | 'ERROR'
+
+export interface Attachment {
+  id: string
+  conversationId: string
+  messageId: string | null
+  uploadedBy: string | null
+  filename: string
+  mediaType: string
+  sizeBytes: number
+  sha256: string | null
+  scanStatus: AttachmentScanStatus
+  scanThreat: string | null
+  createdAt: string
+}
+
+// #103-C — promote a clean attachment into a project knowledge base.
+export interface PromoteAttachmentRequest {
+  knowledgeBaseId: string
+  sourceName?: string | null
+}
+
+export interface PromoteAttachmentResponse {
+  knowledgeSourceId: string
+  status: string
+}
+
+export const attachmentsApi = {
+  /** Upload one file to a conversation. Returns the created (scanned) row. */
+  upload: (conversationId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.postForm<Attachment>(
+      `/conversations/${conversationId}/attachments`,
+      form,
+    )
+  },
+  /** All attachments for a conversation, oldest first. */
+  list: (conversationId: string) =>
+    api.get<Attachment[]>(`/conversations/${conversationId}/attachments`),
+  /** Delete an attachment (removes the stored blob + row). */
+  delete: (conversationId: string, attachmentId: string) =>
+    api.delete<void>(
+      `/conversations/${conversationId}/attachments/${attachmentId}`,
+    ),
+  /** Absolute download path for a clean attachment's bytes. */
+  contentPath: (conversationId: string, attachmentId: string) =>
+    `${API_BASE}/conversations/${conversationId}/attachments/${attachmentId}/content`,
+  /**
+   * #103-C — promote a CLEAN attachment into a project knowledge base. The
+   * engine extracts/ingests the content as a manual knowledge source and
+   * returns the created source id; requires project EDITOR.
+   */
+  promote: (
+    projectId: string,
+    conversationId: string,
+    attachmentId: string,
+    data: PromoteAttachmentRequest,
+  ) =>
+    api.post<PromoteAttachmentResponse>(
+      `/projects/${projectId}/conversations/${conversationId}/attachments/${attachmentId}/promote`,
+      data,
     ),
 }
 
@@ -1351,4 +1988,146 @@ export const quotasApi = {
     })
     return api.get<QuotaConsumption>(`/admin/quotas/consumption?${params.toString()}`)
   },
+}
+
+// ---- System Settings (#71a) ----
+
+export type SettingType = 'STRING' | 'INT' | 'RATIO' | 'BOOL' | 'MODEL_REF' | 'JSON'
+
+export interface SystemSetting {
+  key: string
+  valueType: SettingType
+  value: string | null
+  description: string | null
+  updatedBy: string | null
+  updatedAt: string
+}
+
+export interface UpdateSystemSettingRequest {
+  value: string
+}
+
+export const systemSettingsApi = {
+  list: () => api.get<SystemSetting[]>('/admin/system-settings'),
+  update: (key: string, req: UpdateSystemSettingRequest) =>
+    api.put<SystemSetting>(`/admin/system-settings/${encodeURIComponent(key)}`, req),
+}
+
+// ==================== My Work (UC-013) ====================
+
+/** Per-tab `(active / created)` counter shared by the Workflows and Conversations tabs. */
+export interface MyWorkTabCounter {
+  active: number
+  created: number
+}
+
+/** Counters + first-run / get-started hints for the My Work landing page. */
+export interface MyWorkSummary {
+  workflows: MyWorkTabCounter
+  conversations: MyWorkTabCounter
+  approvalsPending: number
+  archivedCount: number
+  firstRun: boolean
+  canCreateWorkflow: boolean
+  canCreateConversation: boolean
+}
+
+/** One row in the My Work Workflows tab. */
+export interface MyWorkflowRow {
+  id: string
+  projectId: string
+  projectName: string | null
+  name: string
+  description: string | null
+  status: WorkflowStatus
+  version: number
+  activeExecutions: number
+  lastExecutionAt: string | null
+  lastExecutionStatus: RequestStatus | null
+}
+
+/** One row in the My Work Conversations tab (an Assistant with its live session rollup). */
+export interface MyAssistantRow {
+  id: string
+  projectId: string
+  projectName: string | null
+  name: string
+  description: string | null
+  status: string
+  activeSessions: number
+  lastSessionAt: string | null
+}
+
+export type MyApprovalSource = 'EXECUTION' | 'CONVERSATION'
+
+/** One pending decision in the My Work Approvals tab. */
+export interface MyApprovalRow {
+  messageId: string
+  conversationId: string
+  projectId: string
+  projectName: string | null
+  source: MyApprovalSource
+  assistantId: string | null
+  summary: string | null
+  payloadJson: string | null
+  requestedByUserId: string | null
+  externalUserRef: string | null
+  requestedAt: string
+  expiresAt: string | null
+}
+
+export type MyArchivedType = 'WORKFLOW' | 'ASSISTANT'
+
+/** One archived service definition in the My Work Archived tab. */
+export interface MyArchivedRow {
+  id: string
+  projectId: string
+  projectName: string | null
+  type: MyArchivedType
+  name: string
+  description: string | null
+  archivedAt: string | null
+}
+
+/** A chip in the Conversations-tab Continue rail (the caller's own recent session). */
+export interface MyContinueRow {
+  conversationId: string
+  title: string | null
+  assistantId: string | null
+  assistantName: string | null
+  lastMessageAt: string | null
+}
+
+interface MyWorkQuery {
+  projectIds?: string[]
+  status?: WorkflowStatus
+  type?: MyArchivedType
+  q?: string
+  limit?: number
+}
+
+function myWorkQueryString(opts?: MyWorkQuery): string {
+  const params = new URLSearchParams()
+  opts?.projectIds?.forEach((id) => params.append('projectIds', id))
+  if (opts?.status) params.set('status', opts.status)
+  if (opts?.type) params.set('type', opts.type)
+  if (opts?.q) params.set('q', opts.q)
+  if (opts?.limit != null) params.set('limit', String(opts.limit))
+  const qs = params.toString()
+  return qs ? `?${qs}` : ''
+}
+
+export const myWorkApi = {
+  summary: (projectIds?: string[]) =>
+    api.get<MyWorkSummary>(`/my-work/summary${myWorkQueryString({ projectIds })}`),
+  workflows: (opts?: Pick<MyWorkQuery, 'projectIds' | 'status' | 'q'>) =>
+    api.get<MyWorkflowRow[]>(`/my-work/workflows${myWorkQueryString(opts)}`),
+  conversations: (opts?: Pick<MyWorkQuery, 'projectIds' | 'q'>) =>
+    api.get<MyAssistantRow[]>(`/my-work/conversations${myWorkQueryString(opts)}`),
+  continueRail: (opts?: Pick<MyWorkQuery, 'projectIds' | 'limit'>) =>
+    api.get<MyContinueRow[]>(`/my-work/conversations/continue${myWorkQueryString(opts)}`),
+  approvals: (opts?: Pick<MyWorkQuery, 'projectIds' | 'q'>) =>
+    api.get<MyApprovalRow[]>(`/my-work/approvals${myWorkQueryString(opts)}`),
+  archived: (opts?: Pick<MyWorkQuery, 'projectIds' | 'type' | 'q'>) =>
+    api.get<MyArchivedRow[]>(`/my-work/archived${myWorkQueryString(opts)}`),
 }
