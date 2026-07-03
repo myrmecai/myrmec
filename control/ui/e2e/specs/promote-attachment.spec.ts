@@ -70,7 +70,7 @@ test.describe("#103-C promote attachment to knowledge base", () => {
       description: null,
       scope: "PROJECT",
       projectId,
-      providerId: "stub",
+      providerId: "builtin",
       status: "ACTIVE",
       classification: null,
       allowAssistantBinding: true,

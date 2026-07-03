@@ -10,8 +10,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Users, FolderKanban, LayoutDashboard, LogOut, Bot, ChevronDown, Settings, User, Workflow, Cpu, Wrench, BookOpen, ShieldCheck, KeyRound, Building2, Server, ScrollText, Gauge, MessageSquare, Layers, Inbox } from 'lucide-react'
+import { LayoutDashboard, LogOut, Settings, User, Inbox, ChevronDown } from 'lucide-react'
 import { QuotaBanner } from '@/components/quota-banner'
+import { Sidebar } from '@/components/sidebar'
 
 export const Route = createFileRoute('/_authenticated')({
   beforeLoad: ({ context }) => {
@@ -54,15 +55,13 @@ function AuthenticatedLayout() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Top Navigation Bar */}
-      <header className="h-14 border-b bg-card flex items-center px-4 gap-4">
-        {/* Logo */}
+      {/* Slim Top Bar — logo, Dashboard + My Work shortcuts, user menu */}
+      <header className="h-14 border-b bg-card flex items-center px-4 gap-4 shrink-0">
         <Link to="/dashboard" className="flex items-center gap-2 font-bold text-lg">
           <img src="/logo-mark.svg" alt="Myrmec" className="h-7 w-7" />
           <span>Myrmec</span>
         </Link>
 
-        {/* Left side navigation */}
         <nav className="flex items-center gap-1 ml-4">
           <Link to="/dashboard">
             <Button variant="ghost" size="sm">
@@ -70,170 +69,16 @@ function AuthenticatedLayout() {
               Dashboard
             </Button>
           </Link>
-
           <Link to="/my-work">
             <Button variant="ghost" size="sm">
               <Inbox className="h-4 w-4 mr-2" />
               My Work
             </Button>
           </Link>
-
-          {/* Service Management Dropdown - visible to all */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm">
-                <Layers className="h-4 w-4 mr-2" />
-                Service Management
-                <ChevronDown className="h-4 w-4 ml-1" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuLabel>Services</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild>
-                <Link to="/workflows" className="cursor-pointer">
-                  <Workflow className="h-4 w-4 mr-2" />
-                  Workflows
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link to="/assistants" className="cursor-pointer">
-                  <MessageSquare className="h-4 w-4 mr-2" />
-                  Assistants
-                </Link>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Platform Management Dropdown - PLATFORM_ADMIN */}
-          {isPlatformAdmin && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm">
-                  <Server className="h-4 w-4 mr-2" />
-                  Platform
-                  <ChevronDown className="h-4 w-4 ml-1" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuLabel>Platform</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem asChild>
-                  <Link to="/models" className="cursor-pointer">
-                    <Cpu className="h-4 w-4 mr-2" />
-                    Models
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/agents" className="cursor-pointer">
-                    <Bot className="h-4 w-4 mr-2" />
-                    Agents
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/agent-profiles" className="cursor-pointer">
-                    <Bot className="h-4 w-4 mr-2" />
-                    Agent Profiles
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/tools" className="cursor-pointer">
-                    <Wrench className="h-4 w-4 mr-2" />
-                    Tools
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/admin/service-types" className="cursor-pointer">
-                    <Layers className="h-4 w-4 mr-2" />
-                    Service Types
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/knowledge" className="cursor-pointer">
-                    <BookOpen className="h-4 w-4 mr-2" />
-                    Knowledge
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/users" className="cursor-pointer">
-                    <Users className="h-4 w-4 mr-2" />
-                    Users
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/auth-providers" className="cursor-pointer">
-                    <ShieldCheck className="h-4 w-4 mr-2" />
-                    Authentication Providers
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/admin/secrets" className="cursor-pointer">
-                    <KeyRound className="h-4 w-4 mr-2" />
-                    Global Secrets
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/admin/audit-log" className="cursor-pointer">
-                    <ScrollText className="h-4 w-4 mr-2" />
-                    Audit Log
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/admin/quotas" className="cursor-pointer">
-                    <Gauge className="h-4 w-4 mr-2" />
-                    Quotas
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/admin/providers" className="cursor-pointer">
-                    <Server className="h-4 w-4 mr-2" />
-                    Model Providers
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/admin/system-settings" className="cursor-pointer">
-                    <Settings className="h-4 w-4 mr-2" />
-                    System Settings
-                  </Link>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-
-          {/* Organization Management Dropdown - ORG_ADMIN */}
-          {isOrgAdmin && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm">
-                  <Building2 className="h-4 w-4 mr-2" />
-                  Organization
-                  <ChevronDown className="h-4 w-4 ml-1" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuLabel>Organization</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem asChild>
-                  <Link to="/admin/groups" className="cursor-pointer">
-                    <Building2 className="h-4 w-4 mr-2" />
-                    Groups
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/projects" className="cursor-pointer">
-                    <FolderKanban className="h-4 w-4 mr-2" />
-                    Projects
-                  </Link>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
         </nav>
 
-        {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Right side - User menu */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm" className="gap-2">
@@ -275,11 +120,14 @@ function AuthenticatedLayout() {
         </DropdownMenu>
       </header>
 
-      {/* Main content */}
-      <main className="flex-1 bg-muted/40">
-        <QuotaBanner />
-        <Outlet />
-      </main>
+      {/* Sidebar + Content */}
+      <div className="flex flex-1 min-h-0">
+        <Sidebar />
+        <main className="flex-1 bg-muted/40 overflow-auto">
+          <QuotaBanner />
+          <Outlet />
+        </main>
+      </div>
     </div>
   )
 }

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+      AI Context Management — Project Instruction Bindings.
+      Join table — enables/disables org OPTIONAL instruction assets per project.
+    -->
+
+    <changeSet id="20260630-07-01-create-project-instruction-bindings" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="project_instruction_bindings"/>
+            </not>
+        </preConditions>
+        <comment>Project Instruction Bindings — opt-in join table for org OPTIONAL instruction assets.</comment>
+
+        <createTable tableName="project_instruction_bindings">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_pib_project"
+                             references="projects(id)"/>
+            </column>
+            <column name="instruction_asset_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_pib_instruction_asset"
+                             references="instruction_assets(id)"/>
+            </column>
+            <column name="enabled" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <!-- Unique constraint: (project_id, instruction_asset_id) -->
+    <changeSet id="20260630-07-02-pib-unique" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="uq_pib_project_asset"/>
+            </not>
+        </preConditions>
+        <createIndex indexName="uq_pib_project_asset"
+                     tableName="project_instruction_bindings" unique="true">
+            <column name="project_id"/>
+            <column name="instruction_asset_id"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

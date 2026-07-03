@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * SPI for knowledge-base retrieval backends (vector search, BM25, hybrid, ...).
@@ -44,4 +45,39 @@ public interface RetrievalProvider {
      * valid response (no relevant chunks).
      */
     List<RetrievalResult> query(@Valid @NotNull RetrievalQuery query) throws RetrievalException;
+
+    /**
+     * Whether this provider supports ingestion (uploading content via
+     * connectors). Providers that manage their own content (e.g. {@code http}
+     * BYO-RAG) return {@code false}; providers that accept uploaded files
+     * (e.g. {@code ragflow}) return {@code true}.
+     *
+     * <p>When {@code false}, the engine blocks KB source creation for this
+     * provider — sources are meaningless without an ingestion-capable
+     * backend.</p>
+     */
+    default boolean supportsIngestion() {
+        return false;
+    }
+
+    /**
+     * Ingest a file into the provider's index. Called by
+     * {@code ConnectorDispatcher} after a connector emits a file during sync.
+     *
+     * <p>Implementations should upload the file to the provider's ingestion
+     * API and trigger parsing/indexing. The default implementation throws
+     * {@link UnsupportedOperationException} — providers that return
+     * {@code true} for {@link #supportsIngestion()} must override this.</p>
+     *
+     * @param kbId            the knowledge base ID (for config lookup)
+     * @param providerConfig  the KB's {@code provider_config} JSON string
+     * @param projectId       the KB's owning project ID (for secret resolution;
+     *                        null for SYSTEM/GROUP scope)
+     * @param file            the file to ingest
+     * @throws RetrievalException if ingestion fails
+     */
+    default void ingest(UUID kbId, String providerConfig, UUID projectId,
+                        ai.myrmec.engine.spi.connector.EmittedFile file) throws RetrievalException {
+        throw new UnsupportedOperationException("Provider " + id() + " does not support ingestion");
+    }
 }

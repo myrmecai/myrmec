@@ -6,9 +6,8 @@ import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine._system.exception.ValidationDetail;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileRepository;
+import ai.myrmec.engine.knowledge.KnowledgeProviderRepository;
 import ai.myrmec.engine.tool.Tool;
-import ai.myrmec.engine.knowledge.rag.KnowledgeBase;
-import ai.myrmec.engine.knowledge.rag.KnowledgeBaseRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.hibernate.Hibernate;
@@ -44,7 +43,7 @@ public class AssistantVersionService {
     private final AssistantVersionRepository versionRepository;
     private final AssistantRepository assistantRepository;
     private final AgentProfileRepository agentProfileRepository;
-    private final KnowledgeBaseRepository knowledgeBaseRepository;
+    private final KnowledgeProviderRepository knowledgeProviderRepository;
 
     // ==================== Draft creation ====================
 
@@ -242,21 +241,23 @@ public class AssistantVersionService {
                             "Unsupported channel: " + c + ".")));
         }
 
-        // knowledge: every bound KB must exist, be ACTIVE, and allow assistant binding.
+        // knowledge: validate that kbBindings reference existing knowledge providers.
         List<String> unavailableKbs = new ArrayList<>();
         if (draft.getKbBindings() != null) {
             for (String kbId : draft.getKbBindings()) {
-                KnowledgeBase kb = parseUuid(kbId)
-                        .flatMap(knowledgeBaseRepository::findById)
-                        .orElse(null);
-                if (kb == null || kb.getStatus() != KnowledgeBase.Status.ACTIVE || !kb.isAllowAssistantBinding()) {
-                    unavailableKbs.add(kb != null ? kb.getName() : kbId);
+                try {
+                    UUID id = UUID.fromString(kbId);
+                    if (!knowledgeProviderRepository.existsById(id)) {
+                        unavailableKbs.add(kbId);
+                    }
+                } catch (IllegalArgumentException e) {
+                    unavailableKbs.add(kbId);
                 }
             }
         }
         if (!unavailableKbs.isEmpty()) {
             failures.add(ValidationDetail.of("kbBindings", "INVALID_VALUE",
-                    "One or more selected knowledge bases are unavailable: "
+                    "One or more selected knowledge providers are unavailable: "
                             + String.join(", ", unavailableKbs) + "."));
         }
 

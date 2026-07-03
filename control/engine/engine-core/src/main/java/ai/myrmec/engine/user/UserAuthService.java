@@ -45,7 +45,7 @@ public class UserAuthService {
     private final AuthProviderService authProviderService;
     private final ExternalAuthStateService externalAuthStateService;
     private final ObjectMapper objectMapper;
-    private final ai.myrmec.engine.audit.AuditLogService auditLogService;
+    private final ai.myrmec.engine.audit.AuditEventService auditEventService;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -63,31 +63,19 @@ public class UserAuthService {
 
         if (user == null) {
             log.warn("Login failed: user not found for email: {}", email);
-            auditLogService.record(ai.myrmec.engine.audit.AuditLogService.AuditEvent.builder()
-                    .action("LOGIN_FAILED")
-                    .payload(java.util.Map.of("email", email, "reason", "USER_NOT_FOUND"))
-                    .build());
+            auditEventService.recordEvent("User", null, "LOGIN_FAILED", "ORGANIZATION", null, java.util.UUID.randomUUID(), "SYSTEM", null, null, null, null, java.util.Map.of("email", email, "reason", "USER_NOT_FOUND"));
             throw new BadRequestException("Invalid email or password");
         }
 
         if (!user.getIsActive()) {
             log.warn("Login failed: inactive user: {}", email);
-            auditLogService.record(ai.myrmec.engine.audit.AuditLogService.AuditEvent.builder()
-                    .action("LOGIN_FAILED")
-                    .actorUserId(user.getId())
-                    .payload(java.util.Map.of("email", email, "reason", "INACTIVE"))
-                    .build());
+            auditEventService.recordEvent("User", user.getId(), "LOGIN_FAILED", "ORGANIZATION", null, user.getId(), user.getName(), null, null, null, null, java.util.Map.of("email", email, "reason", "INACTIVE"));
             throw new BadRequestException("User account is disabled");
         }
 
         if (!AuthenticationProvider.LOCAL_CODE.equals(user.getProviderCode())) {
             log.warn("Login failed: non-LOCAL user attempted password login: {}", email);
-            auditLogService.record(ai.myrmec.engine.audit.AuditLogService.AuditEvent.builder()
-                    .action("LOGIN_FAILED")
-                    .actorUserId(user.getId())
-                    .payload(java.util.Map.of("email", email, "reason", "WRONG_PROVIDER",
-                            "provider", user.getProviderCode()))
-                    .build());
+            auditEventService.recordEvent("User", user.getId(), "LOGIN_FAILED", "ORGANIZATION", null, user.getId(), user.getName(), null, null, null, null, java.util.Map.of("email", email, "reason", "WRONG_PROVIDER", "provider", user.getProviderCode()));
             throw new BadRequestException("This account uses external authentication");
         }
 
@@ -95,11 +83,7 @@ public class UserAuthService {
 
         if (!userService.verifyPassword(user, request.getPassword())) {
             log.warn("Login failed: invalid password for email: {}", email);
-            auditLogService.record(ai.myrmec.engine.audit.AuditLogService.AuditEvent.builder()
-                    .action("LOGIN_FAILED")
-                    .actorUserId(user.getId())
-                    .payload(java.util.Map.of("email", email, "reason", "BAD_PASSWORD"))
-                    .build());
+            auditEventService.recordEvent("User", user.getId(), "LOGIN_FAILED", "ORGANIZATION", null, user.getId(), user.getName(), null, null, null, null, java.util.Map.of("email", email, "reason", "BAD_PASSWORD"));
             throw new BadRequestException("Invalid email or password");
         }
 
@@ -110,13 +94,7 @@ public class UserAuthService {
         String refreshToken = jwtTokenProvider.generateUserRefreshToken(user.getId());
 
         log.info("User logged in: {} (provider: {})", email, user.getProviderCode());
-        auditLogService.record(ai.myrmec.engine.audit.AuditLogService.AuditEvent.builder()
-                .action("LOGIN")
-                .actorUserId(user.getId())
-                .resourceType("USER")
-                .resourceId(user.getId())
-                .payload(java.util.Map.of("email", email, "provider", user.getProviderCode()))
-                .build());
+        auditEventService.recordEvent("User", user.getId(), "LOGIN", "ORGANIZATION", null, user.getId(), user.getName(), null, null, null, null, java.util.Map.of("email", email, "provider", user.getProviderCode()));
 
         return LoginResponse.builder()
                 .userId(user.getId())

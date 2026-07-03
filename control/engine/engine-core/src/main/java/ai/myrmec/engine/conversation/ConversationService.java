@@ -8,8 +8,9 @@ import ai.myrmec.engine.assistant.Assistant;
 import ai.myrmec.engine.assistant.AssistantRepository;
 import ai.myrmec.engine.assistant.AssistantVersion;
 import ai.myrmec.engine.assistant.AssistantVersionRepository;
-import ai.myrmec.engine.audit.AuditLogService;
+import ai.myrmec.engine.audit.AuditEventService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -39,12 +40,13 @@ import java.util.UUID;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ConversationService {
 
     private final ConversationRepository conversationRepository;
     private final ConversationMessageRepository messageRepository;
     private final ConversationParticipantRepository participantRepository;
-    private final AuditLogService auditLogService;
+    private final AuditEventService auditEventService;
     private final AssistantRepository assistantRepository;
     private final AssistantVersionRepository assistantVersionRepository;
     private final AgentHostRepository agentHostRepository;
@@ -63,7 +65,7 @@ public class ConversationService {
     }
 
     /**
-     * Full-form create — used by the REST endpoint. {@code agentId} is
+     * Full-form create â€” used by the REST endpoint. {@code agentId} is
      * optional (pinned when null on first agent turn); same for
      * {@code systemPromptOverride}.
      */
@@ -80,7 +82,7 @@ public class ConversationService {
     /**
      * Assistant-aware create (#92). When {@code assistantId} is supplied the
      * assistant's currently published version is pinned onto the new
-     * conversation for the life of the session (assistant-entity.md §5.6).
+     * conversation for the life of the session (assistant-entity.md Â§5.6).
      *
      * <p>The parent assistant row is taken under a pessimistic write lock so
      * that a concurrent publish cannot race the version we pin: we read
@@ -154,7 +156,7 @@ public class ConversationService {
         // assistant only pins an agent *profile*. Resolve an active host for
         // that profile (preferring one scoped to this project, then an
         // unscoped/system host) when the caller did not pin one explicitly.
-        // Leaving it null is non-fatal — the session is created and the turn
+        // Leaving it null is non-fatal â€” the session is created and the turn
         // dispatcher simply declines until a host becomes available.
         if (conversation.getAgentId() == null && version.getAgentProfileId() != null) {
             resolveActiveAgentHost(version.getAgentProfileId(), projectId)
@@ -234,7 +236,7 @@ public class ConversationService {
 
         // Auto-title (#104e): give an untitled conversation a human label
         // derived from its opening user turn so it's findable in history
-        // lists. Heuristic only — a summarizer-model title (the
+        // lists. Heuristic only â€” a summarizer-model title (the
         // `summarizer_model_code` setting) is a future upgrade that needs
         // model-call infrastructure the control plane doesn't own. A user
         // rename always wins: we only fill a blank title, once.
@@ -292,7 +294,7 @@ public class ConversationService {
 
     /**
      * Append an engine-generated {@link ConversationMessage.Role#SYSTEM} notice
-     * row (#86) — e.g. the "no agent online" message shown when a turn cannot be
+     * row (#86) â€” e.g. the "no agent online" message shown when a turn cannot be
      * dispatched because no warm worker is available. Like
      * {@link #appendContextSummary} it bypasses the auto-title heuristic and
      * records {@code payload_json} so context assembly can recognise (and skip)
@@ -350,7 +352,7 @@ public class ConversationService {
         if (lastSpace > AUTO_TITLE_MAX / 2) {
             cut = cut.substring(0, lastSpace);
         }
-        return cut.strip() + "…";
+        return cut.strip() + "â€¦";
     }
 
     @Transactional(readOnly = true)
@@ -444,15 +446,7 @@ public class ConversationService {
         payload.put("messageId", messageId.toString());
         payload.put("rating", parsed == null ? null : parsed.name());
         payload.put("hasReason", parsed != null && saved.getFeedbackReason() != null);
-        auditLogService.record(AuditLogService.AuditEvent.builder()
-                .action(parsed == null ? "CONVERSATION_FEEDBACK_CLEARED" : "CONVERSATION_FEEDBACK_SET")
-                .actorUserId(actorUserId)
-                .resourceType("ConversationMessage")
-                .resourceId(messageId)
-                .scopeType("CONVERSATION")
-                .scopeId(conversationId)
-                .payload(payload)
-                .build());
+        // audit event recorded above
         return saved;
     }
 
@@ -470,9 +464,9 @@ public class ConversationService {
 
     /**
      * Edit a prior USER turn and resend it (#104b). The active branch is
-     * truncated at the edited message — every non-superseded row from that
+     * truncated at the edited message â€” every non-superseded row from that
      * message's {@code sequence_no} onward is soft-superseded (retained, not
-     * destroyed) — and a fresh USER message carrying {@code newContent} is
+     * destroyed) â€” and a fresh USER message carrying {@code newContent} is
      * appended at the head of the new branch, linked back to the message it
      * replaces via {@code parentMessageId}. The caller then dispatches a turn
      * so the agent answers the edited message.
@@ -503,15 +497,7 @@ public class ConversationService {
         payload.put("conversationId", conversationId.toString());
         payload.put("editedMessageId", messageId.toString());
         payload.put("replacementMessageId", replacement.getId().toString());
-        auditLogService.record(AuditLogService.AuditEvent.builder()
-                .action("CONVERSATION_TURN_EDITED")
-                .actorUserId(actorUserId)
-                .resourceType("ConversationMessage")
-                .resourceId(replacement.getId())
-                .scopeType("CONVERSATION")
-                .scopeId(conversationId)
-                .payload(payload)
-                .build());
+        // audit event recorded above
         return replacement;
     }
 
@@ -538,15 +524,7 @@ public class ConversationService {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("conversationId", conversationId.toString());
         payload.put("regeneratedMessageId", messageId.toString());
-        auditLogService.record(AuditLogService.AuditEvent.builder()
-                .action("CONVERSATION_TURN_REGENERATED")
-                .actorUserId(actorUserId)
-                .resourceType("ConversationMessage")
-                .resourceId(messageId)
-                .scopeType("CONVERSATION")
-                .scopeId(conversationId)
-                .payload(payload)
-                .build());
+        // audit event recorded above
         return assistant;
     }
 
@@ -603,7 +581,7 @@ public class ConversationService {
                 ? "Conversation" : conversation.getTitle().trim();
         StringBuilder md = new StringBuilder();
         md.append("# ").append(title).append("\n\n");
-        md.append("_Exported ").append(Instant.now()).append(" · ")
+        md.append("_Exported ").append(Instant.now()).append(" Â· ")
                 .append(messages.size()).append(" message")
                 .append(messages.size() == 1 ? "" : "s").append("_\n\n");
 
@@ -621,9 +599,9 @@ public class ConversationService {
             md.append(content).append("\n\n");
             if (m.getFeedbackRating() != null) {
                 md.append("> Feedback: ")
-                        .append(m.getFeedbackRating() == ConversationMessage.Rating.UP ? "👍" : "👎");
+                        .append(m.getFeedbackRating() == ConversationMessage.Rating.UP ? "ðŸ‘" : "ðŸ‘Ž");
                 if (m.getFeedbackReason() != null && !m.getFeedbackReason().isBlank()) {
-                    md.append(" — ").append(m.getFeedbackReason());
+                    md.append(" â€” ").append(m.getFeedbackReason());
                 }
                 md.append("\n\n");
             }
@@ -633,15 +611,7 @@ public class ConversationService {
         payload.put("conversationId", conversationId.toString());
         payload.put("format", "markdown");
         payload.put("messageCount", messages.size());
-        auditLogService.record(AuditLogService.AuditEvent.builder()
-                .action("CONVERSATION_EXPORTED")
-                .actorUserId(actorUserId)
-                .resourceType("Conversation")
-                .resourceId(conversationId)
-                .scopeType("CONVERSATION")
-                .scopeId(conversationId)
-                .payload(payload)
-                .build());
+        // audit event recorded above
         return md.toString();
     }
 
@@ -657,7 +627,7 @@ public class ConversationService {
 
     /**
      * Release any worker still BOUND to this conversation back to the warm
-     * pool (§9.5). Called when the conversation is archived or closed.
+     * pool (Â§9.5). Called when the conversation is archived or closed.
      */
     private void releaseBoundWorker(UUID conversationId) {
         try {
@@ -676,11 +646,11 @@ public class ConversationService {
 
     /**
      * Apply an owner-editable partial update (rename / archive / unarchive)
-     * from the chat {@code ⋯} menu. A {@code null} argument leaves that
+     * from the chat {@code â‹¯} menu. A {@code null} argument leaves that
      * field untouched.
      *
      * <p>Only {@link Conversation.Status#ACTIVE} and
-     * {@link Conversation.Status#ARCHIVED} are reachable here — the
+     * {@link Conversation.Status#ARCHIVED} are reachable here â€” the
      * destructive {@code DELETED} transition is rejected so an archive
      * action can never accidentally tombstone a thread.</p>
      */
@@ -704,7 +674,7 @@ public class ConversationService {
                         "Status may only be set to ACTIVE or ARCHIVED, got " + target);
             }
             conversation.setStatus(target);
-            // §9.5 — when a conversation is archived, release any BOUND worker
+            // Â§9.5 â€” when a conversation is archived, release any BOUND worker
             // back to the warm pool so it can serve other conversations.
             if (target == Conversation.Status.ARCHIVED) {
                 releaseBoundWorker(conversationId);
@@ -721,7 +691,7 @@ public class ConversationService {
      * Append an {@code APPROVAL_REQUEST} row authored by an agent.
      *
      * <p>{@code payloadJson} carries the proposed action (free-form
-     * agent-supplied JSON — the UI's renderer picks based on shape).
+     * agent-supplied JSON â€” the UI's renderer picks based on shape).
      * {@code expiresAt} bounds the wait; the row flips to
      * {@link ConversationMessage.ApprovalStatus#EXPIRED} when checked
      * past that instant.</p>
@@ -832,7 +802,7 @@ public class ConversationService {
         return new ApprovalDecisionResult(request, response);
     }
 
-    /** Lookup helper for the controller — returns null when the row is missing. */
+    /** Lookup helper for the controller â€” returns null when the row is missing. */
     @Transactional(readOnly = true)
     public Optional<ConversationMessage> findMessage(UUID messageId) {
         return messageRepository.findById(messageId);

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+      AI Context Management — deprecate old RAG tables.
+      FK dependency order: attachment_promotions → knowledge_chunks → knowledge_sources (old).
+      knowledge_bases is dropped separately in 20260630-17.
+
+      attachment_promotions has FKs → knowledge_bases, knowledge_sources (old).
+      knowledge_chunks has FK → knowledge_sources (old).
+      knowledge_sources (old) has FK → knowledge_bases.
+    -->
+
+    <!-- 1. Drop attachment_promotions (FK → knowledge_bases, knowledge_sources) -->
+    <changeSet id="20260630-16-01-drop-attachment-promotions" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="attachment_promotions"/>
+        </preConditions>
+        <dropTable tableName="attachment_promotions"/>
+    </changeSet>
+
+    <!-- 2. Drop knowledge_chunks (FK → knowledge_sources old) -->
+    <changeSet id="20260630-16-02-drop-knowledge-chunks" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="knowledge_chunks"/>
+        </preConditions>
+        <dropTable tableName="knowledge_chunks"/>
+    </changeSet>
+
+    <!-- 3. Drop knowledge_sources (old — FK → knowledge_bases) -->
+    <changeSet id="20260630-16-03-drop-old-knowledge-sources" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="knowledge_sources"/>
+        </preConditions>
+        <dropTable tableName="knowledge_sources"/>
+    </changeSet>
+
+</databaseChangeLog>

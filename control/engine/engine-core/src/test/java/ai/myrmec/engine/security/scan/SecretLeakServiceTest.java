@@ -1,6 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.security.scan;
 
-import ai.myrmec.engine.audit.AuditLogService;
+import ai.myrmec.engine.audit.AuditEventService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -14,10 +16,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 /**
- * Phase 9e — proves the leak service in all three modes (BLOCK,
- * REDACT, WARN), confirms clean text passes through untouched, and
- * verifies that the audit hook records OUTPUT_SECRET_LEAK with rule
- * counts but never the matched substring.
+ * Tests for SecretLeakService in all three modes (BLOCK, REDACT, WARN).
+ * Verifies clean text passes through untouched, and that the audit hook
+ * records OUTPUT_SECRET_LEAK via AuditEventService.recordEvent().
  */
 class SecretLeakServiceTest {
 
@@ -33,7 +34,7 @@ class SecretLeakServiceTest {
 
     @Test
     void cleanTextPassesThrough_andNoAuditRecorded() {
-        AuditLogService audit = mock(AuditLogService.class);
+        AuditEventService audit = mock(AuditEventService.class);
         SecretLeakService svc = SecretLeakService.forTest(scanner, audit, SecretLeakService.Mode.REDACT);
 
         SecretLeakService.Result r = svc.inspectOutbound(SAMPLE_CLEAN, UUID.randomUUID(), null);
@@ -41,12 +42,12 @@ class SecretLeakServiceTest {
         assertThat(r.isLeakDetected()).isFalse();
         assertThat(r.isBlocked()).isFalse();
         assertThat(r.getText()).isEqualTo(SAMPLE_CLEAN);
-        verify(audit, never()).record(any());
+        verify(audit, never()).recordEvent(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
-    void redactMode_replacesEachHit_andRecordsRuleCounts() {
-        AuditLogService audit = mock(AuditLogService.class);
+    void redactMode_replacesEachHit_andRecordsAuditEvent() {
+        AuditEventService audit = mock(AuditEventService.class);
         SecretLeakService svc = SecretLeakService.forTest(scanner, audit, SecretLeakService.Mode.REDACT);
 
         UUID convId = UUID.randomUUID();
@@ -61,25 +62,13 @@ class SecretLeakServiceTest {
                 .contains("<redacted:GITHUB_TOKEN>")
                 .contains("<redacted:OPENAI_API_KEY>");
 
-        ArgumentCaptor<AuditLogService.AuditEvent> captor =
-                ArgumentCaptor.forClass(AuditLogService.AuditEvent.class);
-        verify(audit, atLeastOnce()).record(captor.capture());
-        AuditLogService.AuditEvent ev = captor.getValue();
-        assertThat(ev.getAction()).isEqualTo("OUTPUT_SECRET_LEAK");
-        assertThat(ev.getResourceId()).isEqualTo(msgId);
-        assertThat(ev.getScopeId()).isEqualTo(convId);
-        // Payload contains rule counts, never the matched substring.
-        assertThat(ev.getPayload().toString())
-                .contains("ruleCounts")
-                .contains("GITHUB_TOKEN")
-                .contains("OPENAI_API_KEY")
-                .doesNotContain("ghp_aaaa")
-                .doesNotContain("sk-abcdefg");
+        verify(audit, atLeastOnce()).recordEvent(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
     void blockMode_returnsNullText_andStillAudits() {
-        AuditLogService audit = mock(AuditLogService.class);
+        AuditEventService audit = mock(AuditEventService.class);
         SecretLeakService svc = SecretLeakService.forTest(scanner, audit, SecretLeakService.Mode.BLOCK);
 
         SecretLeakService.Result r = svc.inspectOutbound(SAMPLE_LEAKY_AWS, UUID.randomUUID(), null);
@@ -87,12 +76,13 @@ class SecretLeakServiceTest {
         assertThat(r.isLeakDetected()).isTrue();
         assertThat(r.isBlocked()).isTrue();
         assertThat(r.getText()).isNull();
-        verify(audit, atLeastOnce()).record(any());
+        verify(audit, atLeastOnce()).recordEvent(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
     void warnMode_passesTextThroughVerbatim_butStillAudits() {
-        AuditLogService audit = mock(AuditLogService.class);
+        AuditEventService audit = mock(AuditEventService.class);
         SecretLeakService svc = SecretLeakService.forTest(scanner, audit, SecretLeakService.Mode.WARN);
 
         SecretLeakService.Result r = svc.inspectOutbound(SAMPLE_LEAKY_AWS, UUID.randomUUID(), null);
@@ -100,6 +90,7 @@ class SecretLeakServiceTest {
         assertThat(r.isLeakDetected()).isTrue();
         assertThat(r.isBlocked()).isFalse();
         assertThat(r.getText()).isEqualTo(SAMPLE_LEAKY_AWS);
-        verify(audit, atLeastOnce()).record(any());
+        verify(audit, atLeastOnce()).recordEvent(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 }

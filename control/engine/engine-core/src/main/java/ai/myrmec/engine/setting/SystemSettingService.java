@@ -2,7 +2,7 @@ package ai.myrmec.engine.setting;
 
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
-import ai.myrmec.engine.audit.AuditLogService;
+import ai.myrmec.engine.audit.AuditEventService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,7 +35,7 @@ public class SystemSettingService {
     public static final String AUDIT_ACTION = "SYSTEM_SETTING_UPDATED";
 
     private final SystemSettingRepository repository;
-    private final AuditLogService auditLogService;
+    private final AuditEventService auditEventService;
     private final ObjectMapper objectMapper;
 
     // ---- read paths -------------------------------------------------
@@ -131,16 +131,16 @@ public class SystemSettingService {
         setting.setUpdatedBy(actorUserId);
         SystemSetting saved = repository.save(setting);
 
-        auditLogService.record(AuditLogService.AuditEvent.builder()
-                .action(AUDIT_ACTION)
-                .actorUserId(actorUserId)
-                .resourceType("SystemSetting")
-                .scopeType("SYSTEM")
-                .payload(Map.of(
+        /* Audit the setting change */
+        auditEventService.recordEvent(
+                "SystemSetting", null, AUDIT_ACTION,
+                "ORGANIZATION", null,
+                actorUserId, actorUserId != null ? "USER" : "SYSTEM",
+                null, null, null, null,
+                Map.of(
                         "key", key,
                         "oldValue", oldValue == null ? "" : oldValue,
-                        "newValue", normalised))
-                .build());
+                        "newValue", normalised));
 
         return saved;
     }

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+      AI Context Management — Governance Profiles.
+
+      Reference/config data — code natural key PK. Three built-in profiles
+      (STRICT, STANDARD, FLEXIBLE) seeded via Liquibase. Selection stored
+      in system_settings key 'governance_profile_code' (type STRING, default STANDARD).
+      See governance-and-versioning.md §2.
+    -->
+
+    <changeSet id="20260630-01-governance-profiles" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="governance_profiles"/>
+            </not>
+        </preConditions>
+        <comment>Governance Profiles — persistent policy entity with code natural key.</comment>
+
+        <createTable tableName="governance_profiles">
+            <column name="code" type="varchar(50)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(200)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="is_built_in" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_system" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="policies" type="jsonb">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <!-- Seed 3 built-in governance profiles -->
+    <changeSet id="20260630-01-governance-profiles-seed" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="governance_profiles"/>
+            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM governance_profiles</sqlCheck>
+        </preConditions>
+
+        <insert tableName="governance_profiles">
+            <column name="code" value="STRICT"/>
+            <column name="name" value="Strict"/>
+            <column name="description" value="Banking / Compliance — maximum governance, Git-only sources, hard caps."/>
+            <column name="is_built_in" valueBoolean="true"/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="policies" value='{"inlineInstructions":"NOT_ALLOWED","instructionSourceTypes":["GIT"],"knowledgeProviderTypes":["MANAGED"],"knowledgeDataSourceTypes":["GIT"],"contextManifestRetentionDays":365,"budgetEnforcement":"HARD_CAP_NO_OVERRIDE","activationRules":"REQUIRED_ALL","contextManifestOnEveryExecution":true,"contextPinning":"PINNED_AT_START"}'/>
+        </insert>
+
+        <insert tableName="governance_profiles">
+            <column name="code" value="STANDARD"/>
+            <column name="name" value="Standard"/>
+            <column name="description" value="Enterprise default — balanced governance, Git + Inline, managed + external providers."/>
+            <column name="is_built_in" valueBoolean="true"/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="policies" value='{"inlineInstructions":"PROJECT_SERVICE","instructionSourceTypes":["GIT","INLINE"],"knowledgeProviderTypes":["MANAGED","EXTERNAL_HTTP"],"knowledgeDataSourceTypes":["GIT","CONFLUENCE","JIRA","NOTION"],"contextManifestRetentionDays":90,"budgetEnforcement":"HARD_CAP_PER_SERVICE","activationRules":"REQUIRED_ORG_PROJECT","contextManifestOnEveryExecution":true,"contextPinning":"PINNED_AT_START"}'/>
+        </insert>
+
+        <insert tableName="governance_profiles">
+            <column name="code" value="FLEXIBLE"/>
+            <column name="name" value="Flexible"/>
+            <column name="description" value="Pilot / Startup — minimal governance, all source types, configurable budgets."/>
+            <column name="is_built_in" valueBoolean="true"/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="policies" value='{"inlineInstructions":"ALL_SCOPES","instructionSourceTypes":["GIT","INLINE","URL","PACKAGE"],"knowledgeProviderTypes":["ANY"],"knowledgeDataSourceTypes":["ANY"],"contextManifestRetentionDays":30,"budgetEnforcement":"CONFIGURABLE","activationRules":"OPTIONAL","contextManifestOnEveryExecution":false,"contextPinning":"IMMEDIATE_EFFECT"}'/>
+        </insert>
+    </changeSet>
+
+</databaseChangeLog>

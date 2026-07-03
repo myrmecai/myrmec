@@ -1,6 +1,6 @@
 package ai.myrmec.engine.security.scan;
 
-import ai.myrmec.engine.audit.AuditLogService;
+import ai.myrmec.engine.audit.AuditEventService;
 import ai.myrmec.engine.spi.security.SecretLeakHit;
 import ai.myrmec.engine.spi.security.SecretLeakScanner;
 import lombok.Getter;
@@ -16,7 +16,7 @@ import java.util.UUID;
 /**
  * Phase 9e — single integration point that wraps the configured
  * {@link SecretLeakScanner} with an enforcement policy
- * (block | redact | warn) and an {@link AuditLogService} hook so
+ * (block | redact | warn) and an {@link AuditEventService} hook so
  * platform admins can see hits in the audit trail.
  *
  * <p><b>Mode</b> ({@code myrmec.security.secret-leak.mode}, default
@@ -56,7 +56,7 @@ public class SecretLeakService {
     }
 
     private final SecretLeakScanner scanner;
-    private final AuditLogService auditLogService;
+    private final AuditEventService auditEventService;
     @Getter
     private final Mode mode;
     @Getter
@@ -64,11 +64,11 @@ public class SecretLeakService {
 
     public SecretLeakService(
             SecretLeakScanner scanner,
-            AuditLogService auditLogService,
+            AuditEventService auditEventService,
             @Value("${myrmec.security.secret-leak.enabled:true}") boolean enabled,
             @Value("${myrmec.security.secret-leak.mode:REDACT}") String mode) {
         this.scanner = scanner;
-        this.auditLogService = auditLogService;
+        this.auditEventService = auditEventService;
         this.enabled = enabled;
         this.mode = Mode.parse(mode);
     }
@@ -109,14 +109,21 @@ public class SecretLeakService {
         payload.put("mode", mode.name());
         payload.put("ruleCounts", ruleCounts);
         try {
-            auditLogService.record(AuditLogService.AuditEvent.builder()
-                    .action("OUTPUT_SECRET_LEAK")
-                    .resourceType("ConversationMessage")
-                    .resourceId(messageId)
-                    .scopeType("Conversation")
-                    .scopeId(conversationId)
-                    .payload(payload)
-                    .build());
+            // Resolve actor from security context (null for system actions)
+            UUID actorId = null;
+            String actorName = "SYSTEM";
+            var auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.getPrincipal() instanceof ai.myrmec.engine.user.UserPrincipal up) {
+                actorId = up.getUserId();
+                actorName = up.getName() != null ? up.getName() : "UNKNOWN";
+            }
+            auditEventService.recordEvent(
+                    "ConversationMessage", messageId,
+                    "OUTPUT_SECRET_LEAK",
+                    "ORGANIZATION", null,
+                    actorId != null ? actorId : java.util.UUID.randomUUID(),
+                    actorName,
+                    null, null, null, payload, null);
         } catch (Exception ex) {
             log.warn("Audit of OUTPUT_SECRET_LEAK failed (continuing): {}", ex.getMessage());
         }
@@ -181,7 +188,7 @@ public class SecretLeakService {
      * Test-only constructor for unit tests that don't need the audit
      * trail (in-process verification of mode + redaction).
      */
-    static SecretLeakService forTest(SecretLeakScanner scanner, AuditLogService audit, Mode mode) {
+    static SecretLeakService forTest(SecretLeakScanner scanner, AuditEventService audit, Mode mode) {
         return new SecretLeakService(scanner, audit, true, mode.name());
     }
 }

@@ -18,7 +18,15 @@ import java.util.function.Consumer;
  *       client. Returns {@code null} if the token doesn't resolve.</li>
  *   <li>{@link #chunkSink()} — call once per emitted chunk. Engine batches
  *       and writes to {@code knowledge_chunks}. Throwing from the sink
- *       indicates a non-recoverable persistence error and aborts the sync.</li>
+ *       indicates a non-recoverable persistence error and aborts the sync.
+ *       Used when the retrieval provider does NOT support ingestion (e.g.
+ *       {@code builtin}, {@code http}).</li>
+ *   <li>{@link #fileSink()} — call once per emitted raw file. Engine
+ *       forwards each file to the retrieval provider's {@code ingest()}
+ *       pipeline (e.g. RAGFlow upload + parse). Used when the retrieval
+ *       provider DOES support ingestion. May be {@code null} when the
+ *       provider doesn't support ingestion; connectors should check
+ *       before calling.</li>
  * </ul>
  *
  * <p>The context is request-scoped; do not retain it past the {@code sync}
@@ -36,6 +44,19 @@ public interface ConnectorContext {
      */
     String resolveSecret(@NotNull String token);
 
-    /** Sink for emitted chunks. See class docs for batching semantics. */
+    /**
+     * Sink for emitted chunks. Used when the retrieval provider does NOT
+     * support ingestion (e.g. {@code builtin}, {@code http}); the engine
+     * persists each chunk to {@code knowledge_chunks}.
+     */
     @NotNull Consumer<EmittedChunk> chunkSink();
+
+    /**
+     * Sink for emitted raw files. Used when the retrieval provider DOES
+     * support ingestion (e.g. {@code ragflow}); the engine forwards each
+     * file to {@link ai.myrmec.engine.spi.retrieval.RetrievalProvider#ingest}.
+     * Returns {@code null} when the provider doesn't support ingestion;
+     * connectors should check before calling.
+     */
+    Consumer<EmittedFile> fileSink();
 }

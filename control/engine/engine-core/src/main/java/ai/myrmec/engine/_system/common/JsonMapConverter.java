@@ -36,13 +36,24 @@ public class JsonMapConverter implements AttributeConverter<Map<String, Object>,
 
     @Override
     public Map<String, Object> convertToEntityAttribute(String dbData) {
-        if (dbData == null || dbData.isBlank() || dbData.equals("{}")) {
+        if (dbData == null || dbData.isBlank()) {
             return new java.util.HashMap<>();
         }
+        // H2 may return jsonb columns with surrounding quotes and escaped inner quotes.
+        String trimmed = dbData.trim();
+        if (trimmed.equals("{}") || trimmed.equals("\"{}\"") || trimmed.equals("'{}'")) {
+            return new java.util.HashMap<>();
+        }
+        // Strip surrounding quotes if present (H2 jsonb compatibility).
+        if (trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+            trimmed = trimmed.substring(1, trimmed.length() - 1);
+            // Unescape inner quotes (H2 double-escapes jsonb content).
+            trimmed = trimmed.replace("\\\"", "\"");
+        }
         try {
-            return new java.util.HashMap<>(OBJECT_MAPPER.readValue(dbData, MAP_TYPE));
+            return new java.util.HashMap<>(OBJECT_MAPPER.readValue(trimmed, MAP_TYPE));
         } catch (IOException e) {
-            log.error("Failed to deserialize JSON to map", e);
+            log.error("Failed to deserialize JSON to map: {}", dbData, e);
             throw new IllegalArgumentException("Failed to deserialize metadata from JSON", e);
         }
     }

@@ -2,8 +2,8 @@ package ai.myrmec.engine.quota;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.TestDataFactory;
-import ai.myrmec.engine.audit.AuditLogEntry;
-import ai.myrmec.engine.audit.AuditLogEntryRepository;
+import ai.myrmec.engine.audit.AuditEvent;
+import ai.myrmec.engine.audit.AuditEventRepository;
 import ai.myrmec.engine.group.Group;
 import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.project.ProjectRepository;
@@ -26,7 +26,7 @@ class QuotaServiceTest extends IntegrationTestBase {
     private QuotaService quotaService;
 
     @Autowired
-    private AuditLogEntryRepository auditLogEntryRepository;
+    private AuditEventRepository auditEventRepository;
 
     @Autowired
     private ProjectRepository projectRepository;
@@ -42,11 +42,11 @@ class QuotaServiceTest extends IntegrationTestBase {
         assertThat(q.getId()).isNotNull();
         assertThat(q.getLimitAmount()).isEqualTo(500L);
 
-        List<AuditLogEntry> rows = auditLogEntryRepository.findAll();
+        List<AuditEvent> rows = auditEventRepository.findAll();
         assertThat(rows).anyMatch(r ->
-                "QUOTA_CREATED".equals(r.getAction())
-                        && "Quota".equals(r.getResourceType())
-                        && q.getId().equals(r.getResourceId()));
+                "QUOTA_CREATED".equals(r.getEventType())
+                        && "Quota".equals(r.getEntityType())
+                        && q.getId().equals(r.getEntityId()));
     }
 
     @Test
@@ -61,8 +61,8 @@ class QuotaServiceTest extends IntegrationTestBase {
         assertThat(updated.getLimitAmount()).isEqualTo(1000L);
         assertThat(updated.isEnforced()).isFalse();
 
-        long updatedAudits = auditLogEntryRepository.findAll().stream()
-                .filter(r -> "QUOTA_UPDATED".equals(r.getAction()))
+        long updatedAudits = auditEventRepository.findAll().stream()
+                .filter(r -> "QUOTA_UPDATED".equals(r.getEventType()))
                 .count();
         assertThat(updatedAudits).isEqualTo(1L);
     }
@@ -78,8 +78,8 @@ class QuotaServiceTest extends IntegrationTestBase {
         quotaService.delete(q.getId());
 
         assertThat(quotaService.findByScope(Quota.Scope.PROJECT, projectId)).isEmpty();
-        long deletedAudits = auditLogEntryRepository.findAll().stream()
-                .filter(r -> "QUOTA_DELETED".equals(r.getAction()))
+        long deletedAudits = auditEventRepository.findAll().stream()
+                .filter(r -> "QUOTA_DELETED".equals(r.getEventType()))
                 .count();
         assertThat(deletedAudits).isEqualTo(1L);
     }
@@ -157,8 +157,8 @@ class QuotaServiceTest extends IntegrationTestBase {
         assertThat(paused.getPausedAt()).isNotNull();
         assertThat(paused.getPausedBy()).isEqualTo(pausedBy);
 
-        long pausedAudits = auditLogEntryRepository.findAll().stream()
-                .filter(r -> "QUOTA_PAUSED".equals(r.getAction()))
+        long pausedAudits = auditEventRepository.findAll().stream()
+                .filter(r -> "QUOTA_PAUSED".equals(r.getEventType()))
                 .count();
         assertThat(pausedAudits).isEqualTo(1L);
     }
@@ -180,8 +180,8 @@ class QuotaServiceTest extends IntegrationTestBase {
         assertThat(resumed.getPausedAt()).isNull();
         assertThat(resumed.getPausedBy()).isNull();
 
-        long resumedAudits = auditLogEntryRepository.findAll().stream()
-                .filter(r -> "QUOTA_RESUMED".equals(r.getAction()))
+        long resumedAudits = auditEventRepository.findAll().stream()
+                .filter(r -> "QUOTA_RESUMED".equals(r.getEventType()))
                 .count();
         assertThat(resumedAudits).isEqualTo(1L);
     }
@@ -196,8 +196,8 @@ class QuotaServiceTest extends IntegrationTestBase {
 
         quotaService.update(q.getId(), 1000L, true, null);
 
-        long changeAudits = auditLogEntryRepository.findAll().stream()
-                .filter(r -> "QUOTA_LIMIT_CHANGED".equals(r.getAction()))
+        long changeAudits = auditEventRepository.findAll().stream()
+                .filter(r -> "QUOTA_LIMIT_CHANGED".equals(r.getEventType()))
                 .count();
         assertThat(changeAudits).isEqualTo(1L);
     }

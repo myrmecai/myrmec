@@ -83,7 +83,6 @@ public class ProjectService {
         // Set workspace repo configuration
         project.setWorkspaceRepoUrl(request.getWorkspaceRepoUrl());
         project.setWorkspaceRepoBranch(request.getWorkspaceRepoBranch() != null ? request.getWorkspaceRepoBranch() : "main");
-        project.setRagConfig(request.getRagConfig());
         // HITL policy default: false. Conscious opt-in by an admin.
         project.setAutoHitlOnDestructive(
                 request.getAutoHitlOnDestructive() != null && request.getAutoHitlOnDestructive());
@@ -166,9 +165,6 @@ public class ProjectService {
                 validateWorkspaceCredentialSecret(project.getId(), secretId);
                 project.setWorkspaceCredentialSecretId(secretId);
             }
-        }
-        if (request.getRagConfig() != null) {
-            project.setRagConfig(request.getRagConfig());
         }
         if (request.getAutoHitlOnDestructive() != null) {
             project.setAutoHitlOnDestructive(request.getAutoHitlOnDestructive());

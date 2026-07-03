@@ -40,7 +40,7 @@ class SystemSettingControllerTest extends IntegrationTestBase {
 
     @Test
     void adminCanUpdateAnIntSettingAndAuditIsRecorded() {
-        long auditBefore = auditLogEntryRepository.count();
+        long auditBefore = auditEventRepository.count();
 
         ResponseEntity<SystemSettingResponse> updated = restTemplate.exchange(
                 "/api/v1/admin/system-settings/history_limit",
@@ -57,7 +57,7 @@ class SystemSettingControllerTest extends IntegrationTestBase {
         assertThat(systemSettingService.getInt("history_limit", 20L)).isEqualTo(40L);
 
         // One audit row was written under the settings action.
-        assertThat(auditLogEntryRepository.count()).isEqualTo(auditBefore + 1);
+        assertThat(auditEventRepository.count()).isEqualTo(auditBefore + 1);
     }
 
     @Test

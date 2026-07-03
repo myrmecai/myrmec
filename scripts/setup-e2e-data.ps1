@@ -15,8 +15,8 @@
 #   - Registration Keys (agent-registration.env, chat-agent-registration.env)
 #   - Project with repo config
 #   - Workflow with steps
-#   - Organization-level knowledge documents
-#   - Project-level knowledge documents
+#   - Organization-level instruction assets (published)
+#   - Project-level instruction assets (published)
 #   - Sample conversations (workflow kickoff + chat-ready)
 #   - Published Assistant (Chat Assistant)
 #   - Test users (joga.singh@gmail.com, tester@e2e-test.local)
@@ -779,9 +779,67 @@ if ($execution) {
 Write-Host ""
 
 # ============================================================
-# STEP 9: Create Organization-Level Knowledge Documents
+# STEP 9: Create Organization-Level Instruction Assets
 # ============================================================
-Write-Host "9. Creating organization-level knowledge documents..." -ForegroundColor Yellow
+# Replaces the old /admin/knowledge endpoint. The new flow is:
+#   1. POST /admin/instruction-assets (create parent, status=INCOMPLETE)
+#   2. POST /admin/instruction-assets/{id}/drafts (create DRAFT version with INLINE content)
+#   3. POST /admin/instruction-assets/{id}/publish (promote DRAFT → PUBLISHED, parent → ACTIVE)
+Write-Host "9. Creating organization-level instruction assets..." -ForegroundColor Yellow
+
+# Helper: create an instruction asset with INLINE content and publish it
+function Create-And-Publish-Instruction {
+    param(
+        [string]$Scope,
+        [string]$ProjectId,
+        [string]$Name,
+        [string]$Description,
+        [string]$Category,
+        [string]$Content,
+        [hashtable]$Applicability,
+        [string]$Availability = "REQUIRED",
+        [int]$Priority = 100,
+        [hashtable]$Headers,
+        [string]$ApiUrl
+    )
+    # 1. Create parent
+    $createBody = @{
+        scope       = $Scope
+        projectId   = $ProjectId
+        name        = $Name
+        description = $Description
+        category    = $Category
+    }
+    $asset = Invoke-Api -Method POST -Uri "$ApiUrl/admin/instruction-assets" -Headers $Headers -Body $createBody -IgnoreError
+    if (-not $asset -or -not $asset.id) {
+        Write-Host " (skipped - may already exist)" -ForegroundColor Gray
+        return $null
+    }
+    Write-Host " created (ID: $($asset.id))" -ForegroundColor Green -NoNewline
+
+    # 2. Create draft with INLINE content
+    $draftBody = @{
+        sourceType     = "INLINE"
+        sourceDetails  = @{ content = $Content }
+        applicability  = $Applicability
+        availability   = $Availability
+        priority       = $Priority
+    }
+    $draft = Invoke-Api -Method POST -Uri "$ApiUrl/admin/instruction-assets/$($asset.id)/drafts" -Headers $Headers -Body $draftBody -IgnoreError
+    if (-not $draft) {
+        Write-Host " (draft creation failed)" -ForegroundColor Red
+        return $asset.id
+    }
+
+    # 3. Publish the draft
+    $published = Invoke-Api -Method POST -Uri "$ApiUrl/admin/instruction-assets/$($asset.id)/publish" -Headers $Headers -IgnoreError
+    if ($published) {
+        Write-Host " published" -ForegroundColor Green
+    } else {
+        Write-Host " (publish failed)" -ForegroundColor Red
+    }
+    return $asset.id
+}
 
 $codingStandards = @"
 # Coding Standards
@@ -824,36 +882,39 @@ $securityGuidelines = @"
 - Return generic error messages to clients
 "@
 
-$orgDocs = @(
+$orgInstructions = @(
     @{
-        name = "Coding Standards"
-        category = "STANDARD"
-        priority = 100
-        appliesTo = @("**")
-        content = $codingStandards
+        name        = "Coding Standards"
+        description = "General coding standards for all projects"
+        category    = "STANDARD"
+        content     = $codingStandards
+        applicability = @{ CONVERSATION = "true"; WORKFLOW = "true" }
+        priority    = 100
     },
     @{
-        name = "Security Guidelines"
-        category = "REQUIREMENT"
-        priority = 150
-        appliesTo = @("**")
-        content = $securityGuidelines
+        name        = "Security Guidelines"
+        description = "Security requirements for all projects"
+        category    = "REQUIREMENT"
+        content     = $securityGuidelines
+        applicability = @{ CONVERSATION = "true"; WORKFLOW = "true" }
+        priority    = 150
     }
 )
 
-foreach ($doc in $orgDocs) {
-    Write-Host "   Creating: $($doc.name)..." -NoNewline
-    $result = Invoke-Api -Method POST -Uri "$ApiUrl/admin/knowledge" -Headers $adminHeaders -Body $doc -IgnoreError
-    if ($result) {
-        Write-Host " created (priority: $($doc.priority))" -ForegroundColor Green
-    }
+foreach ($instr in $orgInstructions) {
+    Write-Host "   Creating: $($instr.name)..." -NoNewline
+    Create-And-Publish-Instruction `
+        -Scope "ORGANIZATION" -ProjectId $null `
+        -Name $instr.name -Description $instr.description -Category $instr.category `
+        -Content $instr.content -Applicability $instr.applicability -Priority $instr.priority `
+        -Headers $adminHeaders -ApiUrl $ApiUrl | Out-Null
 }
 Write-Host ""
 
 # ============================================================
-# STEP 10: Create Project-Level Knowledge Documents
+# STEP 10: Create Project-Level Instruction Assets
 # ============================================================
-Write-Host "10. Creating project-level knowledge documents..." -ForegroundColor Yellow
+Write-Host "10. Creating project-level instruction assets..." -ForegroundColor Yellow
 
 $javaStandards = @"
 # Java Spring Boot Standards
@@ -940,43 +1001,48 @@ $architecture = @"
 - PostgreSQL as managed service
 "@
 
-$projectDocs = @(
+$projectInstructions = @(
     @{
-        name = "Java Spring Standards"
-        category = "INSTRUCTION"
-        priority = 200
-        appliesTo = @("**/*.java")
-        content = $javaStandards
+        name        = "Java Spring Standards"
+        description = "Java Spring Boot coding standards for this project"
+        category    = "STANDARD"
+        content     = $javaStandards
+        applicability = @{ CONVERSATION = "true"; WORKFLOW = "true" }
+        priority    = 200
     },
     @{
-        name = "React TypeScript Standards"
-        category = "INSTRUCTION"
-        priority = 200
-        appliesTo = @("**/*.tsx", "**/*.ts")
-        content = $reactStandards
+        name        = "React TypeScript Standards"
+        description = "React TypeScript coding standards for this project"
+        category    = "STANDARD"
+        content     = $reactStandards
+        applicability = @{ CONVERSATION = "true"; WORKFLOW = "true" }
+        priority    = 200
     },
     @{
-        name = "REST API Conventions"
-        category = "INSTRUCTION"
-        priority = 180
-        appliesTo = @("**/controller/*.java", "**/api/*.ts")
-        content = $restApiConventions
+        name        = "REST API Conventions"
+        description = "REST API design conventions for this project"
+        category    = "STANDARD"
+        content     = $restApiConventions
+        applicability = @{ CONVERSATION = "true"; WORKFLOW = "true" }
+        priority    = 180
     },
     @{
-        name = "Architecture"
-        category = "ARCHITECTURE"
-        priority = 250
-        appliesTo = @("**")
-        content = $architecture
+        name        = "Architecture"
+        description = "Address Book application architecture overview"
+        category    = "ARCHITECTURE"
+        content     = $architecture
+        applicability = @{ CONVERSATION = "true"; WORKFLOW = "true" }
+        priority    = 250
     }
 )
 
-foreach ($doc in $projectDocs) {
-    Write-Host "   Creating: $($doc.name)..." -NoNewline
-    $result = Invoke-Api -Method POST -Uri "$ApiUrl/projects/$projectId/knowledge" -Headers $adminHeaders -Body $doc -IgnoreError
-    if ($result) {
-        Write-Host " created (priority: $($doc.priority), applies: $($doc.appliesTo -join ', '))" -ForegroundColor Green
-    }
+foreach ($instr in $projectInstructions) {
+    Write-Host "   Creating: $($instr.name)..." -NoNewline
+    Create-And-Publish-Instruction `
+        -Scope "PROJECT" -ProjectId $projectId `
+        -Name $instr.name -Description $instr.description -Category $instr.category `
+        -Content $instr.content -Applicability $instr.applicability -Priority $instr.priority `
+        -Headers $adminHeaders -ApiUrl $ApiUrl | Out-Null
 }
 Write-Host ""
 
@@ -1066,21 +1132,12 @@ foreach ($q in $quotas) {
 Write-Host ""
 
 # ============================================================
-# STEP 14: Verify audit log + agent health endpoints (Phase 9b/9c/9d)
+# STEP 14: Verify agent health endpoint (Phase 9b/9c/9d)
 # ============================================================
-# Read-only sanity checks. The audit log should already contain
-# entries from the role-grant, secret-CRUD, and quota-CRUD operations
-# performed above. Agent health gives the dispatcher's view of the
-# registered agent.
-Write-Host "14. Verifying audit log + agent health endpoints..." -ForegroundColor Yellow
-
-$auditEntries = Invoke-Api -Method GET -Uri "$ApiUrl/audit-log?size=5" -Headers $adminHeaders -IgnoreError
-if ($auditEntries) {
-    $count = if ($auditEntries.totalElements) { $auditEntries.totalElements } else { ($auditEntries.content | Measure-Object).Count }
-    Write-Host "   Audit log reachable. Recent entries: $count" -ForegroundColor Green
-} else {
-    Write-Host "   Audit log endpoint not reachable (may not be wired in this build)" -ForegroundColor Yellow
-}
+# Audit events are now recorded internally by AuditEventService
+# (no public API endpoint). Agent health gives the dispatcher's
+# view of the registered agent.
+Write-Host "14. Verifying agent health endpoint..." -ForegroundColor Yellow
 
 if ($agentIds["Addressbook Fullstack Agent"]) {
     $agentId = $agentIds["Addressbook Fullstack Agent"]
@@ -1090,6 +1147,8 @@ if ($agentIds["Addressbook Fullstack Agent"]) {
     } else {
         Write-Host "   Agent health endpoint not reachable" -ForegroundColor Yellow
     }
+} else {
+    Write-Host "   Skipped - no agent created" -ForegroundColor Gray
 }
 Write-Host ""
 
@@ -1226,12 +1285,12 @@ Write-Host "  - 2 Registration Keys (agent-registration.env, chat-agent-registra
 Write-Host "  - 1 Project with repo config (Address Book Application)"
 Write-Host "  - 1 Published Workflow (Feature Implementation - 3 steps)"
 Write-Host "  - 1 Workflow Execution (Contact Search feature)"
-Write-Host "  - 2 Org-level Knowledge Docs (Coding Standards, Security Guidelines)"
-Write-Host "  - 4 Project-level Knowledge Docs (Java, React, REST API, Architecture)"
+Write-Host "  - 2 Org-level Instruction Assets (Coding Standards, Security Guidelines)"
+Write-Host "  - 4 Project-level Instruction Assets (Java, React, REST API, Architecture)"
 Write-Host "  - autoHitlOnDestructive enabled on project (Phase 7)"
 Write-Host "  - 1 Custom Model Provider (local-vllm) (Phase 10 #70)"
 Write-Host "  - 2 Project Quotas: 500k TOKENS/day + `$50/month (Phase 8)"
-Write-Host "  - Audit log + agent health endpoints verified (Phase 9b/9c/9d)"
+Write-Host "  - Agent health endpoint verified (Phase 9b/9c/9d)"
 Write-Host "  - 2 Sample Conversations (workflow kickoff + chat-ready)"
 Write-Host "  - 1 Published Assistant (Chat Assistant - pins the chat profile)"
 Write-Host ""

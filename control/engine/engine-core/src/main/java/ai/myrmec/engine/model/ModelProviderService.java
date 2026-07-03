@@ -2,7 +2,7 @@ package ai.myrmec.engine.model;
 
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.ResourceInUseException;
-import ai.myrmec.engine.audit.AuditLogService;
+import ai.myrmec.engine.audit.AuditEventService;
 import ai.myrmec.engine.model.dto.CreateModelProviderRequest;
 import ai.myrmec.engine.model.dto.UpdateModelProviderRequest;
 import lombok.RequiredArgsConstructor;
@@ -29,7 +29,7 @@ public class ModelProviderService {
 
     private final ModelProviderConfigRepository providerRepository;
     private final ModelRepository modelRepository;
-    private final AuditLogService auditLogService;
+    private final AuditEventService auditEventService;
 
     @Transactional(readOnly = true)
     public List<ModelProviderConfig> findAll() {
@@ -117,11 +117,9 @@ public class ModelProviderService {
         payload.put("status", p.getStatus().name());
         payload.put("system", p.isSystem());
         try {
-            auditLogService.record(AuditLogService.AuditEvent.builder()
-                    .action(action)
-                    .resourceType("ModelProvider")
-                    .payload(payload)
-                    .build());
+            auditEventService.recordEvent("ModelProvider", null, action,
+                    "ORGANIZATION", null, null, "SYSTEM",
+                    null, null, null, null, payload);
         } catch (Exception ex) {
             log.warn("Audit of {} failed (continuing): {}", action, ex.getMessage());
         }

@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+      AI Context Management — Audit Events.
+      Append-only event log for all versioned entity state changes.
+      Shared across the platform. BIGINT PK (sequence, append-optimized).
+      event_type is generic (no entity prefix) — entity_type disambiguates.
+      before_snapshot / after_snapshot store only changed fields, not full rows.
+    -->
+
+    <changeSet id="20260630-12-01-create-audit-events" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="audit_events"/>
+            </not>
+        </preConditions>
+        <comment>Audit Events — append-only event log. BIGINT PK for append optimization.</comment>
+
+        <createTable tableName="audit_events">
+            <column name="id" type="bigint" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="event_type" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="entity_type" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="entity_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="version_id" type="uuid"/>
+            <column name="scope_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_ae_project"
+                             references="projects(id)"/>
+            </column>
+            <column name="actor_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_ae_actor"
+                             references="users(id)"/>
+            </column>
+            <column name="actor_display_name" type="varchar(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="timestamp" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reason_code" type="varchar(50)"/>
+            <column name="before_snapshot" type="jsonb"/>
+            <column name="after_snapshot" type="jsonb"/>
+            <column name="metadata" type="jsonb"/>
+        </createTable>
+    </changeSet>
+
+    <!-- Index: (entity_type, entity_id, timestamp DESC) — entity history query -->
+    <changeSet id="20260630-12-02-ae-index-entity" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_ae_entity_time"/>
+            </not>
+        </preConditions>
+        <createIndex indexName="idx_ae_entity_time" tableName="audit_events">
+            <column name="entity_type"/>
+            <column name="entity_id"/>
+            <column name="timestamp"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- Index: (scope_type, project_id, timestamp DESC) — scope-based query -->
+    <changeSet id="20260630-12-03-ae-index-scope" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_ae_scope"/>
+            </not>
+        </preConditions>
+        <createIndex indexName="idx_ae_scope" tableName="audit_events">
+            <column name="scope_type"/>
+            <column name="project_id"/>
+            <column name="timestamp"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- Index: (actor_id, timestamp DESC) — actor activity query -->
+    <changeSet id="20260630-12-04-ae-index-actor" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_ae_actor"/>
+            </not>
+        </preConditions>
+        <createIndex indexName="idx_ae_actor" tableName="audit_events">
+            <column name="actor_id"/>
+            <column name="timestamp"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- Index: (event_type, timestamp DESC) — event type query -->
+    <changeSet id="20260630-12-05-ae-index-event-type" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_ae_event_type"/>
+            </not>
+        </preConditions>
+        <createIndex indexName="idx_ae_event_type" tableName="audit_events">
+            <column name="event_type"/>
+            <column name="timestamp"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

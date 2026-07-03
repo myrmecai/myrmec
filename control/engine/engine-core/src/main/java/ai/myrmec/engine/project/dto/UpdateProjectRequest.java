@@ -47,11 +47,6 @@ public class UpdateProjectRequest {
     private String workspaceCredentialSecretId;
 
     /**
-     * External RAG configuration.
-     */
-    private Map<String, Object> ragConfig;
-
-    /**
      * HITL policy switch. Null preserves the current value.
      */
     private Boolean autoHitlOnDestructive;

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                   http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="20260630-14-drop-rag-config" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <columnExists tableName="projects" columnName="rag_config"/>
+        </preConditions>
+        <comment>Drop deprecated rag_config column from projects (replaced by AI Context Management)</comment>
+        <dropColumn tableName="projects" columnName="rag_config"/>
+    </changeSet>
+
+</databaseChangeLog>

@@ -25,13 +25,6 @@ public class TaskContext {
     private List<KnowledgeEntry> knowledge;
     
     /**
-     * Optional RAG configuration for external knowledge retrieval.
-     * If present, the agent can query an external RAG system for
-     * additional context beyond the embedded knowledge.
-     */
-    private RagConfig rag;
-    
-    /**
      * Total character count of embedded knowledge (for monitoring).
      */
     private int knowledgeCharCount;
@@ -59,25 +52,6 @@ public class TaskContext {
         
         /** Priority used for sorting (higher = more important) */
         private int priority;
-    }
-    
-    /**
-     * Configuration for external RAG system access.
-     */
-    @Data
-    @Builder
-    public static class RagConfig {
-        /** RAG API endpoint URL */
-        private String endpoint;
-        
-        /** Secret name for API key (agent retrieves from vault) */
-        private String apiKeySecret;
-        
-        /** Collection/index name to query */
-        private String collection;
-        
-        /** Maximum number of results to retrieve */
-        private int topK;
     }
     
     /**

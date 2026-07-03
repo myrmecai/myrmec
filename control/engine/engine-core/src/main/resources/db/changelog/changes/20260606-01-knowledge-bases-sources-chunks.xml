@@ -209,8 +209,10 @@
             <column name="id" type="uuid">
                 <constraints primaryKey="true" nullable="false"/>
             </column>
+            <!-- Nullable for cached retrieval passages from external providers
+                 (e.g. RAGFlow) that don't have a knowledge_sources row. -->
             <column name="knowledge_source_id" type="uuid">
-                <constraints nullable="false" foreignKeyName="fk_knowledge_chunk_source"
+                <constraints nullable="true" foreignKeyName="fk_knowledge_chunk_source"
                              references="knowledge_sources(id)"/>
             </column>
             <column name="locator" type="varchar(2000)">
@@ -237,7 +239,8 @@
             </not>
         </preConditions>
         <!-- A single (source, locator) yields one row even across re-syncs;
-             connector upserts by this tuple. -->
+             connector upserts by this tuple. Only applies to chunks with a
+             non-null knowledge_source_id (cached passages skip this index). -->
         <createIndex indexName="uq_knowledge_chunk_source_locator"
                      tableName="knowledge_chunks" unique="true">
             <column name="knowledge_source_id"/>

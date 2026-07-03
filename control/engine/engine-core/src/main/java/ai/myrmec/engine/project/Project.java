@@ -82,14 +82,6 @@ public class Project {
     private UUID workspaceCredentialSecretId;
 
     /**
-     * External RAG configuration for agent knowledge retrieval.
-     * Structure: {endpoint, api_key_secret, collection, top_k}
-     */
-    @Convert(converter = JsonMapConverter.class)
-    @Column(name = "rag_config")
-    private Map<String, Object> ragConfig;
-
-    /**
      * HITL policy switch (Phase 7b). When true, the dispatcher must
      * request human approval before executing any tool whose
      * {@code risk_class} is DESTRUCTIVE or IRREVERSIBLE. Defaults to

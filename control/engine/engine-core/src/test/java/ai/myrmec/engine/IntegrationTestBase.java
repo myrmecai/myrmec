@@ -5,7 +5,8 @@ import ai.myrmec.engine.conversation.ConversationMessageRepository;
 import ai.myrmec.engine.conversation.ConversationParticipantRepository;
 import ai.myrmec.engine.conversation.ConversationRepository;
 import ai.myrmec.engine.spi.crypto.EncryptionService;
-import ai.myrmec.engine.knowledge.KnowledgeDocumentRepository;
+import ai.myrmec.engine.spi.crypto.EncryptionService;
+import ai.myrmec.engine.audit.AuditEventRepository;
 import ai.myrmec.engine.model.Model;
 import ai.myrmec.engine.model.ModelRepository;
 import ai.myrmec.engine.project.ProjectRepository;
@@ -43,7 +44,7 @@ public abstract class IntegrationTestBase {
     protected ProjectRepository projectRepository;
 
     @Autowired
-    protected KnowledgeDocumentRepository knowledgeDocumentRepository;
+    protected AuditEventRepository auditEventRepository;
 
     @Autowired
     protected UserRepository userRepository;
@@ -67,7 +68,7 @@ public abstract class IntegrationTestBase {
     protected ai.myrmec.engine.snapshot.ExecutionSnapshotRepository executionSnapshotRepository;
 
     @Autowired
-    protected ai.myrmec.engine.audit.AuditLogEntryRepository auditLogEntryRepository;
+    protected ai.myrmec.engine.context.ContextManifestRepository contextManifestRepository;
 
     @Autowired
     protected ai.myrmec.engine.quota.QuotaConsumptionRepository quotaConsumptionRepository;
@@ -79,13 +80,40 @@ public abstract class IntegrationTestBase {
     protected ai.myrmec.engine.serviceaccount.ServiceAccountRepository serviceAccountRepository;
 
     @Autowired
-    protected ai.myrmec.engine.knowledge.rag.KnowledgeChunkRepository knowledgeChunkRepository;
+    protected ai.myrmec.engine.instruction.InstructionAssetRepository instructionAssetRepository;
 
     @Autowired
-    protected ai.myrmec.engine.knowledge.rag.KnowledgeSourceRepository knowledgeSourceRepository;
+    protected ai.myrmec.engine.instruction.InstructionAssetVersionRepository instructionAssetVersionRepository;
 
     @Autowired
-    protected ai.myrmec.engine.knowledge.rag.KnowledgeBaseRepository knowledgeBaseRepository;
+    protected ai.myrmec.engine.connection.ConnectionConfigRepository connectionConfigRepository;
+
+    @Autowired
+    protected ai.myrmec.engine.connection.ConnectionConfigVersionRepository connectionConfigVersionRepository;
+
+    @Autowired
+    protected ai.myrmec.engine.knowledge.KnowledgeProviderRepository knowledgeProviderRepository;
+
+    @Autowired
+    protected ai.myrmec.engine.knowledge.KnowledgeProviderVersionRepository knowledgeProviderVersionRepository;
+
+    @Autowired
+    protected ai.myrmec.engine.knowledge.KnowledgeSourceRepository knowledgeSourceRepository;
+
+    @Autowired
+    protected ai.myrmec.engine.knowledge.DataFeedRepository dataFeedRepository;
+
+    @Autowired
+    protected ai.myrmec.engine.project.ProjectSettingRepository projectSettingRepository;
+
+    @Autowired
+    protected ai.myrmec.engine.project.ProjectInstructionBindingRepository projectInstructionBindingRepository;
+
+    @Autowired
+    protected ai.myrmec.engine.project.ProjectProviderBindingRepository projectProviderBindingRepository;
+
+    @Autowired
+    protected ai.myrmec.engine.assistant.AssistantContextBindingRepository assistantContextBindingRepository;
 
     /**
      * Test admin - retrieved or created for E2E tests.
@@ -118,7 +146,8 @@ public abstract class IntegrationTestBase {
         // Delete in correct order to avoid FK violations.
         // Conversation tables reference projects, so they must go first.
         executionSnapshotRepository.deleteAllInBatch();
-        auditLogEntryRepository.deleteAllInBatch();
+        // context_manifests references conversations(id); clear before conversations.
+        contextManifestRepository.deleteAllInBatch();
         quotaConsumptionRepository.deleteAllInBatch();
         quotaRepository.deleteAllInBatch();
         conversationMessageRepository.deleteAllInBatch();
@@ -126,12 +155,24 @@ public abstract class IntegrationTestBase {
         conversationRepository.deleteAllInBatch();
         // service_accounts references projects(id); clear before projects.
         serviceAccountRepository.deleteAllInBatch();
-        // RAG knowledge tables: chunks -> sources -> bases (bases FK projects).
-        knowledgeChunkRepository.deleteAllInBatch();
+        // New AI context tables — clear before projects (they have FKs to projects).
+        dataFeedRepository.deleteAllInBatch();
         knowledgeSourceRepository.deleteAllInBatch();
-        knowledgeBaseRepository.deleteAllInBatch();
-        knowledgeDocumentRepository.deleteAll();
+        knowledgeProviderVersionRepository.deleteAllInBatch();
+        knowledgeProviderRepository.deleteAllInBatch();
+        connectionConfigVersionRepository.deleteAllInBatch();
+        connectionConfigRepository.deleteAllInBatch();
+        instructionAssetVersionRepository.deleteAllInBatch();
+        instructionAssetRepository.deleteAllInBatch();
+        // project_settings, project_instruction_bindings, project_provider_bindings,
+        // and assistant_context_bindings reference projects(id); clear before projects.
+        projectSettingRepository.deleteAllInBatch();
+        projectInstructionBindingRepository.deleteAllInBatch();
+        projectProviderBindingRepository.deleteAllInBatch();
+        assistantContextBindingRepository.deleteAllInBatch();
         projectRepository.deleteAll();
+        // audit_events references projects(id) and users(id); clear after projects.
+        auditEventRepository.deleteAllInBatch();
 
         // Get or create the test admin user
         TEST_ADMIN_ID = userRepository.findByEmail(TEST_ADMIN_EMAIL)

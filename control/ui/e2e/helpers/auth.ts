@@ -54,10 +54,12 @@ export async function loginAsAdmin(page: Page): Promise<void> {
     email: payload.email ?? payload.sub ?? E2E_ADMIN.email,
     roles: payload.roles ?? [],
   }
-  // localStorage isn't accessible until a page is loaded. Initialise on the
-  // app origin then have the test navigate again to its target route.
-  await page.goto('/login')
-  await page.evaluate(
+
+  // Use addInitScript to seed localStorage before any page loads. This
+  // ensures the auth context reads the token on the very first render,
+  // before route guards run, avoiding the race condition where the
+  // _authenticated guard sees isLoading=true and isAuthenticated=false.
+  await page.addInitScript(
     ([access, refresh, userJson, accessKey, refreshKey, userKey]) => {
       window.localStorage.setItem(accessKey, access)
       window.localStorage.setItem(refreshKey, refresh)

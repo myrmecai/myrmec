@@ -2,7 +2,7 @@ package ai.myrmec.engine.attachment;
 
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
-import ai.myrmec.engine.audit.AuditLogService;
+import ai.myrmec.engine.audit.AuditEventService;
 import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.conversation.ConversationRepository;
 import ai.myrmec.engine.project.Project;
@@ -67,7 +67,7 @@ public class AttachmentService {
     private final BlobStore blobStore;
     private final ContentScanProvider scanProvider;
     private final SystemSettingService systemSettingService;
-    private final AuditLogService auditLogService;
+    private final AuditEventService auditEventService;
 
     /**
      * Validate, scan-gate, and (when clean) store an uploaded attachment
@@ -121,7 +121,7 @@ public class AttachmentService {
 
         String filename = sanitiseFilename(file.getOriginalFilename());
 
-        // #104 — hard gate: scan BEFORE storing any bytes.
+        // #104 â€” hard gate: scan BEFORE storing any bytes.
         ScanResult scan = scanProvider.scan(bytes, filename, mediaType);
 
         ConversationMessageAttachment row = new ConversationMessageAttachment();
@@ -288,14 +288,12 @@ public class AttachmentService {
                        UUID actorUserId, Map<String, Object> payload) {
         Map<String, Object> body = new LinkedHashMap<>(payload);
         body.put("conversationId", conversationId.toString());
-        auditLogService.record(AuditLogService.AuditEvent.builder()
-                .action(action)
-                .actorUserId(actorUserId)
-                .resourceType("ConversationMessageAttachment")
-                .resourceId(attachmentId)
-                .scopeType("CONVERSATION")
-                .scopeId(conversationId)
-                .payload(body)
-                .build());
+        try {
+            auditEventService.recordEvent("ConversationMessageAttachment", attachmentId, action,
+                    "ORGANIZATION", null, actorUserId, actorUserId != null ? "USER" : "SYSTEM",
+                    null, null, null, null, body);
+        } catch (Exception e) {
+            log.warn("Audit of {} failed (continuing): {}", action, e.getMessage());
+        }
     }
 }

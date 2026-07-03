@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+      AI Context Management — Instruction Assets (parent + version).
+      Two-version model: parent row + version rows. At most one PUBLISHED + one DRAFT.
+      Uses scope + project_id for org/project scoping.
+    -->
+
+    <!-- 1. Create parent table -->
+    <changeSet id="20260630-03-01-create-instruction-assets" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="instruction_assets"/>
+            </not>
+        </preConditions>
+        <comment>Instruction Assets — parent table. AI instructions with categories and applicability.</comment>
+
+        <createTable tableName="instruction_assets">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="scope" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_instr_asset_project"
+                             references="projects(id)"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="category" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="INCOMPLETE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="current_version_id" type="uuid"/>
+            <column name="published_at" type="timestamp with time zone"/>
+            <column name="published_by" type="uuid"/>
+            <column name="created_by" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_by" type="uuid"/>
+        </createTable>
+    </changeSet>
+
+    <!-- 2. Unique constraint on (scope, project_id, name) -->
+    <changeSet id="20260630-03-02-instr-asset-unique-name" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="uq_instr_asset_scope_project_name"/>
+            </not>
+        </preConditions>
+        <createIndex indexName="uq_instr_asset_scope_project_name"
+                     tableName="instruction_assets" unique="true">
+            <column name="scope"/>
+            <column name="project_id"/>
+            <column name="name"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- 3. Create version table -->
+    <changeSet id="20260630-03-03-create-instruction-asset-versions" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="instruction_asset_versions"/>
+            </not>
+        </preConditions>
+        <comment>Instruction Asset Versions — immutable-once-published behaviour contract.</comment>
+
+        <createTable tableName="instruction_asset_versions">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="asset_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_iav_asset"
+                             references="instruction_assets(id)"/>
+            </column>
+            <column name="version_number" type="integer">
+                <constraints nullable="false"/>
+            </column>
+            <column name="parent_version_id" type="uuid"/>
+            <column name="status" type="varchar(20)" defaultValue="DRAFT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="source_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="source_details" type="jsonb"/>
+            <column name="connection_config_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_iav_conn_config"
+                             references="connection_configs(id)"/>
+            </column>
+            <column name="applicability" type="jsonb">
+                <constraints nullable="false"/>
+            </column>
+            <column name="availability" type="varchar(20)" defaultValue="OPTIONAL">
+                <constraints nullable="false"/>
+            </column>
+            <column name="priority" type="integer" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="estimated_tokens" type="integer"/>
+            <column name="git_commit" type="varchar(40)"/>
+            <column name="inline_version" type="integer"/>
+            <column name="activation_rules" type="jsonb"/>
+            <column name="draft_owner_id" type="uuid"/>
+            <column name="published_at" type="timestamp with time zone"/>
+            <column name="published_by" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <!-- 4. FK: current_version_id → instruction_asset_versions.id -->
+    <changeSet id="20260630-03-04-instr-asset-current-version-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_instr_asset_current_version"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="instruction_assets"
+            baseColumnNames="current_version_id"
+            referencedTableName="instruction_asset_versions"
+            referencedColumnNames="id"
+            constraintName="fk_instr_asset_current_version"
+            onDelete="SET NULL"/>
+    </changeSet>
+
+    <!-- 5. FK: parent_version_id → instruction_asset_versions.id (self-reference) -->
+    <changeSet id="20260630-03-05-iav-parent-version-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_iav_parent_version"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="instruction_asset_versions"
+            baseColumnNames="parent_version_id"
+            referencedTableName="instruction_asset_versions"
+            referencedColumnNames="id"
+            constraintName="fk_iav_parent_version"
+            onDelete="SET NULL"/>
+    </changeSet>
+
+    <!-- 6. Partial unique indexes (PostgreSQL only) -->
+    <changeSet id="20260630-03-06-iav-unique-draft" author="myrmec" dbms="postgresql">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="uq_iav_draft_per_asset"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE UNIQUE INDEX uq_iav_draft_per_asset
+            ON instruction_asset_versions (asset_id) WHERE status = 'DRAFT';
+        </sql>
+    </changeSet>
+
+    <changeSet id="20260630-03-07-iav-unique-published" author="myrmec" dbms="postgresql">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="uq_iav_published_per_asset"/>
+            </not>
+        </preConditions>
+        <sql>
+            CREATE UNIQUE INDEX uq_iav_published_per_asset
+            ON instruction_asset_versions (asset_id) WHERE status = 'PUBLISHED';
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

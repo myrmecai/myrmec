@@ -1,8 +1,5 @@
 package ai.myrmec.engine;
 
-import ai.myrmec.engine.knowledge.KnowledgeCategory;
-import ai.myrmec.engine.knowledge.KnowledgeDocument;
-import ai.myrmec.engine.knowledge.KnowledgeScope;
 import ai.myrmec.engine.model.DeploymentType;
 import ai.myrmec.engine.model.Model;
 import ai.myrmec.engine.model.ModelStatus;
@@ -56,11 +53,6 @@ public class TestDataFactory {
             return this;
         }
 
-        public ProjectBuilder ragConfig(Map<String, Object> config) {
-            project.setRagConfig(config);
-            return this;
-        }
-
         public Project build() {
             return project;
         }
@@ -71,144 +63,6 @@ public class TestDataFactory {
      */
     public static ProjectBuilder projectBuilder(String name) {
         return new ProjectBuilder(name);
-    }
-
-    // ==================== Knowledge Document Builders ====================
-
-    /**
-     * Fluent builder for KnowledgeDocument entity.
-     */
-    public static class KnowledgeDocumentBuilder {
-        private final KnowledgeDocument doc;
-
-        private KnowledgeDocumentBuilder(String name) {
-            this.doc = new KnowledgeDocument();
-            this.doc.setName(name);
-            this.doc.setCategory(KnowledgeCategory.STANDARD);
-            this.doc.setScope(KnowledgeScope.ORGANIZATION);
-            this.doc.setPriority(100);
-            this.doc.setActive(true);
-            this.doc.setCreatedAt(Instant.now());
-            this.doc.setCreatedBy(UUID.randomUUID());
-        }
-
-        public KnowledgeDocumentBuilder content(String content) {
-            doc.setContent(content);
-            return this;
-        }
-
-        public KnowledgeDocumentBuilder category(KnowledgeCategory category) {
-            doc.setCategory(category);
-            return this;
-        }
-
-        public KnowledgeDocumentBuilder organizationScope() {
-            doc.setScope(KnowledgeScope.ORGANIZATION);
-            doc.setProjectId(null);
-            return this;
-        }
-
-        public KnowledgeDocumentBuilder projectScope(UUID projectId) {
-            doc.setScope(KnowledgeScope.PROJECT);
-            doc.setProjectId(projectId);
-            return this;
-        }
-
-        public KnowledgeDocumentBuilder priority(int priority) {
-            doc.setPriority(priority);
-            return this;
-        }
-
-        public KnowledgeDocumentBuilder appliesTo(String... patterns) {
-            doc.setAppliesTo(List.of(patterns));
-            return this;
-        }
-
-        public KnowledgeDocumentBuilder appliesTo(List<String> patterns) {
-            doc.setAppliesTo(patterns);
-            return this;
-        }
-
-        public KnowledgeDocumentBuilder active(boolean active) {
-            doc.setActive(active);
-            return this;
-        }
-
-        public KnowledgeDocumentBuilder sourcePath(String path) {
-            doc.setSourcePath(path);
-            return this;
-        }
-
-        public KnowledgeDocumentBuilder createdBy(UUID userId) {
-            doc.setCreatedBy(userId);
-            return this;
-        }
-
-        public KnowledgeDocument build() {
-            if (doc.getContent() == null) {
-                doc.setContent("# " + doc.getName() + "\n\nDefault test content.");
-            }
-            return doc;
-        }
-    }
-
-    /**
-     * Create a knowledge document builder.
-     */
-    public static KnowledgeDocumentBuilder knowledgeDocument(String name) {
-        return new KnowledgeDocumentBuilder(name);
-    }
-
-    // ==================== Convenience Methods ====================
-
-    /**
-     * Create an organization-level standard document.
-     */
-    public static KnowledgeDocument orgStandard(String name, String content, int priority) {
-        return knowledgeDocument(name)
-                .category(KnowledgeCategory.STANDARD)
-                .organizationScope()
-                .content(content)
-                .priority(priority)
-                .build();
-    }
-
-    /**
-     * Create an organization-level requirement document.
-     */
-    public static KnowledgeDocument orgRequirement(String name, String content, int priority) {
-        return knowledgeDocument(name)
-                .category(KnowledgeCategory.REQUIREMENT)
-                .organizationScope()
-                .content(content)
-                .priority(priority)
-                .build();
-    }
-
-    /**
-     * Create a project-level instruction document with appliesTo.
-     */
-    public static KnowledgeDocument projectInstruction(UUID projectId, String name, String content, 
-                                                       int priority, String... appliesTo) {
-        return knowledgeDocument(name)
-                .category(KnowledgeCategory.INSTRUCTION)
-                .projectScope(projectId)
-                .content(content)
-                .priority(priority)
-                .appliesTo(appliesTo)
-                .build();
-    }
-
-    /**
-     * Create a project-level architecture document.
-     */
-    public static KnowledgeDocument projectArchitecture(UUID projectId, String name, String content, int priority) {
-        return knowledgeDocument(name)
-                .category(KnowledgeCategory.ARCHITECTURE)
-                .projectScope(projectId)
-                .content(content)
-                .priority(priority)
-                .build();
     }
 
     // ==================== Model Builders ====================

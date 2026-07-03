@@ -26,7 +26,6 @@ public class ProjectResponse {
     private String workspaceRepoUrl;
     private String workspaceRepoBranch;
     private UUID workspaceCredentialSecretId;
-    private Map<String, Object> ragConfig;
     private boolean autoHitlOnDestructive;
     private boolean attachmentsEnabled;
     private Integer attachmentRetentionTtlDays;
@@ -46,7 +45,6 @@ public class ProjectResponse {
                 .workspaceRepoUrl(project.getWorkspaceRepoUrl())
                 .workspaceRepoBranch(project.getWorkspaceRepoBranch())
                 .workspaceCredentialSecretId(project.getWorkspaceCredentialSecretId())
-                .ragConfig(project.getRagConfig())
                 .autoHitlOnDestructive(project.isAutoHitlOnDestructive())
                 .attachmentsEnabled(project.isAttachmentsEnabled())
                 .attachmentRetentionTtlDays(project.getAttachmentRetentionTtlDays())

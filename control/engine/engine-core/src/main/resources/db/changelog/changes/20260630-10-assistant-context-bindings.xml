@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+      AI Context Management — Assistant Context Bindings.
+      Per-assistant-version overrides: opt out of OPTIONAL instruction assets,
+      bind a subset of knowledge sources. See UC-KM-11.
+    -->
+
+    <changeSet id="20260630-10-01-create-assistant-context-bindings" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="assistant_context_bindings"/>
+            </not>
+        </preConditions>
+        <comment>Assistant Context Bindings — per-assistant-version context overrides.</comment>
+
+        <createTable tableName="assistant_context_bindings">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="assistant_version_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_acb_assistant_version"
+                             references="assistant_version(id)"/>
+            </column>
+            <column name="binding_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="target_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="enabled" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <!-- Unique constraint: (assistant_version_id, binding_type, target_id) -->
+    <changeSet id="20260630-10-02-acb-unique" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="uq_acb_version_type_target"/>
+            </not>
+        </preConditions>
+        <createIndex indexName="uq_acb_version_type_target"
+                     tableName="assistant_context_bindings" unique="true">
+            <column name="assistant_version_id"/>
+            <column name="binding_type"/>
+            <column name="target_id"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

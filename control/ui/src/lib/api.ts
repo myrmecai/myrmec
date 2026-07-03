@@ -68,7 +68,13 @@ class ApiClient {
       return undefined as T
     }
 
-    return response.json()
+    // Handle 200 with empty body (e.g., ResponseEntity.ok().build())
+    const text = await response.text()
+    if (!text) {
+      return undefined as T
+    }
+
+    return JSON.parse(text) as T
   }
 
   get<T>(path: string): Promise<T> {
@@ -312,13 +318,6 @@ export const authProvidersApi = {
 // Projects API
 export type ProjectStatus = 'ACTIVE' | 'INACTIVE'
 
-export interface RagConfig {
-  endpoint?: string
-  apiKeySecret?: string
-  collection?: string
-  topK?: number
-}
-
 export interface Project {
   id: string
   name: string
@@ -329,7 +328,6 @@ export interface Project {
   workspaceRepoUrl: string | null
   workspaceRepoBranch: string | null
   workspaceCredentialSecretId: string | null
-  ragConfig: RagConfig | null
   createdAt: string
   updatedAt: string | null
 }
@@ -342,7 +340,6 @@ export interface CreateProjectRequest {
   workspaceRepoUrl?: string
   workspaceRepoBranch?: string
   workspaceCredentialSecretId?: string | null
-  ragConfig?: RagConfig
 }
 
 export interface UpdateProjectRequest {
@@ -353,7 +350,6 @@ export interface UpdateProjectRequest {
   workspaceRepoUrl?: string
   workspaceRepoBranch?: string
   workspaceCredentialSecretId?: string | null
-  ragConfig?: RagConfig
 }
 
 export const projectsApi = {
@@ -547,108 +543,6 @@ export const globalSecretsApi = {
   update: (id: string, data: UpdateSecretRequest) =>
     api.put<Secret>(`/admin/secrets/${id}`, data),
   delete: (id: string) => api.delete<void>(`/admin/secrets/${id}`),
-}
-
-// Knowledge bases (RAG) API
-export interface KnowledgeBase {
-  id: string
-  name: string
-  description: string | null
-  scope: string
-  projectId: string | null
-  providerId: string | null
-  status: string | null
-  classification: string | null
-  allowAssistantBinding: boolean
-  sourceCount: number
-  createdAt: string
-  updatedAt: string
-}
-
-export interface CreateKnowledgeBaseRequest {
-  name: string
-  description?: string | null
-  providerId?: string | null
-  classification?: string | null
-}
-
-export interface KnowledgeSource {
-  id: string
-  knowledgeBaseId: string
-  connectorType: string
-  name: string
-  uri: string
-  syncSchedule: string | null
-  enabled: boolean
-  lastSyncAt: string | null
-  lastSyncStatus: string | null
-  lastSyncChunks: number | null
-  lastSyncErrorCount: number | null
-  lastSyncDurationMs: number | null
-  chunkCount: number
-  createdAt: string
-  updatedAt: string
-}
-
-export interface CreateKnowledgeSourceRequest {
-  connectorType: string
-  name: string
-  uri: string
-  configJson?: string | null
-  syncSchedule?: string | null
-}
-
-export interface SyncResult {
-  status: string
-  chunksEmitted: number
-  errorCount: number
-  errors: string[]
-  durationMs: number
-  completedAt: string
-}
-
-export interface KnowledgeCapabilities {
-  connectorTypes: string[]
-  providerIds: string[]
-}
-
-// #30 — user-facing chunk-context preview for the citation side panel.
-export interface ChunkContext {
-  chunkId: string
-  sourceId: string
-  sourceName: string
-  locator: string
-  passage: string
-  before: string[]
-  after: string[]
-}
-
-export const knowledgeBasesApi = {
-  list: (projectId: string) =>
-    api.get<KnowledgeBase[]>(`/projects/${projectId}/knowledge-bases`),
-  get: (projectId: string, kbId: string) =>
-    api.get<KnowledgeBase>(`/projects/${projectId}/knowledge-bases/${kbId}`),
-  create: (projectId: string, data: CreateKnowledgeBaseRequest) =>
-    api.post<KnowledgeBase>(`/projects/${projectId}/knowledge-bases`, data),
-  delete: (projectId: string, kbId: string) =>
-    api.delete<void>(`/projects/${projectId}/knowledge-bases/${kbId}`),
-  listSources: (projectId: string, kbId: string) =>
-    api.get<KnowledgeSource[]>(`/projects/${projectId}/knowledge-bases/${kbId}/sources`),
-  addSource: (projectId: string, kbId: string, data: CreateKnowledgeSourceRequest) =>
-    api.post<KnowledgeSource>(`/projects/${projectId}/knowledge-bases/${kbId}/sources`, data),
-  deleteSource: (projectId: string, kbId: string, sourceId: string) =>
-    api.delete<void>(`/projects/${projectId}/knowledge-bases/${kbId}/sources/${sourceId}`),
-  sync: (projectId: string, kbId: string, sourceId: string) =>
-    api.post<SyncResult>(
-      `/projects/${projectId}/knowledge-bases/${kbId}/sources/${sourceId}/sync`,
-      {},
-    ),
-  capabilities: () => api.get<KnowledgeCapabilities>('/knowledge/capabilities'),
-  // #30 — fetch the cited chunk plus its neighbouring passages for the side panel.
-  chunkContext: (projectId: string, kbId: string, chunkId: string) =>
-    api.get<ChunkContext>(
-      `/projects/${projectId}/knowledge-bases/${kbId}/chunks/${chunkId}/context`,
-    ),
 }
 
 // Providers API
@@ -1405,107 +1299,415 @@ export const assistantsApi = {
     api.delete<void>(`/assistants/${id}/grants/${grantId}`),
 }
 
-// Knowledge Documents API
-export type KnowledgeScope = 'ORGANIZATION' | 'PROJECT'
-export type KnowledgeCategory = 'STANDARD' | 'INSTRUCTION' | 'REQUIREMENT' | 'ARCHITECTURE'
+// ============================================================================
+// AI Context Management API
+// ============================================================================
 
-export interface KnowledgeDocument {
-  id: string
-  scope: KnowledgeScope
-  projectId: string | null
-  category: KnowledgeCategory
-  name: string
-  content: string
-  priority: number
-  appliesTo: string[] | null
-  sourcePath: string | null
-  active: boolean
-  createdBy: string
-  createdAt: string
-  updatedAt: string | null
+// --- Governance Profiles ---
+
+export interface FeatureValueResponse {
+  code: string
+  description: string
+  sortOrder: number
+  possibleValues: string[]
+  currentValues: string[]
 }
 
-export interface CreateKnowledgeDocumentRequest {
-  category: KnowledgeCategory
-  name: string
-  content: string
-  priority?: number
-  appliesTo?: string[]
-  sourcePath?: string
+export interface FeatureGroupResponse {
+  code: string
+  description: string
+  sortOrder: number
+  features: FeatureValueResponse[]
 }
 
-export interface UpdateKnowledgeDocumentRequest {
-  category: KnowledgeCategory
+export interface GovernanceProfile {
+  code: string
   name: string
-  content: string
-  priority?: number
-  appliesTo?: string[]
-  sourcePath?: string
-}
-
-export const knowledgeApi = {
-  // Organization-level knowledge (admin)
-  listOrganization: () => api.get<KnowledgeDocument[]>('/admin/knowledge'),
-  getOrganization: (id: string) => api.get<KnowledgeDocument>(`/admin/knowledge/${id}`),
-  createOrganization: (data: CreateKnowledgeDocumentRequest) =>
-    api.post<KnowledgeDocument>('/admin/knowledge', data),
-  updateOrganization: (id: string, data: UpdateKnowledgeDocumentRequest) =>
-    api.put<KnowledgeDocument>(`/admin/knowledge/${id}`, data),
-  deleteOrganization: (id: string) => api.delete<void>(`/admin/knowledge/${id}`),
-  activateOrganization: (id: string) =>
-    api.post<KnowledgeDocument>(`/admin/knowledge/${id}/activate`),
-  deactivateOrganization: (id: string) =>
-    api.post<KnowledgeDocument>(`/admin/knowledge/${id}/deactivate`),
-
-  // Project-level knowledge
-  listProject: (projectId: string) =>
-    api.get<KnowledgeDocument[]>(`/projects/${projectId}/knowledge`),
-  getProject: (projectId: string, id: string) =>
-    api.get<KnowledgeDocument>(`/projects/${projectId}/knowledge/${id}`),
-  createProject: (projectId: string, data: CreateKnowledgeDocumentRequest) =>
-    api.post<KnowledgeDocument>(`/projects/${projectId}/knowledge`, data),
-  updateProject: (projectId: string, id: string, data: UpdateKnowledgeDocumentRequest) =>
-    api.put<KnowledgeDocument>(`/projects/${projectId}/knowledge/${id}`, data),
-  deleteProject: (projectId: string, id: string) =>
-    api.delete<void>(`/projects/${projectId}/knowledge/${id}`),
-  activateProject: (projectId: string, id: string) =>
-    api.post<KnowledgeDocument>(`/projects/${projectId}/knowledge/${id}/activate`),
-  deactivateProject: (projectId: string, id: string) =>
-    api.post<KnowledgeDocument>(`/projects/${projectId}/knowledge/${id}/deactivate`),
-}
-
-// Project Knowledge Repos API
-export interface ProjectKnowledgeRepo {
-  id: string
-  projectId: string
-  name: string
-  repoUrl: string
-  branch: string
-  instructionPaths: string[] | null
-  credentialSecretId: string | null
+  description: string | null
+  isBuiltIn: boolean
+  isSystem: boolean
+  isCurrentDefault: boolean
+  policies: Record<string, unknown>
+  groups: FeatureGroupResponse[]
   createdAt: string
   updatedAt: string
 }
 
-export interface ProjectKnowledgeRepoRequest {
+export interface ProductFeatureResponse {
+  code: string
+  groupCode: string
+  groupName: string
+  sortOrder: number
+  description: string
+  values: string[]
+}
+
+export const governanceApi = {
+  list: () => api.get<GovernanceProfile[]>('/admin/governance-profiles'),
+  get: (code: string) => api.get<GovernanceProfile>(`/admin/governance-profiles/${code}`),
+  getCurrent: () => api.get<GovernanceProfile>('/admin/governance-profiles/current'),
+  setDefault: (code: string) => api.post<void>(`/admin/governance-profiles/${code}/set-default`),
+  getProductFeatures: () => api.get<ProductFeatureResponse[]>('/admin/product-features'),
+}
+
+// --- Connection Configs ---
+
+export type ConnectionType = 'GIT' | 'HTTP' | 'MANAGED_RAG' | 'S3' | 'DB_SCHEMA'
+export type ConnectionConfigStatus = 'INCOMPLETE' | 'ACTIVE' | 'DISABLED' | 'ARCHIVED'
+export type VersionStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED'
+
+export interface ConnectionConfig {
+  id: string
+  scope: string
+  projectId: string | null
   name: string
-  repoUrl: string
-  branch?: string
-  instructionPaths?: string[]
+  description: string | null
+  type: ConnectionType
+  status: ConnectionConfigStatus
+  credentialSecretId: string | null
+  currentVersionId: string | null
+  publishedAt: string | null
+  publishedBy: string | null
+  createdBy: string | null
+  createdAt: string
+  updatedAt: string
+  updatedBy: string | null
+}
+
+export interface ConnectionConfigVersion {
+  id: string
+  connectionConfigId: string
+  versionNumber: number
+  parentVersionId: string | null
+  status: VersionStatus
+  url: string | null
+  config: Record<string, unknown> | null
+  draftOwnerId: string | null
+  publishedAt: string | null
+  publishedBy: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateConnectionConfigRequest {
+  scope: string
+  projectId?: string | null
+  name: string
+  description?: string
+  type: ConnectionType
   credentialSecretId?: string | null
 }
 
-export const projectKnowledgeReposApi = {
+export interface UpdateDraftRequest {
+  url?: string
+  config?: Record<string, unknown>
+}
+
+export const connectionConfigApi = {
+  list: () => api.get<ConnectionConfig[]>('/admin/connection-configs'),
+  get: (id: string) => api.get<ConnectionConfig>(`/admin/connection-configs/${id}`),
+  getPublishedVersion: (id: string) =>
+    api.get<ConnectionConfigVersion>(`/admin/connection-configs/${id}/published-version`),
+  getDraftVersion: (id: string) =>
+    api.get<ConnectionConfigVersion | null>(`/admin/connection-configs/${id}/draft-version`),
+  create: (data: CreateConnectionConfigRequest) =>
+    api.post<ConnectionConfig>('/admin/connection-configs', data),
+  createDraft: (id: string) =>
+    api.post<ConnectionConfigVersion>(`/admin/connection-configs/${id}/drafts`),
+  updateDraft: (id: string, data: UpdateDraftRequest) =>
+    api.put<ConnectionConfigVersion>(`/admin/connection-configs/${id}/drafts`, data),
+  publish: (id: string) =>
+    api.post<ConnectionConfigVersion>(`/admin/connection-configs/${id}/publish`),
+  discardDraft: (id: string) =>
+    api.delete<void>(`/admin/connection-configs/${id}/drafts`),
+  disable: (id: string) =>
+    api.post<ConnectionConfig>(`/admin/connection-configs/${id}/disable`),
+  reenable: (id: string) =>
+    api.post<ConnectionConfig>(`/admin/connection-configs/${id}/reenable`),
+  archive: (id: string) =>
+    api.post<ConnectionConfig>(`/admin/connection-configs/${id}/archive`),
+}
+
+// --- Instruction Assets ---
+
+export type InstructionCategory =
+  | 'PERSONA'
+  | 'STANDARD'
+  | 'REQUIREMENT'
+  | 'ARCHITECTURE'
+  | 'SECURITY'
+  | 'COMPLIANCE'
+  | 'SAFETY'
+  | 'GOAL'
+  | 'OUTPUT_FORMAT'
+  | 'CONSTRAINT'
+  | 'DOMAIN_RULE'
+  | 'RESPONSE_STYLE'
+
+export type InstructionAssetStatus = 'INCOMPLETE' | 'ACTIVE' | 'DISABLED' | 'ARCHIVED'
+export type SourceType = 'INLINE' | 'GIT'
+export type Availability = 'REQUIRED' | 'OPTIONAL'
+
+export interface InstructionAsset {
+  id: string
+  scope: string
+  projectId: string | null
+  name: string
+  description: string | null
+  category: InstructionCategory
+  status: InstructionAssetStatus
+  currentVersionId: string | null
+  publishedAt: string | null
+  publishedBy: string | null
+  createdBy: string | null
+  createdAt: string
+  updatedAt: string
+  updatedBy: string | null
+}
+
+export interface InstructionAssetVersion {
+  id: string
+  assetId: string
+  versionNumber: number
+  parentVersionId: string | null
+  status: VersionStatus
+  sourceType: SourceType
+  sourceDetails: Record<string, unknown> | null
+  connectionConfigId: string | null
+  applicability: Record<string, unknown>
+  availability: Availability
+  priority: number
+  estimatedTokens: number | null
+  gitCommit: string | null
+  inlineVersion: number | null
+  activationRules: Record<string, unknown> | null
+  draftOwnerId: string | null
+  publishedAt: string | null
+  publishedBy: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateInstructionAssetRequest {
+  scope: string
+  projectId?: string | null
+  name: string
+  description?: string
+  category: InstructionCategory
+}
+
+export interface CreateDraftRequest {
+  sourceType: SourceType
+  sourceDetails?: Record<string, unknown>
+  connectionConfigId?: string | null
+  applicability?: Record<string, unknown>
+  availability?: Availability
+  priority?: number
+  activationRules?: Record<string, unknown>
+}
+
+export const instructionAssetApi = {
+  list: () => api.get<InstructionAsset[]>('/admin/instruction-assets'),
+  get: (id: string) => api.get<InstructionAsset>(`/admin/instruction-assets/${id}`),
+  getPublishedVersion: (id: string) =>
+    api.get<InstructionAssetVersion>(`/admin/instruction-assets/${id}/published-version`),
+  getDraftVersion: (id: string) =>
+    api.get<InstructionAssetVersion | null>(`/admin/instruction-assets/${id}/draft-version`),
+  create: (data: CreateInstructionAssetRequest) =>
+    api.post<InstructionAsset>('/admin/instruction-assets', data),
+  createDraft: (id: string, data: CreateDraftRequest) =>
+    api.post<InstructionAssetVersion>(`/admin/instruction-assets/${id}/drafts`, data),
+  publish: (id: string) =>
+    api.post<InstructionAssetVersion>(`/admin/instruction-assets/${id}/publish`),
+  discardDraft: (id: string) =>
+    api.delete<void>(`/admin/instruction-assets/${id}/drafts`),
+  disable: (id: string) =>
+    api.post<InstructionAsset>(`/admin/instruction-assets/${id}/disable`),
+  reenable: (id: string) =>
+    api.post<InstructionAsset>(`/admin/instruction-assets/${id}/reenable`),
+  archive: (id: string) =>
+    api.post<InstructionAsset>(`/admin/instruction-assets/${id}/archive`),
+}
+
+// --- Knowledge Providers ---
+
+export type ProviderType = 'MANAGED' | 'EXTERNAL'
+
+export interface KnowledgeProvider {
+  id: string
+  scope: string
+  projectId: string | null
+  name: string
+  description: string | null
+  type: ProviderType
+  status: ConnectionConfigStatus
+  currentVersionId: string | null
+  publishedAt: string | null
+  publishedBy: string | null
+  createdBy: string | null
+  createdAt: string
+  updatedAt: string
+  updatedBy: string | null
+}
+
+export interface KnowledgeProviderVersion {
+  id: string
+  providerId: string
+  versionNumber: number
+  parentVersionId: string | null
+  status: VersionStatus
+  connectionConfigId: string | null
+  config: Record<string, unknown> | null
+  draftOwnerId: string | null
+  publishedAt: string | null
+  publishedBy: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateKnowledgeProviderRequest {
+  scope: string
+  projectId?: string | null
+  name: string
+  description?: string
+  type: ProviderType
+}
+
+export interface CreateProviderDraftRequest {
+  connectionConfigId?: string | null
+  config?: Record<string, unknown>
+}
+
+export const knowledgeProviderApi = {
+  list: () => api.get<KnowledgeProvider[]>('/admin/knowledge-providers'),
+  get: (id: string) => api.get<KnowledgeProvider>(`/admin/knowledge-providers/${id}`),
+  getPublishedVersion: (id: string) =>
+    api.get<KnowledgeProviderVersion>(`/admin/knowledge-providers/${id}/published-version`),
+  getDraftVersion: (id: string) =>
+    api.get<KnowledgeProviderVersion | null>(`/admin/knowledge-providers/${id}/draft-version`),
+  create: (data: CreateKnowledgeProviderRequest) =>
+    api.post<KnowledgeProvider>('/admin/knowledge-providers', data),
+  createDraft: (id: string, data: CreateProviderDraftRequest) =>
+    api.post<KnowledgeProviderVersion>(`/admin/knowledge-providers/${id}/drafts`, data),
+  publish: (id: string) =>
+    api.post<KnowledgeProviderVersion>(`/admin/knowledge-providers/${id}/publish`),
+  discardDraft: (id: string) =>
+    api.delete<void>(`/admin/knowledge-providers/${id}/drafts`),
+  disable: (id: string) =>
+    api.post<KnowledgeProvider>(`/admin/knowledge-providers/${id}/disable`),
+  reenable: (id: string) =>
+    api.post<KnowledgeProvider>(`/admin/knowledge-providers/${id}/reenable`),
+}
+
+// --- Knowledge Sources ---
+
+export interface KnowledgeSource {
+  id: string
+  scope: string
+  projectId: string | null
+  name: string
+  description: string | null
+  status: string
+  providerVersionId: string
+  config: Record<string, unknown> | null
+  availability: string
+  priority: number
+  createdBy: string | null
+  createdAt: string
+  updatedAt: string
+  updatedBy: string | null
+}
+
+export interface CreateKnowledgeSourceRequest {
+  scope: string
+  projectId?: string | null
+  name: string
+  description?: string
+  providerVersionId: string
+  config?: Record<string, unknown>
+  availability?: string
+  priority?: number
+}
+
+export const knowledgeSourceApi = {
+  list: () => api.get<KnowledgeSource[]>('/admin/knowledge-sources'),
+  get: (id: string) => api.get<KnowledgeSource>(`/admin/knowledge-sources/${id}`),
+  create: (data: CreateKnowledgeSourceRequest) =>
+    api.post<KnowledgeSource>('/admin/knowledge-sources', data),
+  disable: (id: string) =>
+    api.post<KnowledgeSource>(`/admin/knowledge-sources/${id}/disable`),
+  archive: (id: string) =>
+    api.post<KnowledgeSource>(`/admin/knowledge-sources/${id}/archive`),
+}
+
+// --- Data Feeds ---
+
+export interface DataFeed {
+  id: string
+  scope: string
+  projectId: string | null
+  name: string
+  description: string | null
+  status: string
+  providerVersionId: string
+  datasetName: string
+  connectionConfigId: string | null
+  connectionDetails: Record<string, unknown> | null
+  syncSchedule: string | null
+  syncStatus: string
+  lastSyncAt: string | null
+  chunkCount: number | null
+  errorMessage: string | null
+  createdBy: string | null
+  createdAt: string
+  updatedAt: string
+  updatedBy: string | null
+}
+
+export interface CreateDataFeedRequest {
+  scope: string
+  projectId?: string | null
+  name: string
+  description?: string
+  providerVersionId: string
+  datasetName: string
+  connectionConfigId?: string | null
+  connectionDetails?: Record<string, unknown>
+  syncSchedule?: string
+}
+
+export const dataFeedApi = {
+  list: () => api.get<DataFeed[]>('/admin/data-feeds'),
+  get: (id: string) => api.get<DataFeed>(`/admin/data-feeds/${id}`),
+  create: (data: CreateDataFeedRequest) =>
+    api.post<DataFeed>('/admin/data-feeds', data),
+  triggerSync: (id: string) =>
+    api.post<DataFeed>(`/admin/data-feeds/${id}/sync`),
+  disable: (id: string) =>
+    api.post<DataFeed>(`/admin/data-feeds/${id}/disable`),
+}
+
+// --- Project Settings ---
+
+export interface ProjectSetting {
+  id: string
+  projectId: string
+  settingKey: string
+  valueType: string
+  settingValue: string | null
+  description: string | null
+  updatedBy: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export const projectSettingApi = {
   list: (projectId: string) =>
-    api.get<ProjectKnowledgeRepo[]>(`/projects/${projectId}/knowledge-repos`),
-  get: (projectId: string, id: string) =>
-    api.get<ProjectKnowledgeRepo>(`/projects/${projectId}/knowledge-repos/${id}`),
-  create: (projectId: string, data: ProjectKnowledgeRepoRequest) =>
-    api.post<ProjectKnowledgeRepo>(`/projects/${projectId}/knowledge-repos`, data),
-  update: (projectId: string, id: string, data: ProjectKnowledgeRepoRequest) =>
-    api.put<ProjectKnowledgeRepo>(`/projects/${projectId}/knowledge-repos/${id}`, data),
-  delete: (projectId: string, id: string) =>
-    api.delete<void>(`/projects/${projectId}/knowledge-repos/${id}`),
+    api.get<ProjectSetting[]>(`/projects/${projectId}/settings`),
+  get: (projectId: string, key: string) =>
+    api.get<ProjectSetting>(`/projects/${projectId}/settings/${key}`),
+  update: (projectId: string, key: string, value: string) =>
+    api.put<ProjectSetting>(`/projects/${projectId}/settings/${key}`, { value }),
 }
 
 // ============================================================================

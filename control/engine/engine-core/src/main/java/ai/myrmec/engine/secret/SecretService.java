@@ -1,10 +1,8 @@
 package ai.myrmec.engine.secret;
 
 import ai.myrmec.engine._system.exception.DuplicateResourceException;
-import ai.myrmec.engine._system.exception.ResourceInUseException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectKnowledgeRepoRepository;
 import ai.myrmec.engine.project.ProjectRepository;
 import ai.myrmec.engine.secret.dto.CreateSecretRequest;
 import ai.myrmec.engine.secret.dto.SecretResponse;
@@ -34,8 +32,7 @@ public class SecretService {
     private final UserRepository userRepository;
     private final SecretBackendRegistry backendRegistry;
     private final LocalSecretBackendAdapter localBackend;
-    private final ProjectKnowledgeRepoRepository knowledgeRepoRepository;
-    private final ai.myrmec.engine.audit.AuditLogService auditLogService;
+    private final ai.myrmec.engine.audit.AuditEventService auditEventService;
 
     // -------- reads --------
 
@@ -107,14 +104,13 @@ public class SecretService {
 
         secret = secretRepository.save(secret);
         log.info("Updated secret {} ({})", secret.getName(), id);
-        auditLogService.record(ai.myrmec.engine.audit.AuditLogService.AuditEvent.builder()
-                .action("SECRET_UPDATED")
-                .resourceType("SECRET")
-                .resourceId(secret.getId())
-                .scopeType(secret.getProject() == null ? "SYSTEM" : "PROJECT")
-                .scopeId(secret.getProject() == null ? null : secret.getProject().getId())
-                .payload(java.util.Map.of("name", secret.getName(), "type", secret.getType().name()))
-                .build());
+        auditEventService.recordEvent(
+                "SECRET", secret.getId(), "SECRET_UPDATED",
+                secret.getProject() == null ? "ORGANIZATION" : "PROJECT",
+                secret.getProject() == null ? null : secret.getProject().getId(),
+                null, "SYSTEM",
+                null, null, null, null,
+                java.util.Map.of("name", secret.getName(), "type", secret.getType().name()));
         return SecretResponse.from(secret);
     }
 
@@ -123,11 +119,6 @@ public class SecretService {
         Secret secret = secretRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Secret", id.toString()));
 
-        long refs = knowledgeRepoRepository.countByCredentialSecretId(id);
-        if (refs > 0) {
-            throw ResourceInUseException.blockedBy("KnowledgeRepo", (int) refs);
-        }
-
         try {
             backendRegistry.forSecret(secret).delete(secret);
         } catch (RuntimeException e) {
@@ -135,14 +126,13 @@ public class SecretService {
         }
         secretRepository.delete(secret);
         log.info("Deleted secret {} ({})", secret.getName(), id);
-        auditLogService.record(ai.myrmec.engine.audit.AuditLogService.AuditEvent.builder()
-                .action("SECRET_DELETED")
-                .resourceType("SECRET")
-                .resourceId(id)
-                .scopeType(secret.getProject() == null ? "SYSTEM" : "PROJECT")
-                .scopeId(secret.getProject() == null ? null : secret.getProject().getId())
-                .payload(java.util.Map.of("name", secret.getName()))
-                .build());
+        auditEventService.recordEvent(
+                "SECRET", id, "SECRET_DELETED",
+                secret.getProject() == null ? "ORGANIZATION" : "PROJECT",
+                secret.getProject() == null ? null : secret.getProject().getId(),
+                null, "SYSTEM",
+                null, null, null, null,
+                java.util.Map.of("name", secret.getName()));
     }
 
     // -------- helpers --------
@@ -170,15 +160,14 @@ public class SecretService {
         secret = secretRepository.save(secret);
         log.info("Created secret {} (type={}, scope={})",
                 secret.getName(), secret.getType(), secret.isGlobal() ? "GLOBAL" : "PROJECT");
-        auditLogService.record(ai.myrmec.engine.audit.AuditLogService.AuditEvent.builder()
-                .action("SECRET_CREATED")
-                .actorUserId(currentUserId)
-                .resourceType("SECRET")
-                .resourceId(secret.getId())
-                .scopeType(secret.isGlobal() ? "SYSTEM" : "PROJECT")
-                .scopeId(secret.isGlobal() ? null : secret.getProject().getId())
-                .payload(java.util.Map.of("name", secret.getName(), "type", secret.getType().name()))
-                .build());
+        auditEventService.recordEvent(
+                "SECRET", secret.getId(), "SECRET_CREATED",
+                secret.isGlobal() ? "ORGANIZATION" : "PROJECT",
+                secret.isGlobal() ? null : secret.getProject().getId(),
+                currentUserId != null ? currentUserId : null,
+                "SYSTEM",
+                null, null, null, null,
+                java.util.Map.of("name", secret.getName(), "type", secret.getType().name()));
         return SecretResponse.from(secret);
     }
 

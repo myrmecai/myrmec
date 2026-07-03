@@ -1,6 +1,6 @@
 package ai.myrmec.engine.quota;
 
-import ai.myrmec.engine.audit.AuditLogService;
+import ai.myrmec.engine.audit.AuditEventService;
 import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.project.ProjectRepository;
 import lombok.RequiredArgsConstructor;
@@ -38,7 +38,7 @@ import java.util.UUID;
 public class QuotaService {
 
     private final QuotaRepository quotaRepository;
-    private final AuditLogService auditLogService;
+    private final AuditEventService auditEventService;
     private final ProjectRepository projectRepository;
 
     @Transactional(readOnly = true)
@@ -195,14 +195,12 @@ public class QuotaService {
         change.put("quotaId", q.getId().toString());
         change.put("timestamp", Instant.now().toString());
         try {
-            auditLogService.record(AuditLogService.AuditEvent.builder()
-                    .action("QUOTA_LIMIT_CHANGED")
-                    .resourceType("Quota")
-                    .resourceId(q.getId())
-                    .scopeType(q.getScopeType().name())
-                    .scopeId(q.getScopeId())
-                    .payload(change)
-                    .build());
+            auditEventService.recordEvent(
+                    "Quota", q.getId(), "QUOTA_LIMIT_CHANGED",
+                    q.getScopeType().name(),
+                    null,
+                    null, "SYSTEM",
+                    null, null, null, null, change);
         } catch (Exception ex) {
             log.warn("Quota change audit failed (continuing): {}", ex.getMessage());
         }
@@ -217,14 +215,12 @@ public class QuotaService {
         payload.put("limitAmount", q.getLimitAmount());
         payload.put("enforced", q.isEnforced());
         try {
-            auditLogService.record(AuditLogService.AuditEvent.builder()
-                    .action(action)
-                    .resourceType("Quota")
-                    .resourceId(q.getId())
-                    .scopeType(q.getScopeType().name())
-                    .scopeId(q.getScopeId())
-                    .payload(payload)
-                    .build());
+            auditEventService.recordEvent(
+                    "Quota", q.getId(), action,
+                    q.getScopeType().name(),
+                    null,
+                    null, "SYSTEM",
+                    null, null, null, null, payload);
         } catch (Exception ex) {
             log.warn("Audit of {} failed (continuing): {}", action, ex.getMessage());
         }

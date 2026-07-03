@@ -1,7 +1,6 @@
 package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine.agent.*;
-import ai.myrmec.engine.knowledge.TaskContextResolver;
 import ai.myrmec.engine.model.Model;
 import ai.myrmec.engine.model.ModelService;
 import ai.myrmec.engine.tool.ToolService;
@@ -10,6 +9,7 @@ import ai.myrmec.engine.websocket.AgentConnectionManager;
 import ai.myrmec.engine.websocket.AgentWebSocketHandler;
 import ai.myrmec.engine.websocket.message.payload.TaskAssignPayload;
 import ai.myrmec.engine.websocket.message.payload.TaskContext;
+import ai.myrmec.engine.knowledge.TaskContextResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -36,8 +36,8 @@ public class TaskDispatcherService {
     private final AgentWebSocketHandler webSocketHandler;
     private final ToolService toolService;
     private final ModelService modelService;
-    private final TaskContextResolver contextResolver;
     private final TaskAttemptService taskAttemptService;
+    private final TaskContextResolver contextResolver;
 
     /**
      * Dispatch pending tasks to available agents.
@@ -217,11 +217,11 @@ public class TaskDispatcherService {
             log.warn("Agent profile '{}' has no default model configured", profile.getName());
         }
         
-        // Get task context (knowledge docs, instructions, workspace)
+        // Get task context using the new instruction assets system.
         TaskContext context = contextResolver.resolve(
                 workflow.getProject().getId(),
                 task.getStepId(),
-                workflow.getArtifactsRepo()  // Pass workflow repo config
+                null  // artifactsRepo is a Map, not used by the new resolver
         );
         
         // Override workspace branch with execution-specific feature branch
