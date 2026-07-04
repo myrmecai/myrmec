@@ -6,6 +6,7 @@ import ai.myrmec.engine._system.security.CurrentUser;
 import ai.myrmec.engine.connection.dto.ConnectionConfigResponse;
 import ai.myrmec.engine.connection.dto.ConnectionConfigVersionResponse;
 import ai.myrmec.engine.connection.dto.CreateConnectionConfigRequest;
+import ai.myrmec.engine.connection.dto.UpdateConnectionConfigRequest;
 import ai.myrmec.engine.connection.dto.UpdateDraftRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -91,6 +92,25 @@ public class ConnectionConfigController {
                 .body(ConnectionConfigResponse.from(config));
     }
 
+    // ---- Update parent --------------------------------------------------
+
+    @PutMapping("/api/v1/admin/connection-configs/{id}")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasRole('ORG_ADMIN')")
+    @Operation(summary = "Update a connection config (name, description, credentialSecretId)")
+    public ResponseEntity<ConnectionConfigResponse> update(
+            @PathVariable UUID id,
+            @Valid @RequestBody UpdateConnectionConfigRequest request,
+            @CurrentUser UUID userId) {
+        var config = service.update(
+                id,
+                request.name(),
+                request.description(),
+                request.credentialSecretId(),
+                userId,
+                userId != null ? userId.toString() : "SYSTEM");
+        return ResponseEntity.ok(ConnectionConfigResponse.from(config));
+    }
+
     // ---- Version management ------------------------------------------
 
     @PostMapping("/api/v1/admin/connection-configs/{id}/drafts")
@@ -165,5 +185,15 @@ public class ConnectionConfigController {
             @CurrentUser UUID userId) {
         return ResponseEntity.ok(ConnectionConfigResponse.from(
                 service.archive(id, userId, userId != null ? userId.toString() : "SYSTEM")));
+    }
+
+    @DeleteMapping("/api/v1/admin/connection-configs/{id}")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasRole('ORG_ADMIN')")
+    @Operation(summary = "Delete a connection config and all its versions")
+    public ResponseEntity<Void> delete(
+            @PathVariable UUID id,
+            @CurrentUser UUID userId) {
+        service.delete(id, userId, userId != null ? userId.toString() : "SYSTEM");
+        return ResponseEntity.noContent().build();
     }
 }

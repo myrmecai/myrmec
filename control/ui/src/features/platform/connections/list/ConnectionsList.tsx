@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
 
-import { Link } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import { type ColumnDef } from '@tanstack/react-table'
 import {
   connectionConfigApi,
+  type ConnectionConfig,
   type ConnectionType,
   type CreateConnectionConfigRequest,
 } from '@/lib/api'
@@ -28,34 +30,61 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ContentAreaLayout } from '@/components/content-area-layout'
-import { Plus, AlertCircle } from 'lucide-react'
+import { Plus, AlertCircle, MoreVertical, Eye, Power, PowerOff, Archive, Trash2 } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { dialogService } from '@/services/dialog-service'
+import DataTable2 from '@/components/data-table2/data-table2'
+import { SortedColumnHeader } from '@/components/data-table2/sorted-column-header'
 import { TYPE_LABELS, STATUS_COLORS } from '../shared/constants'
 
 export function ConnectionsList() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [createOpen, setCreateOpen] = useState(false)
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
 
   const { data: configs, isLoading, error } = useQuery({
     queryKey: ['connection-configs'],
     queryFn: connectionConfigApi.list,
   })
 
+  const [createError, setCreateError] = useState<string | null>(null)
+
   const createMutation = useMutation({
-    mutationFn: connectionConfigApi.create,
-    onSuccess: () => {
+    mutationFn: async (data: CreateConnectionConfigRequest) => {
+      // Create the config, then auto-create a Draft (Pattern 4 §Rule 4:
+      // "Zone 2 Draft ready for editing")
+      const config = await connectionConfigApi.create(data)
+      await connectionConfigApi.createDraft(config.id)
+      return config
+    },
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['connection-configs'] })
       setCreateOpen(false)
+      setCreateError(null)
+      // Show toast (Pattern 4 §Rule 5, Pattern 6)
+      setToastMessage('Connection Config created — please complete and publish.')
+      setTimeout(() => setToastMessage(null), 5000)
+      // Navigate to detail page in Edit mode (Pattern 4 §Rule 3, 4)
+      navigate({ to: '/platform/connections/$id', params: { id: data.id }, search: { edit: true } })
+    },
+    onError: (error: any) => {
+      // Try to extract field-specific message from validation error details
+      const details = error?.error?.details
+      if (Array.isArray(details) && details.length > 0 && details[0]?.message) {
+        setCreateError(details[0].message)
+      } else {
+        setCreateError(error?.error?.message ?? 'Failed to create connection config')
+      }
     },
   })
 
@@ -68,6 +97,130 @@ export function ConnectionsList() {
     mutationFn: connectionConfigApi.reenable,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['connection-configs'] }),
   })
+
+  const archiveMutation = useMutation({
+    mutationFn: connectionConfigApi.archive,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['connection-configs'] }),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: connectionConfigApi.delete,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['connection-configs'] }),
+  })
+
+  const filteredConfigs = useMemo(
+    () => (configs ?? []).filter((c) => c.status !== 'ARCHIVED'),
+    [configs],
+  )
+
+  const columns: ColumnDef<ConnectionConfig>[] = useMemo(() => [
+    {
+      accessorKey: 'name',
+      header: ({ table, column }) => (
+        <SortedColumnHeader table={table} column={column} title="Name" />
+      ),
+      cell: ({ row }) => (
+        <div className="font-medium">
+          <Link to="/platform/connections/$id" params={{ id: row.original.id }} className="hover:underline">
+            {row.original.name}
+          </Link>
+          {row.original.description && (
+            <span className="text-xs text-muted-foreground block">{row.original.description}</span>
+          )}
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'type',
+      header: ({ table, column }) => (
+        <SortedColumnHeader table={table} column={column} title="Type" />
+      ),
+      cell: ({ row }) => (
+        <Badge variant="outline">{TYPE_LABELS[row.original.type] || row.original.type}</Badge>
+      ),
+    },
+    {
+      accessorKey: 'status',
+      header: ({ table, column }) => (
+        <SortedColumnHeader table={table} column={column} title="Status" />
+      ),
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2">
+          <div className={`h-2 w-2 rounded-full ${STATUS_COLORS[row.original.status] || 'bg-gray-400'}`} />
+          <span className="text-sm">{row.original.status}</span>
+        </div>
+      ),
+    },
+    {
+      id: 'actions',
+      header: 'Actions',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const config = row.original
+        return (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" aria-label="More actions">
+                <MoreVertical className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem asChild>
+                <Link to="/platform/connections/$id" params={{ id: config.id }}>
+                  <Eye className="h-4 w-4 mr-2" /> View
+                </Link>
+              </DropdownMenuItem>
+              {config.status === 'ACTIVE' && (
+                <DropdownMenuItem onClick={() => disableMutation.mutate(config.id)}>
+                  <PowerOff className="h-4 w-4 mr-2" /> Disable
+                </DropdownMenuItem>
+              )}
+              {config.status === 'DISABLED' && (
+                <DropdownMenuItem onClick={() => reenableMutation.mutate(config.id)}>
+                  <Power className="h-4 w-4 mr-2" /> Enable
+                </DropdownMenuItem>
+              )}
+              {config.status !== 'ARCHIVED' && (
+                <DropdownMenuItem
+                  onClick={async () => {
+                    const confirmed = await dialogService.showConfirmDialog({
+                      title: 'Archive Connection Config',
+                      message: `Archive "${config.name}"? Archived configs are hidden from the list but can be restored.`,
+                      severity: 'warning',
+                      type: 'warning',
+                      confirmLabel: 'Archive',
+                      cancelLabel: 'Cancel',
+                    })
+                    if (confirmed) archiveMutation.mutate(config.id)
+                  }}
+                  disabled={config.status === 'ACTIVE'}
+                >
+                  <Archive className="h-4 w-4 mr-2" /> Archive
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive"
+                onClick={async () => {
+                  const confirmed = await dialogService.showConfirmDialog({
+                    title: 'Delete Connection Config',
+                    message: `Delete "${config.name}"? This cannot be undone.`,
+                    severity: 'error',
+                    type: 'warning',
+                    confirmLabel: 'Delete',
+                    cancelLabel: 'Cancel',
+                  })
+                  if (confirmed) deleteMutation.mutate(config.id)
+                }}
+              >
+                <Trash2 className="h-4 w-4 mr-2" /> Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )
+      },
+    },
+  ], [disableMutation, reenableMutation, archiveMutation, deleteMutation])
 
   if (isLoading) {
     return <div className="flex items-center justify-center h-full"><p className="text-muted-foreground">Loading...</p></div>
@@ -87,6 +240,15 @@ export function ConnectionsList() {
   return (
     <ContentAreaLayout>
     <div className="space-y-6">
+      {toastMessage && (
+        <div
+          className="fixed bottom-4 right-4 z-50 rounded-lg border bg-background p-4 shadow-lg"
+          role="status"
+          aria-live="polite"
+        >
+          <p className="text-sm">{toastMessage}</p>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Connection Configs</h1>
@@ -104,65 +266,22 @@ export function ConnectionsList() {
           <CardDescription>Reusable connection definitions with versioned configs</CardDescription>
         </CardHeader>
         <CardContent>
-          {configs && configs.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {configs.map((config) => (
-                  <TableRow key={config.id}>
-                    <TableCell className="font-medium">
-                      <Link to="/platform/connections/$id" params={{ id: config.id }} className="hover:underline">
-                        {config.name}
-                      </Link>
-                      {config.description && (
-                        <span className="text-xs text-muted-foreground block">{config.description}</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{TYPE_LABELS[config.type] || config.type}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div className={`h-2 w-2 rounded-full ${STATUS_COLORS[config.status] || 'bg-gray-400'}`} />
-                        <span className="text-sm">{config.status}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-2">
-                        {config.status === 'ACTIVE' && (
-                          <Button size="sm" variant="outline" onClick={() => disableMutation.mutate(config.id)}>
-                            Disable
-                          </Button>
-                        )}
-                        {config.status === 'DISABLED' && (
-                          <Button size="sm" variant="outline" onClick={() => reenableMutation.mutate(config.id)}>
-                            Re-enable
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <p className="text-muted-foreground text-center py-8">No connection configs yet.</p>
-          )}
+          <DataTable2
+            columns={columns}
+            data={filteredConfigs}
+            pagination={true}
+            loading={isLoading}
+            showRowSelection={false}
+          />
         </CardContent>
       </Card>
 
       <CreateConnectionConfigDialog
         open={createOpen}
-        onOpenChange={setCreateOpen}
+        onOpenChange={(v) => { setCreateOpen(v); if (v) setCreateError(null) }}
         onCreate={(data) => createMutation.mutate(data)}
         isPending={createMutation.isPending}
+        error={createError}
       />
     </div>
     </ContentAreaLayout>
@@ -174,11 +293,13 @@ function CreateConnectionConfigDialog({
   onOpenChange,
   onCreate,
   isPending,
+  error,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   onCreate: (data: CreateConnectionConfigRequest) => void
   isPending: boolean
+  error: string | null
 }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -216,7 +337,7 @@ function CreateConnectionConfigDialog({
           <div className="space-y-2">
             <Label htmlFor="type">Connection Type</Label>
             <Select value={type} onValueChange={(v) => setType(v as ConnectionType)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger id="type"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {Object.entries(TYPE_LABELS).map(([value, label]) => (
                   <SelectItem key={value} value={value}>{label}</SelectItem>
@@ -224,6 +345,12 @@ function CreateConnectionConfigDialog({
               </SelectContent>
             </Select>
           </div>
+          {error && (
+            <div className="flex items-center gap-2 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4" />
+              <span>{error}</span>
+            </div>
+          )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" disabled={isPending || !name}>{isPending ? 'Creating...' : 'Create'}</Button>

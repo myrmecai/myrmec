@@ -1,0 +1,80 @@
+{
+  "app": {
+    "info": "Information",
+    "app_info": "Application Information",
+    "version": "Version",
+    "build_date": "Build Date",
+    "api_version": "API Version",
+    "api_build_date": "API Build Date"
+  },
+  "dashboard": {
+    "title": "Home",
+    "welcome": "Welcome to Myrmec"
+  },
+  "common": {
+    "actions": "Actions",
+    "loading": "Loading...",
+    "saving": "Saving...",
+    "validating": "Validating...",
+    "error": "Error",
+    "all": "All",
+    "yes": "Yes",
+    "no": "No",
+    "ok": "OK",
+    "phone": "Phone",
+    "street": "Street",
+    "city": "City",
+    "postal_code": "Postal Code",
+    "field_required": "Required",
+    "pagination": {
+      "selected": "{{selected}} of {{total}} row(s) selected",
+      "rows_per_page": "Rows per page",
+      "page_info": "Page {{current}} of {{total}}",
+      "go_to_first_page": "Go to first page",
+      "go_to_previous_page": "Go to previous page",
+      "go_to_next_page": "Go to next page",
+      "go_to_last_page": "Go to last page"
+    },
+    "back_button": {
+      "unsaved_changes_title": "Unsaved Changes",
+      "unsaved_changes_message": "You have unsaved changes. Are you sure you want to leave this page and discard your changes?"
+    },
+    "buttons": {
+      "add": "Add",
+      "insert": "Insert",
+      "edit": "Edit",
+      "delete": "Delete",
+      "save": "Save",
+      "cancel": "Cancel",
+      "view": "View",
+      "search": "Search",
+      "yes": "Yes",
+      "continue": "Continue",
+      "create": "Create",
+      "update": "Update",
+      "saving": "Saving...",
+      "activate": "Activate",
+      "deactivate": "Deactivate",
+      "next": "Next",
+      "previous": "Previous",
+      "back": "Back"
+    },
+    "messages": {
+      "confirm": "Confirm",
+      "confirm_delete_title": "Deletion Confirmation",
+      "confirm_delete_message": "Are you sure you want to delete '{{name}}'?",
+      "confirm_deactivate_title": "Deactivation Confirmation",
+      "confirm_deactivate_message": "Are you sure you want to deactivate '{{name}}'?",
+      "delete_success": "Deleted successfully",
+      "deactivate_success": "Deactivated successfully",
+      "auth_error_occurred": "An Error Occurred.",
+      "auth_error_message": "Please try refreshing the page or contact support if the issue persists.",
+      "access_denied": "Access Denied",
+      "access_denied_message": "You do not have permission to access the system.",
+      "access_denied_dealer_user": "Dealer users, please contact your NSC administrator to gain access.",
+      "access_denied_other_user": "Other users, please contact KEU IT to gain access.",
+      "no_results_found": "No results found.",
+      "resource_access_denied": "You do not have permission '{{action}}' for resource '{{resource}}'"
+    }
+  }
+}

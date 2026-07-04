@@ -19,4 +19,6 @@ public interface ConnectionConfigRepository extends JpaRepository<ConnectionConf
     boolean existsByScopeAndProjectIdIsNullAndName(String scope, String name);
 
     boolean existsByScopeAndProjectIdAndName(String scope, UUID projectId, String name);
+
+    List<ConnectionConfig> findByCredentialSecretId(UUID credentialSecretId);
 }

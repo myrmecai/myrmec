@@ -48,6 +48,8 @@ export function SecretsList() {
   const queryClient = useQueryClient()
   const [createOpen, setCreateOpen] = useState(false)
   const [editSecret, setEditSecret] = useState<Secret | null>(null)
+  const [editMetaSecret, setEditMetaSecret] = useState<Secret | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const {
     data: secrets,
@@ -79,9 +81,24 @@ export function SecretsList() {
     },
   })
 
+  const updateMetadataMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      globalSecretsApi.updateMetadata(id, name),
+    onSuccess: () => {
+      invalidate()
+      setEditMetaSecret(null)
+    },
+  })
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => globalSecretsApi.delete(id),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      setDeleteError(null)
+      invalidate()
+    },
+    onError: (error: Error) => {
+      setDeleteError(error.message || 'Failed to delete secret. It may be in use.')
+    },
   })
 
   if (isLoading) {
@@ -114,6 +131,15 @@ export function SecretsList() {
         </div>
       </div>
 
+      {deleteError && (
+        <div className="mb-4 p-3 text-sm text-destructive bg-destructive/10 rounded-md flex items-center justify-between">
+          <span>{deleteError}</span>
+          <Button variant="ghost" size="sm" onClick={() => setDeleteError(null)}>
+            Dismiss
+          </Button>
+        </div>
+      )}
+
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
@@ -124,7 +150,7 @@ export function SecretsList() {
           </div>
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild>
-              <Button variant="outline">
+              <Button>
                 <Plus className="h-4 w-4 mr-2" />
                 New Global Secret
               </Button>
@@ -165,10 +191,18 @@ export function SecretsList() {
                       <Button
                         variant="ghost"
                         size="icon"
+                        onClick={() => setEditMetaSecret(secret)}
+                        title="Edit metadata"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => setEditSecret(secret)}
                         title="Rotate value"
                       >
-                        <Pencil className="h-4 w-4" />
+                        <KeyRound className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="ghost"
@@ -206,6 +240,19 @@ export function SecretsList() {
               onSubmit={(payload) => updateMutation.mutate({ id: editSecret.id, payload })}
               isLoading={updateMutation.isPending}
               error={updateMutation.error?.message}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editMetaSecret} onOpenChange={(open) => !open && setEditMetaSecret(null)}>
+        <DialogContent className="max-w-xl">
+          {editMetaSecret && (
+            <EditMetadataForm
+              secret={editMetaSecret}
+              onSubmit={(name) => updateMetadataMutation.mutate({ id: editMetaSecret.id, name })}
+              isLoading={updateMetadataMutation.isPending}
+              error={updateMetadataMutation.error?.message}
             />
           )}
         </DialogContent>
@@ -323,6 +370,59 @@ function RotateSecretForm({ secret, onSubmit, isLoading, error }: RotateSecretFo
       <DialogFooter>
         <Button type="submit" disabled={isLoading}>
           {isLoading ? 'Saving...' : 'Update Secret'}
+        </Button>
+      </DialogFooter>
+    </form>
+  )
+}
+
+interface EditMetadataFormProps {
+  secret: Secret
+  onSubmit: (name: string) => void
+  isLoading: boolean
+  error?: string
+}
+
+function EditMetadataForm({ secret, onSubmit, isLoading, error }: EditMetadataFormProps) {
+  const [name, setName] = useState(secret.name)
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    onSubmit(name.trim())
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <DialogHeader>
+        <DialogTitle>Edit Secret Metadata</DialogTitle>
+        <DialogDescription>
+          Update the name for this secret. The type cannot be changed after creation.
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="space-y-4 py-4">
+        {error && (
+          <div className="p-3 text-sm text-destructive bg-destructive/10 rounded-md">{error}</div>
+        )}
+        <div className="space-y-2">
+          <Label htmlFor="meta-name">Name *</Label>
+          <Input
+            id="meta-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g., shared-github-pat"
+            required
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>Type</Label>
+          <div className="text-sm text-muted-foreground font-mono">{secret.type}</div>
+        </div>
+      </div>
+
+      <DialogFooter>
+        <Button type="submit" disabled={isLoading}>
+          {isLoading ? 'Saving...' : 'Save'}
         </Button>
       </DialogFooter>
     </form>

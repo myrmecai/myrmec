@@ -4,6 +4,7 @@ package ai.myrmec.engine.connection;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -15,4 +16,6 @@ public interface ConnectionConfigVersionRepository extends JpaRepository<Connect
     Optional<ConnectionConfigVersion> findByConnectionConfigIdAndStatus(UUID connectionConfigId, String status);
 
     Optional<ConnectionConfigVersion> findByConnectionConfigIdAndStatusOrderByVersionNumberDesc(UUID connectionConfigId, String status);
+
+    List<ConnectionConfigVersion> findAllByConnectionConfigId(UUID connectionConfigId);
 }

@@ -97,6 +97,48 @@ public class ConnectionConfigService {
         return saved;
     }
 
+    // ---- update parent ------------------------------------------------
+
+    @Transactional
+    public ConnectionConfig update(UUID configId, String name, String description,
+                                   UUID credentialSecretId, UUID actorId,
+                                   String actorDisplayName) {
+        ConnectionConfig config = findById(configId);
+
+        if (name != null && !name.isBlank()) {
+            // Validate name uniqueness if name is changing
+            if (!name.equals(config.getName())) {
+                boolean exists = config.getProjectId() == null
+                        ? repository.existsByScopeAndProjectIdIsNullAndName(config.getScope(), name)
+                        : repository.existsByScopeAndProjectIdAndName(config.getScope(), config.getProjectId(), name);
+                if (exists) {
+                    throw BadRequestException.forField("name", "DUPLICATE_CODE",
+                            "A connection config with this name already exists in this scope.");
+                }
+            }
+            config.setName(name);
+        }
+
+        if (description != null) {
+            config.setDescription(description);
+        }
+
+        if (credentialSecretId != null) {
+            config.setCredentialSecretId(credentialSecretId);
+        }
+
+        ConnectionConfig saved = repository.save(config);
+        log.info("Updated connection config: {} (id: {})", saved.getName(), configId);
+
+        auditEventService.recordEvent(
+                "connection_config", configId, "UPDATED",
+                config.getScope(), config.getProjectId(), actorId, actorDisplayName,
+                null, null, null,
+                Map.of("name", saved.getName()), null);
+
+        return saved;
+    }
+
     // ---- version management ------------------------------------------
 
     @Transactional
@@ -270,5 +312,24 @@ public class ConnectionConfigService {
         }
 
         return versionRepository.save(draft);
+    }
+
+    // ---- delete -------------------------------------------------------
+
+    @Transactional
+    public void delete(UUID configId, UUID actorId, String actorDisplayName) {
+        ConnectionConfig config = findById(configId);
+
+        // Delete all versions first
+        List<ConnectionConfigVersion> versions = versionRepository.findAllByConnectionConfigId(configId);
+        versionRepository.deleteAll(versions);
+
+        repository.delete(config);
+        log.info("Deleted connection config: {} (id: {})", config.getName(), configId);
+
+        auditEventService.recordEvent(
+                "connection_config", configId, "DELETED",
+                config.getScope(), config.getProjectId(), actorId, actorDisplayName,
+                null, null, null, Map.of("name", config.getName()), null);
     }
 }

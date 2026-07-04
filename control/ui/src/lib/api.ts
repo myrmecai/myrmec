@@ -542,6 +542,8 @@ export const globalSecretsApi = {
   create: (data: CreateSecretRequest) => api.post<Secret>('/admin/secrets', data),
   update: (id: string, data: UpdateSecretRequest) =>
     api.put<Secret>(`/admin/secrets/${id}`, data),
+  updateMetadata: (id: string, name: string) =>
+    api.put<Secret>(`/admin/secrets/${id}/metadata`, { name }),
   delete: (id: string) => api.delete<void>(`/admin/secrets/${id}`),
 }
 
@@ -1352,7 +1354,7 @@ export const governanceApi = {
 
 // --- Connection Configs ---
 
-export type ConnectionType = 'GIT' | 'HTTP' | 'MANAGED_RAG' | 'S3' | 'DB_SCHEMA'
+export type ConnectionType = 'GIT' | 'HTTP' | 'S3' | 'DB'
 export type ConnectionConfigStatus = 'INCOMPLETE' | 'ACTIVE' | 'DISABLED' | 'ARCHIVED'
 export type VersionStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED'
 
@@ -1403,6 +1405,12 @@ export interface UpdateDraftRequest {
   config?: Record<string, unknown>
 }
 
+export interface UpdateConnectionConfigRequest {
+  name?: string
+  description?: string
+  credentialSecretId?: string | null
+}
+
 export const connectionConfigApi = {
   list: () => api.get<ConnectionConfig[]>('/admin/connection-configs'),
   get: (id: string) => api.get<ConnectionConfig>(`/admin/connection-configs/${id}`),
@@ -1412,6 +1420,8 @@ export const connectionConfigApi = {
     api.get<ConnectionConfigVersion | null>(`/admin/connection-configs/${id}/draft-version`),
   create: (data: CreateConnectionConfigRequest) =>
     api.post<ConnectionConfig>('/admin/connection-configs', data),
+  update: (id: string, data: UpdateConnectionConfigRequest) =>
+    api.put<ConnectionConfig>(`/admin/connection-configs/${id}`, data),
   createDraft: (id: string) =>
     api.post<ConnectionConfigVersion>(`/admin/connection-configs/${id}/drafts`),
   updateDraft: (id: string, data: UpdateDraftRequest) =>
@@ -1426,6 +1436,8 @@ export const connectionConfigApi = {
     api.post<ConnectionConfig>(`/admin/connection-configs/${id}/reenable`),
   archive: (id: string) =>
     api.post<ConnectionConfig>(`/admin/connection-configs/${id}/archive`),
+  delete: (id: string) =>
+    api.delete<void>(`/admin/connection-configs/${id}`),
 }
 
 // --- Instruction Assets ---

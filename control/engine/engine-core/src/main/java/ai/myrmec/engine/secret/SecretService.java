@@ -33,6 +33,7 @@ public class SecretService {
     private final SecretBackendRegistry backendRegistry;
     private final LocalSecretBackendAdapter localBackend;
     private final ai.myrmec.engine.audit.AuditEventService auditEventService;
+    private final ai.myrmec.engine.connection.ConnectionConfigRepository connectionConfigRepository;
 
     // -------- reads --------
 
@@ -115,9 +116,34 @@ public class SecretService {
     }
 
     @Transactional
+    public SecretResponse updateMetadata(UUID id, String name) {
+        Secret secret = secretRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Secret", id.toString()));
+        secret.setName(name);
+        secret = secretRepository.save(secret);
+        log.info("Updated secret metadata for {} ({})", secret.getName(), id);
+        auditEventService.recordEvent(
+                "SECRET", secret.getId(), "SECRET_METADATA_UPDATED",
+                secret.getProject() == null ? "ORGANIZATION" : "PROJECT",
+                secret.getProject() == null ? null : secret.getProject().getId(),
+                null, "SYSTEM",
+                null, null, null, null,
+                java.util.Map.of("name", secret.getName()));
+        return SecretResponse.from(secret);
+    }
+
+    @Transactional
     public void delete(UUID id) {
         Secret secret = secretRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Secret", id.toString()));
+
+        // Check if any connection configs reference this secret
+        List<ai.myrmec.engine.connection.ConnectionConfig> referencingConfigs =
+                connectionConfigRepository.findByCredentialSecretId(id);
+        if (!referencingConfigs.isEmpty()) {
+            throw ai.myrmec.engine._system.exception.ResourceInUseException.blockedBy(
+                    "ConnectionConfig", referencingConfigs.size());
+        }
 
         try {
             backendRegistry.forSecret(secret).delete(secret);

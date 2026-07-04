@@ -2,6 +2,7 @@ package ai.myrmec.engine.secret;
 
 import ai.myrmec.engine.secret.dto.CreateSecretRequest;
 import ai.myrmec.engine.secret.dto.SecretResponse;
+import ai.myrmec.engine.secret.dto.UpdateSecretMetadataRequest;
 import ai.myrmec.engine.secret.dto.UpdateSecretRequest;
 import ai.myrmec.engine.user.UserPrincipal;
 import jakarta.validation.Valid;
@@ -52,6 +53,12 @@ public class GlobalSecretController {
     @PutMapping("/{id}")
     public SecretResponse update(@PathVariable UUID id, @Valid @RequestBody UpdateSecretRequest request) {
         return secretService.update(id, request);
+    }
+
+    @PutMapping("/{id}/metadata")
+    public SecretResponse updateMetadata(@PathVariable UUID id,
+                                         @Valid @RequestBody UpdateSecretMetadataRequest request) {
+        return secretService.updateMetadata(id, request.name());
     }
 
     @DeleteMapping("/{id}")
