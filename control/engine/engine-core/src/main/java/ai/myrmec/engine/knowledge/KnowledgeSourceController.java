@@ -2,6 +2,7 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.knowledge;
 
+import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.security.CurrentUser;
 import ai.myrmec.engine.knowledge.dto.CreateKnowledgeSourceRequest;
 import ai.myrmec.engine.knowledge.dto.KnowledgeSourceResponse;
@@ -41,15 +42,12 @@ public class KnowledgeSourceController {
 
     @PostMapping("/api/v1/admin/knowledge-sources")
     @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasRole('ORG_ADMIN')")
-    @Operation(summary = "Create a knowledge source")
+    @Operation(summary = "Create a knowledge source (deprecated — use POST /knowledge-providers/{id}/knowledge-sources)")
     public ResponseEntity<KnowledgeSourceResponse> create(
             @Valid @RequestBody CreateKnowledgeSourceRequest request,
             @CurrentUser UUID userId) {
-        var source = service.create(request.scope(), request.projectId(), request.name(),
-                request.description(), request.providerVersionId(), request.config(),
-                request.availability(), request.priority(), userId,
-                userId != null ? userId.toString() : "SYSTEM");
-        return ResponseEntity.status(HttpStatus.CREATED).body(KnowledgeSourceResponse.from(source));
+        // Legacy endpoint — no longer supports standalone creation without a provider
+        throw new BadRequestException("Use POST /api/v1/admin/knowledge-providers/{id}/knowledge-sources to create a knowledge source.");
     }
 
     @PostMapping("/api/v1/admin/knowledge-sources/{id}/disable")

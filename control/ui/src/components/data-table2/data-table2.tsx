@@ -17,13 +17,15 @@ interface DataTableProps<TData, TValue> {
     showColumnSeperator?: boolean,
     showRowSelection?: boolean,
     selectedRows?: TData[]
+    defaultSort?: { id: string; desc: boolean }
+    pageSize?: number
 }
 
 function DataTable2<TData, TValue>({ columns, data, onSelectionChange, enableMultiRowSelection,
     loading = false, pagination = true, className = "", showColumnSeperator = false,
-    selectedRows = [], showRowSelection = false
+    selectedRows = [], showRowSelection = false, defaultSort, pageSize = 10
     , ...props }: DataTableProps<TData, TValue>) {
-    const [sorting, setSorting] = useState<SortingState>([])
+    const [sorting, setSorting] = useState<SortingState>(defaultSort ? [defaultSort] : [])
     const columnSeparatorClass = "relative not-last:[&>div]:pr-4 not-last:after:absolute not-last:after:content-[''] not-last:after:border-border not-last:after:border-r-1 not-last:after:right-0 not-last:after:top-4 not-last:after:bottom-4"
     const [rowSelection, setRowSelection] = useState<any>({})
     const multiSelect = enableMultiRowSelection ?? false;
@@ -65,7 +67,7 @@ function DataTable2<TData, TValue>({ columns, data, onSelectionChange, enableMul
         data: data,
         columns: columns,
         getCoreRowModel: getCoreRowModel(),
-        getPaginationRowModel: getPaginationRowModel(),
+        getPaginationRowModel: pagination ? getPaginationRowModel() : undefined,
         enableMultiRowSelection: multiSelect,
         //  onRowSelectionChange: setRowSelection
         onRowSelectionChange: (updater) => {
@@ -85,7 +87,7 @@ function DataTable2<TData, TValue>({ columns, data, onSelectionChange, enableMul
             sorting
         },
         initialState: {
-            pagination: { pageIndex: selectedPageIndex, pageSize: 10 }
+            pagination: { pageIndex: selectedPageIndex, pageSize }
         }
     })
     const NoResult = () => {

@@ -1384,6 +1384,9 @@ export interface ConnectionConfigVersion {
   status: VersionStatus
   url: string | null
   config: Record<string, unknown> | null
+  testStatus: string | null
+  lastTestAt: string | null
+  lastTestError: string | null
   draftOwnerId: string | null
   publishedAt: string | null
   publishedBy: string | null
@@ -1411,6 +1414,14 @@ export interface UpdateConnectionConfigRequest {
   credentialSecretId?: string | null
 }
 
+export interface TestConnectionResult {
+  status: 'SUCCESS' | 'FAILED'
+  latencyMs: number
+  endpoint: string
+  authenticated: boolean | null
+  error: string | null
+}
+
 export const connectionConfigApi = {
   list: () => api.get<ConnectionConfig[]>('/admin/connection-configs'),
   get: (id: string) => api.get<ConnectionConfig>(`/admin/connection-configs/${id}`),
@@ -1430,6 +1441,8 @@ export const connectionConfigApi = {
     api.post<ConnectionConfigVersion>(`/admin/connection-configs/${id}/publish`),
   discardDraft: (id: string) =>
     api.delete<void>(`/admin/connection-configs/${id}/drafts`),
+  testConnection: (id: string, body?: { url: string; config?: Record<string, unknown> }) =>
+    api.post<TestConnectionResult>(`/admin/connection-configs/${id}/test`, body),
   disable: (id: string) =>
     api.post<ConnectionConfig>(`/admin/connection-configs/${id}/disable`),
   reenable: (id: string) =>
@@ -1519,7 +1532,8 @@ export interface CreateDraftRequest {
 }
 
 export const instructionAssetApi = {
-  list: () => api.get<InstructionAsset[]>('/admin/instruction-assets'),
+  list: (projectId?: string) =>
+    api.get<InstructionAsset[]>(projectId ? `/admin/instruction-assets?projectId=${projectId}` : '/admin/instruction-assets'),
   get: (id: string) => api.get<InstructionAsset>(`/admin/instruction-assets/${id}`),
   getPublishedVersion: (id: string) =>
     api.get<InstructionAssetVersion>(`/admin/instruction-assets/${id}/published-version`),
@@ -1527,8 +1541,12 @@ export const instructionAssetApi = {
     api.get<InstructionAssetVersion | null>(`/admin/instruction-assets/${id}/draft-version`),
   create: (data: CreateInstructionAssetRequest) =>
     api.post<InstructionAsset>('/admin/instruction-assets', data),
+  update: (id: string, data: { name?: string; description?: string; category?: InstructionCategory }) =>
+    api.patch<InstructionAsset>(`/admin/instruction-assets/${id}`, data),
   createDraft: (id: string, data: CreateDraftRequest) =>
     api.post<InstructionAssetVersion>(`/admin/instruction-assets/${id}/drafts`, data),
+  updateDraft: (id: string, data: Partial<CreateDraftRequest>) =>
+    api.patch<InstructionAssetVersion>(`/admin/instruction-assets/${id}/drafts`, data),
   publish: (id: string) =>
     api.post<InstructionAssetVersion>(`/admin/instruction-assets/${id}/publish`),
   discardDraft: (id: string) =>
@@ -1591,16 +1609,21 @@ export interface CreateProviderDraftRequest {
 }
 
 export const knowledgeProviderApi = {
-  list: () => api.get<KnowledgeProvider[]>('/admin/knowledge-providers'),
+  list: (projectId?: string) =>
+    api.get<KnowledgeProvider[]>(projectId ? `/admin/knowledge-providers?projectId=${projectId}` : '/admin/knowledge-providers'),
   get: (id: string) => api.get<KnowledgeProvider>(`/admin/knowledge-providers/${id}`),
   getPublishedVersion: (id: string) =>
-    api.get<KnowledgeProviderVersion>(`/admin/knowledge-providers/${id}/published-version`),
+    api.get<KnowledgeProviderVersion | null>(`/admin/knowledge-providers/${id}/published-version`),
   getDraftVersion: (id: string) =>
     api.get<KnowledgeProviderVersion | null>(`/admin/knowledge-providers/${id}/draft-version`),
   create: (data: CreateKnowledgeProviderRequest) =>
     api.post<KnowledgeProvider>('/admin/knowledge-providers', data),
+  update: (id: string, data: { name?: string; description?: string }) =>
+    api.patch<KnowledgeProvider>(`/admin/knowledge-providers/${id}`, data),
   createDraft: (id: string, data: CreateProviderDraftRequest) =>
     api.post<KnowledgeProviderVersion>(`/admin/knowledge-providers/${id}/drafts`, data),
+  updateDraft: (id: string, data: CreateProviderDraftRequest) =>
+    api.patch<KnowledgeProviderVersion>(`/admin/knowledge-providers/${id}/drafts`, data),
   publish: (id: string) =>
     api.post<KnowledgeProviderVersion>(`/admin/knowledge-providers/${id}/publish`),
   discardDraft: (id: string) =>
@@ -1609,43 +1632,55 @@ export const knowledgeProviderApi = {
     api.post<KnowledgeProvider>(`/admin/knowledge-providers/${id}/disable`),
   reenable: (id: string) =>
     api.post<KnowledgeProvider>(`/admin/knowledge-providers/${id}/reenable`),
+  archive: (id: string) =>
+    api.post<KnowledgeProvider>(`/admin/knowledge-providers/${id}/archive`),
+  unarchive: (id: string) =>
+    api.post<KnowledgeProvider>(`/admin/knowledge-providers/${id}/unarchive`),
+  delete: (id: string) =>
+    api.delete<void>(`/admin/knowledge-providers/${id}`),
+  getVersions: (id: string) =>
+    api.get<KnowledgeProviderVersion[]>(`/admin/knowledge-providers/${id}/versions`),
+  cloneVersion: (id: string, versionId: string) =>
+    api.post<KnowledgeProviderVersion>(`/admin/knowledge-providers/${id}/versions/${versionId}/clone`),
 }
 
 // --- Knowledge Sources ---
 
 export interface KnowledgeSource {
   id: string
-  scope: string
-  projectId: string | null
   name: string
   description: string | null
-  status: string
   providerVersionId: string
   config: Record<string, unknown> | null
-  availability: string
-  priority: number
   createdBy: string | null
   createdAt: string
   updatedAt: string
-  updatedBy: string | null
 }
 
 export interface CreateKnowledgeSourceRequest {
-  scope: string
-  projectId?: string | null
   name: string
   description?: string
-  providerVersionId: string
   config?: Record<string, unknown>
-  availability?: string
-  priority?: number
+}
+
+export interface UpdateKnowledgeSourceRequest {
+  name?: string
+  description?: string
+  config?: Record<string, unknown>
 }
 
 export const knowledgeSourceApi = {
   list: () => api.get<KnowledgeSource[]>('/admin/knowledge-sources'),
   get: (id: string) => api.get<KnowledgeSource>(`/admin/knowledge-sources/${id}`),
-  create: (data: CreateKnowledgeSourceRequest) =>
-    api.post<KnowledgeSource>('/admin/knowledge-sources', data),
+  listByProvider: (providerId: string) =>
+    api.get<KnowledgeSource[]>(`/admin/knowledge-providers/${providerId}/knowledge-sources`),
+  create: (providerId: string, data: CreateKnowledgeSourceRequest) =>
+    api.post<KnowledgeSource>(`/admin/knowledge-providers/${providerId}/knowledge-sources`, data),
+  update: (id: string, data: UpdateKnowledgeSourceRequest) =>
+    api.patch<KnowledgeSource>(`/admin/knowledge-sources/${id}`, data),
+  delete: (id: string) =>
+    api.delete<void>(`/admin/knowledge-sources/${id}`),
+  // Deprecated: kept for backward compatibility with old KnowledgeSourcesList/Detail
   disable: (id: string) =>
     api.post<KnowledgeSource>(`/admin/knowledge-sources/${id}/disable`),
   archive: (id: string) =>

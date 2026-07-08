@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import { type ColumnDef } from '@tanstack/react-table'
 import {
   globalSecretsApi,
   type Secret,
@@ -27,14 +28,6 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -43,6 +36,9 @@ import {
 } from '@/components/ui/select'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Plus, Pencil, Trash2, KeyRound } from 'lucide-react'
+import { dialogService } from '@/services/dialog-service'
+import DataTable2 from '@/components/data-table2/data-table2'
+import { SortedColumnHeader } from '@/components/data-table2/sorted-column-header'
 
 export function SecretsList() {
   const queryClient = useQueryClient()
@@ -100,6 +96,77 @@ export function SecretsList() {
       setDeleteError(error.message || 'Failed to delete secret. It may be in use.')
     },
   })
+
+  const columns: ColumnDef<Secret>[] = useMemo(() => [
+    {
+      accessorKey: 'name',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Name" />,
+      cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+    },
+    {
+      accessorKey: 'type',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Type" />,
+      cell: ({ row }) => <span className="font-mono text-xs">{row.original.type}</span>,
+    },
+    {
+      accessorKey: 'createdByEmail',
+      header: 'Created By',
+      cell: ({ row }) => <span className="text-xs">{row.original.createdByEmail ?? '-'}</span>,
+    },
+    {
+      accessorKey: 'updatedAt',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Updated" />,
+      cell: ({ row }) => (
+        <span className="text-xs">{new Date(row.original.updatedAt).toLocaleString()}</span>
+      ),
+    },
+    {
+      id: 'actions',
+      header: 'Actions',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const secret = row.original
+        return (
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setEditMetaSecret(secret)}
+              title="Edit metadata"
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setEditSecret(secret)}
+              title="Rotate value"
+            >
+              <KeyRound className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={async () => {
+                const confirmed = await dialogService.showConfirmDialog({
+                  title: 'Delete Secret',
+                  message: `Delete global secret "${secret.name}"? This cannot be undone.`,
+                  severity: 'error',
+                  type: 'warning',
+                  confirmLabel: 'Delete',
+                  cancelLabel: 'Cancel',
+                })
+                if (confirmed) deleteMutation.mutate(secret.id)
+              }}
+              title="Delete"
+            >
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+          </div>
+        )
+      },
+    },
+  ], [deleteMutation])
 
   if (isLoading) {
     return (
@@ -165,70 +232,13 @@ export function SecretsList() {
           </Dialog>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Created By</TableHead>
-                <TableHead>Updated</TableHead>
-                <TableHead className="w-[100px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {secrets?.map((secret) => (
-                <TableRow key={secret.id}>
-                  <TableCell className="font-medium">{secret.name}</TableCell>
-                  <TableCell>
-                    <span className="font-mono text-xs">{secret.type}</span>
-                  </TableCell>
-                  <TableCell className="text-xs">{secret.createdByEmail ?? '-'}</TableCell>
-                  <TableCell className="text-xs">
-                    {new Date(secret.updatedAt).toLocaleString()}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setEditMetaSecret(secret)}
-                        title="Edit metadata"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setEditSecret(secret)}
-                        title="Rotate value"
-                      >
-                        <KeyRound className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => {
-                          if (confirm(`Delete global secret "${secret.name}"?`)) {
-                            deleteMutation.mutate(secret.id)
-                          }
-                        }}
-                        title="Delete"
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {(!secrets || secrets.length === 0) && (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                    No global secrets yet.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          <DataTable2
+            columns={columns}
+            data={secrets ?? []}
+            pagination={true}
+            loading={isLoading}
+            showRowSelection={false}
+          />
         </CardContent>
       </Card>
 

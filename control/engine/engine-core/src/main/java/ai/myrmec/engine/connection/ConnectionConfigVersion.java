@@ -58,6 +58,15 @@ public class ConnectionConfigVersion {
     @Column(name = "config", columnDefinition = "jsonb")
     private Map<String, Object> config;
 
+    @Column(name = "test_status", length = 20)
+    private String testStatus;
+
+    @Column(name = "last_test_at")
+    private Instant lastTestAt;
+
+    @Column(name = "last_test_error", columnDefinition = "text")
+    private String lastTestError;
+
     @Column(name = "draft_owner_id")
     private UUID draftOwnerId;
 

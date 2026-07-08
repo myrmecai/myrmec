@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { ArrowLeft, Save, Send, Trash2 } from 'lucide-react'
+import { dialogService } from '@/services/dialog-service'
 
 type ReachOption = 'WEB_UI' | 'EXTERNAL_API'
 const REACH_OPTIONS: ReachOption[] = ['WEB_UI', 'EXTERNAL_API']
@@ -122,10 +123,16 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
           draft={draft}
           onSaved={invalidate}
           onPublish={() => publishMutation.mutate()}
-          onDiscard={() => {
-            if (confirm('Discard this draft? Unpublished changes are lost.')) {
-              discardDraftMutation.mutate()
-            }
+          onDiscard={async () => {
+            const confirmed = await dialogService.showConfirmDialog({
+              title: 'Discard Draft',
+              message: 'Discard this draft? Any unsaved changes will be lost.',
+              severity: 'warning',
+              type: 'warning',
+              confirmLabel: 'Discard',
+              cancelLabel: 'Cancel',
+            })
+            if (confirmed) discardDraftMutation.mutate()
           }}
           publishing={publishMutation.isPending}
           publishError={publishMutation.error?.message}

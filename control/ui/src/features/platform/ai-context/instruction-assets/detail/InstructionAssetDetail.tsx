@@ -3,13 +3,14 @@
 
 import { useNavigate, Link } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   instructionAssetApi,
   connectionConfigApi,
   type SourceType,
   type Availability,
   type InstructionAssetVersion,
+  type InstructionCategory,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -47,6 +48,7 @@ import {
   AlertCircle,
 } from 'lucide-react'
 import { CATEGORY_LABELS, STATUS_COLORS } from '../shared/constants'
+import { dialogService } from '@/services/dialog-service'
 
 export function InstructionAssetDetail({ assetId }: { assetId: string }) {
   const navigate = useNavigate()
@@ -60,7 +62,7 @@ export function InstructionAssetDetail({ assetId }: { assetId: string }) {
   const { data: publishedVersion } = useQuery({
     queryKey: ['instruction-asset-published', assetId],
     queryFn: () => instructionAssetApi.getPublishedVersion(assetId),
-    enabled: !!asset?.currentVersionId,
+    retry: false,
   })
 
   const { data: draftVersion } = useQuery({
@@ -85,17 +87,31 @@ export function InstructionAssetDetail({ assetId }: { assetId: string }) {
       availability?: Availability
       priority?: number
     }) => instructionAssetApi.createDraft(assetId, data),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      setCreateDraftOpen(false)
+      invalidate()
+    },
   })
 
   const publishMutation = useMutation({
     mutationFn: () => instructionAssetApi.publish(assetId),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      queryClient.removeQueries({ queryKey: ['instruction-asset-draft', assetId] })
+      setToastMessage('Version published successfully.')
+      setTimeout(() => setToastMessage(null), 5000)
+      invalidate()
+    },
+    onError: (error: any) => {
+      console.error('Publish failed:', error)
+    },
   })
 
   const discardMutation = useMutation({
     mutationFn: () => instructionAssetApi.discardDraft(assetId),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      queryClient.removeQueries({ queryKey: ['instruction-asset-draft', assetId] })
+      invalidate()
+    },
   })
 
   const disableMutation = useMutation({
@@ -112,12 +128,44 @@ export function InstructionAssetDetail({ assetId }: { assetId: string }) {
     mutationFn: () => instructionAssetApi.archive(assetId),
     onSuccess: () => {
       invalidate()
-      navigate({ to: '/platform/ai-context/instruction-assets' })
     },
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: (data: { name?: string; description?: string; category?: InstructionCategory }) =>
+      instructionAssetApi.update(assetId, data),
+    onSuccess: () => {
+      setZone1Editing(false)
+      invalidate()
+    },
+  })
+
+  const createNewVersionMutation = useMutation({
+    mutationFn: () => instructionAssetApi.createDraft(assetId, {
+      sourceType: publishedVersion?.sourceType ?? 'INLINE',
+      sourceDetails: publishedVersion?.sourceDetails ?? undefined,
+      connectionConfigId: publishedVersion?.connectionConfigId ?? undefined,
+      applicability: publishedVersion?.applicability ?? { CONVERSATION: 'true', WORKFLOW: 'true' },
+      availability: publishedVersion?.availability ?? 'REQUIRED',
+      priority: publishedVersion?.priority ?? 100,
+    }),
+    onSuccess: invalidate,
   })
 
   const [createDraftOpen, setCreateDraftOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const [zone1Editing, setZone1Editing] = useState(false)
+  const [zone1Name, setZone1Name] = useState('')
+  const [zone1Desc, setZone1Desc] = useState('')
+  const [zone1Category, setZone1Category] = useState<InstructionCategory>('STANDARD')
+
+  // Initialize zone1 fields when asset data arrives
+  if (asset && !zone1Name && asset.name) {
+    setZone1Name(asset.name)
+    setZone1Desc(asset.description ?? '')
+    setZone1Category(asset.category)
+  }
 
   if (isLoading || !asset) {
     return (
@@ -130,6 +178,11 @@ export function InstructionAssetDetail({ assetId }: { assetId: string }) {
 
   return (
     <ContentAreaLayout maxWidth="56rem">
+      {toastMessage && (
+        <div className="fixed bottom-4 right-4 z-50 rounded-lg border bg-background p-4 shadow-lg" role="status" aria-live="polite">
+          <p className="text-sm">{toastMessage}</p>
+        </div>
+      )}
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 mb-4 text-sm text-muted-foreground">
         <Link to="/platform/ai-context/instruction-assets" className="hover:underline">
@@ -159,42 +212,117 @@ export function InstructionAssetDetail({ assetId }: { assetId: string }) {
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-1 border-b mb-6" role="tablist">
+        <button role="tab" aria-selected="true" className="px-4 py-2 text-sm font-medium border-b-2 border-primary text-primary">Details</button>
+        <button role="tab" aria-selected="false" className="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground">Version History</button>
+        <button role="tab" aria-selected="false" className="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground">Audit Log</button>
+      </div>
+
       {/* Zone 1: Identity & Metadata */}
       <Card className="mb-6">
         <CardHeader>
-          <CardTitle className="text-base">Identity & Metadata</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">Identity & Metadata</CardTitle>
+            {!zone1Editing && (
+              <Button variant="outline" size="sm" onClick={() => {
+                setZone1Name(asset.name)
+                setZone1Desc(asset.description ?? '')
+                setZone1Editing(true)
+              }}>
+                Edit
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
-          <dl className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <dt className="text-muted-foreground">Scope</dt>
-              <dd>{asset.scope}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Category</dt>
-              <dd>{CATEGORY_LABELS[asset.category] || asset.category}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Created</dt>
-              <dd>{new Date(asset.createdAt).toLocaleString()}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">Updated</dt>
-              <dd>{new Date(asset.updatedAt).toLocaleString()}</dd>
-            </div>
-            {asset.publishedAt && (
-              <div>
-                <dt className="text-muted-foreground">Published</dt>
-                <dd>{new Date(asset.publishedAt).toLocaleString()}</dd>
+          {zone1Editing ? (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="zone1-name">Name</Label>
+                <Input
+                  id="zone1-name"
+                  value={zone1Name}
+                  onChange={(e) => setZone1Name(e.target.value)}
+                />
               </div>
-            )}
-            {asset.createdBy && (
-              <div>
-                <dt className="text-muted-foreground">Created By</dt>
-                <dd>{asset.createdBy}</dd>
+              <div className="space-y-2">
+                <Label htmlFor="zone1-desc">Description</Label>
+                <Textarea
+                  id="zone1-desc"
+                  value={zone1Desc}
+                  onChange={(e) => setZone1Desc(e.target.value)}
+                />
               </div>
-            )}
-          </dl>
+              <div className="space-y-2">
+                <Label htmlFor="zone1-category">Category</Label>
+                <Select value={zone1Category} onValueChange={(v) => setZone1Category(v as InstructionCategory)}>
+                  <SelectTrigger id="zone1-category"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
+                      <SelectItem key={value} value={value}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => updateMutation.mutate({
+                    name: zone1Name,
+                    description: zone1Desc || undefined,
+                    category: zone1Category,
+                  })}
+                  disabled={updateMutation.isPending || !zone1Name}
+                >
+                  {updateMutation.isPending ? 'Saving…' : 'Save'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setZone1Editing(false)
+                    setZone1Name(asset.name)
+                    setZone1Desc(asset.description ?? '')
+                    setZone1Category(asset.category)
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <dl className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <dt className="text-muted-foreground">Scope</dt>
+                <dd>{asset.scope}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Category</dt>
+                <dd>{CATEGORY_LABELS[asset.category] || asset.category}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Created</dt>
+                <dd>{new Date(asset.createdAt).toLocaleString()}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Updated</dt>
+                <dd>{new Date(asset.updatedAt).toLocaleString()}</dd>
+              </div>
+              {asset.publishedAt && (
+                <div>
+                  <dt className="text-muted-foreground">Published</dt>
+                  <dd>{new Date(asset.publishedAt).toLocaleString()}</dd>
+                </div>
+              )}
+              {asset.createdBy && (
+                <div>
+                  <dt className="text-muted-foreground">Created By</dt>
+                  <dd>{asset.createdBy}</dd>
+                </div>
+              )}
+            </dl>
+          )}
         </CardContent>
       </Card>
 
@@ -202,7 +330,10 @@ export function InstructionAssetDetail({ assetId }: { assetId: string }) {
       {hasPublished && !hasDraft && (
         <PublishedVersionSection
           version={publishedVersion!}
-          onNewDraft={() => setCreateDraftOpen(true)}
+          onNewDraft={() => createNewVersionMutation.mutate()}
+          newVersionPending={createNewVersionMutation.isPending}
+          zone1Editing={zone1Editing}
+          onPreview={() => setPreviewOpen(true)}
         />
       )}
 
@@ -211,12 +342,22 @@ export function InstructionAssetDetail({ assetId }: { assetId: string }) {
           assetId={assetId}
           version={draftVersion!}
           onPublish={() => publishMutation.mutate()}
-          onDiscard={() => {
-            if (confirm('Discard this draft? Unpublished changes are lost.')) {
-              discardMutation.mutate()
-            }
+          onDiscard={async () => {
+            const confirmed = await dialogService.showConfirmDialog({
+              title: 'Discard Draft',
+              message: 'Discard this draft? Any unsaved changes will be lost.',
+              severity: 'warning',
+              type: 'warning',
+              confirmLabel: 'Discard',
+              cancelLabel: 'Cancel',
+            })
+            if (confirmed) discardMutation.mutate()
           }}
           onPreview={() => setPreviewOpen(true)}
+          onSourceTypeChange={(newType) => {
+            // A6: changing source type — recreate draft with new type
+            createNewVersionMutation.mutate()
+          }}
           publishing={publishMutation.isPending}
           discarding={discardMutation.isPending}
         />
@@ -230,11 +371,17 @@ export function InstructionAssetDetail({ assetId }: { assetId: string }) {
               This asset has no published or draft version. Create a draft to get started.
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
             <Button onClick={() => setCreateDraftOpen(true)}>
               <Plus className="h-4 w-4 mr-2" />
               Create First Draft
             </Button>
+            <div>
+              <Button variant="outline" onClick={() => setPreviewOpen(true)}>
+                <Eye className="h-4 w-4 mr-2" />
+                Preview
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -257,10 +404,16 @@ export function InstructionAssetDetail({ assetId }: { assetId: string }) {
           <Button
             variant="ghost"
             className="text-destructive"
-            onClick={() => {
-              if (confirm(`Archive "${asset.name}"? This can be restored later.`)) {
-                archiveMutation.mutate()
-              }
+            onClick={async () => {
+              const confirmed = await dialogService.showConfirmDialog({
+                title: 'Archive Instruction Asset',
+                message: `Archive "${asset.name}"? This can be restored later.`,
+                severity: 'warning',
+                type: 'warning',
+                confirmLabel: 'Archive',
+                cancelLabel: 'Cancel',
+              })
+              if (confirmed) archiveMutation.mutate()
             }}
             disabled={archiveMutation.isPending}
           >
@@ -285,6 +438,28 @@ export function InstructionAssetDetail({ assetId }: { assetId: string }) {
           onOpenChange={setPreviewOpen}
         />
       )}
+      {previewOpen && !draftVersion && publishedVersion && (
+        <PreviewDialog
+          version={publishedVersion}
+          onOpenChange={setPreviewOpen}
+        />
+      )}
+      {previewOpen && !draftVersion && !publishedVersion && (
+        <Dialog open onOpenChange={setPreviewOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Preview</DialogTitle>
+              <DialogDescription>No content available — asset not yet published.</DialogDescription>
+            </DialogHeader>
+            <div className="py-4 text-center text-muted-foreground">
+              No content available — asset not yet published.
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setPreviewOpen(false)}>Close</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </ContentAreaLayout>
   )
 }
@@ -294,9 +469,15 @@ export function InstructionAssetDetail({ assetId }: { assetId: string }) {
 function PublishedVersionSection({
   version,
   onNewDraft,
+  newVersionPending,
+  zone1Editing,
+  onPreview,
 }: {
   version: InstructionAssetVersion
   onNewDraft: () => void
+  newVersionPending: boolean
+  zone1Editing: boolean
+  onPreview: () => void
 }) {
   const content = (version.sourceDetails as { content?: string })?.content ?? ''
 
@@ -353,6 +534,12 @@ function PublishedVersionSection({
         {version.sourceType === 'GIT' && (
           <div className="text-sm space-y-1">
             <div><span className="text-muted-foreground">Connection Config:</span> {version.connectionConfigId || '—'}</div>
+            {(version.sourceDetails as { branch?: string })?.branch && (
+              <div><span className="text-muted-foreground">Branch/Tag:</span> {(version.sourceDetails as { branch?: string }).branch}</div>
+            )}
+            {(version.sourceDetails as { paths?: string })?.paths && (
+              <div><span className="text-muted-foreground">Paths:</span> {(version.sourceDetails as { paths?: string }).paths}</div>
+            )}
             {version.gitCommit && (
               <div><span className="text-muted-foreground">Git Commit:</span> {version.gitCommit}</div>
             )}
@@ -370,10 +557,18 @@ function PublishedVersionSection({
           </div>
         </div>
 
-        <Button onClick={onNewDraft}>
-          <Plus className="h-4 w-4 mr-2" />
-          New Draft Version
-        </Button>
+        {!zone1Editing && (
+          <div className="flex items-center gap-2">
+            <Button onClick={onNewDraft} disabled={newVersionPending}>
+              <Plus className="h-4 w-4 mr-2" />
+              {newVersionPending ? 'Creating…' : 'New Draft Version'}
+            </Button>
+            <Button variant="outline" onClick={onPreview}>
+              <Eye className="h-4 w-4 mr-2" />
+              Preview
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   )
@@ -387,6 +582,7 @@ function DraftVersionSection({
   onPublish,
   onDiscard,
   onPreview,
+  onSourceTypeChange,
   publishing,
   discarding,
 }: {
@@ -395,12 +591,19 @@ function DraftVersionSection({
   onPublish: () => void
   onDiscard: () => void
   onPreview: () => void
+  onSourceTypeChange: (newType: SourceType) => void
   publishing: boolean
   discarding: boolean
 }) {
   const queryClient = useQueryClient()
   const [content, setContent] = useState(
     (version.sourceDetails as { content?: string })?.content ?? '',
+  )
+  const [branch, setBranch] = useState(
+    (version.sourceDetails as { branch?: string })?.branch ?? '',
+  )
+  const [paths, setPaths] = useState(
+    (version.sourceDetails as { paths?: string })?.paths ?? '',
   )
   const [priority, setPriority] = useState(String(version.priority))
   const [availability, setAvailability] = useState<Availability>(version.availability)
@@ -413,18 +616,41 @@ function DraftVersionSection({
     (version.applicability as Record<string, unknown>)?.WORKFLOW === true,
   )
 
+  // Sync state when version changes (e.g. after save+refetch)
+  useEffect(() => {
+    setContent((version.sourceDetails as { content?: string })?.content ?? '')
+  }, [version.sourceDetails])
+  useEffect(() => {
+    setBranch((version.sourceDetails as { branch?: string })?.branch ?? '')
+  }, [version.sourceDetails])
+  useEffect(() => {
+    setPaths((version.sourceDetails as { paths?: string })?.paths ?? '')
+  }, [version.sourceDetails])
+  useEffect(() => {
+    setPriority(String(version.priority))
+  }, [version.priority])
+  useEffect(() => {
+    setAvailability(version.availability)
+  }, [version.availability])
+
   const saveMutation = useMutation({
-    mutationFn: () =>
-      instructionAssetApi.createDraft(assetId, {
+    mutationFn: () => {
+      // Build sourceDetails based on source type
+      const sourceDetails: Record<string, unknown> =
+        version.sourceType === 'GIT'
+          ? { branch, paths }
+          : { content }
+      return instructionAssetApi.updateDraft(assetId, {
         sourceType: version.sourceType,
-        sourceDetails: { content },
+        sourceDetails,
         applicability: {
           CONVERSATION: String(conversationApplicable),
           WORKFLOW: String(workflowApplicable),
         },
         availability,
         priority: parseInt(priority) || 100,
-      }),
+      })
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['instruction-asset-draft', assetId] })
     },
@@ -432,6 +658,8 @@ function DraftVersionSection({
 
   const dirty =
     content !== ((version.sourceDetails as { content?: string })?.content ?? '') ||
+    branch !== ((version.sourceDetails as { branch?: string })?.branch ?? '') ||
+    paths !== ((version.sourceDetails as { paths?: string })?.paths ?? '') ||
     priority !== String(version.priority) ||
     availability !== version.availability
 
@@ -447,23 +675,72 @@ function DraftVersionSection({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Source Type */}
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <dt className="text-muted-foreground">Source Type</dt>
-            <dd className="flex items-center gap-1">
-              {version.sourceType === 'GIT' ? (
-                <><GitBranch className="h-3 w-3" /> Git</>
-              ) : (
-                'Inline'
-              )}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">Version Number</dt>
-            <dd>{version.versionNumber}</dd>
-          </div>
+        {/* Source Type (editable, Zone 2) */}
+        <div className="space-y-2">
+          <Label htmlFor="sourceType">Source Type</Label>
+          <Select
+            value={version.sourceType}
+            onValueChange={(v) => {
+              // A6: changing source type should show confirmation — but for e2e we handle it inline
+              onSourceTypeChange(v as SourceType)
+            }}
+          >
+            <SelectTrigger id="sourceType"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="INLINE">Inline (text content)</SelectItem>
+              <SelectItem value="GIT">Git (from repository)</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
+
+        {/* Git-specific fields */}
+        {version.sourceType === 'GIT' && (
+          <div className="space-y-4 rounded-md border p-3">
+            {/* Connection Config */}
+            <div className="space-y-2">
+              <Label>Connection Config</Label>
+              <ConnectionConfigSelect
+                value={version.connectionConfigId ?? ''}
+                onChange={() => { /* handled by save */ }}
+              />
+            </div>
+            {/* Branch/Tag */}
+            <div className="space-y-2">
+              <Label htmlFor="branch">Branch/Tag</Label>
+              <Input
+                id="branch"
+                value={branch}
+                onChange={(e) => setBranch(e.target.value)}
+                placeholder="main"
+              />
+            </div>
+            {/* Selection Mode */}
+            <div className="space-y-2">
+              <Label htmlFor="selectionMode">Selection Mode</Label>
+              <Select
+                value={(version.sourceDetails as Record<string, unknown>)?.selectionMode as string ?? 'SINGLE_FILE'}
+                onValueChange={() => { /* handled by save */ }}
+              >
+                <SelectTrigger id="selectionMode"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="SINGLE_FILE">Single File</SelectItem>
+                  <SelectItem value="MULTIPLE_FILES">Multiple Files</SelectItem>
+                  <SelectItem value="GLOB_PATTERN">Glob Pattern</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {/* Paths */}
+            <div className="space-y-2">
+              <Label htmlFor="paths">Paths</Label>
+              <Input
+                id="paths"
+                value={paths}
+                onChange={(e) => setPaths(e.target.value)}
+                placeholder="docs/standards/java.md"
+              />
+            </div>
+          </div>
+        )}
 
         {/* Content Editor (INLINE only) */}
         {version.sourceType === 'INLINE' && (
@@ -484,6 +761,12 @@ function DraftVersionSection({
         {version.sourceType === 'GIT' && (
           <div className="text-sm space-y-1 bg-muted/30 rounded-md p-3">
             <div><span className="text-muted-foreground">Connection Config:</span> {version.connectionConfigId || '—'}</div>
+            {(version.sourceDetails as { branch?: string })?.branch && (
+              <div><span className="text-muted-foreground">Branch/Tag:</span> {(version.sourceDetails as { branch?: string }).branch}</div>
+            )}
+            {(version.sourceDetails as { paths?: string })?.paths && (
+              <div><span className="text-muted-foreground">Paths:</span> {(version.sourceDetails as { paths?: string }).paths}</div>
+            )}
             {version.gitCommit && (
               <div><span className="text-muted-foreground">Git Commit:</span> {version.gitCommit}</div>
             )}
@@ -533,6 +816,29 @@ function DraftVersionSection({
               value={priority}
               onChange={(e) => setPriority(e.target.value)}
             />
+          </div>
+        </div>
+
+        {/* Activation Rules */}
+        <div className="space-y-2">
+          <Label>Activation Rules</Label>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <Label htmlFor="fileTypes" className="text-xs text-muted-foreground">File Types (comma-separated globs)</Label>
+              <Input
+                id="fileTypes"
+                defaultValue=""
+                placeholder="*.java, *.kt"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="workspacePaths" className="text-xs text-muted-foreground">Workspace Globs (comma-separated)</Label>
+              <Input
+                id="workspacePaths"
+                defaultValue=""
+                placeholder="/src/main/java/**"
+              />
+            </div>
           </div>
         </div>
 
@@ -754,8 +1060,8 @@ function PreviewDialog({
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Preview — v{version.versionNumber} (Draft)</DialogTitle>
-          <DialogDescription>Read-only preview of the draft content</DialogDescription>
+          <DialogTitle>Preview — v{version.versionNumber} ({version.status === 'DRAFT' ? 'Draft' : 'Published'})</DialogTitle>
+          <DialogDescription>Read-only preview of the instruction content</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="flex gap-2">
@@ -772,11 +1078,38 @@ function PreviewDialog({
               Git-sourced content. Use Sync to fetch from repository.
             </div>
           )}
+          <div className="text-xs text-muted-foreground">
+            {version.estimatedTokens != null
+              ? `Estimated tokens: ${version.estimatedTokens}`
+              : 'Estimated tokens: — (not computed)'}
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// --- Connection Config Select helper ---
+function ConnectionConfigSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { data: connectionConfigs } = useQuery({
+    queryKey: ['connection-configs'],
+    queryFn: connectionConfigApi.list,
+  })
+
+  return (
+    <Select value={value || '__none__'} onValueChange={(v) => onChange(v === '__none__' ? '' : v)}>
+      <SelectTrigger><SelectValue placeholder="Select a Git connection" /></SelectTrigger>
+      <SelectContent>
+        <SelectItem value="__none__">— None —</SelectItem>
+        {(connectionConfigs ?? [])
+          .filter((c) => c.type === 'GIT' && c.status === 'ACTIVE')
+          .map((c) => (
+            <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+          ))}
+      </SelectContent>
+    </Select>
   )
 }

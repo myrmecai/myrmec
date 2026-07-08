@@ -8,6 +8,8 @@ import ai.myrmec.engine.connection.dto.ConnectionConfigVersionResponse;
 import ai.myrmec.engine.connection.dto.CreateConnectionConfigRequest;
 import ai.myrmec.engine.connection.dto.UpdateConnectionConfigRequest;
 import ai.myrmec.engine.connection.dto.UpdateDraftRequest;
+import ai.myrmec.engine.connection.dto.TestConnectionRequest;
+import ai.myrmec.engine.connection.dto.TestConnectionResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -153,6 +155,20 @@ public class ConnectionConfigController {
             @CurrentUser UUID userId) {
         service.discardDraft(id, userId, userId != null ? userId.toString() : "SYSTEM");
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/api/v1/admin/connection-configs/{id}/test")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasRole('ORG_ADMIN')")
+    @Operation(summary = "Test connection connectivity (UC-018 Step 5) — stateless, no save required")
+    public ResponseEntity<TestConnectionResponse> testConnection(
+            @PathVariable UUID id,
+            @RequestBody(required = false) TestConnectionRequest request) {
+        if (request != null && request.url() != null && !request.url().isBlank()) {
+            // Stateless test: use the URL and config from the request body
+            return ResponseEntity.ok(service.testConnectionStateless(id, request.url(), request.config()));
+        }
+        // Fallback: test the saved Draft or Published version
+        return ResponseEntity.ok(service.testConnection(id));
     }
 
     // ---- Lifecycle ---------------------------------------------------

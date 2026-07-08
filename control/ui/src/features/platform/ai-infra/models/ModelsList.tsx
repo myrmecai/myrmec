@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import { type ColumnDef } from '@tanstack/react-table'
 import {
   modelsApi,
   providersApi,
@@ -23,14 +24,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ContentAreaLayout } from '@/components/content-area-layout'
 import {
@@ -46,6 +39,9 @@ import {
   Zap,
   Heart,
 } from 'lucide-react'
+import { dialogService } from '@/services/dialog-service'
+import DataTable2 from '@/components/data-table2/data-table2'
+import { SortedColumnHeader } from '@/components/data-table2/sorted-column-header'
 
 export function ModelsList() {
   const queryClient = useQueryClient()
@@ -103,6 +99,115 @@ export function ModelsList() {
     testMutation.mutate(code)
   }
 
+  const columns: ColumnDef<Model>[] = useMemo(() => [
+    {
+      accessorKey: 'code',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Code" />,
+      cell: ({ row }) => <span className="font-mono text-sm">{row.original.code}</span>,
+    },
+    {
+      accessorKey: 'name',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Name" />,
+      cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+    },
+    {
+      accessorKey: 'providerName',
+      header: 'Provider',
+      cell: ({ row }) => <span className="text-sm">{row.original.providerName}</span>,
+    },
+    {
+      accessorKey: 'modelId',
+      header: 'Model ID',
+      cell: ({ row }) => (
+        <span className="font-mono text-sm max-w-[150px] truncate block">{row.original.modelId}</span>
+      ),
+    },
+    {
+      accessorKey: 'deploymentType',
+      header: 'Type',
+      cell: ({ row }) =>
+        row.original.deploymentType === 'CLOUD' ? (
+          <span className="inline-flex items-center gap-1 text-blue-600">
+            <Cloud className="h-4 w-4" />
+            Cloud
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-purple-600">
+            <Server className="h-4 w-4" />
+            On-Premise
+          </span>
+        ),
+    },
+    {
+      accessorKey: 'status',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Status" />,
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2">
+          <StatusBadge status={row.original.status} />
+          {row.original.deploymentType === 'ON_PREMISE' && (
+            <HealthBadge health={row.original.healthStatus} />
+          )}
+          {row.original.lastTestStatus === 'SUCCESS' && (
+            <span title="Last test passed">
+              <Zap className="h-4 w-4 text-yellow-500" />
+            </span>
+          )}
+        </div>
+      ),
+    },
+    {
+      id: 'actions',
+      header: 'Actions',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const model = row.original
+        return (
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => handleTest(model.code)}
+              disabled={testingModel === model.code}
+              title="Test connection"
+            >
+              {testingModel === model.code ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Zap className="h-4 w-4" />
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setEditModel(model)}
+              title="Edit"
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={async () => {
+                const confirmed = await dialogService.showConfirmDialog({
+                  title: 'Delete Model',
+                  message: 'Are you sure you want to delete this model? This cannot be undone.',
+                  severity: 'error',
+                  type: 'warning',
+                  confirmLabel: 'Delete',
+                  cancelLabel: 'Cancel',
+                })
+                if (confirmed) deleteMutation.mutate(model.code)
+              }}
+              title="Delete"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        )
+      },
+    },
+  ], [testingModel, handleTest, deleteMutation])
+
   if (isLoading) {
     return (
       <div className="p-8">
@@ -151,103 +256,13 @@ export function ModelsList() {
           <CardDescription>{models?.length || 0} models configured</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Code</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Provider</TableHead>
-                <TableHead>Model ID</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-[150px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {models?.map((model) => (
-                <TableRow key={model.code}>
-                  <TableCell className="font-mono text-sm">{model.code}</TableCell>
-                  <TableCell className="font-medium">{model.name}</TableCell>
-                  <TableCell>
-                    <span className="text-sm">{model.providerName}</span>
-                  </TableCell>
-                  <TableCell className="font-mono text-sm max-w-[150px] truncate">
-                    {model.modelId}
-                  </TableCell>
-                  <TableCell>
-                    {model.deploymentType === 'CLOUD' ? (
-                      <span className="inline-flex items-center gap-1 text-blue-600">
-                        <Cloud className="h-4 w-4" />
-                        Cloud
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-purple-600">
-                        <Server className="h-4 w-4" />
-                        On-Premise
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <StatusBadge status={model.status} />
-                      {model.deploymentType === 'ON_PREMISE' && (
-                        <HealthBadge health={model.healthStatus} />
-                      )}
-                      {model.lastTestStatus === 'SUCCESS' && (
-                        <span title="Last test passed">
-                          <Zap className="h-4 w-4 text-yellow-500" />
-                        </span>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleTest(model.code)}
-                        disabled={testingModel === model.code}
-                        title="Test connection"
-                      >
-                        {testingModel === model.code ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Zap className="h-4 w-4" />
-                        )}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setEditModel(model)}
-                        title="Edit"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => {
-                          if (confirm('Are you sure you want to delete this model?')) {
-                            deleteMutation.mutate(model.code)
-                          }
-                        }}
-                        title="Delete"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {models?.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground">
-                    No models configured. Add your first AI model to get started.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          <DataTable2
+            columns={columns}
+            data={models ?? []}
+            pagination={true}
+            loading={isLoading}
+            showRowSelection={false}
+          />
         </CardContent>
       </Card>
 

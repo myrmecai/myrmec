@@ -7,6 +7,7 @@ import ai.myrmec.engine.instruction.dto.CreateDraftRequest;
 import ai.myrmec.engine.instruction.dto.CreateInstructionAssetRequest;
 import ai.myrmec.engine.instruction.dto.InstructionAssetResponse;
 import ai.myrmec.engine.instruction.dto.InstructionAssetVersionResponse;
+import ai.myrmec.engine.instruction.dto.UpdateInstructionAssetRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -33,8 +34,14 @@ public class InstructionAssetController {
 
     @GetMapping("/api/v1/admin/instruction-assets")
     @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasRole('ORG_ADMIN')")
-    @Operation(summary = "List all org-scoped instruction assets")
-    public ResponseEntity<List<InstructionAssetResponse>> listOrgScoped() {
+    @Operation(summary = "List instruction assets (optional project filter)")
+    public ResponseEntity<List<InstructionAssetResponse>> list(
+            @RequestParam(required = false) UUID projectId) {
+        if (projectId != null) {
+            return ResponseEntity.ok(service.findAllProjectScoped(projectId).stream()
+                    .map(InstructionAssetResponse::from)
+                    .toList());
+        }
         return ResponseEntity.ok(service.findAllOrgScoped().stream()
                 .map(InstructionAssetResponse::from)
                 .toList());
@@ -83,6 +90,23 @@ public class InstructionAssetController {
                 .body(InstructionAssetResponse.from(asset));
     }
 
+    @PatchMapping("/api/v1/admin/instruction-assets/{id}")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasRole('ORG_ADMIN')")
+    @Operation(summary = "Update Zone-1 parent-row fields (name, description, category)")
+    public ResponseEntity<InstructionAssetResponse> update(
+            @PathVariable UUID id,
+            @RequestBody UpdateInstructionAssetRequest request,
+            @CurrentUser UUID userId) {
+        var asset = service.update(
+                id,
+                request.name(),
+                request.description(),
+                request.category(),
+                userId,
+                userId != null ? userId.toString() : "SYSTEM");
+        return ResponseEntity.ok(InstructionAssetResponse.from(asset));
+    }
+
     @PostMapping("/api/v1/admin/instruction-assets/{id}/drafts")
     @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasRole('ORG_ADMIN')")
     @Operation(summary = "Create a new draft version for an instruction asset")
@@ -103,6 +127,26 @@ public class InstructionAssetController {
                 userId != null ? userId.toString() : "SYSTEM");
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(InstructionAssetVersionResponse.from(draft));
+    }
+
+    @PatchMapping("/api/v1/admin/instruction-assets/{id}/drafts")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasRole('ORG_ADMIN')")
+    @Operation(summary = "Update the current draft version")
+    public ResponseEntity<InstructionAssetVersionResponse> updateDraft(
+            @PathVariable UUID id,
+            @RequestBody CreateDraftRequest request,
+            @CurrentUser UUID userId) {
+        var draft = service.updateDraft(
+                id,
+                request.sourceType(),
+                request.sourceDetails(),
+                request.connectionConfigId(),
+                request.applicability(),
+                request.availability(),
+                request.priority(),
+                request.activationRules(),
+                userId);
+        return ResponseEntity.ok(InstructionAssetVersionResponse.from(draft));
     }
 
     @PostMapping("/api/v1/admin/instruction-assets/{id}/publish")

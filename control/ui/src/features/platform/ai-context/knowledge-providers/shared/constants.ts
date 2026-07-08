@@ -4,8 +4,7 @@
 import type { ProviderType } from '@/lib/api'
 
 export const TYPE_LABELS: Record<ProviderType, string> = {
-  MANAGED: 'Managed RAG',
-  EXTERNAL: 'External API',
+  EXTERNAL: 'External (HTTP)',
 }
 
 export const STATUS_COLORS: Record<string, string> = {

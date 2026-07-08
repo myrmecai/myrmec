@@ -94,6 +94,43 @@ public class InstructionAssetService {
         return saved;
     }
 
+    // ---- update parent ------------------------------------------------
+
+    @Transactional
+    public InstructionAsset update(UUID assetId, String name, String description, String category,
+                                   UUID actorId, String actorDisplayName) {
+        InstructionAsset asset = findById(assetId);
+
+        if (name != null && !name.isBlank() && !name.equals(asset.getName())) {
+            boolean exists = asset.getProjectId() == null
+                    ? repository.existsByScopeAndProjectIdIsNullAndName(asset.getScope(), name)
+                    : repository.existsByScopeAndProjectIdAndName(asset.getScope(), asset.getProjectId(), name);
+            if (exists) {
+                throw BadRequestException.forField("name", "DUPLICATE_CODE",
+                        "An instruction asset with this name already exists in this scope.");
+            }
+            asset.setName(name);
+        }
+
+        if (description != null) {
+            asset.setDescription(description);
+        }
+
+        if (category != null && !category.isBlank()) {
+            asset.setCategory(category);
+        }
+
+        InstructionAsset saved = repository.save(asset);
+        log.info("Updated instruction asset: {} (id: {})", saved.getName(), assetId);
+
+        auditEventService.recordEvent(
+                "instruction_asset", assetId, "UPDATED",
+                asset.getScope(), asset.getProjectId(), actorId, actorDisplayName,
+                null, null, null, Map.of("name", saved.getName()), null);
+
+        return saved;
+    }
+
     // ---- version management ------------------------------------------
 
     @Transactional
@@ -199,6 +236,31 @@ public class InstructionAssetService {
                 "instruction_asset", assetId, "DRAFT_DISCARDED",
                 asset.getScope(), asset.getProjectId(), actorId, actorDisplayName,
                 draft.getId(), null, null, null, null);
+    }
+
+    @Transactional
+    public InstructionAssetVersion updateDraft(UUID assetId, String sourceType,
+                                               Map<String, Object> sourceDetails,
+                                               UUID connectionConfigId,
+                                               Map<String, Object> applicability,
+                                               String availability,
+                                               Integer priority,
+                                               Map<String, Object> activationRules,
+                                               UUID actorId) {
+        InstructionAssetVersion draft = getDraftVersion(assetId);
+        if (draft == null) {
+            throw new BadRequestException("No draft version exists to update.");
+        }
+
+        if (sourceType != null) draft.setSourceType(sourceType);
+        if (sourceDetails != null) draft.setSourceDetails(sourceDetails);
+        if (connectionConfigId != null) draft.setConnectionConfigId(connectionConfigId);
+        if (applicability != null) draft.setApplicability(applicability);
+        if (availability != null) draft.setAvailability(availability);
+        if (priority != null) draft.setPriority(priority);
+        if (activationRules != null) draft.setActivationRules(activationRules);
+
+        return versionRepository.save(draft);
     }
 
     // ---- lifecycle ---------------------------------------------------

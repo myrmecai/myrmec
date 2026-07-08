@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
-import { useNavigate } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import { type ColumnDef } from '@tanstack/react-table'
 import { projectsApi, projectSecretsApi, globalSecretsApi, groupsApi, type Project, type CreateProjectRequest, type UpdateProjectRequest, type Secret, type CredentialType, type Group } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
@@ -27,16 +28,17 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, Pencil, Trash2, FolderOpen, FolderX, GitBranch, KeyRound, Users, Building2, ArrowRightLeft, BrainCircuit } from 'lucide-react'
+import { Plus, Pencil, Trash2, FolderOpen, FolderX, GitBranch, Building2, MoreVertical } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { dialogService } from '@/services/dialog-service'
+import DataTable2 from '@/components/data-table2/data-table2'
+import { SortedColumnHeader } from '@/components/data-table2/sorted-column-header'
 
 const GIT_COMPATIBLE_TYPES: ReadonlySet<CredentialType> = new Set<CredentialType>([
   'BEARER_TOKEN',
@@ -179,6 +181,108 @@ export function ProjectsList() {
     },
   })
 
+  const columns: ColumnDef<Project>[] = useMemo(() => [
+    {
+      accessorKey: 'name',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Name" />,
+      cell: ({ row }) => (
+        <span className="font-medium">
+          <Link to="/projects/$projectId" params={{ projectId: row.original.id }} className="hover:underline">
+            {row.original.name}
+          </Link>
+        </span>
+      ),
+    },
+    {
+      accessorKey: 'groupId',
+      header: 'Group',
+      enableSorting: false,
+      cell: ({ row }) => (
+        <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
+          <Building2 className="h-3.5 w-3.5" />
+          {groupById.get(row.original.groupId)?.name ?? '—'}
+        </span>
+      ),
+    },
+    {
+      accessorKey: 'description',
+      header: 'Description',
+      cell: ({ row }) => (
+        <span className="max-w-[300px] truncate block">
+          {row.original.description || <span className="text-muted-foreground">No description</span>}
+        </span>
+      ),
+    },
+    {
+      accessorKey: 'status',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Status" />,
+      cell: ({ row }) =>
+        row.original.status === 'ACTIVE' ? (
+          <span className="inline-flex items-center gap-1 text-green-600">
+            <FolderOpen className="h-4 w-4" />
+            Active
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-muted-foreground">
+            <FolderX className="h-4 w-4" />
+            Inactive
+          </span>
+        ),
+    },
+    {
+      accessorKey: 'createdAt',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Created" />,
+      cell: ({ row }) => new Date(row.original.createdAt).toLocaleDateString(),
+    },
+    {
+      id: 'actions',
+      header: 'Actions',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const project = row.original
+        const canTransfer =
+          isPlatformAdmin ||
+          isOrgAdmin ||
+          hasProjectRole(project.id, 'PROJECT_OWNER')
+        return (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+                <span className="sr-only">More actions</span>
+                <MoreVertical className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem asChild>
+                <Link to="/projects/$projectId" params={{ projectId: project.id }}>
+                  View
+                </Link>
+              </DropdownMenuItem>
+              {canTransfer && (
+                <DropdownMenuItem onClick={() => setMoveProject(project)}>
+                  Move to group
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={async () => {
+                const confirmed = await dialogService.showConfirmDialog({
+                  title: 'Delete Project',
+                  message: 'Are you sure you want to delete this project? This cannot be undone.',
+                  severity: 'error',
+                  type: 'warning',
+                  confirmLabel: 'Delete',
+                  cancelLabel: 'Cancel',
+                })
+                if (confirmed) deleteMutation.mutate(project.id)
+              }}>
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )
+      },
+    },
+  ], [groupById, isPlatformAdmin, isOrgAdmin, hasProjectRole, deleteMutation])
+
   if (isLoading) {
     return (
       <div className="p-8">
@@ -227,130 +331,13 @@ export function ProjectsList() {
           <CardDescription>{projects?.length || 0} projects created</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Group</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead className="w-[100px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {projects?.map((project) => {
-                const canTransfer =
-                  isPlatformAdmin ||
-                  isOrgAdmin ||
-                  hasProjectRole(project.id, 'PROJECT_OWNER')
-                return (
-                <TableRow key={project.id}>
-                  <TableCell className="font-medium">{project.name}</TableCell>
-                  <TableCell>
-                    <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
-                      <Building2 className="h-3.5 w-3.5" />
-                      {groupById.get(project.groupId)?.name ?? '—'}
-                    </span>
-                  </TableCell>
-                  <TableCell className="max-w-[300px] truncate">
-                    {project.description || <span className="text-muted-foreground">No description</span>}
-                  </TableCell>
-                  <TableCell>
-                    {project.status === 'ACTIVE' ? (
-                      <span className="inline-flex items-center gap-1 text-green-600">
-                        <FolderOpen className="h-4 w-4" />
-                        Active
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-muted-foreground">
-                        <FolderX className="h-4 w-4" />
-                        Inactive
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {new Date(project.createdAt).toLocaleDateString()}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="AI Context"
-                        onClick={() => navigate({
-                          to: '/projects/$projectId/ai-context',
-                          params: { projectId: project.id },
-                        })}
-                      >
-                        <BrainCircuit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Secrets"
-                        onClick={() => navigate({
-                          to: '/projects/$projectId/secrets',
-                          params: { projectId: project.id },
-                        })}
-                      >
-                        <KeyRound className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Members"
-                        onClick={() => navigate({
-                          to: '/projects/$projectId/members',
-                          params: { projectId: project.id },
-                        })}
-                      >
-                        <Users className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setEditProject(project)}
-                        title="Edit"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      {canTransfer && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setMoveProject(project)}
-                          title="Move to group"
-                        >
-                          <ArrowRightLeft className="h-4 w-4" />
-                        </Button>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => {
-                          if (confirm('Are you sure you want to delete this project?')) {
-                            deleteMutation.mutate(project.id)
-                          }
-                        }}
-                        title="Delete"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-                )
-              })}
-              {projects?.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
-                    No projects yet. Create your first project to get started.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          <DataTable2
+            columns={columns}
+            data={projects ?? []}
+            pagination={true}
+            loading={isLoading}
+            showRowSelection={false}
+          />
         </CardContent>
       </Card>
 

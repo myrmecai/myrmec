@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
-import { Link } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import {
-  projectsApi,
   projectMembersApi,
   type ProjectMember,
   type ProjectMemberRole,
@@ -45,7 +43,8 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Plus, Trash2, ChevronLeft, Users } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
+import { dialogService } from '@/services/dialog-service'
 
 export function ProjectMembers({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient()
@@ -56,11 +55,6 @@ export function ProjectMembers({ projectId }: { projectId: string }) {
   }, [isPlatformAdmin, isOrgAdmin, hasProjectRole, projectId])
 
   const [addOpen, setAddOpen] = useState(false)
-
-  const { data: project } = useQuery({
-    queryKey: ['projects', projectId],
-    queryFn: () => projectsApi.get(projectId),
-  })
 
   const {
     data: members,
@@ -96,50 +90,18 @@ export function ProjectMembers({ projectId }: { projectId: string }) {
   })
 
   if (isLoading) {
-    return (
-      <div className="p-8">
-        <div className="text-muted-foreground">Loading members...</div>
-      </div>
-    )
+    return <div className="text-muted-foreground">Loading members...</div>
   }
 
   if (error) {
-    return (
-      <div className="p-8">
-        <div className="text-destructive">Failed to load members</div>
-      </div>
-    )
+    return <div className="text-destructive">Failed to load members</div>
   }
 
   const projectMembers = members?.projectMembers ?? []
   const systemWideUsers = members?.systemWideUsers ?? []
 
   return (
-    <div className="p-8">
-      <div className="mb-4">
-        <Link
-          to="/projects"
-          className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ChevronLeft className="h-4 w-4 mr-1" />
-          Back to Projects
-        </Link>
-      </div>
-
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Users className="h-7 w-7" />
-            Project Members
-          </h1>
-          <p className="text-muted-foreground">
-            {project?.name
-              ? `Manage who can access project "${project.name}"`
-              : 'Manage who can access this project'}
-          </p>
-        </div>
-      </div>
-
+    <div>
       <Card className="mb-8">
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
@@ -206,10 +168,16 @@ export function ProjectMembers({ projectId }: { projectId: string }) {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => {
-                          if (confirm(`Remove ${m.email} from this project?`)) {
-                            removeMutation.mutate(m)
-                          }
+                        onClick={async () => {
+                          const confirmed = await dialogService.showConfirmDialog({
+                            title: 'Remove Member',
+                            message: `Remove ${m.email} from this project?`,
+                            severity: 'warning',
+                            type: 'warning',
+                            confirmLabel: 'Remove',
+                            cancelLabel: 'Cancel',
+                          })
+                          if (confirmed) removeMutation.mutate(m)
                         }}
                         title="Remove"
                       >

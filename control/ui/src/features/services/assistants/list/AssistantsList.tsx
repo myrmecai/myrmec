@@ -55,6 +55,7 @@ import {
   ArchiveRestore,
   MessageSquare,
 } from 'lucide-react'
+import { dialogService } from '@/services/dialog-service'
 
 export type AssistantsSearch = {
   projectId?: string
@@ -315,17 +316,16 @@ export function AssistantsList() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              onClick={() => {
-                                if (
-                                  confirm(
-                                    `Archive assistant "${a.name}"? It can be restored later.`,
-                                  )
-                                ) {
-                                  archiveMutation.mutate({
-                                    id: a.id,
-                                    archived: true,
-                                  })
-                                }
+                              onClick={async () => {
+                                const confirmed = await dialogService.showConfirmDialog({
+                                  title: 'Archive Assistant',
+                                  message: `Archive assistant "${a.name}"? It can be restored later.`,
+                                  severity: 'warning',
+                                  type: 'warning',
+                                  confirmLabel: 'Archive',
+                                  cancelLabel: 'Cancel',
+                                })
+                                if (confirmed) archiveMutation.mutate({ id: a.id, archived: true })
                               }}
                               title="Archive"
                             >

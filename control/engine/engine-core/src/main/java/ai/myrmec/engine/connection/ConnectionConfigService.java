@@ -5,11 +5,17 @@ package ai.myrmec.engine.connection;
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine.audit.AuditEventService;
+import ai.myrmec.engine.connection.dto.TestConnectionResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -196,6 +202,32 @@ public class ConnectionConfigService {
                     "URL is required at publish time.");
         }
 
+        // BR-CC-14: test_endpoint required for HTTP connections
+        if ("HTTP".equals(config.getType())) {
+            Map<String, Object> cfg = draft.getConfig();
+            String testEndpoint = cfg != null ? (String) cfg.get("testEndpoint") : null;
+            if (testEndpoint == null || testEndpoint.isBlank()) {
+                throw BadRequestException.forField("testEndpoint", "REQUIRED",
+                        "Test Endpoint is required for HTTP connections.");
+            }
+        }
+
+        // BR-CC-15: publish gate runs a server-side connectivity check
+        String fullUrl = buildTestUrl(config.getType(), draft.getUrl(), draft.getConfig());
+        try {
+            boolean connected = performConnectivityCheck(config.getType(), fullUrl);
+            if (!connected) {
+                throw BadRequestException.forField("connection", "CONNECTIVITY_CHECK_FAILED",
+                        "Connection test failed: connectivity check failed for URL " + fullUrl);
+            }
+        } catch (BadRequestException e) {
+            throw e;
+        } catch (Exception e) {
+            String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            throw BadRequestException.forField("connection", "CONNECTIVITY_CHECK_FAILED",
+                    "Connection test failed: " + errorMsg);
+        }
+
         // Archive the current published version if one exists
         ConnectionConfigVersion currentPublished = versionRepository
                 .findByConnectionConfigIdAndStatus(configId, "PUBLISHED").orElse(null);
@@ -306,12 +338,172 @@ public class ConnectionConfigService {
 
         if (url != null) {
             draft.setUrl(url);
+            // BR-CC-16: Zone 2 modification resets test status
+            draft.setTestStatus(null);
+            draft.setLastTestAt(null);
+            draft.setLastTestError(null);
         }
         if (configJson != null) {
             draft.setConfig(configJson);
+            // BR-CC-16: Zone 2 modification resets test status
+            draft.setTestStatus(null);
+            draft.setLastTestAt(null);
+            draft.setLastTestError(null);
         }
 
         return versionRepository.save(draft);
+    }
+
+    // ---- test connection --------------------------------------------
+
+    @Transactional
+    public TestConnectionResponse testConnection(UUID configId) {
+        ConnectionConfig config = findById(configId);
+
+        // Prefer Draft if exists, else Published version
+        ConnectionConfigVersion version = getDraftVersion(configId);
+        if (version == null) {
+            version = getPublishedVersion(configId);
+        }
+
+        if (version.getUrl() == null || version.getUrl().isBlank()) {
+            throw new BadRequestException("Cannot test: URL is not set on the version.");
+        }
+
+        // BR-CC-14: HTTP requires test_endpoint
+        if ("HTTP".equals(config.getType())) {
+            Map<String, Object> cfg = version.getConfig();
+            String testEndpoint = cfg != null ? (String) cfg.get("testEndpoint") : null;
+            if (testEndpoint == null || testEndpoint.isBlank()) {
+                throw new BadRequestException("Cannot test: Test Endpoint is required for HTTP connections.");
+            }
+        }
+
+        long start = System.currentTimeMillis();
+        try {
+            String fullUrl = buildTestUrl(config.getType(), version.getUrl(), version.getConfig());
+            boolean success = performConnectivityCheck(config.getType(), fullUrl);
+            long latency = System.currentTimeMillis() - start;
+
+            if (success) {
+                version.setTestStatus("SUCCESS");
+                version.setLastTestAt(Instant.now());
+                version.setLastTestError(null);
+                versionRepository.save(version);
+                return new TestConnectionResponse("SUCCESS", latency, fullUrl, true, null);
+            } else {
+                version.setTestStatus("FAILED");
+                version.setLastTestAt(Instant.now());
+                version.setLastTestError("Connection check returned non-success status.");
+                versionRepository.save(version);
+                return new TestConnectionResponse("FAILED", latency, fullUrl, null,
+                        "Connection check returned non-success status.");
+            }
+        } catch (Exception e) {
+            long latency = System.currentTimeMillis() - start;
+            String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            version.setTestStatus("FAILED");
+            version.setLastTestAt(Instant.now());
+            version.setLastTestError(errorMsg);
+            versionRepository.save(version);
+            return new TestConnectionResponse("FAILED", latency, version.getUrl(), null, errorMsg);
+        }
+    }
+
+    /**
+     * Stateless test: tests connectivity using the URL and config provided in the request body,
+     * without requiring the Draft to be saved first. Does not persist test status.
+     */
+    @Transactional
+    public TestConnectionResponse testConnectionStateless(UUID configId, String url, Map<String, Object> config) {
+        ConnectionConfig configEntity = findById(configId);
+
+        if (url == null || url.isBlank()) {
+            throw new BadRequestException("Cannot test: URL is required.");
+        }
+
+        // BR-CC-14: HTTP requires test_endpoint
+        if ("HTTP".equals(configEntity.getType())) {
+            String testEndpoint = config != null ? (String) config.get("testEndpoint") : null;
+            if (testEndpoint == null || testEndpoint.isBlank()) {
+                throw new BadRequestException("Cannot test: Test Endpoint is required for HTTP connections.");
+            }
+        }
+
+        long start = System.currentTimeMillis();
+        try {
+            String fullUrl = buildTestUrl(configEntity.getType(), url, config);
+            boolean success = performConnectivityCheck(configEntity.getType(), fullUrl);
+            long latency = System.currentTimeMillis() - start;
+
+            if (success) {
+                return new TestConnectionResponse("SUCCESS", latency, fullUrl, true, null);
+            } else {
+                return new TestConnectionResponse("FAILED", latency, fullUrl, null,
+                        "Connection check returned non-success status.");
+            }
+        } catch (Exception e) {
+            long latency = System.currentTimeMillis() - start;
+            String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            return new TestConnectionResponse("FAILED", latency, url, null, errorMsg);
+        }
+    }
+
+    private String buildTestUrl(String type, String url, Map<String, Object> config) {
+        if ("HTTP".equals(type) && config != null) {
+            String testEndpoint = (String) config.get("testEndpoint");
+            if (testEndpoint != null && !testEndpoint.isBlank()) {
+                String base = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
+                String path = testEndpoint.startsWith("/") ? testEndpoint : "/" + testEndpoint;
+                return base + path;
+            }
+        }
+        return url;
+    }
+
+    private boolean performConnectivityCheck(String type, String fullUrl) throws Exception {
+        switch (type) {
+            case "HTTP":
+            case "MANAGED_RAG": {
+                HttpClient client = HttpClient.newBuilder()
+                        .connectTimeout(Duration.ofSeconds(10))
+                        .build();
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(fullUrl))
+                        .timeout(Duration.ofSeconds(10))
+                        .GET()
+                        .build();
+                HttpResponse<Void> response = client.send(request, HttpResponse.BodyHandlers.discarding());
+                return response.statusCode() >= 200 && response.statusCode() < 300;
+            }
+            case "GIT": {
+                // Use ls-remote via ProcessBuilder
+                ProcessBuilder pb = new ProcessBuilder("git", "ls-remote", fullUrl);
+                pb.redirectErrorStream(true);
+                Process process = pb.start();
+                int exitCode = process.waitFor();
+                return exitCode == 0;
+            }
+            case "S3": {
+                // For S3, just validate the URL is reachable
+                HttpClient client = HttpClient.newBuilder()
+                        .connectTimeout(Duration.ofSeconds(10))
+                        .build();
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(fullUrl))
+                        .timeout(Duration.ofSeconds(10))
+                        .HEAD()
+                        .build();
+                HttpResponse<Void> response = client.send(request, HttpResponse.BodyHandlers.discarding());
+                return response.statusCode() >= 200 && response.statusCode() < 400;
+            }
+            case "DB": {
+                // For DB, just validate URL format (JDBC URL — no actual connection in e2e)
+                return fullUrl.startsWith("jdbc:");
+            }
+            default:
+                throw new BadRequestException("Unknown connection type: " + type);
+        }
     }
 
     // ---- delete -------------------------------------------------------

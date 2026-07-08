@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
 
-import { Link } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import {
@@ -29,6 +29,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
   Table,
   TableBody,
   TableCell,
@@ -39,33 +45,63 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ContentAreaLayout } from '@/components/content-area-layout'
-import { Plus, AlertCircle } from 'lucide-react'
+import { Plus, AlertCircle, MoreVertical } from 'lucide-react'
 import { TYPE_LABELS, STATUS_COLORS } from '../shared/constants'
+import { dialogService } from '@/services/dialog-service'
+import { knowledgeSourceApi, ApiRequestError } from '@/lib/api'
 
 export function KnowledgeProvidersList() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [createOpen, setCreateOpen] = useState(false)
 
   const { data: providers, isLoading, error } = useQuery({
     queryKey: ['knowledge-providers'],
-    queryFn: knowledgeProviderApi.list,
+    queryFn: () => knowledgeProviderApi.list(),
   })
 
   const createMutation = useMutation({
     mutationFn: knowledgeProviderApi.create,
-    onSuccess: () => {
+    onSuccess: (provider) => {
       queryClient.invalidateQueries({ queryKey: ['knowledge-providers'] })
       setCreateOpen(false)
+      // Auto-navigate to detail page (Pattern 4 §Rule 4)
+      navigate({ to: '/platform/ai-context/knowledge-providers/$id', params: { id: provider.id } })
+    },
+    onError: (error) => {
+      console.error('Create failed:', error)
     },
   })
 
   const disableMutation = useMutation({
-    mutationFn: knowledgeProviderApi.disable,
+    mutationFn: async (providerId: string) => {
+      // Fetch source count for the warning
+      const sources = await knowledgeSourceApi.listByProvider(providerId)
+      setDisableTarget({ id: providerId, sourceCount: sources.length })
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['knowledge-providers'] }),
+  })
+  const [disableTarget, setDisableTarget] = useState<{ id: string; sourceCount: number } | null>(null)
+  const confirmDisableMutation = useMutation({
+    mutationFn: (providerId: string) => knowledgeProviderApi.disable(providerId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-providers'] })
+      setDisableTarget(null)
+    },
   })
 
   const reenableMutation = useMutation({
     mutationFn: knowledgeProviderApi.reenable,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['knowledge-providers'] }),
+  })
+
+  const archiveMutation = useMutation({
+    mutationFn: knowledgeProviderApi.archive,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['knowledge-providers'] }),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: knowledgeProviderApi.delete,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['knowledge-providers'] }),
   })
 
@@ -100,7 +136,7 @@ export function KnowledgeProvidersList() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Organization Providers</CardTitle>
+          <CardTitle>Organization-Scoped Providers</CardTitle>
           <CardDescription>Knowledge providers with versioned connection configurations</CardDescription>
         </CardHeader>
         <CardContent>
@@ -116,7 +152,7 @@ export function KnowledgeProvidersList() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {providers.map((provider) => (
+                {providers.filter((p) => p.status !== 'ARCHIVED').map((provider) => (
                   <TableRow key={provider.id}>
                     <TableCell className="font-medium">
                       <Link to="/platform/ai-context/knowledge-providers/$id" params={{ id: provider.id }} className="hover:underline">
@@ -141,18 +177,37 @@ export function KnowledgeProvidersList() {
                         : '—'}
                     </TableCell>
                     <TableCell>
-                      <div className="flex gap-2">
-                        {provider.status === 'ACTIVE' && (
-                          <Button size="sm" variant="outline" onClick={() => disableMutation.mutate(provider.id)}>
-                            Disable
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+                            <span className="sr-only">More actions</span>
+                            <MoreVertical className="h-4 w-4" />
                           </Button>
-                        )}
-                        {provider.status === 'DISABLED' && (
-                          <Button size="sm" variant="outline" onClick={() => reenableMutation.mutate(provider.id)}>
-                            Re-enable
-                          </Button>
-                        )}
-                      </div>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem asChild>
+                            <Link to="/platform/ai-context/knowledge-providers/$id" params={{ id: provider.id }}>
+                              View
+                            </Link>
+                          </DropdownMenuItem>
+                          {provider.status === 'ACTIVE' && (
+                            <DropdownMenuItem onClick={() => disableMutation.mutate(provider.id)}>
+                              Disable
+                            </DropdownMenuItem>
+                          )}
+                          {provider.status === 'DISABLED' && (
+                            <DropdownMenuItem onClick={() => reenableMutation.mutate(provider.id)}>
+                              Re-enable
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem onClick={() => archiveMutation.mutate(provider.id)}>
+                            Archive
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => deleteMutation.mutate(provider.id)}>
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -169,7 +224,30 @@ export function KnowledgeProvidersList() {
         onOpenChange={setCreateOpen}
         onCreate={(data) => createMutation.mutate(data)}
         isPending={createMutation.isPending}
+        error={createMutation.error as ApiRequestError | null}
       />
+
+      {/* Disable Confirmation Dialog */}
+      {disableTarget && (
+        <Dialog open onOpenChange={(o) => { if (!o) setDisableTarget(null) }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Disable Provider</DialogTitle>
+              <DialogDescription>
+                {disableTarget.sourceCount > 0
+                  ? `Warning: ${disableTarget.sourceCount} knowledge source(s) are using this provider. Are you sure you want to disable it?`
+                  : 'Are you sure you want to disable this provider?'}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDisableTarget(null)}>Cancel</Button>
+              <Button onClick={() => confirmDisableMutation.mutate(disableTarget.id)}>
+                Disable
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
     </ContentAreaLayout>
   )
@@ -180,15 +258,17 @@ function CreateKnowledgeProviderDialog({
   onOpenChange,
   onCreate,
   isPending,
+  error,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   onCreate: (data: CreateKnowledgeProviderRequest) => void
   isPending: boolean
+  error: ApiRequestError | null
 }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [type, setType] = useState<ProviderType>('MANAGED')
+  const [type, setType] = useState<ProviderType>('EXTERNAL')
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -200,7 +280,7 @@ function CreateKnowledgeProviderDialog({
     })
     setName('')
     setDescription('')
-    setType('MANAGED')
+    setType('EXTERNAL')
   }
 
   return (
@@ -230,6 +310,16 @@ function CreateKnowledgeProviderDialog({
               </SelectContent>
             </Select>
           </div>
+          {error instanceof ApiRequestError && (() => {
+            // Try to get the most specific error message
+            const apiErr = error.error
+            if (apiErr?.details && Array.isArray(apiErr.details)) {
+              const detail = (apiErr.details as Array<{ message?: string }>).find((d) => d.message)
+              if (detail?.message) return <div className="text-sm text-destructive">{detail.message}</div>
+            }
+            if (apiErr?.message) return <div className="text-sm text-destructive">{apiErr.message}</div>
+            return null
+          })()}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" disabled={isPending || !name}>{isPending ? 'Creating...' : 'Create'}</Button>

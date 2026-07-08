@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import { type ColumnDef } from '@tanstack/react-table'
 import {
   providersApi,
   type CreateModelProviderRequest,
@@ -30,14 +31,6 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -46,6 +39,9 @@ import {
 } from '@/components/ui/select'
 import { ContentAreaLayout } from '@/components/content-area-layout'
 import { Cloud, Pencil, Plus, Server, Trash2 } from 'lucide-react'
+import { dialogService } from '@/services/dialog-service'
+import DataTable2 from '@/components/data-table2/data-table2'
+import { SortedColumnHeader } from '@/components/data-table2/sorted-column-header'
 
 const DEPLOYMENT_TYPES: DeploymentType[] = ['CLOUD', 'ON_PREMISE']
 const STATUSES: ModelStatus[] = ['ACTIVE', 'INACTIVE']
@@ -93,6 +89,103 @@ export function ProvidersList() {
     mutationFn: (code: string) => providersApi.delete(code),
     onSuccess: invalidate,
   })
+
+  const columns: ColumnDef<ModelProviderConfig>[] = useMemo(() => [
+    {
+      accessorKey: 'code',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Code" />,
+      cell: ({ row }) => <span className="font-mono text-xs">{row.original.code}</span>,
+    },
+    {
+      accessorKey: 'name',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Name" />,
+      cell: ({ row }) => <span>{row.original.name}</span>,
+    },
+    {
+      accessorKey: 'deploymentType',
+      header: 'Deployment',
+      cell: ({ row }) => (
+        <div className="flex items-center gap-1.5 text-xs">
+          {row.original.deploymentType === 'CLOUD' ? (
+            <Cloud className="h-3.5 w-3.5" />
+          ) : (
+            <Server className="h-3.5 w-3.5" />
+          )}
+          {row.original.deploymentType}
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'status',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Status" />,
+      cell: ({ row }) =>
+        row.original.status === 'ACTIVE' ? (
+          <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-700">
+            active
+          </span>
+        ) : (
+          <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
+            inactive
+          </span>
+        ),
+    },
+    {
+      accessorKey: 'isSystem',
+      header: 'System',
+      enableSorting: false,
+      cell: ({ row }) =>
+        row.original.isSystem ? (
+          <span className="text-xs px-2 py-0.5 rounded bg-blue-500/10 text-blue-700">
+            system
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">custom</span>
+        ),
+    },
+    {
+      id: 'actions',
+      header: 'Actions',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const p = row.original
+        return (
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setEditing(p)}
+              title="Edit"
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={p.isSystem}
+              onClick={async () => {
+                const confirmed = await dialogService.showConfirmDialog({
+                  title: 'Delete Provider',
+                  message: `Delete provider "${p.code}"? Only non-system providers with no attached models can be deleted.`,
+                  severity: 'error',
+                  type: 'warning',
+                  confirmLabel: 'Delete',
+                  cancelLabel: 'Cancel',
+                })
+                if (confirmed) deleteMutation.mutate(p.code)
+              }}
+              title={
+                p.isSystem
+                  ? 'System providers cannot be deleted'
+                  : 'Delete'
+              }
+            >
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+          </div>
+        )
+      },
+    },
+  ], [deleteMutation])
 
   if (isLoading) {
     return (
@@ -149,101 +242,13 @@ export function ProvidersList() {
           </Dialog>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Code</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Deployment</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>System</TableHead>
-                <TableHead className="w-[100px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {providers?.map((p) => (
-                <TableRow key={p.code}>
-                  <TableCell className="font-mono text-xs">{p.code}</TableCell>
-                  <TableCell>{p.name}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1.5 text-xs">
-                      {p.deploymentType === 'CLOUD' ? (
-                        <Cloud className="h-3.5 w-3.5" />
-                      ) : (
-                        <Server className="h-3.5 w-3.5" />
-                      )}
-                      {p.deploymentType}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    {p.status === 'ACTIVE' ? (
-                      <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-700">
-                        active
-                      </span>
-                    ) : (
-                      <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
-                        inactive
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {p.isSystem ? (
-                      <span className="text-xs px-2 py-0.5 rounded bg-blue-500/10 text-blue-700">
-                        system
-                      </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">
-                        custom
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setEditing(p)}
-                        title="Edit"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        disabled={p.isSystem}
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              `Delete provider "${p.code}"? Only non-system providers with no attached models can be deleted.`,
-                            )
-                          ) {
-                            deleteMutation.mutate(p.code)
-                          }
-                        }}
-                        title={
-                          p.isSystem
-                            ? 'System providers cannot be deleted'
-                            : 'Delete'
-                        }
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {(!providers || providers.length === 0) && (
-                <TableRow>
-                  <TableCell
-                    colSpan={6}
-                    className="text-center text-muted-foreground py-8"
-                  >
-                    No providers configured.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          <DataTable2
+            columns={columns}
+            data={providers ?? []}
+            pagination={true}
+            loading={isLoading}
+            showRowSelection={false}
+          />
         </CardContent>
       </Card>
 

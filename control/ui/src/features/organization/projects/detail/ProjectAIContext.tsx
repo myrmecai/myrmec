@@ -1,137 +1,136 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
-import { Link, useNavigate } from '@tanstack/react-router'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  projectsApi,
   instructionAssetApi,
   knowledgeProviderApi,
-  knowledgeSourceApi,
-  dataFeedApi,
 } from '@/lib/api'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { ArrowLeft, BookOpen, Database, FileSearch, Rss, Gauge } from 'lucide-react'
+import { BookOpen, Database, FileSearch } from 'lucide-react'
+import { ProjectInstructionAssets } from './ProjectInstructionAssets'
+import { ProjectKnowledgeProviders } from './ProjectKnowledgeProviders'
 
 export function ProjectAIContext({ projectId }: { projectId: string }) {
-  const navigate = useNavigate()
+  const [activeSubTab, setActiveSubTab] = useState<'assets' | 'providers' | 'sources'>('assets')
 
-  const { data: project } = useQuery({
-    queryKey: ['project', projectId],
-    queryFn: () => projectsApi.get(projectId),
+  // Fetch org-level items for the "inherited" display
+  const { data: orgAssets } = useQuery({
+    queryKey: ['instruction-assets', 'org'],
+    queryFn: () => instructionAssetApi.list(),
+  })
+  const { data: orgProviders } = useQuery({
+    queryKey: ['knowledge-providers', 'org'],
+    queryFn: () => knowledgeProviderApi.list(),
   })
 
-  const { data: instructionAssets } = useQuery({
-    queryKey: ['instruction-assets'],
-    queryFn: instructionAssetApi.list,
-  })
-
-  const { data: providers } = useQuery({
-    queryKey: ['knowledge-providers'],
-    queryFn: knowledgeProviderApi.list,
-  })
-
-  const { data: sources } = useQuery({
-    queryKey: ['knowledge-sources'],
-    queryFn: knowledgeSourceApi.list,
-  })
-
-  const { data: feeds } = useQuery({
-    queryKey: ['data-feeds'],
-    queryFn: dataFeedApi.list,
-  })
-
-  // Filter to project-scoped items
-  const projectAssets = instructionAssets?.filter((a) => a.scope === 'PROJECT' && a.projectId === projectId) ?? []
-  const projectProviders = providers?.filter((p) => p.scope === 'PROJECT' && p.projectId === projectId) ?? []
-  const projectSources = sources?.filter((s) => s.scope === 'PROJECT' && s.projectId === projectId) ?? []
-  const projectFeeds = feeds?.filter((f) => f.scope === 'PROJECT' && f.projectId === projectId) ?? []
-
-  // Inherited org-level items
-  const orgAssets = instructionAssets?.filter((a) => a.scope === 'ORGANIZATION' && a.status === 'ACTIVE') ?? []
-  const orgProviders = providers?.filter((p) => p.scope === 'ORGANIZATION' && p.status === 'ACTIVE') ?? []
-
-  const tabs = [
-    { label: 'Instruction Assets', icon: BookOpen, count: projectAssets.length, inherited: orgAssets.length, to: '/platform/ai-context/instruction-assets' },
-    { label: 'Knowledge Providers', icon: Database, count: projectProviders.length, inherited: orgProviders.length, to: '/platform/ai-context/knowledge-providers' },
-    { label: 'Knowledge Sources', icon: FileSearch, count: projectSources.length, inherited: 0, to: '/platform/ai-context/knowledge-sources' },
-    { label: 'Data Feeds', icon: Rss, count: projectFeeds.length, inherited: 0, to: '/platform/ai-context/data-feeds' },
-  ]
+  const inheritedAssets = orgAssets?.filter((a) => a.scope === 'ORGANIZATION' && a.status === 'ACTIVE') ?? []
+  const inheritedProviders = orgProviders?.filter((p) => p.scope === 'ORGANIZATION' && p.status === 'ACTIVE') ?? []
 
   return (
-    <div className="p-8 max-w-5xl">
-      <Button
-        variant="ghost"
-        size="sm"
-        className="mb-4"
-        onClick={() => navigate({ to: '/projects' })}
-      >
-        <ArrowLeft className="h-4 w-4 mr-2" />
-        Back to projects
-      </Button>
-
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">AI Context</h1>
-        <p className="text-muted-foreground">
-          {project?.name ?? 'Project'} — manage instruction assets, knowledge providers, and data feeds
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        {tabs.map((tab) => {
-          const Icon = tab.icon
-          return (
-            <Card key={tab.label}>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Icon className="h-5 w-5 text-muted-foreground" />
-                    <CardTitle className="text-base">{tab.label}</CardTitle>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {tab.inherited > 0 && (
-                      <Badge variant="outline" className="text-xs">
-                        {tab.inherited} inherited
-                      </Badge>
-                    )}
-                    <Badge variant="secondary" className="text-xs">
-                      {tab.count} project
-                    </Badge>
-                  </div>
-                </div>
-                <CardDescription>
-                  Manage project-level {tab.label.toLowerCase()} and view inherited org-level assets
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Link to={tab.to}>
-                  <Button size="sm" variant="outline">
-                    Manage →
-                  </Button>
-                </Link>
-              </CardContent>
-            </Card>
-          )
-        })}
-      </div>
-
+    <div className="space-y-4">
       <Card>
         <CardHeader>
-          <div className="flex items-center gap-2">
-            <Gauge className="h-5 w-5 text-muted-foreground" />
-            <CardTitle className="text-base">Governance Profile</CardTitle>
-          </div>
-          <CardDescription>
-            View the governance profile that controls context assembly policies for this project
-          </CardDescription>
+          <CardTitle className="text-base">AI Context</CardTitle>
+          <CardDescription>Project-scoped and inherited organization AI context resources</CardDescription>
         </CardHeader>
         <CardContent>
-          <Link to="/platform/ai-context/governance-profile">
-            <Button size="sm" variant="outline">
-              View Governance Profiles →
-            </Button>
-          </Link>
+          {/* Sub-tab headers */}
+          <div className="flex gap-4 border-b mb-4">
+            <button
+              className={`pb-2 text-sm font-medium ${activeSubTab === 'assets' ? 'border-b-2 border-primary' : 'text-muted-foreground'}`}
+              onClick={() => setActiveSubTab('assets')}
+            >Instruction Assets</button>
+            <button
+              className={`pb-2 text-sm font-medium ${activeSubTab === 'providers' ? 'border-b-2 border-primary' : 'text-muted-foreground'}`}
+              onClick={() => setActiveSubTab('providers')}
+            >Knowledge Providers</button>
+            <button
+              className={`pb-2 text-sm font-medium ${activeSubTab === 'sources' ? 'border-b-2 border-primary' : 'text-muted-foreground'}`}
+              onClick={() => setActiveSubTab('sources')}
+            >Knowledge Sources</button>
+          </div>
+
+          {/* Instruction Assets sub-tab */}
+          {activeSubTab === 'assets' && (
+            <div className="space-y-4">
+              <ProjectInstructionAssets projectId={projectId} />
+              {inheritedAssets.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <BookOpen className="h-5 w-5 text-muted-foreground" />
+                        <CardTitle className="text-base">Inherited Organization Assets</CardTitle>
+                      </div>
+                      <Badge variant="outline" className="text-xs">{inheritedAssets.length} inherited</Badge>
+                    </div>
+                    <CardDescription>Organization-level instruction assets inherited by this project</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {inheritedAssets.map((a) => (
+                        <div key={a.id} className="flex items-center justify-between text-sm">
+                          <span className="font-medium">{a.name}</span>
+                          <Badge variant="outline">{a.status}</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+
+          {/* Knowledge Providers sub-tab */}
+          {activeSubTab === 'providers' && (
+            <div className="space-y-4">
+              <ProjectKnowledgeProviders projectId={projectId} />
+              {inheritedProviders.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Database className="h-5 w-5 text-muted-foreground" />
+                        <CardTitle className="text-base">Inherited Organization Providers</CardTitle>
+                      </div>
+                      <Badge variant="outline" className="text-xs">{inheritedProviders.length} inherited</Badge>
+                    </div>
+                    <CardDescription>Organization-level knowledge providers inherited by this project</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {inheritedProviders.map((p) => (
+                        <div key={p.id} className="flex items-center justify-between text-sm">
+                          <span className="font-medium">{p.name}</span>
+                          <Badge variant="outline">{p.type}</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+
+          {/* Knowledge Sources sub-tab */}
+          {activeSubTab === 'sources' && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <FileSearch className="h-5 w-5 text-muted-foreground" />
+                  <CardTitle className="text-base">Knowledge Sources</CardTitle>
+                </div>
+                <CardDescription>Knowledge sources are managed from each provider's detail page</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground text-center py-4">
+                  Knowledge sources are linked to providers. Navigate to a provider to manage its sources.
+                </p>
+              </CardContent>
+            </Card>
+          )}
         </CardContent>
       </Card>
     </div>

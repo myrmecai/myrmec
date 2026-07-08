@@ -20,4 +20,6 @@ public interface ProjectProviderBindingRepository extends JpaRepository<ProjectP
     Optional<ProjectProviderBinding> findByProjectIdAndProviderId(UUID projectId, UUID providerId);
 
     boolean existsByProjectIdAndProviderId(UUID projectId, UUID providerId);
+
+    List<ProjectProviderBinding> findByProviderId(UUID providerId);
 }

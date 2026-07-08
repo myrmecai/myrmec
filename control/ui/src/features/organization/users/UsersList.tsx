@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { type ColumnDef } from '@tanstack/react-table'
 import {
   authProvidersApi,
   usersApi,
@@ -35,16 +36,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Plus, Pencil, Trash2, Shield, UserCheck, UserX } from 'lucide-react'
+import { dialogService } from '@/services/dialog-service'
+import DataTable2 from '@/components/data-table2/data-table2'
+import { SortedColumnHeader } from '@/components/data-table2/sorted-column-header'
 
 // All roles assignable at SYSTEM scope. PROJECT_OWNER is intentionally excluded
 // (PROJECT scope only) and is granted from the project members page.
@@ -171,6 +167,113 @@ export function UsersList() {
     },
   })
 
+  const columns: ColumnDef<User>[] = useMemo(() => [
+    {
+      accessorKey: 'name',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Name" />,
+      cell: ({ row }) => (
+        <span className="font-medium">
+          {row.original.name}
+          {row.original.isSystem && (
+            <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
+              System
+            </span>
+          )}
+        </span>
+      ),
+    },
+    {
+      accessorKey: 'email',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Email" />,
+      cell: ({ row }) => <span>{row.original.email}</span>,
+    },
+    {
+      accessorKey: 'providerCode',
+      header: 'Provider',
+      cell: ({ row }) => (
+        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-secondary">
+          {row.original.providerCode}
+        </span>
+      ),
+    },
+    {
+      accessorKey: 'isActive',
+      header: 'Status',
+      enableSorting: false,
+      cell: ({ row }) =>
+        row.original.isActive ? (
+          <span className="inline-flex items-center gap-1 text-green-600">
+            <UserCheck className="h-4 w-4" />
+            Active
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-muted-foreground">
+            <UserX className="h-4 w-4" />
+            Inactive
+          </span>
+        ),
+    },
+    {
+      id: 'roles',
+      header: 'Roles',
+      enableSorting: false,
+      cell: ({ row }) => (
+        <div className="flex flex-wrap gap-1">
+          {row.original.roles?.map((role) => (
+            <span
+              key={role.id}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-primary/10 text-primary"
+            >
+              <Shield className="h-3 w-3" />
+              {role.role}
+              {role.projectId && ` (project)`}
+            </span>
+          ))}
+        </div>
+      ),
+    },
+    {
+      id: 'actions',
+      header: 'Actions',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const user = row.original
+        return (
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setEditUser(user)}
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+            {user.isSystem ? (
+              <span className="text-xs text-muted-foreground">Protected</span>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={async () => {
+                  const confirmed = await dialogService.showConfirmDialog({
+                    title: 'Delete User',
+                    message: 'Are you sure you want to delete this user? This cannot be undone.',
+                    severity: 'error',
+                    type: 'warning',
+                    confirmLabel: 'Delete',
+                    cancelLabel: 'Cancel',
+                  })
+                  if (confirmed) deleteMutation.mutate(user.id)
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        )
+      },
+    },
+  ], [deleteMutation])
+
   if (isLoading || isProvidersLoading) {
     return (
       <div className="p-8">
@@ -219,98 +322,13 @@ export function UsersList() {
           <CardDescription>{users?.length || 0} users registered</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Provider</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Roles</TableHead>
-                <TableHead className="w-[100px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {users?.map((user) => (
-                <TableRow key={user.id}>
-                  <TableCell className="font-medium">
-                    {user.name}
-                    {user.isSystem && (
-                      <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
-                        System
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>{user.email}</TableCell>
-                  <TableCell>
-                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-secondary">
-                      {user.providerCode}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    {user.isActive ? (
-                      <span className="inline-flex items-center gap-1 text-green-600">
-                        <UserCheck className="h-4 w-4" />
-                        Active
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-muted-foreground">
-                        <UserX className="h-4 w-4" />
-                        Inactive
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {user.roles?.map((role) => (
-                        <span
-                          key={role.id}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-primary/10 text-primary"
-                        >
-                          <Shield className="h-3 w-3" />
-                          {role.role}
-                          {role.projectId && ` (project)`}
-                        </span>
-                      ))}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setEditUser(user)}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      {user.isSystem ? (
-                        <span className="text-xs text-muted-foreground">Protected</span>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => {
-                            if (confirm('Are you sure you want to delete this user?')) {
-                              deleteMutation.mutate(user.id)
-                            }
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {users?.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
-                    No users found
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          <DataTable2
+            columns={columns}
+            data={users ?? []}
+            pagination={true}
+            loading={isLoading || isProvidersLoading}
+            showRowSelection={false}
+          />
         </CardContent>
       </Card>
 

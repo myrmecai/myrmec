@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
-import { Link } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import {
-  projectsApi,
   projectSecretsApi,
   type Secret,
   type CredentialType,
@@ -44,7 +42,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus, Pencil, Trash2, ChevronLeft, KeyRound } from 'lucide-react'
+import { Plus, Pencil, Trash2 } from 'lucide-react'
+import { dialogService } from '@/services/dialog-service'
 
 export function ProjectSecrets({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient()
@@ -93,46 +92,18 @@ export function ProjectSecrets({ projectId }: { projectId: string }) {
 
   if (isLoading) {
     return (
-      <div className="p-8">
-        <div className="text-muted-foreground">Loading secrets...</div>
-      </div>
+      <div className="text-muted-foreground">Loading secrets...</div>
     )
   }
 
   if (error) {
     return (
-      <div className="p-8">
-        <div className="text-destructive">Failed to load secrets</div>
-      </div>
+      <div className="text-destructive">Failed to load secrets</div>
     )
   }
 
   return (
-    <div className="p-8">
-      <div className="mb-4">
-        <Link
-          to="/projects"
-          className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ChevronLeft className="h-4 w-4 mr-1" />
-          Back to Projects
-        </Link>
-      </div>
-
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
-            <KeyRound className="h-7 w-7" />
-            Project Secrets
-          </h1>
-          <p className="text-muted-foreground">
-            {project?.name
-              ? `Encrypted credentials for project "${project.name}"`
-              : 'Encrypted credentials for tools and integrations'}
-          </p>
-        </div>
-      </div>
-
+    <div>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
@@ -192,10 +163,16 @@ export function ProjectSecrets({ projectId }: { projectId: string }) {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => {
-                          if (confirm(`Delete secret "${secret.name}"?`)) {
-                            deleteMutation.mutate(secret.id)
-                          }
+                        onClick={async () => {
+                          const confirmed = await dialogService.showConfirmDialog({
+                            title: 'Delete Secret',
+                            message: `Delete secret "${secret.name}"? This cannot be undone.`,
+                            severity: 'error',
+                            type: 'warning',
+                            confirmLabel: 'Delete',
+                            cancelLabel: 'Cancel',
+                          })
+                          if (confirmed) deleteMutation.mutate(secret.id)
                         }}
                         title="Delete"
                       >

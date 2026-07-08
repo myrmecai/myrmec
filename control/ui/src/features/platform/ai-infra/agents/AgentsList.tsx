@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import { type ColumnDef } from '@tanstack/react-table'
 import {
   agentsApi,
   agentProfilesApi,
@@ -29,14 +30,6 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import {
   Card,
   CardContent,
   CardDescription,
@@ -58,6 +51,9 @@ import {
   Server,
 } from 'lucide-react'
 import { WORKER_STATUS_STYLES } from './shared/constants'
+import { dialogService } from '@/services/dialog-service'
+import DataTable2 from '@/components/data-table2/data-table2'
+import { SortedColumnHeader } from '@/components/data-table2/sorted-column-header'
 
 export function AgentsList() {
   const queryClient = useQueryClient()
@@ -115,6 +111,126 @@ export function AgentsList() {
     },
   })
 
+  const columns: ColumnDef<Agent>[] = useMemo(() => [
+    {
+      accessorKey: 'name',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Name" />,
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2">
+          <Bot className="h-4 w-4 text-muted-foreground" />
+          <div>
+            <div className="font-medium">{row.original.name}</div>
+            {row.original.description && (
+              <div className="text-xs text-muted-foreground truncate max-w-[200px]">
+                {row.original.description}
+              </div>
+            )}
+          </div>
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'profileName',
+      header: 'Profile',
+      cell: ({ row }) => <Badge variant="outline">{row.original.profileName || 'Unknown'}</Badge>,
+    },
+    {
+      accessorKey: 'projectName',
+      header: 'Project',
+      cell: ({ row }) =>
+        row.original.projectName ? (
+          <span className="text-sm">{row.original.projectName}</span>
+        ) : (
+          <span className="text-muted-foreground text-sm">System-wide</span>
+        ),
+    },
+    {
+      id: 'instances',
+      header: 'Instances',
+      enableSorting: false,
+      cell: ({ row }) => (
+        <div className="flex items-center gap-1">
+          <Activity className="h-3 w-3" />
+          <span className={row.original.activeInstanceCount > 0 ? 'text-green-600' : 'text-muted-foreground'}>
+            {row.original.activeInstanceCount} / {row.original.maxAgents}
+          </span>
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'status',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Status" />,
+      cell: ({ row }) =>
+        row.original.status === 'ACTIVE' ? (
+          <Badge variant="default" className="bg-green-600">Active</Badge>
+        ) : (
+          <Badge variant="secondary">Inactive</Badge>
+        ),
+    },
+    {
+      id: 'actions',
+      header: 'Actions',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const agent = row.original
+        return (
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              title="View workers"
+              onClick={() => setWorkersAgent(agent)}
+            >
+              <Server className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              title="Regenerate key"
+              onClick={async () => {
+                const confirmed = await dialogService.showConfirmDialog({
+                  title: 'Regenerate Key',
+                  message: 'Generate a new registration key? The old key will be invalidated.',
+                  severity: 'warning',
+                  type: 'warning',
+                  confirmLabel: 'Regenerate',
+                  cancelLabel: 'Cancel',
+                })
+                if (confirmed) regenerateKeyMutation.mutate(agent.id)
+              }}
+            >
+              <Key className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setEditAgent(agent)}
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={async () => {
+                const confirmed = await dialogService.showConfirmDialog({
+                  title: 'Delete Agent',
+                  message: 'Delete this agent and all its instances? This cannot be undone.',
+                  severity: 'error',
+                  type: 'warning',
+                  confirmLabel: 'Delete',
+                  cancelLabel: 'Cancel',
+                })
+                if (confirmed) deleteMutation.mutate(agent.id)
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        )
+      },
+    },
+  ], [agents, regenerateKeyMutation, deleteMutation])
+
   if (isLoading) {
     return (
       <div className="p-8">
@@ -168,111 +284,13 @@ export function AgentsList() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Profile</TableHead>
-                <TableHead>Project</TableHead>
-                <TableHead>Instances</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-[150px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {agents?.map((agent) => (
-                <TableRow key={agent.id}>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Bot className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <div className="font-medium">{agent.name}</div>
-                        {agent.description && (
-                          <div className="text-xs text-muted-foreground truncate max-w-[200px]">
-                            {agent.description}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{agent.profileName || 'Unknown'}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    {agent.projectName ? (
-                      <span className="text-sm">{agent.projectName}</span>
-                    ) : (
-                      <span className="text-muted-foreground text-sm">System-wide</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Activity className="h-3 w-3" />
-                      <span className={agent.activeInstanceCount > 0 ? 'text-green-600' : 'text-muted-foreground'}>
-                        {agent.activeInstanceCount} / {agent.maxAgents}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    {agent.status === 'ACTIVE' ? (
-                      <Badge variant="default" className="bg-green-600">Active</Badge>
-                    ) : (
-                      <Badge variant="secondary">Inactive</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="View workers"
-                        onClick={() => setWorkersAgent(agent)}
-                      >
-                        <Server className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Regenerate key"
-                        onClick={() => {
-                          if (confirm('Generate a new registration key? The old key will be invalidated.')) {
-                            regenerateKeyMutation.mutate(agent.id)
-                          }
-                        }}
-                      >
-                        <Key className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setEditAgent(agent)}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => {
-                          if (confirm('Delete this agent and all its instances?')) {
-                            deleteMutation.mutate(agent.id)
-                          }
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {agents?.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
-                    No agents configured yet. Create your first agent to get started.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          <DataTable2
+            columns={columns}
+            data={agents ?? []}
+            pagination={true}
+            loading={isLoading}
+            showRowSelection={false}
+          />
         </CardContent>
       </Card>
 

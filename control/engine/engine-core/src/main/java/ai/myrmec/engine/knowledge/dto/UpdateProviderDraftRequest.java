@@ -2,13 +2,12 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.knowledge.dto;
 
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 import java.util.Map;
+import java.util.UUID;
 
-public record CreateKnowledgeSourceRequest(
-        @NotBlank @Size(max = 100) String name,
-        @Size(max = 2000) String description,
+public record UpdateProviderDraftRequest(
+        UUID connectionConfigId,
         Map<String, Object> config) {
 }

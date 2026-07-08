@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import { type ColumnDef } from '@tanstack/react-table'
 import { groupsApi, type Group, type CreateGroupRequest } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -23,15 +24,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { Building2, Plus, Trash2 } from 'lucide-react'
+import { dialogService } from '@/services/dialog-service'
+import DataTable2 from '@/components/data-table2/data-table2'
+import { SortedColumnHeader } from '@/components/data-table2/sorted-column-header'
 
 export function GroupsList() {
   const queryClient = useQueryClient()
@@ -54,6 +50,50 @@ export function GroupsList() {
     mutationFn: (id: string) => groupsApi.delete(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['groups'] }),
   })
+
+  const columns: ColumnDef<Group>[] = useMemo(() => [
+    {
+      accessorKey: 'name',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Name" />,
+      cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+    },
+    {
+      accessorKey: 'description',
+      header: 'Description',
+      cell: ({ row }) => (
+        <span className="text-muted-foreground">{row.original.description ?? '—'}</span>
+      ),
+    },
+    {
+      id: 'actions',
+      header: 'Actions',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const g = row.original
+        return (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={async () => {
+              const confirmed = await dialogService.showConfirmDialog({
+                title: 'Delete Group',
+                message: `Delete group "${g.name}"? This cannot be undone.`,
+                severity: 'error',
+                type: 'warning',
+                confirmLabel: 'Delete',
+                cancelLabel: 'Cancel',
+              })
+              if (confirmed) deleteMutation.mutate(g.id)
+            }}
+            disabled={g.name === 'Default'}
+            title={g.name === 'Default' ? 'Default group is protected' : 'Delete'}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        )
+      },
+    },
+  ], [deleteMutation])
 
   return (
     <div className="container py-6 space-y-6">
@@ -90,54 +130,18 @@ export function GroupsList() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
-          {error && (
+          {error ? (
             <p className="text-sm text-destructive">
               Failed to load groups: {(error as Error).message}
             </p>
-          )}
-          {groups && (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead className="w-[80px]" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {groups.map((g: Group) => (
-                  <TableRow key={g.id}>
-                    <TableCell className="font-medium">{g.name}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {g.description ?? '—'}
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => {
-                          if (window.confirm(`Delete group "${g.name}"?`)) {
-                            deleteMutation.mutate(g.id)
-                          }
-                        }}
-                        disabled={g.name === 'Default'}
-                        title={g.name === 'Default' ? 'Default group is protected' : 'Delete'}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {groups.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground">
-                      No groups yet.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+          ) : (
+            <DataTable2
+              columns={columns}
+              data={groups ?? []}
+              pagination={true}
+              loading={isLoading}
+              showRowSelection={false}
+            />
           )}
         </CardContent>
       </Card>

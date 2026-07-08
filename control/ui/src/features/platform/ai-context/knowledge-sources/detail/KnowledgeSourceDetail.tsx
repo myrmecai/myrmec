@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { ContentAreaLayout } from '@/components/content-area-layout'
 import { FileSearch, PowerOff, Archive } from 'lucide-react'
 import { STATUS_COLORS } from '../shared/constants'
+import { dialogService } from '@/services/dialog-service'
 
 export function KnowledgeSourceDetail({ sourceId }: { sourceId: string }) {
   const queryClient = useQueryClient()
@@ -92,7 +93,17 @@ export function KnowledgeSourceDetail({ sourceId }: { sourceId: string }) {
           </Button>
         )}
         {source.status !== 'ARCHIVED' && (
-          <Button variant="ghost" className="text-destructive" onClick={() => { if (confirm(`Archive "${source.name}"?`)) archiveMutation.mutate() }} disabled={archiveMutation.isPending}>
+          <Button variant="ghost" className="text-destructive" onClick={async () => {
+            const confirmed = await dialogService.showConfirmDialog({
+              title: 'Archive Knowledge Source',
+              message: `Archive "${source.name}"? This can be restored later.`,
+              severity: 'warning',
+              type: 'warning',
+              confirmLabel: 'Archive',
+              cancelLabel: 'Cancel',
+            })
+            if (confirmed) archiveMutation.mutate()
+          }} disabled={archiveMutation.isPending}>
             <Archive className="h-4 w-4 mr-2" /> Archive
           </Button>
         )}

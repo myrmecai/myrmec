@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import { type ColumnDef } from '@tanstack/react-table'
 import {
   toolsApi,
   type Tool,
@@ -24,14 +25,6 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import {
   Card,
   CardContent,
   CardDescription,
@@ -49,6 +42,9 @@ import {
   ExternalLink,
   Lock,
 } from 'lucide-react'
+import { dialogService } from '@/services/dialog-service'
+import DataTable2 from '@/components/data-table2/data-table2'
+import { SortedColumnHeader } from '@/components/data-table2/sorted-column-header'
 
 const toolTypeLabels: Record<ToolType, { label: string; color: string }> = {
   SYSTEM: { label: 'System', color: 'bg-blue-100 text-blue-800' },
@@ -96,6 +92,108 @@ export function ToolsList() {
       queryClient.invalidateQueries({ queryKey: ['tools'] })
     },
   })
+
+  const columns: ColumnDef<Tool>[] = useMemo(() => [
+    {
+      accessorKey: 'name',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Tool" />,
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2">
+          {row.original.isSystem ? (
+            <span title="System tool">
+              <Lock className="h-4 w-4 text-muted-foreground" />
+            </span>
+          ) : (
+            <Wrench className="h-4 w-4 text-muted-foreground" />
+          )}
+          <div>
+            <div className="font-medium">{row.original.name}</div>
+            <div className="text-xs text-muted-foreground font-mono">{row.original.code}</div>
+            {row.original.description && (
+              <div className="text-xs text-muted-foreground truncate max-w-[300px]">
+                {row.original.description}
+              </div>
+            )}
+          </div>
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'toolType',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Type" />,
+      cell: ({ row }) => (
+        <Badge variant="outline" className={toolTypeLabels[row.original.toolType].color}>
+          {toolTypeLabels[row.original.toolType].label}
+        </Badge>
+      ),
+    },
+    {
+      accessorKey: 'status',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Status" />,
+      cell: ({ row }) => (
+        <Badge className={statusColors[row.original.status]}>
+          {row.original.status}
+        </Badge>
+      ),
+    },
+    {
+      id: 'docs',
+      header: 'Docs',
+      enableSorting: false,
+      cell: ({ row }) =>
+        row.original.docsUrl ? (
+          <a
+            href={row.original.docsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:underline flex items-center gap-1 text-sm"
+          >
+            <ExternalLink className="h-3 w-3" />
+            Docs
+          </a>
+        ) : (
+          <span className="text-muted-foreground text-sm">-</span>
+        ),
+    },
+    {
+      id: 'actions',
+      header: 'Actions',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const tool = row.original
+        return (
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setEditTool(tool)}
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+            {!tool.isSystem && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={async () => {
+                  const confirmed = await dialogService.showConfirmDialog({
+                    title: 'Delete Tool',
+                    message: 'Delete this tool? This cannot be undone.',
+                    severity: 'error',
+                    type: 'warning',
+                    confirmLabel: 'Delete',
+                    cancelLabel: 'Cancel',
+                  })
+                  if (confirmed) deleteMutation.mutate(tool.code)
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        )
+      },
+    },
+  ], [deleteMutation])
 
   if (isLoading) {
     return (
@@ -148,99 +246,13 @@ export function ToolsList() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Tool</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Docs</TableHead>
-                <TableHead className="w-[100px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {tools?.map((tool) => (
-                <TableRow key={tool.code}>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      {tool.isSystem ? (
-                        <span title="System tool">
-                          <Lock className="h-4 w-4 text-muted-foreground" />
-                        </span>
-                      ) : (
-                        <Wrench className="h-4 w-4 text-muted-foreground" />
-                      )}
-                      <div>
-                        <div className="font-medium">{tool.name}</div>
-                        <div className="text-xs text-muted-foreground font-mono">{tool.code}</div>
-                        {tool.description && (
-                          <div className="text-xs text-muted-foreground truncate max-w-[300px]">
-                            {tool.description}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className={toolTypeLabels[tool.toolType].color}>
-                      {toolTypeLabels[tool.toolType].label}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge className={statusColors[tool.status]}>
-                      {tool.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {tool.docsUrl ? (
-                      <a
-                        href={tool.docsUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:underline flex items-center gap-1 text-sm"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                        Docs
-                      </a>
-                    ) : (
-                      <span className="text-muted-foreground text-sm">-</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setEditTool(tool)}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      {!tool.isSystem && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => {
-                            if (confirm('Delete this tool?')) {
-                              deleteMutation.mutate(tool.code)
-                            }
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {tools?.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
-                    No tools registered yet.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          <DataTable2
+            columns={columns}
+            data={tools ?? []}
+            pagination={true}
+            loading={isLoading}
+            showRowSelection={false}
+          />
         </CardContent>
       </Card>
 

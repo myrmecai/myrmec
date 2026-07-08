@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+      Add test status columns to connection_config_versions (UC-018 Step 5).
+      test_status: NULL (not tested), SUCCESS, FAILED
+      last_test_at: timestamp of last test
+      last_test_error: error message if last test failed
+    -->
+    <changeSet id="20260705-01-ccv-test-status" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="connection_config_versions" columnName="test_status"/>
+            </not>
+        </preConditions>
+        <addColumn tableName="connection_config_versions">
+            <column name="test_status" type="varchar(20)"/>
+            <column name="last_test_at" type="timestamp with time zone"/>
+            <column name="last_test_error" type="text"/>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>

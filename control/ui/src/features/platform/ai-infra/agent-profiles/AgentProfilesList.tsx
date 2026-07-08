@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import { type ColumnDef } from '@tanstack/react-table'
 import {
   agentProfilesApi,
   modelsApi,
@@ -23,14 +24,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import {
   Card,
   CardContent,
@@ -58,6 +51,9 @@ import {
   Cpu,
   Wrench,
 } from 'lucide-react'
+import { dialogService } from '@/services/dialog-service'
+import DataTable2 from '@/components/data-table2/data-table2'
+import { SortedColumnHeader } from '@/components/data-table2/sorted-column-header'
 
 export function AgentProfilesList() {
   const queryClient = useQueryClient()
@@ -111,6 +107,143 @@ export function AgentProfilesList() {
     },
   })
 
+  const columns: ColumnDef<AgentProfile>[] = useMemo(() => [
+    {
+      accessorKey: 'name',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Name" />,
+      cell: ({ row }) => (
+        <div>
+          <div className="font-medium">{row.original.name}</div>
+          {row.original.description && (
+            <div className="text-xs text-muted-foreground truncate max-w-[200px]">
+              {row.original.description}
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'defaultModel',
+      header: 'Model',
+      cell: ({ row }) =>
+        row.original.defaultModel ? (
+          <Badge variant="secondary" className="text-xs font-mono">
+            {row.original.defaultModel}
+          </Badge>
+        ) : (
+          <span className="text-sm">-</span>
+        ),
+    },
+    {
+      id: 'capabilities',
+      header: 'Capabilities',
+      enableSorting: false,
+      cell: ({ row }) => (
+        <div className="flex flex-wrap gap-1 max-w-[200px]">
+          {row.original.capabilities?.slice(0, 3).map((cap) => (
+            <Badge key={cap} variant="secondary" className="text-xs">
+              <Cpu className="h-3 w-3 mr-1" />
+              {cap}
+            </Badge>
+          ))}
+          {(row.original.capabilities?.length || 0) > 3 && (
+            <Badge variant="outline" className="text-xs">
+              +{row.original.capabilities!.length - 3}
+            </Badge>
+          )}
+          {!row.original.capabilities?.length && (
+            <span className="text-muted-foreground text-sm">-</span>
+          )}
+        </div>
+      ),
+    },
+    {
+      id: 'tools',
+      header: 'Tools',
+      enableSorting: false,
+      cell: ({ row }) => (
+        <div className="flex flex-wrap gap-1 max-w-[200px]">
+          {row.original.toolCodes?.slice(0, 3).map((tool) => (
+            <Badge key={tool} variant="outline" className="text-xs">
+              <Wrench className="h-3 w-3 mr-1" />
+              {tool}
+            </Badge>
+          ))}
+          {(row.original.toolCodes?.length || 0) > 3 && (
+            <Badge variant="outline" className="text-xs">
+              +{row.original.toolCodes!.length - 3}
+            </Badge>
+          )}
+          {!row.original.toolCodes?.length && (
+            <span className="text-muted-foreground text-sm">-</span>
+          )}
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'status',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Status" />,
+      cell: ({ row }) => <StatusBadge status={row.original.status} />,
+    },
+    {
+      id: 'actions',
+      header: 'Actions',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const profile = row.original
+        return (
+          <div className="flex items-center gap-1">
+            {profile.status === 'ACTIVE' ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => deactivateMutation.mutate(profile.id)}
+                title="Deactivate"
+              >
+                <PowerOff className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => activateMutation.mutate(profile.id)}
+                title="Activate"
+              >
+                <Power className="h-4 w-4" />
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setEditProfile(profile)}
+              title="Edit"
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={async () => {
+                const confirmed = await dialogService.showConfirmDialog({
+                  title: 'Delete Agent Profile',
+                  message: 'Are you sure you want to delete this profile? This cannot be undone.',
+                  severity: 'error',
+                  type: 'warning',
+                  confirmLabel: 'Delete',
+                  cancelLabel: 'Cancel',
+                })
+                if (confirmed) deleteMutation.mutate(profile.id)
+              }}
+              title="Delete"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        )
+      },
+    },
+  ], [activateMutation, deactivateMutation, deleteMutation])
+
   if (isLoading) {
     return (
       <div className="p-8">
@@ -162,138 +295,13 @@ export function AgentProfilesList() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Model</TableHead>
-                <TableHead>Capabilities</TableHead>
-                <TableHead>Tools</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-[150px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {profiles?.map((profile) => (
-                <TableRow key={profile.id}>
-                  <TableCell className="font-medium">
-                    <div>{profile.name}</div>
-                    {profile.description && (
-                      <div className="text-xs text-muted-foreground truncate max-w-[200px]">
-                        {profile.description}
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {profile.defaultModel ? (
-                      <Badge variant="secondary" className="text-xs font-mono">
-                        {profile.defaultModel}
-                      </Badge>
-                    ) : (
-                      <span className="text-sm">-</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1 max-w-[200px]">
-                      {profile.capabilities?.slice(0, 3).map((cap) => (
-                        <Badge key={cap} variant="secondary" className="text-xs">
-                          <Cpu className="h-3 w-3 mr-1" />
-                          {cap}
-                        </Badge>
-                      ))}
-                      {(profile.capabilities?.length || 0) > 3 && (
-                        <Badge variant="outline" className="text-xs">
-                          +{profile.capabilities!.length - 3}
-                        </Badge>
-                      )}
-                      {!profile.capabilities?.length && (
-                        <span className="text-muted-foreground text-sm">-</span>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1 max-w-[200px]">
-                      {profile.toolCodes?.slice(0, 3).map((tool) => (
-                        <Badge key={tool} variant="outline" className="text-xs">
-                          <Wrench className="h-3 w-3 mr-1" />
-                          {tool}
-                        </Badge>
-                      ))}
-                      {(profile.toolCodes?.length || 0) > 3 && (
-                        <Badge variant="outline" className="text-xs">
-                          +{profile.toolCodes!.length - 3}
-                        </Badge>
-                      )}
-                      {!profile.toolCodes?.length && (
-                        <span className="text-muted-foreground text-sm">-</span>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <StatusBadge status={profile.status} />
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      {profile.status === 'ACTIVE' ? (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => deactivateMutation.mutate(profile.id)}
-                          title="Deactivate"
-                        >
-                          <PowerOff className="h-4 w-4" />
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => activateMutation.mutate(profile.id)}
-                          title="Activate"
-                        >
-                          <Power className="h-4 w-4" />
-                        </Button>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setEditProfile(profile)}
-                        title="Edit"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => {
-                          if (
-                            confirm(
-                              'Are you sure you want to delete this profile?'
-                            )
-                          ) {
-                            deleteMutation.mutate(profile.id)
-                          }
-                        }}
-                        title="Delete"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {profiles?.length === 0 && (
-                <TableRow>
-                  <TableCell
-                    colSpan={6}
-                    className="text-center text-muted-foreground"
-                  >
-                    No agent profiles configured. Create your first profile to
-                    define agent capabilities.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          <DataTable2
+            columns={columns}
+            data={profiles ?? []}
+            pagination={true}
+            loading={isLoading}
+            showRowSelection={false}
+          />
         </CardContent>
       </Card>
 

@@ -10,6 +10,8 @@ import {
   type ConnectionConfigVersion,
   type ConnectionType,
   type Secret,
+  type TestConnectionResult,
+  ApiRequestError,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -24,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Link2, Plus, Save, Send, Trash2, Power, PowerOff, Archive } from 'lucide-react'
+import { Link2, Plus, Save, Send, Trash2, Power, PowerOff, Archive, PlugZap } from 'lucide-react'
 import { dialogService } from '@/services/dialog-service'
 import { TYPE_LABELS, STATUS_COLORS, ALLOWED_SECRET_TYPES, TYPE_CONFIG_FIELDS, type ConfigField } from '../shared/constants'
 
@@ -50,6 +52,7 @@ export function ConnectionDetail({ configId, initialEdit = false }: { configId: 
 
   // Sync Zone 1 edit state when config loads
   const [zone1Editing, setZone1Editing] = useState(initialEdit)
+  const [publishError, setPublishError] = useState<string | null>(null)
   const [zone1Name, setZone1Name] = useState('')
   const [zone1Desc, setZone1Desc] = useState('')
   const [zone1SecretId, setZone1SecretId] = useState<string>('')
@@ -96,10 +99,20 @@ export function ConnectionDetail({ configId, initialEdit = false }: { configId: 
       // Remove the draft query from cache entirely so the UI switches
       // to the Published Version card without waiting for refetch.
       queryClient.removeQueries({ queryKey: ['connection-config-draft', configId] })
+      setPublishError(null)
       invalidate()
     },
     onError: (error) => {
       console.error('Publish failed:', error)
+      if (error instanceof ApiRequestError && error.error?.details) {
+        const details = error.error.details as Array<{ message?: string }>
+        const detail = details.find((d) => d.message)
+        setPublishError(detail?.message ?? 'Connection test failed')
+      } else if (error instanceof ApiRequestError && error.error?.message) {
+        setPublishError(error.error.message)
+      } else {
+        setPublishError('Connection test failed')
+      }
     },
   })
 
@@ -285,7 +298,7 @@ export function ConnectionDetail({ configId, initialEdit = false }: { configId: 
           configId={configId}
           connectionType={config.type}
           version={draftVersion!}
-          onPublish={() => publishMutation.mutate()}
+          onPublish={() => { setPublishError(null); publishMutation.mutate() }}
           onDiscard={async () => {
             const confirmed = await dialogService.showConfirmDialog({
               title: 'Discard Draft',
@@ -299,6 +312,7 @@ export function ConnectionDetail({ configId, initialEdit = false }: { configId: 
           }}
           publishing={publishMutation.isPending}
           discarding={discardMutation.isPending}
+          publishError={publishError}
         />
       )}
 
@@ -356,6 +370,7 @@ function DraftSection({
   onDiscard,
   publishing,
   discarding,
+  publishError,
 }: {
   configId: string
   connectionType: ConnectionType
@@ -364,6 +379,7 @@ function DraftSection({
   onDiscard: () => void
   publishing: boolean
   discarding: boolean
+  publishError: string | null
 }) {
   const queryClient = useQueryClient()
   const [url, setUrl] = useState(version.url ?? '')
@@ -396,6 +412,56 @@ function DraftSection({
   }, [version.config, connectionType])
 
   const fields = TYPE_CONFIG_FIELDS[connectionType] ?? []
+
+  const [testResult, setTestResult] = useState<TestConnectionResult | null>(null)
+
+  const testMutation = useMutation({
+    mutationFn: () => {
+      // Stateless test: send current URL and config from the form (no save required)
+      const configObj: Record<string, unknown> = {}
+      for (const field of fields) {
+        const v = configValues[field.key]
+        if (v != null && v !== '') {
+          if (field.type === 'number') {
+            configObj[field.key] = Number(v)
+          } else if (field.key === 'headers') {
+            try {
+              configObj[field.key] = JSON.parse(v as string)
+            } catch {
+              configObj[field.key] = v
+            }
+          } else {
+            configObj[field.key] = v
+          }
+        }
+      }
+      return connectionConfigApi.testConnection(configId, { url, config: configObj })
+    },
+    onSuccess: (result) => {
+      setTestResult(result)
+      // Invalidate draft to pick up the updated testStatus
+      queryClient.invalidateQueries({ queryKey: ['connection-config-draft', configId] })
+    },
+    onError: (error) => {
+      setTestResult({
+        status: 'FAILED',
+        latencyMs: 0,
+        endpoint: url,
+        authenticated: null,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      queryClient.invalidateQueries({ queryKey: ['connection-config-draft', configId] })
+    },
+  })
+
+  // BR-CC-14: HTTP connections need test_endpoint before [Test Connection] is enabled
+  const testEndpointValue = configValues['testEndpoint'] ?? ''
+  const testButtonDisabled =
+    connectionType === 'HTTP' && (!testEndpointValue || testEndpointValue.trim() === '')
+
+  // BR-CC-15: Publish gate is enforced server-side (connectivity check at publish time).
+  // The UI only disables Publish when required fields (URL) are missing.
+  const canPublish = url.trim() !== ''
 
   const saveMutation = useMutation({
     mutationFn: () => {
@@ -494,14 +560,95 @@ function DraftSection({
           <Button size="sm" onClick={() => saveMutation.mutate()} disabled={!dirty || saveMutation.isPending}>
             <Save className="h-4 w-4 mr-2" /> {saveMutation.isPending ? 'Saving…' : 'Save Draft'}
           </Button>
-          <Button size="sm" onClick={onPublish} disabled={publishing}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => testMutation.mutate()}
+            disabled={testButtonDisabled || testMutation.isPending}
+            title={testButtonDisabled ? 'Enter a Test Endpoint path to test this connection.' : undefined}
+          >
+            <PlugZap className="h-4 w-4 mr-2" /> {testMutation.isPending ? 'Testing…' : 'Test Connection'}
+          </Button>
+          <Button
+            size="sm"
+            onClick={onPublish}
+            disabled={publishing || !canPublish}
+          >
             <Send className="h-4 w-4 mr-2" /> {publishing ? 'Publishing…' : 'Publish'}
           </Button>
           <Button size="sm" variant="ghost" className="text-destructive" onClick={onDiscard} disabled={discarding}>
             <Trash2 className="h-4 w-4 mr-2" /> {discarding ? 'Discarding…' : 'Discard'}
           </Button>
         </div>
+
+        {/* Publish error display (BR-CC-15 server-side connectivity check) */}
+        {publishError && (
+          <div className="flex items-center gap-2 text-sm text-destructive pt-2" role="alert">
+            <span>❌ {publishError}</span>
+          </div>
+        )}
+
+        {/* Test status badge */}
+        {version.testStatus && (
+          <div className="flex items-center gap-2 text-sm">
+            {version.testStatus === 'SUCCESS' ? (
+              <Badge className="bg-green-500 text-white">Test: Connected</Badge>
+            ) : (
+              <Badge className="bg-red-500 text-white">Test: Failed</Badge>
+            )}
+            {version.lastTestAt && (
+              <span className="text-muted-foreground">
+                {new Date(version.lastTestAt).toLocaleString()}
+              </span>
+            )}
+            {version.lastTestError && (
+              <span className="text-destructive text-xs">{version.lastTestError}</span>
+            )}
+          </div>
+        )}
+
+        {/* Test result dialog */}
+        {testResult && (
+          <TestResultDialog result={testResult} onClose={() => setTestResult(null)} />
+        )}
       </CardContent>
     </Card>
+  )
+}
+
+function TestResultDialog({ result, onClose }: { result: TestConnectionResult; onClose: () => void }) {
+  const isSuccess = result.status === 'SUCCESS'
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="dialog" aria-modal="true">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle className="text-base">Test Connection Result</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <div className="flex items-center gap-2">
+            <span className="font-medium">Status:</span>
+            {isSuccess ? (
+              <Badge className="bg-green-500 text-white">✅ Connected</Badge>
+            ) : (
+              <Badge className="bg-red-500 text-white">❌ Failed</Badge>
+            )}
+          </div>
+          <div><span className="font-medium">Latency:</span> {result.latencyMs}ms</div>
+          {result.endpoint && <div><span className="font-medium">Endpoint:</span> {result.endpoint}</div>}
+          {result.authenticated != null && (
+            <div><span className="font-medium">Authenticated:</span> {result.authenticated ? 'yes' : 'no'}</div>
+          )}
+          {result.error && (
+            <div className="text-destructive"><span className="font-medium">Error:</span> {result.error}</div>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            {!isSuccess && (
+              <Button size="sm" variant="outline" onClick={onClose}>Retry</Button>
+            )}
+            <Button size="sm" onClick={onClose}>Close</Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   )
 }

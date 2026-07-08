@@ -3,7 +3,8 @@
 
 import { Link } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import { type ColumnDef } from '@tanstack/react-table'
 import {
   dataFeedApi,
   knowledgeProviderApi,
@@ -21,19 +22,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ContentAreaLayout } from '@/components/content-area-layout'
 import { Plus, AlertCircle, RefreshCw } from 'lucide-react'
 import { SYNC_STATUS_COLORS } from '../shared/constants'
+import DataTable2 from '@/components/data-table2/data-table2'
+import { SortedColumnHeader } from '@/components/data-table2/sorted-column-header'
 
 export function DataFeedsList() {
   const queryClient = useQueryClient()
@@ -61,6 +56,83 @@ export function DataFeedsList() {
     mutationFn: dataFeedApi.disable,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['data-feeds'] }),
   })
+
+  const columns: ColumnDef<NonNullable<typeof feeds>[number]>[] = useMemo(() => [
+    {
+      accessorKey: 'name',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Name" />,
+      cell: ({ row }) => (
+        <div className="font-medium">
+          <Link to="/platform/ai-context/data-feeds/$id" params={{ id: row.original.id }} className="hover:underline">
+            {row.original.name}
+          </Link>
+          {row.original.description && (
+            <span className="text-xs text-muted-foreground block">{row.original.description}</span>
+          )}
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'datasetName',
+      header: 'Dataset',
+      cell: ({ row }) => <Badge variant="outline">{row.original.datasetName}</Badge>,
+    },
+    {
+      accessorKey: 'syncStatus',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Sync Status" />,
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2">
+          <div className={`h-2 w-2 rounded-full ${SYNC_STATUS_COLORS[row.original.syncStatus] || 'bg-gray-400'}`} />
+          <span className="text-sm">{row.original.syncStatus}</span>
+          {row.original.errorMessage && (
+            <span className="text-xs text-destructive">{row.original.errorMessage}</span>
+          )}
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'lastSyncAt',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Last Sync" />,
+      cell: ({ row }) => (
+        <span className="text-sm text-muted-foreground">
+          {row.original.lastSyncAt ? new Date(row.original.lastSyncAt).toLocaleString() : '—'}
+        </span>
+      ),
+    },
+    {
+      accessorKey: 'chunkCount',
+      header: 'Chunks',
+      cell: ({ row }) => (
+        <span className="text-sm">{row.original.chunkCount != null ? row.original.chunkCount : '—'}</span>
+      ),
+    },
+    {
+      id: 'actions',
+      header: 'Actions',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const feed = row.original
+        return (
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => syncMutation.mutate(feed.id)}
+              disabled={syncMutation.isPending}
+            >
+              <RefreshCw className="h-3 w-3 mr-1" />
+              Sync
+            </Button>
+            {feed.status === 'ACTIVE' && (
+              <Button size="sm" variant="outline" onClick={() => disableMutation.mutate(feed.id)}>
+                Disable
+              </Button>
+            )}
+          </div>
+        )
+      },
+    },
+  ], [syncMutation, disableMutation])
 
   if (isLoading) {
     return <div className="flex items-center justify-center h-full"><p className="text-muted-foreground">Loading...</p></div>
@@ -97,74 +169,13 @@ export function DataFeedsList() {
           <CardDescription>Data feeds with sync scheduling and status tracking</CardDescription>
         </CardHeader>
         <CardContent>
-          {feeds && feeds.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Dataset</TableHead>
-                  <TableHead>Sync Status</TableHead>
-                  <TableHead>Last Sync</TableHead>
-                  <TableHead>Chunks</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {feeds.map((feed) => (
-                  <TableRow key={feed.id}>
-                    <TableCell className="font-medium">
-                      <Link to="/platform/ai-context/data-feeds/$id" params={{ id: feed.id }} className="hover:underline">
-                        {feed.name}
-                      </Link>
-                      {feed.description && (
-                        <span className="text-xs text-muted-foreground block">{feed.description}</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{feed.datasetName}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div className={`h-2 w-2 rounded-full ${SYNC_STATUS_COLORS[feed.syncStatus] || 'bg-gray-400'}`} />
-                        <span className="text-sm">{feed.syncStatus}</span>
-                      </div>
-                      {feed.errorMessage && (
-                        <span className="text-xs text-destructive">{feed.errorMessage}</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {feed.lastSyncAt
-                        ? new Date(feed.lastSyncAt).toLocaleString()
-                        : '—'}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {feed.chunkCount != null ? feed.chunkCount : '—'}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => syncMutation.mutate(feed.id)}
-                          disabled={syncMutation.isPending}
-                        >
-                          <RefreshCw className="h-3 w-3 mr-1" />
-                          Sync
-                        </Button>
-                        {feed.status === 'ACTIVE' && (
-                          <Button size="sm" variant="outline" onClick={() => disableMutation.mutate(feed.id)}>
-                            Disable
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <p className="text-muted-foreground text-center py-8">No data feeds yet.</p>
-          )}
+          <DataTable2
+            columns={columns}
+            data={feeds ?? []}
+            pagination={true}
+            loading={isLoading}
+            showRowSelection={false}
+          />
         </CardContent>
       </Card>
 
@@ -197,7 +208,7 @@ function CreateDataFeedDialog({
 
   const { data: providers } = useQuery({
     queryKey: ['knowledge-providers'],
-    queryFn: knowledgeProviderApi.list,
+    queryFn: () => knowledgeProviderApi.list(),
   })
 
   const publishedProviders = providers?.filter((p) => p.status === 'ACTIVE') || []

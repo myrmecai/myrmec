@@ -2,6 +2,7 @@
 // Copyright 2026 The Myrmec Authors
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
+import { type ColumnDef } from '@tanstack/react-table'
 import {
   authProvidersApi,
   type AuthProvider,
@@ -38,16 +39,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Plus, Pencil, Power, ShieldCheck } from 'lucide-react'
+import DataTable2 from '@/components/data-table2/data-table2'
+import { SortedColumnHeader } from '@/components/data-table2/sorted-column-header'
 
 export function AuthProvidersList() {
   const queryClient = useQueryClient()
@@ -85,6 +80,68 @@ export function AuthProvidersList() {
       queryClient.invalidateQueries({ queryKey: ['auth-providers'] })
     },
   })
+
+  const columns: ColumnDef<AuthProvider>[] = useMemo(() => [
+    {
+      accessorKey: 'code',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Code" />,
+      cell: ({ row }) => <span className="font-medium">{row.original.code}</span>,
+    },
+    {
+      accessorKey: 'name',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Name" />,
+      cell: ({ row }) => (
+        <span>
+          {row.original.name}
+          {row.original.isSystem && (
+            <Badge variant="secondary" className="ml-2">System</Badge>
+          )}
+        </span>
+      ),
+    },
+    {
+      accessorKey: 'providerType',
+      header: 'Type',
+      cell: ({ row }) => <span>{row.original.providerType}</span>,
+    },
+    {
+      accessorKey: 'isEnabled',
+      header: 'Status',
+      enableSorting: false,
+      cell: ({ row }) => (
+        <Badge variant={row.original.isEnabled ? 'default' : 'secondary'}>
+          {row.original.isEnabled ? 'Enabled' : 'Disabled'}
+        </Badge>
+      ),
+    },
+    {
+      id: 'actions',
+      header: 'Actions',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const provider = row.original
+        return (
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setEditProvider(provider)}
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={toggleMutation.isPending}
+              onClick={() => toggleMutation.mutate({ provider })}
+            >
+              <Power className="h-4 w-4" />
+            </Button>
+          </div>
+        )
+      },
+    },
+  ], [toggleMutation])
 
   if (isLoading) {
     return (
@@ -133,55 +190,13 @@ export function AuthProvidersList() {
           <CardDescription>{providers?.length || 0} provider(s)</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Code</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-[150px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {providers?.map((provider) => (
-                <TableRow key={provider.code}>
-                  <TableCell className="font-medium">{provider.code}</TableCell>
-                  <TableCell>
-                    {provider.name}
-                    {provider.isSystem && (
-                      <Badge variant="secondary" className="ml-2">System</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>{provider.providerType}</TableCell>
-                  <TableCell>
-                    <Badge variant={provider.isEnabled ? 'default' : 'secondary'}>
-                      {provider.isEnabled ? 'Enabled' : 'Disabled'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setEditProvider(provider)}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        disabled={toggleMutation.isPending}
-                        onClick={() => toggleMutation.mutate({ provider })}
-                      >
-                        <Power className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <DataTable2
+            columns={columns}
+            data={providers ?? []}
+            pagination={true}
+            loading={isLoading}
+            showRowSelection={false}
+          />
         </CardContent>
       </Card>
 

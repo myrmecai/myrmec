@@ -4,6 +4,10 @@ import { Outlet, useMatch } from '@tanstack/react-router'
 import { ProjectsList } from '@/features/organization/projects/list/ProjectsList'
 
 export function ProjectsLayout() {
+  const projectDetailMatch = useMatch({
+    from: '/_authenticated/projects/$projectId',
+    shouldThrow: false,
+  })
   const secretsMatch = useMatch({
     from: '/_authenticated/projects/$projectId/secrets',
     shouldThrow: false,
@@ -20,7 +24,7 @@ export function ProjectsLayout() {
     from: '/_authenticated/projects/$projectId/ai-context',
     shouldThrow: false,
   })
-  if (secretsMatch || membersMatch || chatMatch || aiContextMatch) {
+  if (projectDetailMatch || secretsMatch || membersMatch || chatMatch || aiContextMatch) {
     return <Outlet />
   }
 

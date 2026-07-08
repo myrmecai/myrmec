@@ -40,10 +40,9 @@ export interface ConfigField {
 }
 
 export const TYPE_CONFIG_FIELDS: Record<ConnectionType, ConfigField[]> = {
-  GIT: [
-    { key: 'ref', label: 'Ref', placeholder: 'main' },
-  ],
+  GIT: [],
   HTTP: [
+    { key: 'testEndpoint', label: 'Test Endpoint', placeholder: '/health', type: 'text' },
     { key: 'headers', label: 'Headers (JSON)', placeholder: '{"X-Custom":"value"}', type: 'text' },
     { key: 'timeoutMs', label: 'Timeout (ms)', placeholder: '30000', type: 'number' },
   ],
