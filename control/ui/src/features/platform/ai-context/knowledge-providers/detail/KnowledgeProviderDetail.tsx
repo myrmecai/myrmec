@@ -51,7 +51,7 @@ import {
 import { STATUS_COLORS } from '../shared/constants'
 import { dialogService } from '@/services/dialog-service'
 
-export function KnowledgeProviderDetail({ providerId }: { providerId: string }) {
+export function KnowledgeProviderDetail({ providerId, projectId }: { providerId: string; projectId?: string }) {
   const queryClient = useQueryClient()
 
   const { data: provider, isLoading } = useQuery({
@@ -179,6 +179,8 @@ export function KnowledgeProviderDetail({ providerId }: { providerId: string }) 
 
   return (
     <ContentAreaLayout maxWidth="56rem">
+      {/* Breadcrumb — hidden when rendered inside project context (projectId provided) */}
+      {!projectId && (
       <div className="flex items-center gap-2 mb-4 text-sm text-muted-foreground">
         <Link to="/platform/ai-context/knowledge-providers" className="hover:underline">
           Knowledge Providers
@@ -186,6 +188,7 @@ export function KnowledgeProviderDetail({ providerId }: { providerId: string }) 
         <span>/</span>
         <span className="text-foreground font-medium">{provider.name}</span>
       </div>
+      )}
 
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">

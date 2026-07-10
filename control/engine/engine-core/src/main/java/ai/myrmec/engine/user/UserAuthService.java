@@ -54,7 +54,7 @@ public class UserAuthService {
     /**
      * Authenticate user with email and password.
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public LoginResponse login(LoginRequest request) {
         String email = request.getEmail().toLowerCase().trim();
 

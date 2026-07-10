@@ -50,7 +50,7 @@ import {
 import { CATEGORY_LABELS, STATUS_COLORS } from '../shared/constants'
 import { dialogService } from '@/services/dialog-service'
 
-export function InstructionAssetDetail({ assetId }: { assetId: string }) {
+export function InstructionAssetDetail({ assetId, projectId }: { assetId: string; projectId?: string }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
@@ -183,7 +183,8 @@ export function InstructionAssetDetail({ assetId }: { assetId: string }) {
           <p className="text-sm">{toastMessage}</p>
         </div>
       )}
-      {/* Breadcrumb */}
+      {/* Breadcrumb — hidden when rendered inside project context (projectId provided) */}
+      {!projectId && (
       <div className="flex items-center gap-2 mb-4 text-sm text-muted-foreground">
         <Link to="/platform/ai-context/instruction-assets" className="hover:underline">
           Instruction Assets
@@ -191,6 +192,7 @@ export function InstructionAssetDetail({ assetId }: { assetId: string }) {
         <span>/</span>
         <span className="text-foreground font-medium">{asset.name}</span>
       </div>
+      )}
 
       {/* Header */}
       <div className="flex items-center justify-between mb-6">

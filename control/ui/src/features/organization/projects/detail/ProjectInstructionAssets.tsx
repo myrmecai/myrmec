@@ -82,7 +82,7 @@ export function ProjectInstructionAssets({ projectId }: { projectId: string }) {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['instruction-assets', 'project', projectId] })
       setCreateOpen(false)
-      navigate({ to: '/platform/ai-context/instruction-assets/$id', params: { id: data.id } })
+      navigate({ to: '/projects/$projectId/instruction-assets/$id', params: { projectId, id: data.id } })
     },
   })
 
@@ -135,8 +135,8 @@ export function ProjectInstructionAssets({ projectId }: { projectId: string }) {
                   <TableRow key={asset.id}>
                     <TableCell className="font-medium">
                       <Link
-                        to="/platform/ai-context/instruction-assets/$id"
-                        params={{ id: asset.id }}
+                        to="/projects/$projectId/instruction-assets/$id"
+                        params={{ projectId, id: asset.id }}
                         className="hover:underline"
                       >
                         {asset.name}
@@ -154,7 +154,7 @@ export function ProjectInstructionAssets({ projectId }: { projectId: string }) {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem asChild>
-                            <Link to="/platform/ai-context/instruction-assets/$id" params={{ id: asset.id }}>
+                            <Link to="/projects/$projectId/instruction-assets/$id" params={{ projectId, id: asset.id }}>
                               View
                             </Link>
                           </DropdownMenuItem>

@@ -128,10 +128,14 @@ public class ConversationInboundService {
             }
         }
 
-        // Fan to live viewers first — persistence below is for replay only.
-        conversationStreamBroker.broadcast(complete.getConversationId(), safeRawFrame);
+        // Persist the ASSISTANT row FIRST so the REST endpoint returns it
+        // when the UI refetches after receiving the message.complete SSE frame.
+        // Broadcasting before persistence creates a race: the UI invalidates
+        // its query cache on the SSE frame, refetches GET /messages, but the
+        // row isn't there yet.
+        UUID agentId = null;
         try {
-            UUID agentId = agentInstanceRepository.findById(agentInstanceId)
+            agentId = agentInstanceRepository.findById(agentInstanceId)
                     .map(Agent::getAgentHostId)
                     .orElse(null);
             ConversationMessage saved = conversationService.appendMessage(
@@ -152,6 +156,10 @@ public class ConversationInboundService {
             log.warn("Failed to persist message.complete from agent {}: {}",
                     agentInstanceId, e.getMessage(), e);
         }
+
+        // Fan to live viewers AFTER persistence — the UI's invalidateQueries
+        // refetch will now find the row.
+        conversationStreamBroker.broadcast(complete.getConversationId(), safeRawFrame);
 
         // §9.5 — the worker stays BOUND between turns (sticky binding). It is
         // released to IDLE only when the conversation goes IDLE/CLOSED (user

@@ -63,7 +63,7 @@ export function ProjectKnowledgeProviders({ projectId }: { projectId: string }) 
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['knowledge-providers', 'project', projectId] })
       setCreateOpen(false)
-      navigate({ to: '/platform/ai-context/knowledge-providers/$id', params: { id: data.id } })
+      navigate({ to: '/projects/$projectId/knowledge-providers/$id', params: { projectId, id: data.id } })
     },
   })
 
@@ -116,8 +116,8 @@ export function ProjectKnowledgeProviders({ projectId }: { projectId: string }) 
                   <TableRow key={provider.id}>
                     <TableCell className="font-medium">
                       <Link
-                        to="/platform/ai-context/knowledge-providers/$id"
-                        params={{ id: provider.id }}
+                        to="/projects/$projectId/knowledge-providers/$id"
+                        params={{ projectId, id: provider.id }}
                         className="hover:underline"
                       >
                         {provider.name}
@@ -135,7 +135,7 @@ export function ProjectKnowledgeProviders({ projectId }: { projectId: string }) 
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem asChild>
-                            <Link to="/platform/ai-context/knowledge-providers/$id" params={{ id: provider.id }}>
+                            <Link to="/projects/$projectId/knowledge-providers/$id" params={{ projectId, id: provider.id }}>
                               View
                             </Link>
                           </DropdownMenuItem>

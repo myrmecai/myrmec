@@ -2,9 +2,7 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.audit;
 
-import ai.myrmec.engine._system.common.JsonMapConverter;
 import jakarta.persistence.Column;
-import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -14,6 +12,8 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.util.Map;
@@ -72,15 +72,15 @@ public class AuditEvent {
     @Column(name = "reason_code", length = 50)
     private String reasonCode;
 
-    @Convert(converter = JsonMapConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "before_snapshot", columnDefinition = "jsonb")
     private Map<String, Object> beforeSnapshot;
 
-    @Convert(converter = JsonMapConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "after_snapshot", columnDefinition = "jsonb")
     private Map<String, Object> afterSnapshot;
 
-    @Convert(converter = JsonMapConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "metadata", columnDefinition = "jsonb")
     private Map<String, Object> metadata;
 
