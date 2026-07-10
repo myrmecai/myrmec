@@ -22,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -71,9 +72,26 @@ public class ConversationInboundService {
 
     /**
      * {@code message.complete} — final assistant turn. Runs the outbound
-     * secret-leak scan, fans the (possibly redacted) frame to viewers,
-     * persists the canonical ASSISTANT row for replay, then releases the
-     * worker back to the warm pool.
+     * secret-leak scan, persists the canonical ASSISTANT row, then
+     * broadcasts an <em>enriched</em> frame to SSE viewers that carries
+     * the full row (id, role, authorAgentId, createdAt, etc.) so the UI
+     * can insert it directly into its message list without a REST refetch.
+     *
+     * <h3>Design rationale (2026-07-10)</h3>
+     * <p>Previously the engine broadcast the agent's raw
+     * {@code message.complete} frame (just content + modelCode +
+     * tokenCount) and the UI called {@code invalidateQueries} to refetch
+     * {@code GET /messages}. That created a race (the row might not be
+     * committed yet) and an unnecessary network round-trip. Now the
+     * engine builds a {@code history.message}-shaped envelope from the
+     * freshly persisted row and broadcasts that — the UI inserts it
+     * directly, and {@code GET /messages} is only needed on initial page
+     * load and scrollback.</p>
+     *
+     * <p>To revert to the old behaviour: broadcast {@code safeRawFrame}
+     * (the agent's original frame) instead of the enriched frame, and
+     * restore the {@code invalidateQueries} call in the UI's
+     * {@code message.complete} handler.</p>
      */
     public void onMessageComplete(UUID agentInstanceId, JsonNode payload, String rawFrame) {
         MessageCompletePayload complete = objectMapper.convertValue(payload, MessageCompletePayload.class);
@@ -128,17 +146,15 @@ public class ConversationInboundService {
             }
         }
 
-        // Persist the ASSISTANT row FIRST so the REST endpoint returns it
-        // when the UI refetches after receiving the message.complete SSE frame.
-        // Broadcasting before persistence creates a race: the UI invalidates
-        // its query cache on the SSE frame, refetches GET /messages, but the
-        // row isn't there yet.
+        // Persist the ASSISTANT row FIRST so the enriched frame we broadcast
+        // carries the real id, createdAt, etc.
+        ConversationMessage saved = null;
         UUID agentId = null;
         try {
             agentId = agentInstanceRepository.findById(agentInstanceId)
                     .map(Agent::getAgentHostId)
                     .orElse(null);
-            ConversationMessage saved = conversationService.appendMessage(
+            saved = conversationService.appendMessage(
                     complete.getConversationId(),
                     ConversationMessage.Role.ASSISTANT,
                     safeText,
@@ -157,9 +173,22 @@ public class ConversationInboundService {
                     agentInstanceId, e.getMessage(), e);
         }
 
-        // Fan to live viewers AFTER persistence — the UI's invalidateQueries
-        // refetch will now find the row.
-        conversationStreamBroker.broadcast(complete.getConversationId(), safeRawFrame);
+        // Build an enriched frame carrying the full row so the UI can insert
+        // it directly — no REST refetch needed. Shape matches the
+        // history.message envelopes sent on SSE connect (mergeHistory on the
+        // UI side already knows how to consume them).
+        String enrichedFrame = safeRawFrame;
+        if (saved != null) {
+            try {
+                enrichedFrame = objectMapper.writeValueAsString(
+                        buildHistoryEnvelope(saved));
+            } catch (Exception ex) {
+                log.warn("Failed to serialise enriched message.complete (conv {}): {}",
+                        complete.getConversationId(), ex.getMessage());
+                // Fall through — broadcast the raw frame as a safety net.
+            }
+        }
+        conversationStreamBroker.broadcast(complete.getConversationId(), enrichedFrame);
 
         // §9.5 — the worker stays BOUND between turns (sticky binding). It is
         // released to IDLE only when the conversation goes IDLE/CLOSED (user
@@ -334,5 +363,43 @@ public class ConversationInboundService {
         }
         log.info("Agent {} requested approval on conv {} (clientId {}, persisted as {})",
                 agentInstanceId, req.getConversationId(), req.getClientRequestId(), persisted.getId());
+    }
+
+    /**
+     * Build a {@code message.complete} envelope from a freshly persisted
+     * {@link ConversationMessage} row. The payload carries the full row
+     * (id, role, createdAt, modelCode, etc.) so the UI can insert it
+     * directly into its message list via {@code mergeHistory} — no REST
+     * refetch needed. The envelope type is {@code message.complete} so
+     * the UI's existing frame handler picks it up.
+     */
+    private Map<String, Object> buildHistoryEnvelope(ConversationMessage msg) {
+        Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("conversationId", msg.getConversationId().toString());
+        payload.put("messageId", msg.getId().toString());
+        payload.put("sequenceNo", msg.getSequenceNo());
+        payload.put("role", msg.getRole() == null ? null : msg.getRole().name());
+        payload.put("content", msg.getContent());
+        if (msg.getAuthorUserId() != null) {
+            payload.put("authorUserId", msg.getAuthorUserId().toString());
+        }
+        if (msg.getAuthorAgentId() != null) {
+            payload.put("authorAgentId", msg.getAuthorAgentId().toString());
+        }
+        if (msg.getModelCode() != null) {
+            payload.put("modelCode", msg.getModelCode());
+        }
+        if (msg.getTokenCount() != null) {
+            payload.put("tokenCount", msg.getTokenCount());
+        }
+        payload.put("pinned", msg.isPinned());
+        if (msg.getCreatedAt() != null) {
+            payload.put("createdAt", msg.getCreatedAt().toString());
+        }
+
+        Map<String, Object> envelope = new java.util.HashMap<>();
+        envelope.put("type", "message.complete");
+        envelope.put("payload", payload);
+        return envelope;
     }
 }

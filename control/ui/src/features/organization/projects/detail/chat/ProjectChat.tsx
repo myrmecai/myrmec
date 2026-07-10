@@ -588,19 +588,25 @@ function ConversationView({ conversation }: { conversation: Conversation }) {
           return next
         })
       } else if (f.type === 'message.complete') {
+        // The engine now broadcasts an enriched history.message-shaped
+        // envelope carrying the full persisted row (id, role, createdAt,
+        // modelCode, etc.). Insert it directly into the cached list —
+        // no REST refetch needed. GET /messages is only used on initial
+        // page load and scrollback.
+        //
+        // To revert to the old behaviour: replace this block with
+        //   setStreaming(prev => { ... mark complete ... })
+        //   queryClient.invalidateQueries(['conversation-messages', id])
         const seq = Number(p.sequenceNo ?? 0)
-        // Mark the in-flight stream complete and refresh the persisted
-        // list — the engine will have inserted an ASSISTANT row by now.
+        queryClient.setQueryData<ConversationMessage[]>(
+          ['conversation-messages', conversation.id],
+          (current) => mergeHistory(current ?? [], p),
+        )
+        // Drop the streaming buffer entry — the REST list now has the row.
         setStreaming((prev) => {
           const next = new Map(prev)
-          const existing = next.get(seq)
-          if (existing) {
-            next.set(seq, { ...existing, complete: true })
-          }
+          next.delete(seq)
           return next
-        })
-        queryClient.invalidateQueries({
-          queryKey: ['conversation-messages', conversation.id],
         })
       } else if (f.type === 'task.cancelled') {
         // #4 — the worker acknowledged a cancel. Drop the in-flight buffer
@@ -671,25 +677,6 @@ function ConversationView({ conversation }: { conversation: Conversation }) {
       }
     }
   }, [conversation.id, queryClient])
-
-  // Once the persisted list contains the assistant row that corresponds
-  // to a buffered stream, drop the streaming entry — REST is now the
-  // source of truth.
-  useEffect(() => {
-    if (!messages || streaming.size === 0) return
-    const persistedSeqs = new Set(
-      messages.filter((m) => m.role === 'ASSISTANT').map((m) => m.sequenceNo),
-    )
-    let dirty = false
-    const next = new Map(streaming)
-    for (const seq of streaming.keys()) {
-      if (persistedSeqs.has(seq)) {
-        next.delete(seq)
-        dirty = true
-      }
-    }
-    if (dirty) setStreaming(next)
-  }, [messages, streaming])
 
   // Auto-scroll on new content — but only when the user is already at the
   // bottom, so reading scrollback isn't interrupted.
