@@ -16,11 +16,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Phase 8 &mdash; admin CRUD on {@link Quota} rows. Owns the
- * child-tightens-only invariant (Phase 8e): a project-scoped quota
- * cannot exceed its parent group's quota for the same
- * (resource, period); a user-scoped quota cannot exceed its parent
- * project's quota; etc.
+ * Budget and quota administration service. Owns the hierarchical
+ * budget invariants (Phase 8e): a CEILING at level N must not be more
+ * generous than its parent CEILING; a RESERVATION must fit within the
+ * parent CEILING's remaining shared pool.
  *
  * <p>Hierarchy parent lookup is intentionally simple in Community:
  * we don't crawl the org/group/project relationship table here, we
@@ -30,7 +29,7 @@ import java.util.UUID;
  *
  * <p>Every mutation records an audit row under action
  * {@code QUOTA_CREATED} / {@code QUOTA_UPDATED} / {@code QUOTA_DELETED}
- * so the Phase 8d UI history pane has clean data.</p>
+ * so the budget UI history pane has clean data.</p>
  */
 @Slf4j
 @Service
@@ -53,16 +52,21 @@ public class QuotaService {
 
     @Transactional
     public Quota create(Quota.Scope scope, UUID scopeId, Quota.ResourceType resource,
-                        Quota.Period period, long limitAmount, boolean enforced,
+                        Quota.Period period, long limitAmount, EnforcementMode enforcementMode,
+                        QuotaType quotaType, ServiceType serviceType, Long maxExecutionAmount,
                         Map<String, Object> tags, UUID createdBy) {
-        validateChildTightensOnly(scope, scopeId, resource, period, limitAmount);
+        validateBudgetCreateOrUpdate(scope, scopeId, resource, period, limitAmount, quotaType);
         Quota q = new Quota();
         q.setScopeType(scope);
         q.setScopeId(scopeId);
         q.setResourceType(resource);
         q.setPeriod(period);
         q.setLimitAmount(limitAmount);
-        q.setEnforced(enforced);
+        q.setQuotaType(quotaType);
+        q.setEnforcementMode(enforcementMode);
+        q.setEnforced(enforcementMode == EnforcementMode.BLOCK);
+        q.setServiceType(serviceType);
+        q.setMaxExecutionAmount(maxExecutionAmount);
         q.setTags(tags);
         q.setCreatedBy(createdBy);
         Quota saved = quotaRepository.save(q);
@@ -71,14 +75,18 @@ public class QuotaService {
     }
 
     @Transactional
-    public Quota update(UUID id, long newLimitAmount, boolean enforced, Map<String, Object> tags) {
+    public Quota update(UUID id, long newLimitAmount, EnforcementMode enforcementMode,
+                        QuotaType quotaType, Long maxExecutionAmount, Map<String, Object> tags) {
         Quota q = quotaRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Quota not found: " + id));
-        validateChildTightensOnly(q.getScopeType(), q.getScopeId(), q.getResourceType(),
-                q.getPeriod(), newLimitAmount);
+        validateBudgetCreateOrUpdate(q.getScopeType(), q.getScopeId(), q.getResourceType(),
+                q.getPeriod(), newLimitAmount, quotaType);
         recordQuotaChange(q, newLimitAmount);
         q.setLimitAmount(newLimitAmount);
-        q.setEnforced(enforced);
+        q.setEnforcementMode(enforcementMode);
+        q.setEnforced(enforcementMode == EnforcementMode.BLOCK);
+        q.setQuotaType(quotaType);
+        q.setMaxExecutionAmount(maxExecutionAmount);
         q.setTags(tags);
         Quota saved = quotaRepository.save(q);
         audit("QUOTA_UPDATED", saved);
@@ -89,8 +97,30 @@ public class QuotaService {
     public void delete(UUID id) {
         Quota q = quotaRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Quota not found: " + id));
+        if (q.getQuotaType() == QuotaType.CEILING) {
+            List<Quota> childReservations = findChildReservationsForCeiling(q);
+            if (!childReservations.isEmpty()) {
+                throw new IllegalArgumentException(String.format(
+                        "Cannot delete CEILING at %s/%s because %d child RESERVATION(s) depend on it",
+                        q.getScopeType(), q.getScopeId(), childReservations.size()));
+            }
+        }
         audit("QUOTA_DELETED", q);
         quotaRepository.delete(q);
+    }
+
+    private List<Quota> findChildReservationsForCeiling(Quota ceiling) {
+        List<Quota.Scope> childScopes = switch (ceiling.getScopeType()) {
+            case ORG -> List.of(Quota.Scope.GROUP);
+            case GROUP -> List.of(Quota.Scope.PROJECT);
+            case PROJECT -> List.of(Quota.Scope.SERVICE);
+            case SERVICE -> List.of();
+        };
+        if (childScopes.isEmpty()) {
+            return List.of();
+        }
+        return quotaRepository.findByQuotaTypeAndResourceTypeAndPeriodAndScopeTypeIn(
+                QuotaType.RESERVATION, ceiling.getResourceType(), ceiling.getPeriod(), childScopes);
     }
 
     @Transactional
@@ -135,18 +165,21 @@ public class QuotaService {
      *   <li>{@code ORG} &mdash; top of hierarchy, pass through.</li>
      * </ul>
      */
-    private void validateChildTightensOnly(Quota.Scope scope, UUID scopeId,
-                                           Quota.ResourceType resource,
-                                           Quota.Period period, long limitAmount) {
+    private void validateBudgetCreateOrUpdate(Quota.Scope scope, UUID scopeId,
+                                              Quota.ResourceType resource,
+                                              Quota.Period period, long limitAmount,
+                                              QuotaType quotaType) {
+        if (quotaType == QuotaType.RESERVATION) {
+            validateReservationFits(scope, scopeId, resource, period, limitAmount);
+            return;
+        }
         switch (scope) {
             case ORG -> {
-                // No parent to check.
+                // Top of hierarchy — no parent to check.
             }
             case SERVICE, PROJECT -> {
                 Optional<Project> project = projectRepository.findById(scopeId);
                 if (project.isEmpty()) {
-                    // Project doesn't exist yet — let the FK validation
-                    // happen at persist time; nothing for us to check.
                     return;
                 }
                 UUID groupId = project.get().getGroupId();
@@ -161,11 +194,86 @@ public class QuotaService {
         }
     }
 
+    private void validateReservationFits(Quota.Scope scope, UUID scopeId,
+                                         Quota.ResourceType resource,
+                                         Quota.Period period, long requestedAmount) {
+        if (scope == Quota.Scope.ORG) {
+            throw new IllegalArgumentException(
+                    "ORG-level RESERVATION is not allowed; create a CEILING instead");
+        }
+
+        List<Quota> parentCeilings = findParentCeilings(scope, scopeId, resource, period);
+        if (parentCeilings.isEmpty()) {
+            throw new IllegalArgumentException(String.format(
+                    "Reservations require an explicit budget at the parent scope: " +
+                            "no parent CEILING exists to reserve from for %s/%s/%s",
+                    scope, resource, period));
+        }
+
+        long alreadyReserved = quotaRepository
+                .sumReservationLimitByParent(parentCeilings.get(0).getScopeType(),
+                        parentCeilings.get(0).getScopeId(),
+                        resource, period, null);
+
+        for (Quota ceiling : parentCeilings) {
+            long remaining = ceiling.getLimitAmount() - alreadyReserved;
+            if (requestedAmount > remaining) {
+                throw new IllegalArgumentException(String.format(
+                        "Reservation %d exceeds shared pool of %d for %s/%s under %s/%s " +
+                                "(already reserved %d)",
+                        requestedAmount, remaining, resource, period,
+                        ceiling.getScopeType(), ceiling.getScopeId(), alreadyReserved));
+            }
+        }
+    }
+
+    private List<Quota> findParentCeilings(Quota.Scope scope, UUID scopeId,
+                                           Quota.ResourceType resource, Quota.Period period) {
+        return switch (scope) {
+            case ORG -> List.of();
+            case GROUP -> quotaRepository
+                    .findByScopeTypeAndResourceTypeAndPeriod(Quota.Scope.ORG, resource, period)
+                    .stream().filter(q -> q.getQuotaType() == QuotaType.CEILING).toList();
+            case PROJECT, SERVICE -> {
+                Optional<Project> project = projectRepository.findById(scopeId);
+                if (project.isEmpty()) {
+                    yield List.of();
+                }
+                UUID groupId = project.get().getGroupId();
+                List<Quota> parents = new java.util.ArrayList<>();
+                if (scope == Quota.Scope.SERVICE) {
+                    parents.addAll(quotaRepository
+                            .findByScopeTypeAndScopeIdAndResourceType(
+                                    Quota.Scope.PROJECT, scopeId, resource)
+                            .stream().filter(q -> q.getQuotaType() == QuotaType.CEILING
+                                    && q.getPeriod() == period)
+                            .toList());
+                }
+                if (groupId != null) {
+                    parents.addAll(quotaRepository
+                            .findByScopeTypeAndScopeIdAndResourceType(
+                                    Quota.Scope.GROUP, groupId, resource)
+                            .stream().filter(q -> q.getQuotaType() == QuotaType.CEILING
+                                    && q.getPeriod() == period)
+                            .toList());
+                }
+                parents.addAll(quotaRepository
+                        .findByScopeTypeAndResourceTypeAndPeriod(Quota.Scope.ORG, resource, period)
+                        .stream().filter(q -> q.getQuotaType() == QuotaType.CEILING)
+                        .toList());
+                yield parents;
+            }
+        };
+    }
+
     private void enforceCeiling(Quota.Scope childScope, Quota.Scope parentScope, UUID parentScopeId,
                                 Quota.ResourceType resource, Quota.Period period, long childLimit) {
-        List<Quota> parentQuotas = quotaRepository
-                .findByScopeTypeAndScopeIdAndResourceType(parentScope, parentScopeId, resource);
-        for (Quota parent : parentQuotas) {
+        List<Quota> parentCeilings = quotaRepository
+                .findByScopeTypeAndScopeIdAndResourceType(parentScope, parentScopeId, resource)
+                .stream()
+                .filter(q -> q.getQuotaType() == QuotaType.CEILING)
+                .toList();
+        for (Quota parent : parentCeilings) {
             if (parent.getPeriod() == period && childLimit > parent.getLimitAmount()) {
                 throw new IllegalArgumentException(String.format(
                         "Quota %s/%d exceeds parent %s ceiling of %d for %s/%s",
@@ -178,9 +286,12 @@ public class QuotaService {
     private void enforceCeilingAcrossAllOrgs(Quota.Scope childScope,
                                              Quota.ResourceType resource,
                                              Quota.Period period, long childLimit) {
-        List<Quota> orgQuotas = quotaRepository
-                .findByScopeTypeAndResourceTypeAndPeriod(Quota.Scope.ORG, resource, period);
-        for (Quota org : orgQuotas) {
+        List<Quota> orgCeilings = quotaRepository
+                .findByScopeTypeAndResourceTypeAndPeriod(Quota.Scope.ORG, resource, period)
+                .stream()
+                .filter(q -> q.getQuotaType() == QuotaType.CEILING)
+                .toList();
+        for (Quota org : orgCeilings) {
             if (childLimit > org.getLimitAmount()) {
                 throw new IllegalArgumentException(String.format(
                         "Quota %s/%d exceeds ORG ceiling of %d for %s/%s",

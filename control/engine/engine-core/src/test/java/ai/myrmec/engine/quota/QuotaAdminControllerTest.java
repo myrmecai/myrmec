@@ -1,16 +1,20 @@
 package ai.myrmec.engine.quota;
 
 import ai.myrmec.engine.IntegrationTestBase;
+import ai.myrmec.engine.group.Group;
+import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.quota.dto.CreateQuotaRequest;
 import ai.myrmec.engine.quota.dto.QuotaResponse;
 import ai.myrmec.engine.quota.dto.UpdateQuotaRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -45,9 +49,9 @@ class QuotaAdminControllerTest extends IntegrationTestBase {
                 QuotaResponse.class);
         assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(created.getBody()).isNotNull();
-        UUID id = created.getBody().getId();
+        UUID id = created.getBody().id();
         assertThat(id).isNotNull();
-        assertThat(created.getBody().getLimitAmount()).isEqualTo(100_000L);
+        assertThat(created.getBody().limitAmount()).isEqualTo(100_000L);
 
         // List filtered by scope returns our row.
         ResponseEntity<List<QuotaResponse>> listed = restTemplate.exchange(
@@ -56,7 +60,7 @@ class QuotaAdminControllerTest extends IntegrationTestBase {
                 new HttpEntity<>(adminHeaders()),
                 new ParameterizedTypeReference<List<QuotaResponse>>() {});
         assertThat(listed.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(listed.getBody()).extracting(QuotaResponse::getId).contains(id);
+        assertThat(listed.getBody()).extracting(QuotaResponse::id).contains(id);
 
         // Update limit.
         UpdateQuotaRequest updateReq = UpdateQuotaRequest.builder()
@@ -70,8 +74,8 @@ class QuotaAdminControllerTest extends IntegrationTestBase {
                 QuotaResponse.class);
         assertThat(updated.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(updated.getBody()).isNotNull();
-        assertThat(updated.getBody().getLimitAmount()).isEqualTo(250_000L);
-        assertThat(updated.getBody().isEnforced()).isFalse();
+        assertThat(updated.getBody().limitAmount()).isEqualTo(250_000L);
+        assertThat(updated.getBody().enforced()).isFalse();
 
         // Delete.
         ResponseEntity<Void> deleted = restTemplate.exchange(
@@ -112,13 +116,13 @@ class QuotaAdminControllerTest extends IntegrationTestBase {
                 .resourceType("TOKENS")
                 .period("DAILY")
                 .limitAmount(1_000L)
-                .enforced(true)
+                .enforcementMode("BLOCK")
                 .build();
         restTemplate.exchange(
                 "/api/v1/admin/quotas",
                 HttpMethod.POST,
                 new HttpEntity<>(req, adminHeaders()),
-                QuotaResponse.class);
+                Void.class);
 
         ResponseEntity<Map<String, Object>> res = restTemplate.exchange(
                 "/api/v1/admin/quotas/consumption"
@@ -131,5 +135,91 @@ class QuotaAdminControllerTest extends IntegrationTestBase {
         assertThat(res.getBody().get("blocked")).isEqualTo(false);
         assertThat(res.getBody().get("warning")).isEqualTo(true);
         assertThat(((Number) res.getBody().get("limitAmount")).longValue()).isEqualTo(1_000L);
+    }
+
+    @Test
+    void projectBudgetOwnerCanCreateAndUpdateProjectCeiling() {
+        Project project = createTestProject();
+        HttpHeaders headers = budgetOwnerHeaders(project.getId());
+
+        CreateQuotaRequest req = CreateQuotaRequest.builder()
+                .scopeType("PROJECT")
+                .scopeId(project.getId())
+                .resourceType("TOKENS")
+                .period("DAILY")
+                .limitAmount(5_000L)
+                .quotaType("CEILING")
+                .enforcementMode("BLOCK")
+                .build();
+
+        ResponseEntity<QuotaResponse> created = restTemplate.exchange(
+                "/api/v1/admin/quotas",
+                HttpMethod.POST,
+                new HttpEntity<>(req, headers),
+                QuotaResponse.class);
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        QuotaResponse body = created.getBody();
+        assertThat(body).isNotNull();
+        assertThat(body.quotaType()).isEqualTo("CEILING");
+        assertThat(body.enforcementMode()).isEqualTo("BLOCK");
+
+        UpdateQuotaRequest updateReq = UpdateQuotaRequest.builder()
+                .limitAmount(6_000L)
+                .quotaType("CEILING")
+                .enforcementMode("WARN")
+                .build();
+        ResponseEntity<QuotaResponse> updated = restTemplate.exchange(
+                "/api/v1/admin/quotas/" + body.id(),
+                HttpMethod.PUT,
+                new HttpEntity<>(updateReq, headers),
+                QuotaResponse.class);
+        assertThat(updated.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(updated.getBody()).isNotNull();
+        assertThat(updated.getBody().limitAmount()).isEqualTo(6_000L);
+        assertThat(updated.getBody().enforcementMode()).isEqualTo("WARN");
+    }
+
+    @Test
+    void nonAdminCannotCreateOrgCeiling() {
+        Project project = createTestProject();
+        HttpHeaders headers = budgetOwnerHeaders(project.getId());
+
+        CreateQuotaRequest req = CreateQuotaRequest.builder()
+                .scopeType("ORG")
+                .scopeId(UUID.randomUUID())
+                .resourceType("TOKENS")
+                .period("DAILY")
+                .limitAmount(1_000L)
+                .quotaType("CEILING")
+                .enforcementMode("BLOCK")
+                .build();
+
+        ResponseEntity<QuotaResponse> created = restTemplate.exchange(
+                "/api/v1/admin/quotas",
+                HttpMethod.POST,
+                new HttpEntity<>(req, headers),
+                QuotaResponse.class);
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    private Project createTestProject() {
+        Project project = new Project();
+        project.setName("Quota Test Project " + UUID.randomUUID());
+        project.setGroupId(Group.DEFAULT_GROUP_ID);
+        project.setCreatedAt(Instant.now());
+        project.setUpdatedAt(Instant.now());
+        return projectRepository.save(project);
+    }
+
+    private HttpHeaders budgetOwnerHeaders(UUID projectId) {
+        String token = jwtTokenProvider.generateUserAccessToken(
+                TEST_ADMIN_ID,
+                "Budget Owner",
+                "budget@e2e-test.local",
+                List.of("proj:" + projectId + ":BUDGET_OWNER"));
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(token);
+        headers.set("Content-Type", "application/json");
+        return headers;
     }
 }

@@ -37,7 +37,7 @@ class QuotaServiceTest extends IntegrationTestBase {
         Quota q = quotaService.create(
                 Quota.Scope.PROJECT, projectId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
-                500L, true, null, null);
+                500L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null);
 
         assertThat(q.getId()).isNotNull();
         assertThat(q.getLimitAmount()).isEqualTo(500L);
@@ -55,9 +55,10 @@ class QuotaServiceTest extends IntegrationTestBase {
         Quota q = quotaService.create(
                 Quota.Scope.PROJECT, projectId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
-                500L, true, null, null);
+                500L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null);
 
-        Quota updated = quotaService.update(q.getId(), 1000L, false, null);
+        Quota updated = quotaService.update(q.getId(), 1000L, EnforcementMode.TELEMETRY,
+                QuotaType.CEILING, null, null);
         assertThat(updated.getLimitAmount()).isEqualTo(1000L);
         assertThat(updated.isEnforced()).isFalse();
 
@@ -73,7 +74,7 @@ class QuotaServiceTest extends IntegrationTestBase {
         Quota q = quotaService.create(
                 Quota.Scope.PROJECT, projectId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
-                500L, true, null, null);
+                500L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null);
 
         quotaService.delete(q.getId());
 
@@ -98,20 +99,20 @@ class QuotaServiceTest extends IntegrationTestBase {
         quotaService.create(
                 Quota.Scope.GROUP, Group.DEFAULT_GROUP_ID,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
-                500L, true, null, null);
+                500L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null);
 
         // 400 under the 500 cap — allowed.
         Quota allowed = quotaService.create(
                 Quota.Scope.PROJECT, project.getId(),
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
-                400L, true, null, null);
+                400L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null);
         assertThat(allowed.getLimitAmount()).isEqualTo(400L);
 
         // 600 over the 500 cap — rejected.
         assertThatThrownBy(() -> quotaService.create(
                 Quota.Scope.PROJECT, project.getId(),
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
-                600L, true, null, null))
+                600L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("exceeds parent");
     }
@@ -122,13 +123,13 @@ class QuotaServiceTest extends IntegrationTestBase {
         quotaService.create(
                 Quota.Scope.ORG, orgId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
-                1_000L, true, null, null);
+                1_000L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null);
 
         // Group quota of 2000 exceeds the ORG ceiling of 1000.
         assertThatThrownBy(() -> quotaService.create(
                 Quota.Scope.GROUP, UUID.randomUUID(),
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
-                2_000L, true, null, null))
+                2_000L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("ORG ceiling");
     }
@@ -139,7 +140,7 @@ class QuotaServiceTest extends IntegrationTestBase {
         Quota q = quotaService.create(
                 Quota.Scope.ORG, UUID.randomUUID(),
                 Quota.ResourceType.COST_USD_CENTS, Quota.Period.MONTHLY_CALENDAR,
-                10_000_000L, true, null, null);
+                10_000_000L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null);
         assertThat(q.getLimitAmount()).isEqualTo(10_000_000L);
     }
 
@@ -149,7 +150,7 @@ class QuotaServiceTest extends IntegrationTestBase {
         Quota q = quotaService.create(
                 Quota.Scope.PROJECT, projectId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
-                500L, true, null, null);
+                500L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null);
 
         UUID pausedBy = UUID.randomUUID();
         Quota paused = quotaService.pause(q.getId(), pausedBy);
@@ -169,7 +170,7 @@ class QuotaServiceTest extends IntegrationTestBase {
         Quota q = quotaService.create(
                 Quota.Scope.PROJECT, projectId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
-                500L, true, null, null);
+                500L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null);
 
         UUID pausedBy = UUID.randomUUID();
         quotaService.pause(q.getId(), pausedBy);
@@ -192,13 +193,24 @@ class QuotaServiceTest extends IntegrationTestBase {
         Quota q = quotaService.create(
                 Quota.Scope.PROJECT, projectId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
-                500L, true, null, null);
+                500L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null);
 
-        quotaService.update(q.getId(), 1000L, true, null);
+        quotaService.update(q.getId(), 1000L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null);
 
         long changeAudits = auditEventRepository.findAll().stream()
                 .filter(r -> "QUOTA_LIMIT_CHANGED".equals(r.getEventType()))
                 .count();
         assertThat(changeAudits).isEqualTo(1L);
+    }
+
+    @Test
+    void reservationRequiresExplicitParentBudget() {
+        UUID projectId = UUID.randomUUID();
+        assertThatThrownBy(() -> quotaService.create(
+                Quota.Scope.SERVICE, projectId, Quota.ResourceType.COST_USD_CENTS,
+                Quota.Period.MONTHLY_CALENDAR, 1_000L, EnforcementMode.BLOCK,
+                QuotaType.RESERVATION, ServiceType.WORKFLOW, null, null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Reservations require an explicit budget at the parent scope");
     }
 }

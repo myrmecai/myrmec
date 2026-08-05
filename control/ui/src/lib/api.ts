@@ -1326,13 +1326,8 @@ export interface GovernanceProfile {
   code: string
   name: string
   description: string | null
-  isBuiltIn: boolean
-  isSystem: boolean
   isCurrentDefault: boolean
-  policies: Record<string, unknown>
   groups: FeatureGroupResponse[]
-  createdAt: string
-  updatedAt: string
 }
 
 export interface ProductFeatureResponse {
@@ -2160,9 +2155,12 @@ export const auditLogApi = {
 
 // ==================== Quotas (Phase 8d) ====================
 
-export type QuotaScope = 'ORG' | 'GROUP' | 'PROJECT' | 'USER'
+export type QuotaScope = 'ORG' | 'GROUP' | 'PROJECT' | 'SERVICE'
 export type QuotaResourceType = 'TOKENS' | 'COST_USD_CENTS'
 export type QuotaPeriod = 'DAILY' | 'MONTHLY_CALENDAR' | 'LIFETIME'
+export type QuotaType = 'CEILING' | 'RESERVATION'
+export type EnforcementMode = 'TELEMETRY' | 'WARN' | 'BLOCK'
+export type QuotaServiceType = 'WORKFLOW' | 'CONVERSATIONAL'
 
 export interface Quota {
   id: string
@@ -2172,6 +2170,10 @@ export interface Quota {
   period: QuotaPeriod
   limitAmount: number
   enforced: boolean
+  quotaType: QuotaType
+  enforcementMode: EnforcementMode
+  serviceType: QuotaServiceType | null
+  maxExecutionAmount: number | null
   tags: Record<string, unknown> | null
   createdBy: string | null
   createdAt: string
@@ -2184,13 +2186,20 @@ export interface CreateQuotaRequest {
   resourceType: QuotaResourceType
   period: QuotaPeriod
   limitAmount: number
-  enforced: boolean
+  enforced?: boolean
+  quotaType?: QuotaType
+  enforcementMode?: EnforcementMode
+  serviceType?: QuotaServiceType
+  maxExecutionAmount?: number
   tags?: Record<string, unknown> | null
 }
 
 export interface UpdateQuotaRequest {
   limitAmount: number
-  enforced: boolean
+  enforced?: boolean
+  quotaType?: QuotaType
+  enforcementMode?: EnforcementMode
+  maxExecutionAmount?: number
   tags?: Record<string, unknown> | null
 }
 
@@ -2236,6 +2245,102 @@ export const quotasApi = {
       amount: String(amount),
     })
     return api.get<QuotaConsumption>(`/admin/quotas/consumption?${params.toString()}`)
+  },
+}
+
+// ==================== Budget Dashboard (Phase 8d) ====================
+
+export interface BudgetTreeNode {
+  id: string
+  scopeType: QuotaScope
+  scopeId: string
+  name: string
+  resourceType: QuotaResourceType
+  period: QuotaPeriod
+  effectiveLimit: number | null
+  consumed: number | null
+  quotaType: QuotaType | null
+  enforcementMode: EnforcementMode | null
+  paused: boolean
+  children: BudgetTreeNode[]
+}
+
+export interface DashboardResponse {
+  tree: BudgetTreeNode[]
+}
+
+export interface SharedPool {
+  totalLimit: number
+  reservedAmount: number
+  sharedAmount: number
+  consumedInShared: number
+}
+
+export interface EffectiveQuota {
+  id: string
+  scopeType: QuotaScope
+  scopeId: string
+  name: string
+  resourceType: QuotaResourceType
+  period: QuotaPeriod
+  ownLimit: number | null
+  inheritedLimit: number | null
+  effectiveLimit: number | null
+  quotaType: QuotaType | null
+  enforcementMode: EnforcementMode | null
+  consumed: number | null
+  remaining: number | null
+  atRisk: boolean
+  exceeded: boolean
+  paused: boolean
+}
+
+export interface ProjectServiceBudgetsResponse {
+  projectId: string
+  resourceType: QuotaResourceType
+  period: QuotaPeriod
+  sharedPool: SharedPool
+  serviceBudgets: EffectiveQuota[]
+}
+
+export interface EffectiveQuotasResponse {
+  quotas: EffectiveQuota[]
+}
+
+export const budgetsApi = {
+  dashboard: (resourceType: QuotaResourceType, period: QuotaPeriod) => {
+    const params = new URLSearchParams({ resourceType, period })
+    return api.get<DashboardResponse>(`/budgets/dashboard?${params.toString()}`)
+  },
+  projectServices: (
+    projectId: string,
+    resourceType: QuotaResourceType,
+    period: QuotaPeriod,
+  ) => {
+    const params = new URLSearchParams({ resourceType, period })
+    return api.get<ProjectServiceBudgetsResponse>(
+      `/budgets/projects/${projectId}/services?${params.toString()}`,
+    )
+  },
+  projectEffectiveQuotas: (
+    projectId: string,
+    resourceType: QuotaResourceType,
+    period: QuotaPeriod,
+  ) => {
+    const params = new URLSearchParams({ resourceType, period })
+    return api.get<EffectiveQuotasResponse>(
+      `/budgets/projects/${projectId}/effective-quotas?${params.toString()}`,
+    )
+  },
+  groupEffectiveQuotas: (
+    groupId: string,
+    resourceType: QuotaResourceType,
+    period: QuotaPeriod,
+  ) => {
+    const params = new URLSearchParams({ resourceType, period })
+    return api.get<EffectiveQuotasResponse>(
+      `/budgets/groups/${groupId}/effective-quotas?${params.toString()}`,
+    )
   },
 }
 

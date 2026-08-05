@@ -1,8 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+
 package ai.myrmec.engine.quota.dto;
 
 import ai.myrmec.engine.quota.Quota;
-import lombok.Builder;
-import lombok.Value;
 
 import java.time.Instant;
 import java.util.Map;
@@ -11,35 +12,40 @@ import java.util.UUID;
 /**
  * Phase 8d &mdash; read-side projection of a {@link Quota}.
  */
-@Value
-@Builder
-public class QuotaResponse {
-
-    UUID id;
-    String scopeType;
-    UUID scopeId;
-    String resourceType;
-    String period;
-    long limitAmount;
-    boolean enforced;
-    Map<String, Object> tags;
-    UUID createdBy;
-    Instant createdAt;
-    Instant updatedAt;
+public record QuotaResponse(
+        UUID id,
+        String scopeType,
+        UUID scopeId,
+        String resourceType,
+        String period,
+        long limitAmount,
+        boolean enforced,
+        String quotaType,
+        String enforcementMode,
+        String serviceType,
+        Long maxExecutionAmount,
+        Map<String, Object> tags,
+        UUID createdBy,
+        Instant createdAt,
+        Instant updatedAt
+) {
 
     public static QuotaResponse from(Quota q) {
-        return QuotaResponse.builder()
-                .id(q.getId())
-                .scopeType(q.getScopeType().name())
-                .scopeId(q.getScopeId())
-                .resourceType(q.getResourceType().name())
-                .period(q.getPeriod().name())
-                .limitAmount(q.getLimitAmount())
-                .enforced(q.isEnforced())
-                .tags(q.getTags())
-                .createdBy(q.getCreatedBy())
-                .createdAt(q.getCreatedAt())
-                .updatedAt(q.getUpdatedAt())
-                .build();
+        return new QuotaResponse(
+                q.getId(),
+                q.getScopeType().name(),
+                q.getScopeId(),
+                q.getResourceType().name(),
+                q.getPeriod().name(),
+                q.getLimitAmount(),
+                q.isEnforced(),
+                q.getQuotaType().name(),
+                q.getEnforcementMode().name(),
+                q.getServiceType() != null ? q.getServiceType().name() : null,
+                q.getMaxExecutionAmount(),
+                q.getTags(),
+                q.getCreatedBy(),
+                q.getCreatedAt(),
+                q.getUpdatedAt());
     }
 }

@@ -1,6 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+
 package ai.myrmec.engine.quota;
 
 import ai.myrmec.engine.IntegrationTestBase;
+import ai.myrmec.engine.group.Group;
+import ai.myrmec.engine.group.GroupRepository;
+import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.project.ProjectRepository;
 import ai.myrmec.engine.spi.quota.QuotaDecision;
 import ai.myrmec.engine.spi.quota.QuotaResourceType;
 import ai.myrmec.engine.spi.quota.QuotaScope;
@@ -24,6 +31,12 @@ class BasicQuotaPolicyEngineTest extends IntegrationTestBase {
     @Autowired
     private QuotaService quotaService;
 
+    @Autowired
+    private ProjectRepository projectRepository;
+
+    @Autowired
+    private GroupRepository groupRepository;
+
     @Test
     void noQuotaRow_returnsUnconstrained() {
         UUID projectId = UUID.randomUUID();
@@ -39,7 +52,7 @@ class BasicQuotaPolicyEngineTest extends IntegrationTestBase {
         quotaService.create(
                 Quota.Scope.PROJECT, projectId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
-                1_000L, true, null, null);
+                1_000L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, TEST_ADMIN_ID);
 
         QuotaDecision before = engine.check(QuotaScope.PROJECT, projectId, QuotaResourceType.TOKENS, 100);
         assertThat(before.isBlocked()).isFalse();
@@ -60,7 +73,7 @@ class BasicQuotaPolicyEngineTest extends IntegrationTestBase {
         quotaService.create(
                 Quota.Scope.PROJECT, projectId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
-                1_000L, true, null, null);
+                1_000L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, TEST_ADMIN_ID);
         engine.recordConsumption(QuotaScope.PROJECT, projectId, QuotaResourceType.TOKENS, 750);
 
         // Projected = 750 + 50 = 800 == 80% of 1000.
@@ -76,7 +89,7 @@ class BasicQuotaPolicyEngineTest extends IntegrationTestBase {
         quotaService.create(
                 Quota.Scope.PROJECT, projectId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
-                100L, true, null, null);
+                100L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, TEST_ADMIN_ID);
         engine.recordConsumption(QuotaScope.PROJECT, projectId, QuotaResourceType.TOKENS, 80);
 
         QuotaDecision d = engine.check(QuotaScope.PROJECT, projectId, QuotaResourceType.TOKENS, 50);
@@ -92,7 +105,7 @@ class BasicQuotaPolicyEngineTest extends IntegrationTestBase {
         quotaService.create(
                 Quota.Scope.PROJECT, projectId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
-                100L, false /* enforced=false */, null, null);
+                100L, EnforcementMode.TELEMETRY, QuotaType.CEILING, null, null, null, TEST_ADMIN_ID);
         engine.recordConsumption(QuotaScope.PROJECT, projectId, QuotaResourceType.TOKENS, 200);
 
         QuotaDecision d = engine.check(QuotaScope.PROJECT, projectId, QuotaResourceType.TOKENS, 50);
@@ -101,12 +114,27 @@ class BasicQuotaPolicyEngineTest extends IntegrationTestBase {
     }
 
     @Test
+    void warnMode_reportsWarningButDoesNotBlock() {
+        UUID projectId = UUID.randomUUID();
+        quotaService.create(
+                Quota.Scope.PROJECT, projectId,
+                Quota.ResourceType.TOKENS, Quota.Period.DAILY,
+                100L, EnforcementMode.WARN, QuotaType.CEILING, null, null, null, TEST_ADMIN_ID);
+        engine.recordConsumption(QuotaScope.PROJECT, projectId, QuotaResourceType.TOKENS, 150);
+
+        QuotaDecision d = engine.check(QuotaScope.PROJECT, projectId, QuotaResourceType.TOKENS, 50);
+        assertThat(d.isBlocked()).isFalse();
+        assertThat(d.isWarning()).isTrue();
+        assertThat(d.getRemainingAmount()).isEqualTo(0L);
+    }
+
+    @Test
     void recordConsumption_isAdditive_perPeriod() {
         UUID projectId = UUID.randomUUID();
         quotaService.create(
                 Quota.Scope.PROJECT, projectId,
-                Quota.ResourceType.COST_USD_CENTS, Quota.Period.MONTHLY_CALENDAR,
-                10_000L, true, null, null);
+                Quota.ResourceType.COST_USD_CENTS, Quota.Period.DAILY,
+                10_000L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, TEST_ADMIN_ID);
         engine.recordConsumption(QuotaScope.PROJECT, projectId, QuotaResourceType.COST_USD_CENTS, 1_000);
         engine.recordConsumption(QuotaScope.PROJECT, projectId, QuotaResourceType.COST_USD_CENTS, 2_500);
         engine.recordConsumption(QuotaScope.PROJECT, projectId, QuotaResourceType.COST_USD_CENTS, 500);
@@ -122,7 +150,7 @@ class BasicQuotaPolicyEngineTest extends IntegrationTestBase {
         Quota q = quotaService.create(
                 Quota.Scope.PROJECT, projectId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
-                1_000L, true, null, null);
+                1_000L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, TEST_ADMIN_ID);
 
         quotaService.pause(q.getId(), UUID.randomUUID());
 
@@ -143,7 +171,7 @@ class BasicQuotaPolicyEngineTest extends IntegrationTestBase {
         quotaService.create(
                 Quota.Scope.PROJECT, projectId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
-                1_000L, true, null, null);
+                1_000L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, TEST_ADMIN_ID);
         engine.recordConsumption(QuotaScope.PROJECT, projectId, QuotaResourceType.TOKENS, 1_200);
 
         // check() with amount=0 should show consumed=1200, projected=1200 >= 120% of 1000.
@@ -151,5 +179,88 @@ class BasicQuotaPolicyEngineTest extends IntegrationTestBase {
         assertThat(d.getConsumedAmount()).isEqualTo(1_200L);
         // Should be blocked because 1200 > 1000.
         assertThat(d.isBlocked()).isTrue();
+    }
+
+    @Test
+    void serviceReservationExhaustionFallsBackToProjectCeiling() {
+        Group group = new Group();
+        group.setName("Policy Group");
+        group = groupRepository.save(group);
+
+        Project project = new Project();
+        project.setName("Policy Project");
+        project.setGroupId(group.getId());
+        project = projectRepository.save(project);
+
+        quotaService.create(
+                Quota.Scope.PROJECT, project.getId(),
+                Quota.ResourceType.COST_USD_CENTS, Quota.Period.DAILY,
+                1_000L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, TEST_ADMIN_ID);
+
+        quotaService.create(
+                Quota.Scope.SERVICE, project.getId(),
+                Quota.ResourceType.COST_USD_CENTS, Quota.Period.DAILY,
+                600L, EnforcementMode.BLOCK, QuotaType.RESERVATION,
+                ServiceType.WORKFLOW, null, null, TEST_ADMIN_ID);
+
+        // Consume the full service reservation.
+        engine.recordConsumption(QuotaScope.SERVICE, project.getId(), QuotaResourceType.COST_USD_CENTS, 600);
+
+        // 100 more should be blocked by the reservation even though the
+        // project ceiling still has shared pool left.
+        QuotaDecision reservationBlocked = engine.check(QuotaScope.SERVICE, project.getId(), QuotaResourceType.COST_USD_CENTS, 100);
+        assertThat(reservationBlocked.isBlocked()).isTrue();
+        assertThat(reservationBlocked.getScopeHit()).isEqualTo(QuotaScope.SERVICE);
+
+        // The project ceiling itself is still at 600/1000.
+        QuotaDecision projectDecision = engine.check(QuotaScope.PROJECT, project.getId(), QuotaResourceType.COST_USD_CENTS, 0);
+        assertThat(projectDecision.getConsumedAmount()).isEqualTo(600L);
+        assertThat(projectDecision.getRemainingAmount()).isEqualTo(400L);
+    }
+
+    @Test
+    void serviceFallsBackToSharedPool_whenNoReservation() {
+        Group group = new Group();
+        group.setName("Shared Pool Group");
+        group = groupRepository.save(group);
+
+        Project project = new Project();
+        project.setName("Shared Pool Project");
+        project.setGroupId(group.getId());
+        project = projectRepository.save(project);
+
+        quotaService.create(
+                Quota.Scope.PROJECT, project.getId(),
+                Quota.ResourceType.TOKENS, Quota.Period.DAILY,
+                1_000L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, TEST_ADMIN_ID);
+
+        engine.recordConsumption(QuotaScope.SERVICE, project.getId(), QuotaResourceType.TOKENS, 300);
+
+        QuotaDecision d = engine.check(QuotaScope.SERVICE, project.getId(), QuotaResourceType.TOKENS, 0);
+        assertThat(d.isBlocked()).isFalse();
+        assertThat(d.getRemainingAmount()).isEqualTo(700L);
+        assertThat(d.getScopeHit()).isEqualTo(QuotaScope.PROJECT);
+    }
+
+    @Test
+    void serviceConsumptionRollsUpToProjectAndAncestors() {
+        Group group = new Group();
+        group.setName("Rollup Group");
+        group = groupRepository.save(group);
+
+        Project project = new Project();
+        project.setName("Rollup Project");
+        project.setGroupId(group.getId());
+        project = projectRepository.save(project);
+
+        quotaService.create(
+                Quota.Scope.PROJECT, project.getId(),
+                Quota.ResourceType.TOKENS, Quota.Period.DAILY,
+                1_000L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, TEST_ADMIN_ID);
+
+        engine.recordConsumption(QuotaScope.SERVICE, project.getId(), QuotaResourceType.TOKENS, 250);
+
+        QuotaDecision projectDecision = engine.check(QuotaScope.PROJECT, project.getId(), QuotaResourceType.TOKENS, 0);
+        assertThat(projectDecision.getConsumedAmount()).isEqualTo(250L);
     }
 }
