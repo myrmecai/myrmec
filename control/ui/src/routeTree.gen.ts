@@ -19,6 +19,7 @@ import { Route as AuthenticatedPlatformRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedMyWorkRouteImport } from './routes/_authenticated/my-work'
 import { Route as AuthenticatedModelsRouteImport } from './routes/_authenticated/models'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
+import { Route as AuthenticatedBudgetsRouteImport } from './routes/_authenticated/budgets'
 import { Route as AuthenticatedAuthProvidersRouteImport } from './routes/_authenticated/auth-providers'
 import { Route as AuthenticatedAgentsRouteImport } from './routes/_authenticated/agents'
 import { Route as AuthenticatedAgentProfilesRouteImport } from './routes/_authenticated/agent-profiles'
@@ -106,6 +107,11 @@ const AuthenticatedModelsRoute = AuthenticatedModelsRouteImport.update({
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedBudgetsRoute = AuthenticatedBudgetsRouteImport.update({
+  id: '/budgets',
+  path: '/budgets',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
 const AuthenticatedAuthProvidersRoute =
@@ -348,6 +354,7 @@ export interface FileRoutesByFullPath {
   '/agent-profiles': typeof AuthenticatedAgentProfilesRoute
   '/agents': typeof AuthenticatedAgentsRoute
   '/auth-providers': typeof AuthenticatedAuthProvidersRoute
+  '/budgets': typeof AuthenticatedBudgetsRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/models': typeof AuthenticatedModelsRoute
   '/my-work': typeof AuthenticatedMyWorkRoute
@@ -398,6 +405,7 @@ export interface FileRoutesByTo {
   '/agent-profiles': typeof AuthenticatedAgentProfilesRoute
   '/agents': typeof AuthenticatedAgentsRoute
   '/auth-providers': typeof AuthenticatedAuthProvidersRoute
+  '/budgets': typeof AuthenticatedBudgetsRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/models': typeof AuthenticatedModelsRoute
   '/my-work': typeof AuthenticatedMyWorkRoute
@@ -449,6 +457,7 @@ export interface FileRoutesById {
   '/_authenticated/agent-profiles': typeof AuthenticatedAgentProfilesRoute
   '/_authenticated/agents': typeof AuthenticatedAgentsRoute
   '/_authenticated/auth-providers': typeof AuthenticatedAuthProvidersRoute
+  '/_authenticated/budgets': typeof AuthenticatedBudgetsRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/models': typeof AuthenticatedModelsRoute
   '/_authenticated/my-work': typeof AuthenticatedMyWorkRoute
@@ -501,6 +510,7 @@ export interface FileRouteTypes {
     | '/agent-profiles'
     | '/agents'
     | '/auth-providers'
+    | '/budgets'
     | '/dashboard'
     | '/models'
     | '/my-work'
@@ -551,6 +561,7 @@ export interface FileRouteTypes {
     | '/agent-profiles'
     | '/agents'
     | '/auth-providers'
+    | '/budgets'
     | '/dashboard'
     | '/models'
     | '/my-work'
@@ -601,6 +612,7 @@ export interface FileRouteTypes {
     | '/_authenticated/agent-profiles'
     | '/_authenticated/agents'
     | '/_authenticated/auth-providers'
+    | '/_authenticated/budgets'
     | '/_authenticated/dashboard'
     | '/_authenticated/models'
     | '/_authenticated/my-work'
@@ -722,6 +734,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof AuthenticatedDashboardRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/budgets': {
+      id: '/_authenticated/budgets'
+      path: '/budgets'
+      fullPath: '/budgets'
+      preLoaderRoute: typeof AuthenticatedBudgetsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/auth-providers': {
@@ -1169,6 +1188,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedAgentProfilesRoute: typeof AuthenticatedAgentProfilesRoute
   AuthenticatedAgentsRoute: typeof AuthenticatedAgentsRoute
   AuthenticatedAuthProvidersRoute: typeof AuthenticatedAuthProvidersRoute
+  AuthenticatedBudgetsRoute: typeof AuthenticatedBudgetsRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedModelsRoute: typeof AuthenticatedModelsRoute
   AuthenticatedMyWorkRoute: typeof AuthenticatedMyWorkRoute
@@ -1190,6 +1210,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAgentProfilesRoute: AuthenticatedAgentProfilesRoute,
   AuthenticatedAgentsRoute: AuthenticatedAgentsRoute,
   AuthenticatedAuthProvidersRoute: AuthenticatedAuthProvidersRoute,
+  AuthenticatedBudgetsRoute: AuthenticatedBudgetsRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedModelsRoute: AuthenticatedModelsRoute,
   AuthenticatedMyWorkRoute: AuthenticatedMyWorkRoute,

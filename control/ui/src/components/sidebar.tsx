@@ -19,6 +19,7 @@ import {
   ShieldCheck,
   Link2,
   BrainCircuit,
+  Wallet,
   ChevronRight,
   ChevronDown,
   PanelLeftClose,
@@ -40,27 +41,22 @@ interface NavSection {
 }
 
 export function Sidebar() {
-  const { isPlatformAdmin, isOrgAdmin } = useAuth()
+  const { isPlatformAdmin, isOrgAdmin, hasSystemRole } = useAuth()
 
   // Auto-expand the section containing the active route.
   const dashboardMatch = useMatch({ from: '/_authenticated/dashboard', shouldThrow: false })
   const myWorkMatch = useMatch({ from: '/_authenticated/my-work', shouldThrow: false })
   const workflowsMatch = useMatch({ from: '/_authenticated/workflows/', shouldThrow: false })
   const assistantsMatch = useMatch({ from: '/_authenticated/assistants/', shouldThrow: false })
-
-  const platformMatch = useMatch({ from: '/_authenticated/platform', shouldThrow: false })
-
-  const groupsMatch = useMatch({ from: '/_authenticated/admin/groups/', shouldThrow: false })
-  const projectsMatch = useMatch({ from: '/_authenticated/projects', shouldThrow: false })
-  const usersMatch = useMatch({ from: '/_authenticated/users', shouldThrow: false })
+  const budgetsMatch = useMatch({ from: '/_authenticated/budgets', shouldThrow: false })
 
   // Platform section is active when on /platform or any nested platform route.
   const platformActive = !!platformMatch || checkActive('/platform')
-  const orgActive = !!(groupsMatch || projectsMatch || usersMatch)
-  const servicesActive = !!(workflowsMatch || assistantsMatch)
+  const budgetsActive = !!budgetsMatch || checkActive('/budgets')
 
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     services: servicesActive,
+    budgets: budgetsActive,
     platform: platformActive,
     organization: orgActive,
   })
@@ -96,6 +92,17 @@ export function Sidebar() {
         ],
       },
     ]
+
+    if (isPlatformAdmin || hasSystemRole('BUDGET_OWNER') || isOrgAdmin) {
+      result.push({
+        title: 'Budgets',
+        icon: Wallet,
+        defaultOpen: budgetsActive,
+        items: [
+          { label: 'Budget Overview', to: '/budgets', icon: Wallet },
+        ],
+      })
+    }
 
     if (isPlatformAdmin) {
       result.push({
