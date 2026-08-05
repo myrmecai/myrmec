@@ -50,9 +50,17 @@
             <column name="limit_amount" type="bigint">
                 <constraints nullable="false"/>
             </column>
+            <column name="quota_type" type="varchar(20)" defaultValue="CEILING">
+                <constraints nullable="false"/>
+            </column>
+            <column name="enforcement_mode" type="varchar(20)" defaultValue="BLOCK">
+                <constraints nullable="false"/>
+            </column>
+            <column name="service_type" type="varchar(20)"/>
             <column name="enforced" type="boolean" defaultValueBoolean="true">
                 <constraints nullable="false"/>
             </column>
+            <column name="max_execution_cost_cents" type="bigint"/>
             <column name="tags" type="clob"/>
             <column name="created_by" type="uuid"/>
             <column name="created_at" type="timestamp" defaultValueComputed="CURRENT_TIMESTAMP">
@@ -74,6 +82,18 @@
             <column name="scope_type"/>
             <column name="scope_id"/>
         </createIndex>
+    </changeSet>
+
+    <changeSet id="20260608-05-quotas-unique" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <uniqueConstraintExists tableName="quotas" constraintName="uq_quotas_scope_resource_period"/>
+            </not>
+        </preConditions>
+        <addUniqueConstraint
+            tableName="quotas"
+            columnNames="scope_type, scope_id, resource_type, period"
+            constraintName="uq_quotas_scope_resource_period"/>
     </changeSet>
 
     <changeSet id="20260608-05-quota-consumption" author="myrmec">

@@ -11,14 +11,15 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Phase 8a &mdash; quota row. A single ceiling applied to one (scope,
- * resource, period) tuple.
+ * Phase 8a/8g &mdash; budget/quota row for a single (scope, resource, period) tuple.
  *
- * <p>{@link Scope} chains org &rarr; group &rarr; project &rarr; user
- * with the child-tightens-only rule (Phase 8e): a project quota cannot
- * be more generous than its parent group quota for the same resource +
- * period. Enforcement of that rule lives in {@code QuotaService}; the
- * row itself is polymorphic on {@link #scopeId} (no FK).</p>
+ * <p>{@link Scope} chains org &rarr; group &rarr; project &rarr; service.
+ * The child-tightens-only rule (Phase 8e) is enforced in {@link QuotaService};
+ * the row itself is polymorphic on {@link #scopeId} (no FK).</p>
+ *
+ * <p>{@link #quotaType} distinguishes a maximum ceiling from a guaranteed
+ * reservation carved out of the parent budget. {@link #enforcementMode}
+ * controls whether over-budget spend is recorded, warned, or blocked.</p>
  *
  * <p>{@link #limitAmount} units are determined by {@link #resourceType}:
  * {@link ResourceType#TOKENS} is raw token count;
@@ -32,7 +33,7 @@ import java.util.UUID;
 @NoArgsConstructor
 public class Quota {
 
-    public enum Scope { ORG, GROUP, PROJECT, USER }
+    public enum Scope { ORG, GROUP, PROJECT, SERVICE }
 
     public enum ResourceType { TOKENS, COST_USD_CENTS }
 
@@ -65,14 +66,31 @@ public class Quota {
     @Column(name = "limit_amount", nullable = false)
     private long limitAmount;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "quota_type", nullable = false, length = 20)
+    private QuotaType quotaType = QuotaType.CEILING;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "enforcement_mode", nullable = false, length = 20)
+    private EnforcementMode enforcementMode = EnforcementMode.BLOCK;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "service_type", length = 20)
+    private ServiceType serviceType;
+
+    @Column(name = "max_execution_amount")
+    private Long maxExecutionAmount;
+
     /**
-     * When {@code false}, consumption is recorded but enforcement is
-     * skipped &mdash; used to roll a tightened limit out as a warning
-     * for a period before flipping the switch.
+     * Legacy boolean enforcement flag. Kept for backward compatibility;
+     * new code should prefer {@link #enforcementMode}.
+     * @deprecated use {@link #enforcementMode}
      */
+    @Deprecated(forRemoval = false)
     @Column(name = "enforced", nullable = false)
     private boolean enforced = true;
 
+    @Deprecated(forRemoval = false)
     @Column(name = "max_execution_cost_cents")
     private Long maxExecutionCostCents;
 

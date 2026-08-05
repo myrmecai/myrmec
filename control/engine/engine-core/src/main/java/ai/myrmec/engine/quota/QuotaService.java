@@ -118,13 +118,14 @@ public class QuotaService {
     /**
      * Phase 8e &mdash; child-tightens-only: a quota at level N must
      * not be more generous than any matching quota at level N-1
-     * (ORG &gt; GROUP &gt; PROJECT &gt; USER, in that order of
+     * (ORG &gt; GROUP &gt; PROJECT &gt; SERVICE, in that order of
      * generosity).
      *
      * <p>Walk performed:
      * <ul>
-     *   <li>{@code USER} &mdash; no resolvable owner in Community (users
-     *       span groups), pass through.</li>
+     *   <li>{@code SERVICE} &mdash; resolve via {@code projectRepository}
+     *       to get {@code groupId}, then check project + group + every ORG
+     *       quota that matches (resource, period).</li>
      *   <li>{@code PROJECT} &mdash; resolve via {@code projectRepository}
      *       to get {@code groupId}, then check group + every ORG
      *       quota that matches (resource, period).</li>
@@ -138,10 +139,10 @@ public class QuotaService {
                                            Quota.ResourceType resource,
                                            Quota.Period period, long limitAmount) {
         switch (scope) {
-            case ORG, USER -> {
-                // No parent to check (top, or unresolvable).
+            case ORG -> {
+                // No parent to check.
             }
-            case PROJECT -> {
+            case SERVICE, PROJECT -> {
                 Optional<Project> project = projectRepository.findById(scopeId);
                 if (project.isEmpty()) {
                     // Project doesn't exist yet — let the FK validation
