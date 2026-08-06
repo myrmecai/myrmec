@@ -127,11 +127,19 @@ function TreeRow({
             </Badge>
           </div>
           <div className="col-span-1 text-right">
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/budgets">
-                <Plus className="h-4 w-4" />
-              </Link>
-            </Button>
+            {node.scopeType !== 'ORG' && (
+              <Button variant="ghost" size="sm" asChild>
+                <Link
+                  to="/budgets/new"
+                  search={{
+                    scopeType: node.scopeType,
+                    scopeId: node.scopeId,
+                  }}
+                >
+                  <Plus className="h-4 w-4" />
+                </Link>
+              </Button>
+            )}
           </div>
         </div>
       )}

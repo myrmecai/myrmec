@@ -69,7 +69,7 @@ const ConfirmDialog = ({
     } = props;
     return (
         <AlertDialog open={true} onOpenChange={() => onClose(false)}>
-            <AlertDialogContent>
+            <AlertDialogContent data-testid="confirm-dialog">
                 <AlertDialogHeader>
                     <AlertDialogTitle>{title}</AlertDialogTitle>
                     {message && <AlertDialogDescription className="flex items-center gap-2">

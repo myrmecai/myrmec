@@ -17,8 +17,12 @@ export function formatResourceType(resourceType: QuotaResourceType): string {
       return 'Cost USD'
     case 'TOKENS':
       return 'Tokens'
+    case 'REQUESTS':
+      return 'Requests'
     default:
-      return resourceType
+      // Fallback for unknown values; explicitly cast to satisfy the
+      // narrow union type while keeping the function total.
+      return (resourceType as string) ?? ''
   }
 }
 
@@ -31,7 +35,7 @@ export function formatPeriod(period: string): string {
     case 'LIFETIME':
       return 'Lifetime'
     default:
-      return period
+      return period ?? ''
   }
 }
 

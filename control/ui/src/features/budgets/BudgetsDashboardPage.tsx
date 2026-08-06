@@ -35,7 +35,7 @@ export function BudgetsDashboardPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Budgets</h1>
           {canCreate && (
             <Button asChild>
-              <Link to="/budgets">
+              <Link to="/budgets/new">
                 <Plus className="h-4 w-4 mr-2" />
                 New Budget
               </Link>

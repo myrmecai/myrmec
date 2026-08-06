@@ -2156,7 +2156,7 @@ export const auditLogApi = {
 // ==================== Quotas (Phase 8d) ====================
 
 export type QuotaScope = 'ORG' | 'GROUP' | 'PROJECT' | 'SERVICE'
-export type QuotaResourceType = 'TOKENS' | 'COST_USD_CENTS'
+export type QuotaResourceType = 'TOKENS' | 'COST_USD_CENTS' | 'REQUESTS'
 export type QuotaPeriod = 'DAILY' | 'MONTHLY_CALENDAR' | 'LIFETIME'
 export type QuotaType = 'CEILING' | 'RESERVATION'
 export type EnforcementMode = 'TELEMETRY' | 'WARN' | 'BLOCK'
@@ -2220,12 +2220,17 @@ export const quotasApi = {
     const qs = params.toString()
     return api.get<Quota[]>(`/admin/quotas${qs ? `?${qs}` : ''}`)
   },
+  get: (id: string) => api.get<Quota>(`/admin/quotas/${id}`),
   create: (req: CreateQuotaRequest) =>
     api.post<Quota>('/admin/quotas', req),
   update: (id: string, req: UpdateQuotaRequest) =>
     api.put<Quota>(`/admin/quotas/${id}`, req),
   delete: (id: string) =>
     api.delete<void>(`/admin/quotas/${id}`),
+  pause: (id: string) =>
+    api.post<Quota>(`/admin/quotas/${id}/pause`),
+  resume: (id: string) =>
+    api.post<Quota>(`/admin/quotas/${id}/resume`),
   /**
    * Probe how the policy engine would respond to a {@code charge}
    * against {@code scopeId}. Returns consumed / limit / blocked so the
@@ -2283,6 +2288,7 @@ export interface EffectiveQuota {
   name: string
   resourceType: QuotaResourceType
   period: QuotaPeriod
+  serviceType: QuotaServiceType | null
   ownLimit: number | null
   inheritedLimit: number | null
   effectiveLimit: number | null

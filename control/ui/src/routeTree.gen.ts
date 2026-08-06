@@ -25,11 +25,13 @@ import { Route as AuthenticatedAgentsRouteImport } from './routes/_authenticated
 import { Route as AuthenticatedAgentProfilesRouteImport } from './routes/_authenticated/agent-profiles'
 import { Route as AuthenticatedWorkflowsIndexRouteImport } from './routes/_authenticated/workflows/index'
 import { Route as AuthenticatedPlatformIndexRouteImport } from './routes/_authenticated/platform/index'
+import { Route as AuthenticatedBudgetsIndexRouteImport } from './routes/_authenticated/budgets/index'
 import { Route as AuthenticatedAssistantsIndexRouteImport } from './routes/_authenticated/assistants/index'
 import { Route as AuthenticatedProjectsProjectIdRouteImport } from './routes/_authenticated/projects/$projectId'
 import { Route as AuthenticatedPlatformSecurityRouteImport } from './routes/_authenticated/platform/security'
 import { Route as AuthenticatedPlatformAiInfraRouteImport } from './routes/_authenticated/platform/ai-infra'
 import { Route as AuthenticatedPlatformAiContextRouteImport } from './routes/_authenticated/platform/ai-context'
+import { Route as AuthenticatedBudgetsNewRouteImport } from './routes/_authenticated/budgets/new'
 import { Route as AuthenticatedAdminSecretsRouteImport } from './routes/_authenticated/admin/secrets'
 import { Route as AuthenticatedAdminProvidersRouteImport } from './routes/_authenticated/admin/providers'
 import { Route as AuthenticatedPlatformConnectionsIndexRouteImport } from './routes/_authenticated/platform/connections/index'
@@ -49,6 +51,9 @@ import { Route as AuthenticatedPlatformAiInfraModelsRouteImport } from './routes
 import { Route as AuthenticatedPlatformAiInfraAgentsRouteImport } from './routes/_authenticated/platform/ai-infra/agents'
 import { Route as AuthenticatedPlatformAiInfraAgentProfilesRouteImport } from './routes/_authenticated/platform/ai-infra/agent-profiles'
 import { Route as AuthenticatedPlatformAiContextGovernanceProfileRouteImport } from './routes/_authenticated/platform/ai-context/governance-profile'
+import { Route as AuthenticatedBudgetsProjectsProjectIdRouteImport } from './routes/_authenticated/budgets/projects/$projectId'
+import { Route as AuthenticatedBudgetsGroupsGroupIdRouteImport } from './routes/_authenticated/budgets/groups/$groupId'
+import { Route as AuthenticatedBudgetsEditQuotaIdRouteImport } from './routes/_authenticated/budgets/edit/$quotaId'
 import { Route as AuthenticatedAssistantsAssistantIdEditRouteImport } from './routes/_authenticated/assistants/$assistantId.edit'
 import { Route as AuthenticatedPlatformAiContextKnowledgeSourcesIndexRouteImport } from './routes/_authenticated/platform/ai-context/knowledge-sources/index'
 import { Route as AuthenticatedPlatformAiContextKnowledgeProvidersIndexRouteImport } from './routes/_authenticated/platform/ai-context/knowledge-providers/index'
@@ -59,6 +64,7 @@ import { Route as AuthenticatedProjectsProjectIdInstructionAssetsIdRouteImport }
 import { Route as AuthenticatedPlatformAiContextKnowledgeSourcesIdRouteImport } from './routes/_authenticated/platform/ai-context/knowledge-sources/$id'
 import { Route as AuthenticatedPlatformAiContextKnowledgeProvidersIdRouteImport } from './routes/_authenticated/platform/ai-context/knowledge-providers/$id'
 import { Route as AuthenticatedPlatformAiContextInstructionAssetsIdRouteImport } from './routes/_authenticated/platform/ai-context/instruction-assets/$id'
+import { Route as AuthenticatedBudgetsProjectsProjectIdServicesRouteImport } from './routes/_authenticated/budgets/projects/$projectId.services'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -143,6 +149,12 @@ const AuthenticatedPlatformIndexRoute =
     path: '/',
     getParentRoute: () => AuthenticatedPlatformRoute,
   } as any)
+const AuthenticatedBudgetsIndexRoute =
+  AuthenticatedBudgetsIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedBudgetsRoute,
+  } as any)
 const AuthenticatedAssistantsIndexRoute =
   AuthenticatedAssistantsIndexRouteImport.update({
     id: '/assistants/',
@@ -173,6 +185,11 @@ const AuthenticatedPlatformAiContextRoute =
     path: '/ai-context',
     getParentRoute: () => AuthenticatedPlatformRoute,
   } as any)
+const AuthenticatedBudgetsNewRoute = AuthenticatedBudgetsNewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => AuthenticatedBudgetsRoute,
+} as any)
 const AuthenticatedAdminSecretsRoute =
   AuthenticatedAdminSecretsRouteImport.update({
     id: '/admin/secrets',
@@ -287,6 +304,24 @@ const AuthenticatedPlatformAiContextGovernanceProfileRoute =
     path: '/governance-profile',
     getParentRoute: () => AuthenticatedPlatformAiContextRoute,
   } as any)
+const AuthenticatedBudgetsProjectsProjectIdRoute =
+  AuthenticatedBudgetsProjectsProjectIdRouteImport.update({
+    id: '/projects/$projectId',
+    path: '/projects/$projectId',
+    getParentRoute: () => AuthenticatedBudgetsRoute,
+  } as any)
+const AuthenticatedBudgetsGroupsGroupIdRoute =
+  AuthenticatedBudgetsGroupsGroupIdRouteImport.update({
+    id: '/groups/$groupId',
+    path: '/groups/$groupId',
+    getParentRoute: () => AuthenticatedBudgetsRoute,
+  } as any)
+const AuthenticatedBudgetsEditQuotaIdRoute =
+  AuthenticatedBudgetsEditQuotaIdRouteImport.update({
+    id: '/edit/$quotaId',
+    path: '/edit/$quotaId',
+    getParentRoute: () => AuthenticatedBudgetsRoute,
+  } as any)
 const AuthenticatedAssistantsAssistantIdEditRoute =
   AuthenticatedAssistantsAssistantIdEditRouteImport.update({
     id: '/assistants/$assistantId/edit',
@@ -347,6 +382,12 @@ const AuthenticatedPlatformAiContextInstructionAssetsIdRoute =
     path: '/instruction-assets/$id',
     getParentRoute: () => AuthenticatedPlatformAiContextRoute,
   } as any)
+const AuthenticatedBudgetsProjectsProjectIdServicesRoute =
+  AuthenticatedBudgetsProjectsProjectIdServicesRouteImport.update({
+    id: '/services',
+    path: '/services',
+    getParentRoute: () => AuthenticatedBudgetsProjectsProjectIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -354,7 +395,7 @@ export interface FileRoutesByFullPath {
   '/agent-profiles': typeof AuthenticatedAgentProfilesRoute
   '/agents': typeof AuthenticatedAgentsRoute
   '/auth-providers': typeof AuthenticatedAuthProvidersRoute
-  '/budgets': typeof AuthenticatedBudgetsRoute
+  '/budgets': typeof AuthenticatedBudgetsRouteWithChildren
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/models': typeof AuthenticatedModelsRoute
   '/my-work': typeof AuthenticatedMyWorkRoute
@@ -364,14 +405,19 @@ export interface FileRoutesByFullPath {
   '/users': typeof AuthenticatedUsersRoute
   '/admin/providers': typeof AuthenticatedAdminProvidersRoute
   '/admin/secrets': typeof AuthenticatedAdminSecretsRoute
+  '/budgets/new': typeof AuthenticatedBudgetsNewRoute
   '/platform/ai-context': typeof AuthenticatedPlatformAiContextRouteWithChildren
   '/platform/ai-infra': typeof AuthenticatedPlatformAiInfraRouteWithChildren
   '/platform/security': typeof AuthenticatedPlatformSecurityRouteWithChildren
   '/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
   '/assistants/': typeof AuthenticatedAssistantsIndexRoute
+  '/budgets/': typeof AuthenticatedBudgetsIndexRoute
   '/platform/': typeof AuthenticatedPlatformIndexRoute
   '/workflows/': typeof AuthenticatedWorkflowsIndexRoute
   '/assistants/$assistantId/edit': typeof AuthenticatedAssistantsAssistantIdEditRoute
+  '/budgets/edit/$quotaId': typeof AuthenticatedBudgetsEditQuotaIdRoute
+  '/budgets/groups/$groupId': typeof AuthenticatedBudgetsGroupsGroupIdRoute
+  '/budgets/projects/$projectId': typeof AuthenticatedBudgetsProjectsProjectIdRouteWithChildren
   '/platform/ai-context/governance-profile': typeof AuthenticatedPlatformAiContextGovernanceProfileRoute
   '/platform/ai-infra/agent-profiles': typeof AuthenticatedPlatformAiInfraAgentProfilesRoute
   '/platform/ai-infra/agents': typeof AuthenticatedPlatformAiInfraAgentsRoute
@@ -389,6 +435,7 @@ export interface FileRoutesByFullPath {
   '/workflows/$workflowId/requests': typeof AuthenticatedWorkflowsWorkflowIdRequestsRouteWithChildren
   '/admin/groups/': typeof AuthenticatedAdminGroupsIndexRoute
   '/platform/connections/': typeof AuthenticatedPlatformConnectionsIndexRoute
+  '/budgets/projects/$projectId/services': typeof AuthenticatedBudgetsProjectsProjectIdServicesRoute
   '/platform/ai-context/instruction-assets/$id': typeof AuthenticatedPlatformAiContextInstructionAssetsIdRoute
   '/platform/ai-context/knowledge-providers/$id': typeof AuthenticatedPlatformAiContextKnowledgeProvidersIdRoute
   '/platform/ai-context/knowledge-sources/$id': typeof AuthenticatedPlatformAiContextKnowledgeSourcesIdRoute
@@ -405,7 +452,6 @@ export interface FileRoutesByTo {
   '/agent-profiles': typeof AuthenticatedAgentProfilesRoute
   '/agents': typeof AuthenticatedAgentsRoute
   '/auth-providers': typeof AuthenticatedAuthProvidersRoute
-  '/budgets': typeof AuthenticatedBudgetsRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/models': typeof AuthenticatedModelsRoute
   '/my-work': typeof AuthenticatedMyWorkRoute
@@ -414,14 +460,19 @@ export interface FileRoutesByTo {
   '/users': typeof AuthenticatedUsersRoute
   '/admin/providers': typeof AuthenticatedAdminProvidersRoute
   '/admin/secrets': typeof AuthenticatedAdminSecretsRoute
+  '/budgets/new': typeof AuthenticatedBudgetsNewRoute
   '/platform/ai-context': typeof AuthenticatedPlatformAiContextRouteWithChildren
   '/platform/ai-infra': typeof AuthenticatedPlatformAiInfraRouteWithChildren
   '/platform/security': typeof AuthenticatedPlatformSecurityRouteWithChildren
   '/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
   '/assistants': typeof AuthenticatedAssistantsIndexRoute
+  '/budgets': typeof AuthenticatedBudgetsIndexRoute
   '/platform': typeof AuthenticatedPlatformIndexRoute
   '/workflows': typeof AuthenticatedWorkflowsIndexRoute
   '/assistants/$assistantId/edit': typeof AuthenticatedAssistantsAssistantIdEditRoute
+  '/budgets/edit/$quotaId': typeof AuthenticatedBudgetsEditQuotaIdRoute
+  '/budgets/groups/$groupId': typeof AuthenticatedBudgetsGroupsGroupIdRoute
+  '/budgets/projects/$projectId': typeof AuthenticatedBudgetsProjectsProjectIdRouteWithChildren
   '/platform/ai-context/governance-profile': typeof AuthenticatedPlatformAiContextGovernanceProfileRoute
   '/platform/ai-infra/agent-profiles': typeof AuthenticatedPlatformAiInfraAgentProfilesRoute
   '/platform/ai-infra/agents': typeof AuthenticatedPlatformAiInfraAgentsRoute
@@ -439,6 +490,7 @@ export interface FileRoutesByTo {
   '/workflows/$workflowId/requests': typeof AuthenticatedWorkflowsWorkflowIdRequestsRouteWithChildren
   '/admin/groups': typeof AuthenticatedAdminGroupsIndexRoute
   '/platform/connections': typeof AuthenticatedPlatformConnectionsIndexRoute
+  '/budgets/projects/$projectId/services': typeof AuthenticatedBudgetsProjectsProjectIdServicesRoute
   '/platform/ai-context/instruction-assets/$id': typeof AuthenticatedPlatformAiContextInstructionAssetsIdRoute
   '/platform/ai-context/knowledge-providers/$id': typeof AuthenticatedPlatformAiContextKnowledgeProvidersIdRoute
   '/platform/ai-context/knowledge-sources/$id': typeof AuthenticatedPlatformAiContextKnowledgeSourcesIdRoute
@@ -457,7 +509,7 @@ export interface FileRoutesById {
   '/_authenticated/agent-profiles': typeof AuthenticatedAgentProfilesRoute
   '/_authenticated/agents': typeof AuthenticatedAgentsRoute
   '/_authenticated/auth-providers': typeof AuthenticatedAuthProvidersRoute
-  '/_authenticated/budgets': typeof AuthenticatedBudgetsRoute
+  '/_authenticated/budgets': typeof AuthenticatedBudgetsRouteWithChildren
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/models': typeof AuthenticatedModelsRoute
   '/_authenticated/my-work': typeof AuthenticatedMyWorkRoute
@@ -467,14 +519,19 @@ export interface FileRoutesById {
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/_authenticated/admin/providers': typeof AuthenticatedAdminProvidersRoute
   '/_authenticated/admin/secrets': typeof AuthenticatedAdminSecretsRoute
+  '/_authenticated/budgets/new': typeof AuthenticatedBudgetsNewRoute
   '/_authenticated/platform/ai-context': typeof AuthenticatedPlatformAiContextRouteWithChildren
   '/_authenticated/platform/ai-infra': typeof AuthenticatedPlatformAiInfraRouteWithChildren
   '/_authenticated/platform/security': typeof AuthenticatedPlatformSecurityRouteWithChildren
   '/_authenticated/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
   '/_authenticated/assistants/': typeof AuthenticatedAssistantsIndexRoute
+  '/_authenticated/budgets/': typeof AuthenticatedBudgetsIndexRoute
   '/_authenticated/platform/': typeof AuthenticatedPlatformIndexRoute
   '/_authenticated/workflows/': typeof AuthenticatedWorkflowsIndexRoute
   '/_authenticated/assistants/$assistantId/edit': typeof AuthenticatedAssistantsAssistantIdEditRoute
+  '/_authenticated/budgets/edit/$quotaId': typeof AuthenticatedBudgetsEditQuotaIdRoute
+  '/_authenticated/budgets/groups/$groupId': typeof AuthenticatedBudgetsGroupsGroupIdRoute
+  '/_authenticated/budgets/projects/$projectId': typeof AuthenticatedBudgetsProjectsProjectIdRouteWithChildren
   '/_authenticated/platform/ai-context/governance-profile': typeof AuthenticatedPlatformAiContextGovernanceProfileRoute
   '/_authenticated/platform/ai-infra/agent-profiles': typeof AuthenticatedPlatformAiInfraAgentProfilesRoute
   '/_authenticated/platform/ai-infra/agents': typeof AuthenticatedPlatformAiInfraAgentsRoute
@@ -492,6 +549,7 @@ export interface FileRoutesById {
   '/_authenticated/workflows/$workflowId/requests': typeof AuthenticatedWorkflowsWorkflowIdRequestsRouteWithChildren
   '/_authenticated/admin/groups/': typeof AuthenticatedAdminGroupsIndexRoute
   '/_authenticated/platform/connections/': typeof AuthenticatedPlatformConnectionsIndexRoute
+  '/_authenticated/budgets/projects/$projectId/services': typeof AuthenticatedBudgetsProjectsProjectIdServicesRoute
   '/_authenticated/platform/ai-context/instruction-assets/$id': typeof AuthenticatedPlatformAiContextInstructionAssetsIdRoute
   '/_authenticated/platform/ai-context/knowledge-providers/$id': typeof AuthenticatedPlatformAiContextKnowledgeProvidersIdRoute
   '/_authenticated/platform/ai-context/knowledge-sources/$id': typeof AuthenticatedPlatformAiContextKnowledgeSourcesIdRoute
@@ -520,14 +578,19 @@ export interface FileRouteTypes {
     | '/users'
     | '/admin/providers'
     | '/admin/secrets'
+    | '/budgets/new'
     | '/platform/ai-context'
     | '/platform/ai-infra'
     | '/platform/security'
     | '/projects/$projectId'
     | '/assistants/'
+    | '/budgets/'
     | '/platform/'
     | '/workflows/'
     | '/assistants/$assistantId/edit'
+    | '/budgets/edit/$quotaId'
+    | '/budgets/groups/$groupId'
+    | '/budgets/projects/$projectId'
     | '/platform/ai-context/governance-profile'
     | '/platform/ai-infra/agent-profiles'
     | '/platform/ai-infra/agents'
@@ -545,6 +608,7 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId/requests'
     | '/admin/groups/'
     | '/platform/connections/'
+    | '/budgets/projects/$projectId/services'
     | '/platform/ai-context/instruction-assets/$id'
     | '/platform/ai-context/knowledge-providers/$id'
     | '/platform/ai-context/knowledge-sources/$id'
@@ -561,7 +625,6 @@ export interface FileRouteTypes {
     | '/agent-profiles'
     | '/agents'
     | '/auth-providers'
-    | '/budgets'
     | '/dashboard'
     | '/models'
     | '/my-work'
@@ -570,14 +633,19 @@ export interface FileRouteTypes {
     | '/users'
     | '/admin/providers'
     | '/admin/secrets'
+    | '/budgets/new'
     | '/platform/ai-context'
     | '/platform/ai-infra'
     | '/platform/security'
     | '/projects/$projectId'
     | '/assistants'
+    | '/budgets'
     | '/platform'
     | '/workflows'
     | '/assistants/$assistantId/edit'
+    | '/budgets/edit/$quotaId'
+    | '/budgets/groups/$groupId'
+    | '/budgets/projects/$projectId'
     | '/platform/ai-context/governance-profile'
     | '/platform/ai-infra/agent-profiles'
     | '/platform/ai-infra/agents'
@@ -595,6 +663,7 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId/requests'
     | '/admin/groups'
     | '/platform/connections'
+    | '/budgets/projects/$projectId/services'
     | '/platform/ai-context/instruction-assets/$id'
     | '/platform/ai-context/knowledge-providers/$id'
     | '/platform/ai-context/knowledge-sources/$id'
@@ -622,14 +691,19 @@ export interface FileRouteTypes {
     | '/_authenticated/users'
     | '/_authenticated/admin/providers'
     | '/_authenticated/admin/secrets'
+    | '/_authenticated/budgets/new'
     | '/_authenticated/platform/ai-context'
     | '/_authenticated/platform/ai-infra'
     | '/_authenticated/platform/security'
     | '/_authenticated/projects/$projectId'
     | '/_authenticated/assistants/'
+    | '/_authenticated/budgets/'
     | '/_authenticated/platform/'
     | '/_authenticated/workflows/'
     | '/_authenticated/assistants/$assistantId/edit'
+    | '/_authenticated/budgets/edit/$quotaId'
+    | '/_authenticated/budgets/groups/$groupId'
+    | '/_authenticated/budgets/projects/$projectId'
     | '/_authenticated/platform/ai-context/governance-profile'
     | '/_authenticated/platform/ai-infra/agent-profiles'
     | '/_authenticated/platform/ai-infra/agents'
@@ -647,6 +721,7 @@ export interface FileRouteTypes {
     | '/_authenticated/workflows/$workflowId/requests'
     | '/_authenticated/admin/groups/'
     | '/_authenticated/platform/connections/'
+    | '/_authenticated/budgets/projects/$projectId/services'
     | '/_authenticated/platform/ai-context/instruction-assets/$id'
     | '/_authenticated/platform/ai-context/knowledge-providers/$id'
     | '/_authenticated/platform/ai-context/knowledge-sources/$id'
@@ -778,6 +853,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPlatformIndexRouteImport
       parentRoute: typeof AuthenticatedPlatformRoute
     }
+    '/_authenticated/budgets/': {
+      id: '/_authenticated/budgets/'
+      path: '/'
+      fullPath: '/budgets/'
+      preLoaderRoute: typeof AuthenticatedBudgetsIndexRouteImport
+      parentRoute: typeof AuthenticatedBudgetsRoute
+    }
     '/_authenticated/assistants/': {
       id: '/_authenticated/assistants/'
       path: '/assistants'
@@ -812,6 +894,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/platform/ai-context'
       preLoaderRoute: typeof AuthenticatedPlatformAiContextRouteImport
       parentRoute: typeof AuthenticatedPlatformRoute
+    }
+    '/_authenticated/budgets/new': {
+      id: '/_authenticated/budgets/new'
+      path: '/new'
+      fullPath: '/budgets/new'
+      preLoaderRoute: typeof AuthenticatedBudgetsNewRouteImport
+      parentRoute: typeof AuthenticatedBudgetsRoute
     }
     '/_authenticated/admin/secrets': {
       id: '/_authenticated/admin/secrets'
@@ -946,6 +1035,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPlatformAiContextGovernanceProfileRouteImport
       parentRoute: typeof AuthenticatedPlatformAiContextRoute
     }
+    '/_authenticated/budgets/projects/$projectId': {
+      id: '/_authenticated/budgets/projects/$projectId'
+      path: '/projects/$projectId'
+      fullPath: '/budgets/projects/$projectId'
+      preLoaderRoute: typeof AuthenticatedBudgetsProjectsProjectIdRouteImport
+      parentRoute: typeof AuthenticatedBudgetsRoute
+    }
+    '/_authenticated/budgets/groups/$groupId': {
+      id: '/_authenticated/budgets/groups/$groupId'
+      path: '/groups/$groupId'
+      fullPath: '/budgets/groups/$groupId'
+      preLoaderRoute: typeof AuthenticatedBudgetsGroupsGroupIdRouteImport
+      parentRoute: typeof AuthenticatedBudgetsRoute
+    }
+    '/_authenticated/budgets/edit/$quotaId': {
+      id: '/_authenticated/budgets/edit/$quotaId'
+      path: '/edit/$quotaId'
+      fullPath: '/budgets/edit/$quotaId'
+      preLoaderRoute: typeof AuthenticatedBudgetsEditQuotaIdRouteImport
+      parentRoute: typeof AuthenticatedBudgetsRoute
+    }
     '/_authenticated/assistants/$assistantId/edit': {
       id: '/_authenticated/assistants/$assistantId/edit'
       path: '/assistants/$assistantId/edit'
@@ -1016,8 +1126,51 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPlatformAiContextInstructionAssetsIdRouteImport
       parentRoute: typeof AuthenticatedPlatformAiContextRoute
     }
+    '/_authenticated/budgets/projects/$projectId/services': {
+      id: '/_authenticated/budgets/projects/$projectId/services'
+      path: '/services'
+      fullPath: '/budgets/projects/$projectId/services'
+      preLoaderRoute: typeof AuthenticatedBudgetsProjectsProjectIdServicesRouteImport
+      parentRoute: typeof AuthenticatedBudgetsProjectsProjectIdRoute
+    }
   }
 }
+
+interface AuthenticatedBudgetsProjectsProjectIdRouteChildren {
+  AuthenticatedBudgetsProjectsProjectIdServicesRoute: typeof AuthenticatedBudgetsProjectsProjectIdServicesRoute
+}
+
+const AuthenticatedBudgetsProjectsProjectIdRouteChildren: AuthenticatedBudgetsProjectsProjectIdRouteChildren =
+  {
+    AuthenticatedBudgetsProjectsProjectIdServicesRoute:
+      AuthenticatedBudgetsProjectsProjectIdServicesRoute,
+  }
+
+const AuthenticatedBudgetsProjectsProjectIdRouteWithChildren =
+  AuthenticatedBudgetsProjectsProjectIdRoute._addFileChildren(
+    AuthenticatedBudgetsProjectsProjectIdRouteChildren,
+  )
+
+interface AuthenticatedBudgetsRouteChildren {
+  AuthenticatedBudgetsNewRoute: typeof AuthenticatedBudgetsNewRoute
+  AuthenticatedBudgetsIndexRoute: typeof AuthenticatedBudgetsIndexRoute
+  AuthenticatedBudgetsEditQuotaIdRoute: typeof AuthenticatedBudgetsEditQuotaIdRoute
+  AuthenticatedBudgetsGroupsGroupIdRoute: typeof AuthenticatedBudgetsGroupsGroupIdRoute
+  AuthenticatedBudgetsProjectsProjectIdRoute: typeof AuthenticatedBudgetsProjectsProjectIdRouteWithChildren
+}
+
+const AuthenticatedBudgetsRouteChildren: AuthenticatedBudgetsRouteChildren = {
+  AuthenticatedBudgetsNewRoute: AuthenticatedBudgetsNewRoute,
+  AuthenticatedBudgetsIndexRoute: AuthenticatedBudgetsIndexRoute,
+  AuthenticatedBudgetsEditQuotaIdRoute: AuthenticatedBudgetsEditQuotaIdRoute,
+  AuthenticatedBudgetsGroupsGroupIdRoute:
+    AuthenticatedBudgetsGroupsGroupIdRoute,
+  AuthenticatedBudgetsProjectsProjectIdRoute:
+    AuthenticatedBudgetsProjectsProjectIdRouteWithChildren,
+}
+
+const AuthenticatedBudgetsRouteWithChildren =
+  AuthenticatedBudgetsRoute._addFileChildren(AuthenticatedBudgetsRouteChildren)
 
 interface AuthenticatedPlatformAiContextRouteChildren {
   AuthenticatedPlatformAiContextGovernanceProfileRoute: typeof AuthenticatedPlatformAiContextGovernanceProfileRoute
@@ -1188,7 +1341,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedAgentProfilesRoute: typeof AuthenticatedAgentProfilesRoute
   AuthenticatedAgentsRoute: typeof AuthenticatedAgentsRoute
   AuthenticatedAuthProvidersRoute: typeof AuthenticatedAuthProvidersRoute
-  AuthenticatedBudgetsRoute: typeof AuthenticatedBudgetsRoute
+  AuthenticatedBudgetsRoute: typeof AuthenticatedBudgetsRouteWithChildren
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedModelsRoute: typeof AuthenticatedModelsRoute
   AuthenticatedMyWorkRoute: typeof AuthenticatedMyWorkRoute
@@ -1210,7 +1363,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAgentProfilesRoute: AuthenticatedAgentProfilesRoute,
   AuthenticatedAgentsRoute: AuthenticatedAgentsRoute,
   AuthenticatedAuthProvidersRoute: AuthenticatedAuthProvidersRoute,
-  AuthenticatedBudgetsRoute: AuthenticatedBudgetsRoute,
+  AuthenticatedBudgetsRoute: AuthenticatedBudgetsRouteWithChildren,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedModelsRoute: AuthenticatedModelsRoute,
   AuthenticatedMyWorkRoute: AuthenticatedMyWorkRoute,

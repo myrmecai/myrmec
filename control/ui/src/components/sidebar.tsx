@@ -51,8 +51,10 @@ export function Sidebar() {
   const budgetsMatch = useMatch({ from: '/_authenticated/budgets', shouldThrow: false })
 
   // Platform section is active when on /platform or any nested platform route.
-  const platformActive = !!platformMatch || checkActive('/platform')
+  const platformActive = checkActive('/platform')
   const budgetsActive = !!budgetsMatch || checkActive('/budgets')
+  const servicesActive = !!workflowsMatch || !!assistantsMatch || checkActive('/workflows') || checkActive('/assistants')
+  const orgActive = checkActive('/admin') || checkActive('/projects') || checkActive('/users')
 
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     services: servicesActive,

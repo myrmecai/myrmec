@@ -99,6 +99,16 @@ public class QuotaAdminController {
         return ResponseEntity.status(HttpStatus.CREATED).body(QuotaResponse.from(saved));
     }
 
+    @GetMapping("/{id}")
+    public QuotaResponse get(@PathVariable("id") UUID id, Authentication authentication) {
+        Quota q = quotaRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Quota not found: " + id));
+        if (!budgetAuthorization.permissionsFor(q.getScopeType(), q.getScopeId(), authentication).canView()) {
+            throw new AccessDeniedException("Cannot view budget at " + q.getScopeType() + "/" + q.getScopeId());
+        }
+        return QuotaResponse.from(q);
+    }
+
     @PutMapping("/{id}")
     public QuotaResponse update(
             @PathVariable("id") UUID id,
