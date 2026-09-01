@@ -1,0 +1,106 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+// Generated from myrmec-ee/docs/about-v2.md §3 (Use Cases).
+import V2Layout from "../../layouts/V2Layout.astro";
+
+const sessions = [
+  {
+    title: "Ops Runbook Copilot",
+    body: "An on-call engineer chats: \"Reset the staging environment.\" The agent retrieves the runbook from the infra-docs repo, proposes four steps, and surfaces each kubectl / terraform command as an approval card citing the runbook section. The engineer approves four times. Nothing ran on the engineer's laptop — and the full session is recorded in the audit log.",
+  },
+  {
+    title: "NL→SQL Data Analyst",
+    body: "An analyst asks: \"What's our MRR by region last quarter?\" The agent retrieves the data dictionary, the regional join definition, and the fiscal-quarter rule. Generates SQL → approval card with the query and estimated row count → approved → results stream back with citations to both the schema docs and the SQL that produced them. Database credentials never leave the sandbox.",
+  },
+  {
+    title: "Compliance Q&A",
+    body: "\"What's our data-retention policy for EU customers?\" The agent retrieves from the policy repository, cites the GDPR clause and the matching internal policy section, and produces a structured answer. When the regulator asks how the answer was produced six months later, the Auditor replays the session.",
+  },
+  {
+    title: "Code-aware Operations",
+    body: "\"Where do we handle webhook retry on Stripe failures?\" The agent searches the monorepo and returns the answer with file:line citations — and if asked, opens a PR fixing a bug it spots, with the diff surfaced as an approval card before the push.",
+  },
+  {
+    title: "Vendor Onboarding Assistant",
+    body: "Procurement chats with an agent grounded in vendor policy and previous vendor records. It walks them through compliance questions, files Jira tickets via approved tools, and produces a final dossier for sign-off.",
+  },
+];
+
+const engineering = [
+  ["Code Generation", "Bring AI coding standards, architecture decisions, and review criteria into reusable workflows. Every developer benefits from the same governed approach instead of relying on individual prompt skill."],
+  ["Code Review & Quality Gates", "Run review workflows that check code against your own standards, invoke static-analysis agents, and produce a structured report. Consistent, traceable, never blocked on one reviewer's availability."],
+  ["Documentation Generation", "Read source code and knowledge context, then produce API references, architecture decision records, or user guides — versioned and auditable."],
+  ["Test Generation", "Assign a test-writing agent profile to a workflow step and automatically produce unit, integration, or regression tests from code or specifications."],
+  ["Autonomous Maintenance", "Schedule a recurring workflow that scans a repository for deprecated libraries, writes the upgrade code, runs the tests, and submits a report — without a developer opening an IDE."],
+  ["Architectural Compliance", "An agent reviews each new module against the organisation's architecture knowledge source and flags violations automatically."],
+  ["Legacy Code Migration", "A non-technical project manager triggers a migration workflow that transforms, for example, a Java 8 project to Spring Boot 3 using company-approved patterns stored in Myrmec."],
+];
+
+const operations = [
+  ["Data Processing & Transformation", "Connect specialised agents to pipeline steps for extraction, normalisation, validation, and loading — with full observability across every run."],
+  ["Compliance & Policy Checks", "Run regulatory or internal policy reviews as automated workflow steps, producing evidence trails that can be exported for audit."],
+  ["Incident Analysis", "Feed logs, traces, and runbooks into an analysis workflow that produces structured root-cause reports faster than manual investigation."],
+  ["Onboarding & Knowledge Transfer", "Project-level knowledge lets agents answer questions about a project's history, business logic, and quirks — a 24/7 technical lead for new joiners."],
+  ["Rapid Prototyping", "A product manager defines a workflow that generates a boilerplate microservice from a feature list; agents handle scaffolding, Dockerisation, and CI/CD setup using the admin's standard instructions."],
+];
+---
+
+<V2Layout
+  title="Use Cases | Myrmec"
+  description="How organisations apply Myrmec: governed ops copilots, NL→SQL analysts, compliance Q&A, code generation, incident analysis, and more."
+>
+  <section class="mx-auto max-w-6xl px-6 py-16 md:px-10">
+    <h1 class="text-4xl font-extrabold tracking-tight text-slate-900 md:text-5xl">Use Cases</h1>
+    <p class="mt-4 max-w-2xl text-base leading-relaxed text-slate-500">
+      Every scenario below runs on the same governed runtime — grounded retrieval, sandboxed
+      execution, approval-gated action, full audit trail.
+    </p>
+
+    <!-- ─── INTERACTIVE SESSIONS ─────────────────────────────── -->
+    <h2 class="mt-14 text-2xl font-extrabold tracking-tight text-slate-900">Interactive sessions</h2>
+    <p class="mt-2 text-sm text-slate-500">Conversational steering, grounded retrieval, sandboxed execution, approval-gated action.</p>
+
+    <div class="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+      {sessions.map((s) => (
+        <article class="flex flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:shadow-md">
+          <h3 class="text-base font-bold text-slate-900">{s.title}</h3>
+          <p class="mt-3 flex-1 text-sm leading-relaxed text-slate-500">{s.body}</p>
+        </article>
+      ))}
+    </div>
+
+    <!-- ─── ENGINEERING & CODE ───────────────────────────────── -->
+    <h2 class="mt-16 text-2xl font-extrabold tracking-tight text-slate-900">Engineering &amp; code</h2>
+
+    <div class="mt-8 grid gap-x-10 gap-y-7 md:grid-cols-2">
+      {engineering.map(([title, desc]) => (
+        <div>
+          <h3 class="text-sm font-bold text-slate-900">{title}</h3>
+          <p class="mt-1.5 text-sm leading-relaxed text-slate-500">{desc}</p>
+        </div>
+      ))}
+    </div>
+
+    <!-- ─── OPERATIONS & BUSINESS ────────────────────────────── -->
+    <h2 class="mt-16 text-2xl font-extrabold tracking-tight text-slate-900">Operations &amp; business</h2>
+
+    <div class="mt-8 grid gap-x-10 gap-y-7 md:grid-cols-2">
+      {operations.map(([title, desc]) => (
+        <div>
+          <h3 class="text-sm font-bold text-slate-900">{title}</h3>
+          <p class="mt-1.5 text-sm leading-relaxed text-slate-500">{desc}</p>
+        </div>
+      ))}
+    </div>
+
+    <!-- CTA -->
+    <div class="mt-16 rounded-2xl border border-indigo-200 bg-indigo-50/60 p-8 text-center">
+      <p class="text-base font-semibold text-slate-800">See how these would run in your organisation.</p>
+      <div class="mt-5 flex flex-wrap justify-center gap-4">
+        <a href="/v2/get-started" class="rounded-xl bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500">Get Started</a>
+        <a href="/v2/#contact" class="rounded-xl border border-slate-300 bg-white px-6 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-indigo-400 hover:text-indigo-600">Contact Us</a>
+      </div>
+    </div>
+  </section>
+</V2Layout>

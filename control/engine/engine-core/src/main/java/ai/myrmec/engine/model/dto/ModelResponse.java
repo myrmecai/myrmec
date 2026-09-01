@@ -1,6 +1,7 @@
 package ai.myrmec.engine.model.dto;
 
 import ai.myrmec.engine.model.*;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Builder;
 import lombok.Data;
 
@@ -19,10 +20,9 @@ public class ModelResponse {
     private String name;
     private String provider;
     private String providerName;
-    private DeploymentType deploymentType;
     private String modelId;
     private String apiEndpoint;
-    private boolean requiresAuth;
+    @JsonProperty("supportsVision")
     private boolean supportsVision;
     private Map<String, Object> infraConfig;
     private Map<String, Object> defaultParams;
@@ -33,6 +33,11 @@ public class ModelResponse {
     private String lastTestStatus;
     private Instant createdAt;
     private Instant updatedAt;
+
+    // Admin-only pricing fields (not included in fromPublic())
+    private java.math.BigDecimal inputPrice;
+    private java.math.BigDecimal outputPrice;
+    private String currency;
 
     /**
      * Convert entity to response DTO.
@@ -45,10 +50,8 @@ public class ModelResponse {
                 .name(model.getName())
                 .provider(model.getProvider())
                 .providerName(providerConfig != null ? providerConfig.getName() : model.getProvider())
-                .deploymentType(model.getDeploymentType())
                 .modelId(model.getModelId())
                 .apiEndpoint(model.getApiEndpoint())
-                .requiresAuth(model.isRequiresAuth())
                 .supportsVision(model.isSupportsVision())
                 .infraConfig(model.getInfraConfig())
                 .defaultParams(model.getDefaultParams())
@@ -59,6 +62,9 @@ public class ModelResponse {
                 .lastTestStatus(model.getLastTestStatus())
                 .createdAt(model.getCreatedAt())
                 .updatedAt(model.getUpdatedAt())
+                .inputPrice(model.getInputPrice())
+                .outputPrice(model.getOutputPrice())
+                .currency(model.getCurrency())
                 .build();
     }
 
@@ -73,7 +79,6 @@ public class ModelResponse {
                 .name(model.getName())
                 .provider(model.getProvider())
                 .providerName(providerConfig != null ? providerConfig.getName() : model.getProvider())
-                .deploymentType(model.getDeploymentType())
                 .modelId(model.getModelId())
                 .status(model.getStatus())
                 .healthStatus(model.getHealthStatus())

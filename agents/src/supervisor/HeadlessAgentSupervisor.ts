@@ -125,6 +125,11 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
         agentAccessToken: this.accessToken ?? undefined,
         ...(this.maxIterations !== undefined ? { maxIterations: this.maxIterations } : {}),
         ...(this.maxImageBytes !== undefined ? { maxImageBytes: this.maxImageBytes } : {}),
+        // Execution provider selection (defaults to 'real' in production).
+        // E2E tests set MYRMEC_LLM_EXECUTION=stub and MYRMEC_TOOL_EXECUTION=stub.
+        ...(process.env.MYRMEC_LLM_EXECUTION ? { chatModelMode: process.env.MYRMEC_LLM_EXECUTION as "stub" | "real" } : {}),
+        ...(process.env.MYRMEC_TOOL_EXECUTION ? { sessionToolMode: process.env.MYRMEC_TOOL_EXECUTION as "stub" | "real" } : {}),
+        ...(process.env.MYRMEC_STUB_MODULE ? { stubModulePath: process.env.MYRMEC_STUB_MODULE } : {}),
       },
       onExit: (code) =>
         this.log.warn(`Agent worker exited (code=${code}); restart deferred`),

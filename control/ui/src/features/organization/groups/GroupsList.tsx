@@ -7,6 +7,7 @@ import { groupsApi, type Group, type CreateGroupRequest } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RequiredMark } from '@/components/ui/required-marks'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Card,
@@ -177,7 +178,7 @@ function CreateGroupDialog({
         }}
       >
         <div className="space-y-2">
-          <Label htmlFor="group-name">Name</Label>
+          <Label htmlFor="group-name">Name<RequiredMark /></Label>
           <Input
             id="group-name"
             value={name}

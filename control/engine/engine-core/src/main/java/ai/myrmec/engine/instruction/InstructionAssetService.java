@@ -2,9 +2,20 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.instruction;
 
+import ai.myrmec.engine._system.common.DomainConstants;
+import ai.myrmec.engine._system.common.DomainConstants.AuditAction;
+import ai.myrmec.engine._system.common.DomainConstants.Availability;
+import ai.myrmec.engine._system.common.ResourceType;
+import ai.myrmec.engine._system.common.AuditReason;
+import ai.myrmec.engine._system.common.DomainConstants.EntityStatus;
+import ai.myrmec.engine._system.common.DomainConstants.Scope;
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine.audit.AuditEventService;
+import ai.myrmec.engine.governance.GovernancePolicyEnforcer;
+import ai.myrmec.engine.governance.GovernanceScope;
+import ai.myrmec.engine.governance.ProductFeature;
+import ai.myrmec.engine.instruction.dto.InstructionAssetResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -30,17 +41,30 @@ public class InstructionAssetService {
     private final InstructionAssetRepository repository;
     private final InstructionAssetVersionRepository versionRepository;
     private final AuditEventService auditEventService;
+    private final GovernancePolicyEnforcer governanceEnforcer;
 
     // ---- read paths -------------------------------------------------
 
     @Transactional(readOnly = true)
     public List<InstructionAsset> findAllOrgScoped() {
-        return repository.findByScopeAndProjectIdIsNull("ORGANIZATION");
+        return repository.findByScopeAndProjectIdIsNull(Scope.ORGANIZATION);
+    }
+
+    /**
+     * List all org-scoped instruction assets with their published version's
+     * availability populated.  Used by the admin list endpoint so the UI can
+     * show REQUIRED/OPTIONAL badges without a separate version fetch per asset.
+     */
+    @Transactional(readOnly = true)
+    public List<InstructionAssetResponse> findAllOrgScopedWithAvailability() {
+        return repository.findByScopeAndProjectIdIsNull(Scope.ORGANIZATION).stream()
+                .map(a -> InstructionAssetResponse.from(a, getPublishedVersionOrNull(a.getId()), getDraftVersion(a.getId())))
+                .toList();
     }
 
     @Transactional(readOnly = true)
     public List<InstructionAsset> findAllProjectScoped(UUID projectId) {
-        return repository.findByScopeAndProjectId("PROJECT", projectId);
+        return repository.findByScopeAndProjectId(Scope.PROJECT, projectId);
     }
 
     @Transactional(readOnly = true)
@@ -51,14 +75,24 @@ public class InstructionAssetService {
 
     @Transactional(readOnly = true)
     public InstructionAssetVersion getPublishedVersion(UUID assetId) {
-        return versionRepository.findByAssetIdAndStatus(assetId, "PUBLISHED")
+        return versionRepository.findByAssetIdAndStatus(assetId, EntityStatus.PUBLISHED)
                 .orElseThrow(() -> ResourceNotFoundException.of("InstructionAssetVersion",
                         "assetId=" + assetId + ", status=PUBLISHED"));
     }
 
     @Transactional(readOnly = true)
     public InstructionAssetVersion getDraftVersion(UUID assetId) {
-        return versionRepository.findByAssetIdAndStatus(assetId, "DRAFT").orElse(null);
+        return versionRepository.findByAssetIdAndStatus(assetId, EntityStatus.DRAFT).orElse(null);
+    }
+
+    /**
+     * Get the published version of an instruction asset, or {@code null} if
+     * no published version exists.  Unlike {@link #getPublishedVersion(UUID)},
+     * this method does not throw when the version is missing.
+     */
+    @Transactional(readOnly = true)
+    public InstructionAssetVersion getPublishedVersionOrNull(UUID assetId) {
+        return versionRepository.findByAssetIdAndStatus(assetId, EntityStatus.PUBLISHED).orElse(null);
     }
 
     // ---- create ------------------------------------------------------
@@ -80,14 +114,15 @@ public class InstructionAssetService {
         asset.setName(name);
         asset.setDescription(description);
         asset.setCategory(category);
-        asset.setStatus("INCOMPLETE");
+        asset.setStatus(EntityStatus.INCOMPLETE);
         asset.setCreatedBy(actorId);
+        asset.setUpdatedBy(actorId);
 
         InstructionAsset saved = repository.save(asset);
         log.info("Created instruction asset: {} (id: {})", name, saved.getId());
 
         auditEventService.recordEvent(
-                "instruction_asset", saved.getId(), "CREATED",
+                ResourceType.INSTRUCTION_ASSET, saved.getId(), AuditAction.CREATED,
                 scope, projectId, actorId, actorDisplayName,
                 null, null, null, Map.of("name", name, "category", category), null);
 
@@ -120,11 +155,12 @@ public class InstructionAssetService {
             asset.setCategory(category);
         }
 
+        asset.setUpdatedBy(actorId);
         InstructionAsset saved = repository.save(asset);
         log.info("Updated instruction asset: {} (id: {})", saved.getName(), assetId);
 
         auditEventService.recordEvent(
-                "instruction_asset", assetId, "UPDATED",
+                ResourceType.INSTRUCTION_ASSET, assetId, AuditAction.UPDATED,
                 asset.getScope(), asset.getProjectId(), actorId, actorDisplayName,
                 null, null, null, Map.of("name", saved.getName()), null);
 
@@ -143,6 +179,27 @@ public class InstructionAssetService {
                                                 UUID actorId, String actorDisplayName) {
         InstructionAsset asset = findById(assetId);
 
+        // Governance: INSTRUCTION_SOURCES
+        governanceEnforcer.assertAllowed(
+            asset.getProjectId() != null
+                ? GovernanceScope.ofProject(asset.getProjectId())
+                : GovernanceScope.orgScope(),
+            ProductFeature.INSTRUCTION_SOURCES,
+            sourceType);
+
+        // Governance: INLINE_INSTRUCTIONS_SCOPE (only when sourceType=INLINE)
+        // This is a threshold feature (NONE < PROJECT_SERVICE < ALL): the profile's
+        // value must permit at least the scope the asset lives in. Use
+        // assertPermitted, not assertAllowed — ALL permits PROJECT_SERVICE.
+        if ("INLINE".equals(sourceType)) {
+            governanceEnforcer.assertPermitted(
+                asset.getProjectId() != null
+                    ? GovernanceScope.ofProject(asset.getProjectId())
+                    : GovernanceScope.orgScope(),
+                ProductFeature.INLINE_INSTRUCTIONS_SCOPE,
+                asset.getProjectId() != null ? "PROJECT_SERVICE" : "ALL");
+        }
+
         // Check if a draft already exists
         InstructionAssetVersion existingDraft = getDraftVersion(assetId);
         if (existingDraft != null) {
@@ -150,7 +207,7 @@ public class InstructionAssetService {
         }
 
         InstructionAssetVersion publishedVersion = versionRepository
-                .findByAssetIdAndStatus(assetId, "PUBLISHED").orElse(null);
+                .findByAssetIdAndStatus(assetId, EntityStatus.PUBLISHED).orElse(null);
 
         int versionNumber = publishedVersion != null ? publishedVersion.getVersionNumber() + 1 : 1;
 
@@ -158,12 +215,12 @@ public class InstructionAssetService {
         draft.setAssetId(assetId);
         draft.setVersionNumber(versionNumber);
         draft.setParentVersionId(publishedVersion != null ? publishedVersion.getId() : null);
-        draft.setStatus("DRAFT");
+        draft.setStatus(EntityStatus.DRAFT);
         draft.setSourceType(sourceType);
         draft.setSourceDetails(sourceDetails);
         draft.setConnectionConfigId(connectionConfigId);
         draft.setApplicability(applicability != null ? applicability : Map.of());
-        draft.setAvailability(availability != null ? availability : "OPTIONAL");
+        draft.setAvailability(availability != null ? availability : Availability.OPTIONAL);
         draft.setPriority(priority != null ? priority : 0);
         draft.setActivationRules(activationRules);
         draft.setDraftOwnerId(actorId);
@@ -172,7 +229,7 @@ public class InstructionAssetService {
         log.info("Created draft version {} for instruction asset: {}", versionNumber, assetId);
 
         auditEventService.recordEvent(
-                "instruction_asset", assetId, "DRAFT_CREATED",
+                ResourceType.INSTRUCTION_ASSET, assetId, AuditAction.DRAFT_CREATED,
                 asset.getScope(), asset.getProjectId(), actorId, actorDisplayName,
                 saved.getId(), null, null, Map.of("version_number", versionNumber), null);
 
@@ -190,14 +247,14 @@ public class InstructionAssetService {
 
         // Archive the current published version if one exists
         InstructionAssetVersion currentPublished = versionRepository
-                .findByAssetIdAndStatus(assetId, "PUBLISHED").orElse(null);
+                .findByAssetIdAndStatus(assetId, EntityStatus.PUBLISHED).orElse(null);
         if (currentPublished != null) {
-            currentPublished.setStatus("ARCHIVED");
+            currentPublished.setStatus(EntityStatus.ARCHIVED);
             versionRepository.save(currentPublished);
         }
 
         // Publish the draft
-        draft.setStatus("PUBLISHED");
+        draft.setStatus(EntityStatus.PUBLISHED);
         draft.setDraftOwnerId(null);
         draft.setPublishedAt(Instant.now());
         draft.setPublishedBy(actorId);
@@ -205,15 +262,16 @@ public class InstructionAssetService {
 
         // Update parent
         asset.setCurrentVersionId(saved.getId());
-        asset.setStatus("ACTIVE");
+        asset.setStatus(EntityStatus.ACTIVE);
         asset.setPublishedAt(Instant.now());
         asset.setPublishedBy(actorId);
+        asset.setUpdatedBy(actorId);
         repository.save(asset);
 
         log.info("Published instruction asset version {} (id: {})", draft.getVersionNumber(), assetId);
 
         auditEventService.recordEvent(
-                "instruction_asset", assetId, "PUBLISHED",
+                ResourceType.INSTRUCTION_ASSET, assetId, EntityStatus.PUBLISHED,
                 asset.getScope(), asset.getProjectId(), actorId, actorDisplayName,
                 saved.getId(), null, null, Map.of("version_number", draft.getVersionNumber()), null);
 
@@ -233,7 +291,7 @@ public class InstructionAssetService {
         log.info("Discarded draft for instruction asset: {}", assetId);
 
         auditEventService.recordEvent(
-                "instruction_asset", assetId, "DRAFT_DISCARDED",
+                ResourceType.INSTRUCTION_ASSET, assetId, AuditAction.DRAFT_DISCARDED,
                 asset.getScope(), asset.getProjectId(), actorId, actorDisplayName,
                 draft.getId(), null, null, null, null);
     }
@@ -268,14 +326,15 @@ public class InstructionAssetService {
     @Transactional
     public InstructionAsset disable(UUID assetId, UUID actorId, String actorDisplayName) {
         InstructionAsset asset = findById(assetId);
-        asset.setStatus("DISABLED");
+        asset.setStatus(EntityStatus.DISABLED);
+        asset.setUpdatedBy(actorId);
         InstructionAsset saved = repository.save(asset);
         log.info("Disabled instruction asset: {}", assetId);
 
         auditEventService.recordEvent(
-                "instruction_asset", assetId, "DISABLED",
+                ResourceType.INSTRUCTION_ASSET, assetId, EntityStatus.DISABLED,
                 asset.getScope(), asset.getProjectId(), actorId, actorDisplayName,
-                null, "ADMIN_DISABLED", null, null, null);
+                null, AuditReason.ADMIN_DISABLED, null, null, null);
 
         return saved;
     }
@@ -283,14 +342,15 @@ public class InstructionAssetService {
     @Transactional
     public InstructionAsset reenable(UUID assetId, UUID actorId, String actorDisplayName) {
         InstructionAsset asset = findById(assetId);
-        asset.setStatus("ACTIVE");
+        asset.setStatus(EntityStatus.ACTIVE);
+        asset.setUpdatedBy(actorId);
         InstructionAsset saved = repository.save(asset);
         log.info("Re-enabled instruction asset: {}", assetId);
 
         auditEventService.recordEvent(
-                "instruction_asset", assetId, "REENABLED",
+                ResourceType.INSTRUCTION_ASSET, assetId, AuditAction.REENABLED,
                 asset.getScope(), asset.getProjectId(), actorId, actorDisplayName,
-                null, "ADMIN_REENABLED", null, null, null);
+                null, AuditReason.ADMIN_REENABLED, null, null, null);
 
         return saved;
     }
@@ -298,14 +358,15 @@ public class InstructionAssetService {
     @Transactional
     public InstructionAsset archive(UUID assetId, UUID actorId, String actorDisplayName) {
         InstructionAsset asset = findById(assetId);
-        asset.setStatus("ARCHIVED");
+        asset.setStatus(EntityStatus.ARCHIVED);
+        asset.setUpdatedBy(actorId);
         InstructionAsset saved = repository.save(asset);
         log.info("Archived instruction asset: {}", assetId);
 
         auditEventService.recordEvent(
-                "instruction_asset", assetId, "ARCHIVED",
+                ResourceType.INSTRUCTION_ASSET, assetId, EntityStatus.ARCHIVED,
                 asset.getScope(), asset.getProjectId(), actorId, actorDisplayName,
-                null, "ADMIN_ARCHIVED", null, null, null);
+                null, AuditReason.ADMIN_ARCHIVED, null, null, null);
 
         return saved;
     }

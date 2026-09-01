@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
 
-import { useState, useMemo } from 'react'
-import { Link, useMatch } from '@tanstack/react-router'
+import { useState, useMemo, useEffect } from 'react'
+import { Link, useMatch, useLocation } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/lib/auth'
 import {
@@ -42,6 +42,7 @@ interface NavSection {
 
 export function Sidebar() {
   const { isPlatformAdmin, isOrgAdmin, hasSystemRole } = useAuth()
+  const location = useLocation()
 
   // Auto-expand the section containing the active route.
   const dashboardMatch = useMatch({ from: '/_authenticated/dashboard', shouldThrow: false })
@@ -51,10 +52,11 @@ export function Sidebar() {
   const budgetsMatch = useMatch({ from: '/_authenticated/budgets', shouldThrow: false })
 
   // Platform section is active when on /platform or any nested platform route.
-  const platformActive = checkActive('/platform')
-  const budgetsActive = !!budgetsMatch || checkActive('/budgets')
-  const servicesActive = !!workflowsMatch || !!assistantsMatch || checkActive('/workflows') || checkActive('/assistants')
-  const orgActive = checkActive('/admin') || checkActive('/projects') || checkActive('/users')
+  const currentPath = location.pathname.replace(/\/$/, '')
+  const platformActive = checkActivePath(currentPath, '/platform')
+  const budgetsActive = !!budgetsMatch || checkActivePath(currentPath, '/budgets')
+  const servicesActive = !!workflowsMatch || !!assistantsMatch || checkActivePath(currentPath, '/workflows') || checkActivePath(currentPath, '/assistants')
+  const orgActive = checkActivePath(currentPath, '/admin') || checkActivePath(currentPath, '/projects') || checkActivePath(currentPath, '/users')
 
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     services: servicesActive,
@@ -62,6 +64,18 @@ export function Sidebar() {
     platform: platformActive,
     organization: orgActive,
   })
+
+  // Auto-expand the section containing the active route when navigating.
+  // Only expands — never collapses a section the user manually opened.
+  useEffect(() => {
+    setOpenSections((prev) => ({
+      ...prev,
+      services: prev.services || servicesActive,
+      budgets: prev.budgets || budgetsActive,
+      platform: prev.platform || platformActive,
+      organization: prev.organization || orgActive,
+    }))
+  }, [servicesActive, budgetsActive, platformActive, orgActive])
 
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -112,7 +126,7 @@ export function Sidebar() {
         icon: Server,
         items: [
           { label: 'AI Infrastructure', to: '/platform/ai-infra/models', icon: Cpu },
-          { label: 'AI Context', to: '/platform/ai-context/governance-profile', icon: BrainCircuit },
+          { label: 'AI Context', to: '/platform/ai-context/instruction-assets', icon: BrainCircuit },
           { label: 'Connections', to: '/platform/connections', icon: Link2 },
           { label: 'Security & Access', to: '/platform/security/secrets', icon: ShieldCheck },
         ],
@@ -156,7 +170,7 @@ export function Sidebar() {
               to={item.to}
               icon={item.icon}
               label={item.label}
-              active={checkActive(item.to)}
+              active={checkActivePath(currentPath, item.to)}
             />
           )),
         )}
@@ -210,7 +224,7 @@ export function Sidebar() {
               {isOpen && (
                 <div className="ml-2 mt-0.5 space-y-0.5 border-l border-border pl-2">
                   {section.items.map((item) => {
-                    const active = checkActive(item.to)
+                    const active = checkActivePath(currentPath, item.to)
                     return (
                       <SidebarLink
                         key={item.to}
@@ -232,12 +246,9 @@ export function Sidebar() {
   )
 }
 
-/** Check if a route path is active based on the current URL. */
-function checkActive(to: string): boolean {
-  if (typeof window === 'undefined') return false
-  const current = window.location.pathname.replace(/\/$/, '')
-  const target = to
-  return current === target || current.startsWith(target + '/')
+/** Check if a route path is active based on the given current path. */
+function checkActivePath(currentPath: string, to: string): boolean {
+  return currentPath === to || currentPath.startsWith(to + '/')
 }
 
 function SidebarLink({

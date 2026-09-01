@@ -3,6 +3,8 @@
 
 package ai.myrmec.engine.quota;
 
+import ai.myrmec.engine.assistant.Assistant;
+import ai.myrmec.engine.assistant.AssistantRepository;
 import ai.myrmec.engine.group.Group;
 import ai.myrmec.engine.group.GroupRepository;
 import ai.myrmec.engine.project.Project;
@@ -10,6 +12,8 @@ import ai.myrmec.engine.project.ProjectRepository;
 import ai.myrmec.engine.quota.dto.BudgetTreeNode;
 import ai.myrmec.engine.quota.dto.EffectiveQuota;
 import ai.myrmec.engine.quota.dto.SharedPool;
+import ai.myrmec.engine.workflow.Workflow;
+import ai.myrmec.engine.workflow.WorkflowRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -39,6 +43,8 @@ public class BudgetService {
     private final QuotaConsumptionRepository consumptionRepository;
     private final ProjectRepository projectRepository;
     private final GroupRepository groupRepository;
+    private final WorkflowRepository workflowRepository;
+    private final AssistantRepository assistantRepository;
 
     /** Effective quota for a specific scope, falling back to parent ceilings. */
     @Transactional(readOnly = true)
@@ -74,6 +80,8 @@ public class BudgetService {
                 .effectiveLimit(effectiveLimit)
                 .quotaType(ownRow != null ? ownRow.getQuotaType().name() : null)
                 .enforcementMode(ownRow != null ? ownRow.getEnforcementMode().name() : null)
+                .serviceType(ownRow != null && ownRow.getServiceType() != null
+                        ? ownRow.getServiceType().name() : null)
                 .consumed(consumed)
                 .remaining(remaining)
                 .atRisk(atRisk)
@@ -89,16 +97,19 @@ public class BudgetService {
         long reservedAmount = 0;
         long consumedInShared = 0;
 
+        // 1. Resolve the effective ceiling: PROJECT → GROUP → ORG.
         List<Quota> projectQuotas = quotaRepository.findByScopeTypeAndScopeIdAndResourceType(
                 Quota.Scope.PROJECT, projectId, resource);
         Quota projectCeiling = projectQuotas.stream()
-                .filter(q -> q.getQuotaType() == QuotaType.CEILING)
+                .filter(q -> q.getQuotaType() == QuotaType.CEILING && q.getPeriod() == period)
                 .findFirst()
                 .orElse(null);
-        if (projectCeiling == null) {
-            // Try org ceiling (Community fallback).
-            Quota orgCeiling = resolveOrgCeiling(resource, period);
-            if (orgCeiling == null) {
+        if (projectCeiling != null) {
+            totalLimit = projectCeiling.getLimitAmount();
+        } else {
+            // Fallback: GROUP ceiling, then ORG ceiling.
+            Long inherited = groupThenOrgCeiling(projectId, resource, period);
+            if (inherited == null) {
                 return SharedPool.builder()
                         .totalLimit(0)
                         .reservedAmount(0)
@@ -106,14 +117,17 @@ public class BudgetService {
                         .consumedInShared(0)
                         .build();
             }
-            totalLimit = orgCeiling.getLimitAmount();
-        } else {
-            totalLimit = projectCeiling.getLimitAmount();
+            totalLimit = inherited;
         }
 
-        List<Quota> serviceQuotas = quotaRepository.findByScopeTypeAndScopeIdAndResourceType(
+        // 2. Sum SERVICE-scope reservations under this project (using
+        //    the denormalised project_id column).
+        List<Quota> serviceQuotas = quotaRepository.findByScopeTypeAndProjectIdAndResourceType(
                 Quota.Scope.SERVICE, projectId, resource);
         for (Quota q : serviceQuotas) {
+            if (q.getPeriod() != period) {
+                continue;
+            }
             if (q.getQuotaType() == QuotaType.RESERVATION) {
                 reservedAmount += q.getLimitAmount();
             } else if (q.getQuotaType() == QuotaType.CEILING) {
@@ -133,12 +147,11 @@ public class BudgetService {
     @Transactional(readOnly = true)
     public List<EffectiveQuota> serviceBudgets(UUID projectId, Quota.ResourceType resource, Quota.Period period) {
         List<EffectiveQuota> result = new ArrayList<>();
-        List<Quota> serviceQuotas = quotaRepository.findByScopeTypeAndScopeIdAndResourceType(
+        List<Quota> serviceQuotas = quotaRepository.findByScopeTypeAndProjectIdAndResourceType(
                 Quota.Scope.SERVICE, projectId, resource);
         for (Quota q : serviceQuotas) {
             if (q.getPeriod() == period) {
-                result.add(effectiveQuota(Quota.Scope.SERVICE, projectId, resource, period, null));
-                break; // One aggregated result for services under this project in this period.
+                result.add(effectiveQuota(Quota.Scope.SERVICE, q.getScopeId(), resource, period, null));
             }
         }
         return result;
@@ -223,7 +236,7 @@ public class BudgetService {
 
     private List<BudgetTreeNode> serviceNodes(UUID projectId, Quota.ResourceType resource,
                                               Quota.Period period, Authentication auth) {
-        List<Quota> serviceQuotas = quotaRepository.findByScopeTypeAndScopeIdAndResourceType(
+        List<Quota> serviceQuotas = quotaRepository.findByScopeTypeAndProjectIdAndResourceType(
                 Quota.Scope.SERVICE, projectId, resource);
         return serviceQuotas.stream()
                 .filter(q -> q.getPeriod() == period)
@@ -316,7 +329,17 @@ public class BudgetService {
             case ORG -> null;
             case GROUP -> orgCeiling(resource, period);
             case PROJECT -> groupThenOrgCeiling(scopeId, resource, period);
-            case SERVICE -> projectThenGroupThenOrgCeiling(scopeId, resource, period);
+            case SERVICE -> {
+                // For SERVICE scope, scopeId is the instance ID.
+                // Resolve the project from the instance, then walk
+                // PROJECT → GROUP → ORG.
+                UUID projectId = resolveProjectFromInstance(scopeId);
+                if (projectId == null) {
+                    // Fallback: scopeId might be a project ID (legacy).
+                    projectId = scopeId;
+                }
+                yield projectThenGroupThenOrgCeiling(projectId, resource, period);
+            }
         };
     }
 
@@ -377,8 +400,42 @@ public class BudgetService {
             case ORG -> "Organization";
             case GROUP -> groupRepository.findById(scopeId).map(Group::getName).orElse("Group " + scopeId);
             case PROJECT -> projectRepository.findById(scopeId).map(Project::getName).orElse("Project " + scopeId);
-            case SERVICE -> "Services";
+            case SERVICE -> {
+                // Try workflow, then assistant.
+                Optional<String> wfName = workflowRepository.findById(scopeId)
+                        .map(Workflow::getName);
+                if (wfName.isPresent()) {
+                    yield wfName.get();
+                }
+                Optional<String> asstName = assistantRepository.findById(scopeId)
+                        .map(Assistant::getName);
+                if (asstName.isPresent()) {
+                    yield asstName.get();
+                }
+                yield "Service " + scopeId;
+            }
         };
+    }
+
+    /**
+     * Resolve the project ID from a service-instance UUID by looking up
+     * the workflow / assistant table.  Falls back to checking if the
+     * scopeId is itself a project ID (legacy compatibility).
+     */
+    private UUID resolveProjectFromInstance(UUID serviceInstanceId) {
+        Optional<Workflow> workflow = workflowRepository.findById(serviceInstanceId);
+        if (workflow.isPresent()) {
+            return workflow.get().getProject().getId();
+        }
+        Optional<Assistant> assistant = assistantRepository.findById(serviceInstanceId);
+        if (assistant.isPresent()) {
+            return assistant.get().getProjectId();
+        }
+        // Fallback: scopeId might be a project ID (legacy / test data).
+        if (projectRepository.existsById(serviceInstanceId)) {
+            return serviceInstanceId;
+        }
+        return null;
     }
 
 }

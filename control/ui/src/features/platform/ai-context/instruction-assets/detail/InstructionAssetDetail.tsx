@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
 
-import { useNavigate, Link } from '@tanstack/react-router'
+import { Link } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   instructionAssetApi,
+  usersApi,
   connectionConfigApi,
   type SourceType,
   type Availability,
   type InstructionAssetVersion,
   type InstructionCategory,
 } from '@/lib/api'
+import { ConnectionConfigSelect } from '@/features/platform/connections/components/ConnectionConfigSelect'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -48,11 +50,13 @@ import {
   AlertCircle,
 } from 'lucide-react'
 import { CATEGORY_LABELS, STATUS_COLORS } from '../shared/constants'
+import { RequiredMark, DraftRequiredMark } from '@/components/ui/required-marks'
 import { dialogService } from '@/services/dialog-service'
+import { useGovernancePolicy } from '@/features/platform/ai-context/governance-profile/useGovernancePolicy'
 
 export function InstructionAssetDetail({ assetId, projectId }: { assetId: string; projectId?: string }) {
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const { policy: governancePolicy } = useGovernancePolicy()
 
   const { data: asset, isLoading } = useQuery({
     queryKey: ['instruction-asset', assetId],
@@ -67,16 +71,37 @@ export function InstructionAssetDetail({ assetId, projectId }: { assetId: string
 
   const { data: draftVersion } = useQuery({
     queryKey: ['instruction-asset-draft', assetId],
-    queryFn: () => instructionAssetApi.getDraftVersion(assetId),
+    // The API returns 204 No Content (→ undefined) when no draft exists.
+    // TanStack Query throws on undefined query data — coerce to null.
+    queryFn: async () => (await instructionAssetApi.getDraftVersion(assetId)) ?? null,
     retry: false,
   })
 
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ['instruction-asset', assetId] })
-    queryClient.invalidateQueries({ queryKey: ['instruction-asset-published', assetId] })
-    queryClient.invalidateQueries({ queryKey: ['instruction-asset-draft', assetId] })
-    queryClient.invalidateQueries({ queryKey: ['instruction-assets'] })
-  }
+  // Fetch users to resolve createdBy/updatedBy UUIDs to names
+  const { data: users } = useQuery({
+    queryKey: ['users'],
+    queryFn: () => usersApi.list(),
+  })
+  const userNameById = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const u of users ?? []) {
+      map[u.id] = u.name
+    }
+    return map
+  }, [users])
+
+  // Fetch connection configs to resolve connectionConfigId to name
+  const { data: connectionConfigs } = useQuery({
+    queryKey: ['connection-configs'],
+    queryFn: () => connectionConfigApi.list(),
+  })
+  const connectionConfigNameById = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const c of connectionConfigs ?? []) {
+      map[c.id] = c.name
+    }
+    return map
+  }, [connectionConfigs])
 
   const createDraftMutation = useMutation({
     mutationFn: (data: {
@@ -89,7 +114,12 @@ export function InstructionAssetDetail({ assetId, projectId }: { assetId: string
     }) => instructionAssetApi.createDraft(assetId, data),
     onSuccess: () => {
       setCreateDraftOpen(false)
-      invalidate()
+      queryClient.invalidateQueries({ queryKey: ['instruction-asset', assetId] })
+      queryClient.invalidateQueries({ queryKey: ['instruction-asset-draft', assetId] })
+      // Also invalidate/refetch the list's DraftStatusBadge query key (plural 'drafts')
+      queryClient.invalidateQueries({ queryKey: ['instruction-asset-drafts', assetId] })
+      queryClient.refetchQueries({ queryKey: ['instruction-asset-drafts', assetId] })
+      queryClient.invalidateQueries({ queryKey: ['instruction-assets'] })
     },
   })
 
@@ -97,9 +127,17 @@ export function InstructionAssetDetail({ assetId, projectId }: { assetId: string
     mutationFn: () => instructionAssetApi.publish(assetId),
     onSuccess: () => {
       queryClient.removeQueries({ queryKey: ['instruction-asset-draft', assetId] })
+      // Also invalidate the list's DraftStatusBadge query key (note: plural 'drafts')
+      queryClient.invalidateQueries({ queryKey: ['instruction-asset-drafts', assetId] })
+      queryClient.refetchQueries({ queryKey: ['instruction-asset-drafts', assetId] })
+      queryClient.invalidateQueries({ queryKey: ['instruction-asset', assetId] })
+      queryClient.invalidateQueries({ queryKey: ['instruction-asset-published', assetId] })
+      // Use refetchQueries to ensure the list refetches even though
+      // the list component is not currently mounted.
+      queryClient.invalidateQueries({ queryKey: ['instruction-assets'] })
+      queryClient.refetchQueries({ queryKey: ['instruction-assets'] })
       setToastMessage('Version published successfully.')
       setTimeout(() => setToastMessage(null), 5000)
-      invalidate()
     },
     onError: (error: any) => {
       console.error('Publish failed:', error)
@@ -110,24 +148,35 @@ export function InstructionAssetDetail({ assetId, projectId }: { assetId: string
     mutationFn: () => instructionAssetApi.discardDraft(assetId),
     onSuccess: () => {
       queryClient.removeQueries({ queryKey: ['instruction-asset-draft', assetId] })
-      invalidate()
+      // Also invalidate/refetch the list's DraftStatusBadge query key (plural 'drafts')
+      queryClient.invalidateQueries({ queryKey: ['instruction-asset-drafts', assetId] })
+      queryClient.refetchQueries({ queryKey: ['instruction-asset-drafts', assetId] })
+      queryClient.invalidateQueries({ queryKey: ['instruction-asset', assetId] })
+      queryClient.invalidateQueries({ queryKey: ['instruction-assets'] })
     },
   })
 
   const disableMutation = useMutation({
     mutationFn: () => instructionAssetApi.disable(assetId),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['instruction-asset', assetId] })
+      queryClient.invalidateQueries({ queryKey: ['instruction-assets'] })
+    },
   })
 
   const reenableMutation = useMutation({
     mutationFn: () => instructionAssetApi.reenable(assetId),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['instruction-asset', assetId] })
+      queryClient.invalidateQueries({ queryKey: ['instruction-assets'] })
+    },
   })
 
   const archiveMutation = useMutation({
     mutationFn: () => instructionAssetApi.archive(assetId),
     onSuccess: () => {
-      invalidate()
+      queryClient.invalidateQueries({ queryKey: ['instruction-asset', assetId] })
+      queryClient.invalidateQueries({ queryKey: ['instruction-assets'] })
     },
   })
 
@@ -136,7 +185,8 @@ export function InstructionAssetDetail({ assetId, projectId }: { assetId: string
       instructionAssetApi.update(assetId, data),
     onSuccess: () => {
       setZone1Editing(false)
-      invalidate()
+      queryClient.invalidateQueries({ queryKey: ['instruction-asset', assetId] })
+      queryClient.invalidateQueries({ queryKey: ['instruction-assets'] })
     },
   })
 
@@ -149,7 +199,14 @@ export function InstructionAssetDetail({ assetId, projectId }: { assetId: string
       availability: publishedVersion?.availability ?? 'REQUIRED',
       priority: publishedVersion?.priority ?? 100,
     }),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['instruction-asset-draft', assetId] })
+      // Also invalidate/refetch the list's DraftStatusBadge query key (plural 'drafts')
+      queryClient.invalidateQueries({ queryKey: ['instruction-asset-drafts', assetId] })
+      queryClient.refetchQueries({ queryKey: ['instruction-asset-drafts', assetId] })
+      queryClient.invalidateQueries({ queryKey: ['instruction-asset', assetId] })
+      queryClient.invalidateQueries({ queryKey: ['instruction-assets'] })
+    },
   })
 
   const [createDraftOpen, setCreateDraftOpen] = useState(false)
@@ -227,13 +284,68 @@ export function InstructionAssetDetail({ assetId, projectId }: { assetId: string
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">Identity & Metadata</CardTitle>
             {!zone1Editing && (
-              <Button variant="outline" size="sm" onClick={() => {
-                setZone1Name(asset.name)
-                setZone1Desc(asset.description ?? '')
-                setZone1Editing(true)
-              }}>
-                Edit
-              </Button>
+              <div className="flex items-center gap-2">
+                {asset.status === 'ACTIVE' && (
+                  <Button variant="outline" size="sm" onClick={async () => {
+                    const confirmed = await dialogService.showConfirmDialog({
+                      title: 'Disable Instruction Asset',
+                      message: `Disable "${asset.name}"? The instruction will stop being included in assembled contexts until it is re-enabled.`,
+                      severity: 'warning',
+                      type: 'warning',
+                      confirmLabel: 'Disable',
+                      cancelLabel: 'Cancel',
+                    })
+                    if (confirmed) disableMutation.mutate()
+                  }} disabled={disableMutation.isPending}>
+                    <PowerOff className="h-4 w-4 mr-2" />
+                    Disable
+                  </Button>
+                )}
+                {asset.status === 'DISABLED' && (
+                  <Button variant="outline" size="sm" onClick={async () => {
+                    const confirmed = await dialogService.showConfirmDialog({
+                      title: 'Re-enable Instruction Asset',
+                      message: `Re-enable "${asset.name}"? The instruction will immediately be included in assembled contexts again.`,
+                      severity: 'info',
+                      type: 'warning',
+                      confirmLabel: 'Re-enable',
+                      cancelLabel: 'Cancel',
+                    })
+                    if (confirmed) reenableMutation.mutate()
+                  }} disabled={reenableMutation.isPending}>
+                    <Power className="h-4 w-4 mr-2" />
+                    Re-enable
+                  </Button>
+                )}
+                {asset.status !== 'ARCHIVED' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      const confirmed = await dialogService.showConfirmDialog({
+                        title: 'Archive Instruction Asset',
+                        message: `Archive "${asset.name}"? This can be restored later.`,
+                        severity: 'warning',
+                        type: 'warning',
+                        confirmLabel: 'Archive',
+                        cancelLabel: 'Cancel',
+                      })
+                      if (confirmed) archiveMutation.mutate()
+                    }}
+                    disabled={archiveMutation.isPending}
+                  >
+                    <Archive className="h-4 w-4 mr-2" />
+                    Archive
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" onClick={() => {
+                  setZone1Name(asset.name)
+                  setZone1Desc(asset.description ?? '')
+                  setZone1Editing(true)
+                }}>
+                  Edit
+                </Button>
+              </div>
             )}
           </div>
         </CardHeader>
@@ -241,7 +353,7 @@ export function InstructionAssetDetail({ assetId, projectId }: { assetId: string
           {zone1Editing ? (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="zone1-name">Name</Label>
+                <Label htmlFor="zone1-name">Name<RequiredMark /></Label>
                 <Input
                   id="zone1-name"
                   value={zone1Name}
@@ -320,7 +432,13 @@ export function InstructionAssetDetail({ assetId, projectId }: { assetId: string
               {asset.createdBy && (
                 <div>
                   <dt className="text-muted-foreground">Created By</dt>
-                  <dd>{asset.createdBy}</dd>
+                  <dd>{userNameById[asset.createdBy] ?? asset.createdBy}</dd>
+                </div>
+              )}
+              {asset.updatedBy && (
+                <div>
+                  <dt className="text-muted-foreground">Updated By</dt>
+                  <dd>{userNameById[asset.updatedBy] ?? asset.updatedBy}</dd>
                 </div>
               )}
             </dl>
@@ -332,6 +450,7 @@ export function InstructionAssetDetail({ assetId, projectId }: { assetId: string
       {hasPublished && !hasDraft && (
         <PublishedVersionSection
           version={publishedVersion!}
+          connectionConfigNameById={connectionConfigNameById}
           onNewDraft={() => createNewVersionMutation.mutate()}
           newVersionPending={createNewVersionMutation.isPending}
           zone1Editing={zone1Editing}
@@ -342,8 +461,21 @@ export function InstructionAssetDetail({ assetId, projectId }: { assetId: string
       {hasDraft && (
         <DraftVersionSection
           assetId={assetId}
+          assetProjectId={asset?.projectId ?? null}
           version={draftVersion!}
-          onPublish={() => publishMutation.mutate()}
+          connectionConfigNameById={connectionConfigNameById}
+          governancePolicy={governancePolicy}
+          onPublish={async () => {
+            const confirmed = await dialogService.showConfirmDialog({
+              title: 'Publish Instruction Asset',
+              message: `Publish version ${draftVersion?.versionNumber ?? ''} of "${asset.name}"? The published version becomes live immediately and cannot be edited — open a new draft to change it.`,
+              severity: 'warning',
+              type: 'warning',
+              confirmLabel: 'Publish',
+              cancelLabel: 'Cancel',
+            })
+            if (confirmed) publishMutation.mutate()
+          }}
           onDiscard={async () => {
             const confirmed = await dialogService.showConfirmDialog({
               title: 'Discard Draft',
@@ -356,7 +488,7 @@ export function InstructionAssetDetail({ assetId, projectId }: { assetId: string
             if (confirmed) discardMutation.mutate()
           }}
           onPreview={() => setPreviewOpen(true)}
-          onSourceTypeChange={(newType) => {
+          onSourceTypeChange={() => {
             // A6: changing source type — recreate draft with new type
             createNewVersionMutation.mutate()
           }}
@@ -387,43 +519,6 @@ export function InstructionAssetDetail({ assetId, projectId }: { assetId: string
           </CardContent>
         </Card>
       )}
-
-      {/* Action buttons */}
-      <div className="flex items-center gap-2 mt-6">
-        {asset.status === 'ACTIVE' && (
-          <Button variant="outline" onClick={() => disableMutation.mutate()} disabled={disableMutation.isPending}>
-            <PowerOff className="h-4 w-4 mr-2" />
-            Disable
-          </Button>
-        )}
-        {asset.status === 'DISABLED' && (
-          <Button variant="outline" onClick={() => reenableMutation.mutate()} disabled={reenableMutation.isPending}>
-            <Power className="h-4 w-4 mr-2" />
-            Re-enable
-          </Button>
-        )}
-        {asset.status !== 'ARCHIVED' && (
-          <Button
-            variant="ghost"
-            className="text-destructive"
-            onClick={async () => {
-              const confirmed = await dialogService.showConfirmDialog({
-                title: 'Archive Instruction Asset',
-                message: `Archive "${asset.name}"? This can be restored later.`,
-                severity: 'warning',
-                type: 'warning',
-                confirmLabel: 'Archive',
-                cancelLabel: 'Cancel',
-              })
-              if (confirmed) archiveMutation.mutate()
-            }}
-            disabled={archiveMutation.isPending}
-          >
-            <Archive className="h-4 w-4 mr-2" />
-            Archive
-          </Button>
-        )}
-      </div>
 
       {/* Create Draft Dialog */}
       <CreateDraftDialog
@@ -470,12 +565,14 @@ export function InstructionAssetDetail({ assetId, projectId }: { assetId: string
 
 function PublishedVersionSection({
   version,
+  connectionConfigNameById,
   onNewDraft,
   newVersionPending,
   zone1Editing,
   onPreview,
 }: {
   version: InstructionAssetVersion
+  connectionConfigNameById: Record<string, string>
   onNewDraft: () => void
   newVersionPending: boolean
   zone1Editing: boolean
@@ -535,7 +632,7 @@ function PublishedVersionSection({
 
         {version.sourceType === 'GIT' && (
           <div className="text-sm space-y-1">
-            <div><span className="text-muted-foreground">Connection Config:</span> {version.connectionConfigId || '—'}</div>
+            <div><span className="text-muted-foreground">Connection Config:</span> {version.connectionConfigId ? (connectionConfigNameById[version.connectionConfigId] ?? version.connectionConfigId) : '—'}</div>
             {(version.sourceDetails as { branch?: string })?.branch && (
               <div><span className="text-muted-foreground">Branch/Tag:</span> {(version.sourceDetails as { branch?: string }).branch}</div>
             )}
@@ -580,7 +677,10 @@ function PublishedVersionSection({
 
 function DraftVersionSection({
   assetId,
+  assetProjectId,
   version,
+  connectionConfigNameById,
+  governancePolicy,
   onPublish,
   onDiscard,
   onPreview,
@@ -589,7 +689,10 @@ function DraftVersionSection({
   discarding,
 }: {
   assetId: string
+  assetProjectId: string | null
   version: InstructionAssetVersion
+  connectionConfigNameById: Record<string, string>
+  governancePolicy: import('@/features/platform/ai-context/governance-profile/GovernancePolicy').GovernancePolicy | null
   onPublish: () => void
   onDiscard: () => void
   onPreview: () => void
@@ -606,6 +709,9 @@ function DraftVersionSection({
   )
   const [paths, setPaths] = useState(
     (version.sourceDetails as { paths?: string })?.paths ?? '',
+  )
+  const [connectionConfigId, setConnectionConfigId] = useState<string | null>(
+    version.connectionConfigId ?? null,
   )
   const [priority, setPriority] = useState(String(version.priority))
   const [availability, setAvailability] = useState<Availability>(version.availability)
@@ -632,6 +738,9 @@ function DraftVersionSection({
     setPriority(String(version.priority))
   }, [version.priority])
   useEffect(() => {
+    setConnectionConfigId(version.connectionConfigId ?? null)
+  }, [version.connectionConfigId])
+  useEffect(() => {
     setAvailability(version.availability)
   }, [version.availability])
 
@@ -645,6 +754,7 @@ function DraftVersionSection({
       return instructionAssetApi.updateDraft(assetId, {
         sourceType: version.sourceType,
         sourceDetails,
+        connectionConfigId: version.sourceType === 'GIT' ? connectionConfigId : undefined,
         applicability: {
           CONVERSATION: String(conversationApplicable),
           WORKFLOW: String(workflowApplicable),
@@ -655,6 +765,10 @@ function DraftVersionSection({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['instruction-asset-draft', assetId] })
+      // Also invalidate/refetch the list's DraftStatusBadge query key (plural 'drafts')
+      queryClient.invalidateQueries({ queryKey: ['instruction-asset-drafts', assetId] })
+      queryClient.refetchQueries({ queryKey: ['instruction-asset-drafts', assetId] })
+      queryClient.invalidateQueries({ queryKey: ['instruction-assets'] })
     },
   })
 
@@ -662,6 +776,7 @@ function DraftVersionSection({
     content !== ((version.sourceDetails as { content?: string })?.content ?? '') ||
     branch !== ((version.sourceDetails as { branch?: string })?.branch ?? '') ||
     paths !== ((version.sourceDetails as { paths?: string })?.paths ?? '') ||
+    connectionConfigId !== (version.connectionConfigId ?? null) ||
     priority !== String(version.priority) ||
     availability !== version.availability
 
@@ -679,7 +794,7 @@ function DraftVersionSection({
       <CardContent className="space-y-4">
         {/* Source Type (editable, Zone 2) */}
         <div className="space-y-2">
-          <Label htmlFor="sourceType">Source Type</Label>
+          <Label htmlFor="sourceType">Source Type<DraftRequiredMark /></Label>
           <Select
             value={version.sourceType}
             onValueChange={(v) => {
@@ -689,7 +804,17 @@ function DraftVersionSection({
           >
             <SelectTrigger id="sourceType"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="INLINE">Inline (text content)</SelectItem>
+              <SelectItem
+                value="INLINE"
+                disabled={governancePolicy ? !governancePolicy.allows('INSTRUCTION_SOURCES', 'INLINE') || !governancePolicy.permitsAtLeast('INLINE_INSTRUCTIONS_SCOPE', assetProjectId ? 'PROJECT_SERVICE' : 'ALL') : false}
+              >
+                Inline (text content)
+                {governancePolicy && (!governancePolicy.allows('INSTRUCTION_SOURCES', 'INLINE') || !governancePolicy.permitsAtLeast('INLINE_INSTRUCTIONS_SCOPE', assetProjectId ? 'PROJECT_SERVICE' : 'ALL')) && (
+                  <span className="text-xs text-muted-foreground ml-2">
+                    (disabled by {governancePolicy.profileName} profile)
+                  </span>
+                )}
+              </SelectItem>
               <SelectItem value="GIT">Git (from repository)</SelectItem>
             </SelectContent>
           </Select>
@@ -702,13 +827,13 @@ function DraftVersionSection({
             <div className="space-y-2">
               <Label>Connection Config</Label>
               <ConnectionConfigSelect
-                value={version.connectionConfigId ?? ''}
-                onChange={() => { /* handled by save */ }}
+                value={connectionConfigId}
+                onChange={setConnectionConfigId}
               />
             </div>
             {/* Branch/Tag */}
             <div className="space-y-2">
-              <Label htmlFor="branch">Branch/Tag</Label>
+              <Label htmlFor="branch">Branch/Tag<RequiredMark /></Label>
               <Input
                 id="branch"
                 value={branch}
@@ -733,7 +858,7 @@ function DraftVersionSection({
             </div>
             {/* Paths */}
             <div className="space-y-2">
-              <Label htmlFor="paths">Paths</Label>
+              <Label htmlFor="paths">Paths<RequiredMark /></Label>
               <Input
                 id="paths"
                 value={paths}
@@ -747,7 +872,7 @@ function DraftVersionSection({
         {/* Content Editor (INLINE only) */}
         {version.sourceType === 'INLINE' && (
           <div className="space-y-2">
-            <Label htmlFor="draft-content">Content</Label>
+            <Label htmlFor="draft-content">Content<RequiredMark /></Label>
             <Textarea
               id="draft-content"
               value={content}
@@ -762,7 +887,7 @@ function DraftVersionSection({
         {/* Git info (read-only in draft) */}
         {version.sourceType === 'GIT' && (
           <div className="text-sm space-y-1 bg-muted/30 rounded-md p-3">
-            <div><span className="text-muted-foreground">Connection Config:</span> {version.connectionConfigId || '—'}</div>
+            <div><span className="text-muted-foreground">Connection Config:</span> {version.connectionConfigId ? (connectionConfigNameById[version.connectionConfigId] ?? version.connectionConfigId) : '—'}</div>
             {(version.sourceDetails as { branch?: string })?.branch && (
               <div><span className="text-muted-foreground">Branch/Tag:</span> {(version.sourceDetails as { branch?: string }).branch}</div>
             )}
@@ -865,7 +990,8 @@ function DraftVersionSection({
           <Button
             size="sm"
             onClick={onPublish}
-            disabled={publishing}
+            disabled={publishing || dirty}
+            title={dirty ? 'Save your changes before publishing.' : undefined}
           >
             <Send className="h-4 w-4 mr-2" />
             {publishing ? 'Publishing…' : 'Publish'}
@@ -914,24 +1040,18 @@ function CreateDraftDialog({
 }) {
   const [sourceType, setSourceType] = useState<SourceType>('INLINE')
   const [content, setContent] = useState('')
-  const [connectionConfigId, setConnectionConfigId] = useState<string>('')
+  const [connectionConfigId, setConnectionConfigId] = useState<string | null>(null)
   const [availability, setAvailability] = useState<Availability>('REQUIRED')
   const [priority, setPriority] = useState('100')
   const [conversation, setConversation] = useState(true)
   const [workflow, setWorkflow] = useState(true)
-
-  const { data: connectionConfigs } = useQuery({
-    queryKey: ['connection-configs'],
-    queryFn: connectionConfigApi.list,
-    enabled: sourceType === 'GIT',
-  })
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     onCreate({
       sourceType,
       sourceDetails: sourceType === 'INLINE' ? { content } : undefined,
-      connectionConfigId: sourceType === 'GIT' ? connectionConfigId || undefined : undefined,
+      connectionConfigId: sourceType === 'GIT' ? connectionConfigId ?? undefined : undefined,
       applicability: {
         CONVERSATION: String(conversation),
         WORKFLOW: String(workflow),
@@ -986,16 +1106,12 @@ function CreateDraftDialog({
           {sourceType === 'GIT' && (
             <div className="space-y-2">
               <Label>Connection Config</Label>
-              <Select value={connectionConfigId} onValueChange={setConnectionConfigId}>
-                <SelectTrigger><SelectValue placeholder="Select a Git connection" /></SelectTrigger>
-                <SelectContent>
-                  {(connectionConfigs ?? [])
-                    .filter((c) => c.type === 'GIT' && c.status === 'ACTIVE')
-                    .map((c) => (
-                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+              <ConnectionConfigSelect
+                value={connectionConfigId}
+                onChange={setConnectionConfigId}
+                filter={(c) => c.type === 'GIT' && c.status === 'ACTIVE'}
+                placeholder="Select a Git connection"
+              />
             </div>
           )}
 
@@ -1094,24 +1210,3 @@ function PreviewDialog({
   )
 }
 
-// --- Connection Config Select helper ---
-function ConnectionConfigSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const { data: connectionConfigs } = useQuery({
-    queryKey: ['connection-configs'],
-    queryFn: connectionConfigApi.list,
-  })
-
-  return (
-    <Select value={value || '__none__'} onValueChange={(v) => onChange(v === '__none__' ? '' : v)}>
-      <SelectTrigger><SelectValue placeholder="Select a Git connection" /></SelectTrigger>
-      <SelectContent>
-        <SelectItem value="__none__">— None —</SelectItem>
-        {(connectionConfigs ?? [])
-          .filter((c) => c.type === 'GIT' && c.status === 'ACTIVE')
-          .map((c) => (
-            <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-          ))}
-      </SelectContent>
-    </Select>
-  )
-}

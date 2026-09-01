@@ -13,5 +13,7 @@ public enum TaskStatus {
     /** Task completed (check result for SUCCESS/FAILURE/TIMEOUT) */
     COMPLETED,
     /** Task was cancelled */
-    CANCELLED
+    CANCELLED,
+    /** Task is paused awaiting manual review (continue or stop) */
+    PAUSED
 }

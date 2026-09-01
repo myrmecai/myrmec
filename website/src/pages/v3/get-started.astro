@@ -1,0 +1,81 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+import V3Layout from "../../layouts/V3Layout.astro";
+
+const requirements = [
+  { title: "Docker", desc: "For the engine, the UI, and agent sandbox containers." },
+  { title: "PostgreSQL", desc: "The control plane's system of record." },
+  { title: "A model provider", desc: "OpenAI / Anthropic / Azure keys — or fully local with Ollama or vLLM." },
+];
+---
+
+<V3Layout
+  title="Get Started | Myrmec"
+  description="Get up and running with Myrmec Core — the open-source governed agent runtime."
+>
+  <section class="mx-auto max-w-3xl px-6 py-20 md:px-10">
+    <p class="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold tracking-wide text-indigo-600">
+      Myrmec Core · Apache-2.0
+    </p>
+    <h1 class="mt-5 text-4xl font-extrabold tracking-tight text-slate-900 md:text-5xl">
+      Get started with Myrmec
+    </h1>
+    <p class="mt-5 text-lg leading-relaxed text-slate-500">
+      Complete setup instructions are on their way. In the meantime, here's what a Myrmec
+      deployment looks like — and how to register your interest.
+    </p>
+
+    <!-- Coming soon card -->
+    <div class="mt-12 rounded-2xl border border-indigo-200 bg-indigo-50/60 p-8">
+      <div class="flex items-center gap-3">
+        <svg class="h-6 w-6 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <h2 class="text-lg font-bold text-slate-900">Full quickstart coming soon</h2>
+      </div>
+      <p class="mt-3 text-sm leading-relaxed text-slate-600">
+        We're finalising the step-by-step installation and first-workflow guide. Want to be
+        notified when it lands, or get hands-on help deploying now?
+      </p>
+      <a
+        href="/v3/#contact"
+        class="mt-5 inline-block rounded-xl bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+      >Contact Us</a>
+    </div>
+
+    <!-- What you'll need teaser -->
+    <div class="mt-12">
+      <h2 class="text-xl font-extrabold tracking-tight text-slate-900">What you'll need</h2>
+      <div class="mt-5 space-y-4">
+        {requirements.map((r) => (
+          <div class="flex items-start gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <div>
+              <p class="text-sm font-bold text-slate-900">{r.title}</p>
+              <p class="mt-1 text-sm leading-relaxed text-slate-500">{r.desc}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    <!-- Disabled actions -->
+    <div class="mt-12 flex flex-wrap gap-4">
+      <button
+        disabled
+        class="cursor-not-allowed rounded-xl bg-slate-200 px-6 py-3 text-sm font-semibold text-slate-400"
+        title="Coming soon"
+      >Download Myrmec Core</button>
+      <button
+        disabled
+        class="cursor-not-allowed rounded-xl bg-slate-200 px-6 py-3 text-sm font-semibold text-slate-400"
+        title="Coming soon"
+      >Read the Quickstart</button>
+    </div>
+  </section>
+</V3Layout>

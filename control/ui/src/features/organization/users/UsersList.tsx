@@ -20,6 +20,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RequiredMark } from '@/components/ui/required-marks'
 import {
   Dialog,
   DialogContent,
@@ -405,7 +406,7 @@ function CreateUserForm({ providers, onSubmit, isLoading, error }: CreateUserFor
           </div>
         )}
         <div className="space-y-2">
-          <Label htmlFor="name">Name</Label>
+          <Label htmlFor="name">Name<RequiredMark /></Label>
           <Input
             id="name"
             value={name}
@@ -415,7 +416,7 @@ function CreateUserForm({ providers, onSubmit, isLoading, error }: CreateUserFor
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="email">Email</Label>
+          <Label htmlFor="email">Email<RequiredMark /></Label>
           <Input
             id="email"
             type="email"
@@ -472,7 +473,7 @@ function CreateUserForm({ providers, onSubmit, isLoading, error }: CreateUserFor
         </div>
         {requiresPassword && (
           <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
+            <Label htmlFor="password">Password<RequiredMark /></Label>
             <Input
               id="password"
               type="password"

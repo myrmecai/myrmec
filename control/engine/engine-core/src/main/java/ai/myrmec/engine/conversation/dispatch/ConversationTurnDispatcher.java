@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+
 package ai.myrmec.engine.conversation.dispatch;
 
 import ai.myrmec.engine.agent.AgentHost;
@@ -6,7 +9,7 @@ import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileRepository;
 import ai.myrmec.engine.agent.AgentHostRepository;
-import ai.myrmec.engine.agent.AgentService;
+import ai.myrmec.engine.agent.AgentHostService;
 import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.conversation.ConversationMessage;
 import ai.myrmec.engine.conversation.ConversationRepository;
@@ -25,8 +28,15 @@ import ai.myrmec.engine.websocket.message.MessageType;
 import ai.myrmec.engine.websocket.message.WebSocketMessage;
 import ai.myrmec.engine.websocket.message.payload.AgentBindPayload;
 import ai.myrmec.engine.websocket.message.payload.ConversationTurnAssignPayload;
-import ai.myrmec.engine.websocket.message.payload.ConversationTurnCancelPayload;
+import ai.myrmec.engine.websocket.message.payload.InferenceAssignPayload;
+import ai.myrmec.engine.websocket.message.payload.InferenceCancelPayload;
+import ai.myrmec.engine.websocket.message.payload.SessionClosePayload;
+import ai.myrmec.engine.websocket.message.payload.SessionOpenPayload;
 import ai.myrmec.engine.websocket.message.payload.TaskAssignPayload;
+import ai.myrmec.engine.inference.InferenceRequestAssembler;
+import ai.myrmec.engine.inference.InferenceRequestSpec;
+import ai.myrmec.engine.inference.SessionContextAssembler;
+import ai.myrmec.engine.inference.Session;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -90,7 +100,7 @@ public class ConversationTurnDispatcher {
     private final ModelService modelService;
     private final ai.myrmec.engine.snapshot.SnapshotWriter snapshotWriter;
     private final QuotaPolicyEngine quotaPolicyEngine;
-    private final AgentService agentService;
+    private final AgentHostService agentService;
     private final NodeRegistryService nodeRegistry;
     private final PendingTurnRegistry pendingTurnRegistry;
     private final ConversationSocketRegistry conversationSocketRegistry;
@@ -98,6 +108,9 @@ public class ConversationTurnDispatcher {
     private final ai.myrmec.engine.setting.SystemSettingService systemSettingService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final ai.myrmec.engine.conversation.ConversationNoticeService conversationNoticeService;
+    private final SessionContextAssembler sessionContextAssembler;
+    private final InferenceRequestAssembler inferenceRequestAssembler;
+    private final ai.myrmec.engine.governance.GovernancePolicyResolver governancePolicyResolver;
 
     /**
      * Relay a cancel for the in-flight turn of a conversation to its bound
@@ -114,13 +127,15 @@ public class ConversationTurnDispatcher {
      * @return {@code true} if a cancel frame was delivered to a worker
      */
     public boolean cancel(UUID conversationId) {
-        ConversationTurnCancelPayload payload = ConversationTurnCancelPayload.builder()
-                .conversationId(conversationId)
-                .reason("user_request")
-                .build();
+        // Find the active session for this conversation
+        Session session = sessionContextAssembler.findActiveSession(conversationId, "CONVERSATION");
+        UUID sessionId = session != null ? session.getId() : conversationId;
+        InferenceCancelPayload payload = new InferenceCancelPayload(
+                conversationId,  // requestId — the turn being cancelled
+                sessionId);
         boolean delivered = conversationSocketRegistry.sendMessage(
                 conversationId,
-                WebSocketMessage.of(MessageType.CONVERSATION_TURN_CANCEL, payload));
+                WebSocketMessage.of(MessageType.INFERENCE_CANCEL, payload));
         if (delivered) {
             log.info("Relayed conversation.turn.cancel for conv {}", conversationId);
         } else {
@@ -146,22 +161,44 @@ public class ConversationTurnDispatcher {
             return false;
         }
 
-        // Phase 8c: pre-flight quota check at PROJECT scope. We charge 0
-        // tokens (the LLM hasn't run yet) and rely on prior consumption
-        // to drive the block. A hard block raises QuotaExceededException
-        // which the REST layer translates to 429; for WS we just refuse
-        // to dispatch and let the client surface the error.
+        // Phase 8c: pre-flight quota check. We charge 0 tokens (the LLM
+        // hasn't run yet) and rely on prior consumption to drive the block.
+        // A hard block raises QuotaExceededException which the REST layer
+        // translates to 429; for WS we just refuse to dispatch and let the
+        // client surface the error.
+        //
+        // When the conversation has a pinned assistant, check at SERVICE
+        // scope (scopeId = assistantId). check(SERVICE, assistantId, ...)
+        // internally walks SERVICE -> PROJECT -> GROUP -> ORG via
+        // buildScopeChain and returns the most restrictive decision. This
+        // means a SERVICE RESERVATION block takes priority over the GROUP
+        // ceiling -- the 429 will carry scopeHit=SERVICE.
+        //
+        // For legacy conversations with no assistant, fall back to PROJECT
+        // scope (scopeId = projectId).
         UUID dispatchProjectId = conversation.getProjectId();
-        if (dispatchProjectId != null) {
-            QuotaDecision decision = quotaPolicyEngine.check(
-                    QuotaScope.PROJECT, dispatchProjectId, QuotaResourceType.TOKENS, 0L);
+        UUID assistantId = conversation.getAssistantId();
+        if (dispatchProjectId != null || assistantId != null) {
+            QuotaDecision decision;
+            UUID effectiveScopeId;
+            if (assistantId != null) {
+                decision = quotaPolicyEngine.check(
+                        QuotaScope.SERVICE, assistantId,
+                        QuotaResourceType.TOKENS, 0L);
+                effectiveScopeId = assistantId;
+            } else {
+                decision = quotaPolicyEngine.check(
+                        QuotaScope.PROJECT, dispatchProjectId,
+                        QuotaResourceType.TOKENS, 0L);
+                effectiveScopeId = dispatchProjectId;
+            }
             if (decision.isBlocked()) {
-                log.warn("Conversation turn blocked by quota \u2014 conv {} project {} (used {} of {})",
-                        conversationId, dispatchProjectId,
+                log.warn("Conversation turn blocked by quota -- conv {} scopeId {} (used {} of {})",
+                        conversationId, effectiveScopeId,
                         decision.getConsumedAmount(), decision.getLimitAmount());
                 throw new ai.myrmec.engine._system.exception.QuotaExceededException(
                         decision.getScopeHit() != null ? decision.getScopeHit() : QuotaScope.PROJECT,
-                        dispatchProjectId,
+                        effectiveScopeId,
                         QuotaResourceType.TOKENS,
                         decision.getLimitAmount(),
                         decision.getConsumedAmount());
@@ -176,7 +213,7 @@ public class ConversationTurnDispatcher {
         }
         AgentHost agent = agentOpt.get();
 
-        Optional<AgentProfile> profileOpt = agentProfileRepository.findById(agent.getProfileId());
+        Optional<AgentProfile> profileOpt = agentProfileRepository.findByIdWithTools(agent.getProfileId());
         if (profileOpt.isEmpty()) {
             log.warn("Cannot dispatch turn \u2014 profile {} not found for conv {}",
                     agent.getProfileId(), conversationId);
@@ -250,7 +287,7 @@ public class ConversationTurnDispatcher {
                 // must never be shipped to the agent that picks the turn up.
                 .filter(m -> !conversationNoticeService.isNoAgentNotice(m))
                 .toList();
-        List<ConversationTurnAssignPayload.HistoryEntry> history = buildSlidingWindow(active);
+        List<ConversationTurnAssignPayload.HistoryEntry> historyEntries = buildSlidingWindow(active);
         String userMessage = lastUserContent(active).orElse("");
         long assistantSequenceNo = all.isEmpty()
                 ? 0L
@@ -260,35 +297,81 @@ public class ConversationTurnDispatcher {
                 ? conversation.getSystemPromptOverride()
                 : profile.getSystemPrompt();
 
-        TaskAssignPayload.ModelInfo modelInfo = resolveModel(profile);
+        // Assemble session.open (sent once when worker binds)
+        SessionOpenPayload sessionOpen = sessionContextAssembler.assemble(
+                "CONVERSATION", conversationId, conversation.getProjectId(),
+                agent.getProfileId());
 
-        List<ConversationTurnAssignPayload.AttachmentDescriptor> attachments =
-                buildAttachments(conversationId, active, profile);
+        // Build the inference request spec for the conversation transcript composer
+        List<InferenceRequestSpec.HistoryEntry> history = historyEntries.stream()
+                .map(h -> new InferenceRequestSpec.HistoryEntry(h.getRole(), h.getContent()))
+                .toList();
+        List<InferenceRequestSpec.AttachmentDescriptor> attachments =
+                buildAttachments(conversationId, active, profile).stream()
+                        .map(a -> new InferenceRequestSpec.AttachmentDescriptor(
+                                a.getId().toString(), a.getFilename(), a.getMediaType(), a.getSizeBytes(),
+                                a.getInlineText(), a.isImage(), a.getReadContentPath()))
+                        .toList();
 
-        ConversationTurnAssignPayload payload = ConversationTurnAssignPayload.builder()
-                .conversationId(conversationId)
+        // Extract tool names from the session for this turn
+        List<String> activeToolNames = sessionOpen.tools() != null
+                ? sessionOpen.tools().stream()
+                        .map(SessionOpenPayload.ToolDefinition::name)
+                        .toList()
+                : List.of();
+
+        InferenceRequestSpec spec = InferenceRequestSpec.builder()
+                .serviceType("CONVERSATION")
+                .sessionId(sessionOpen.sessionId())
+                .requestId(conversationId)  // conversation turn = conversationId for now
                 .projectId(conversation.getProjectId())
-                .agentId(agent.getId())
-                .assistantSequenceNo(assistantSequenceNo)
-                .systemPrompt(systemPrompt)
+                .sequenceNo(assistantSequenceNo)
+                .governanceProfileCode(governancePolicyResolver.resolveOrgDefault().code())
+                .contextSnapshot(conversation.getContextSnapshot())
+                .contextPinning(conversation.getContextSnapshot() != null ? "PINNED_AT_START" : null)
+                .conversationSystemPrompt(systemPrompt)
                 .pinnedFacts(conversation.getPinnedFacts())
                 .history(history)
                 .userMessage(userMessage)
-                .timeoutSeconds(DEFAULT_TIMEOUT_SECONDS)
-                .model(modelInfo)
                 .attachments(attachments)
+                .activeToolNames(activeToolNames)
                 .build();
 
-        // Buffer the turn until the worker opens + attaches its conversation
-        // socket (agent-concurrency §9.4). The worker reacts to the agent.bind
-        // above by dialing this replica's home address and sending
-        // conversation.attach; the conversation-socket handler then flushes
-        // this turn over the dedicated socket. The turn cannot ride the control
-        // socket because conversational output (deltas/complete) flows back on
-        // the conversation socket — the two must share one channel.
+        InferenceAssignPayload payload = inferenceRequestAssembler.assemble(spec);
+
+        // Buffer both session.open and inference.assign until the worker
+        // opens + attaches its conversation socket (agent-concurrency §9.4).
+        // The conversation-socket handler flushes them on attach.
+        // CRITICAL: enqueue session.open BEFORE inference.assign. The
+        // handleAttach handler runs on a different thread and calls
+        // takeSessionOpen() before take(). If enqueue(inference.assign)
+        // runs first, a concurrent handleAttach can observe the
+        // inference.assign but miss the session.open, causing the agent
+        // to receive inference.assign without session.open first.
+        pendingTurnRegistry.enqueueSessionOpen(conversationId, sessionOpen);
         pendingTurnRegistry.enqueue(conversationId, payload);
-        log.info("Buffered conversation turn for agent instance {} (conv {} seq {}) — awaiting conversation socket attach",
+        log.info("Buffered inference turn for agent instance {} (conv {} seq {}) — awaiting conversation socket attach",
                 idleInstance.getId(), conversationId, assistantSequenceNo);
+
+        // Race-condition fix: if the conversation socket already attached
+        // (handleAttach ran before this dispatch), the buffered frames would
+        // sit in the registry forever. Flush them now if the socket is open.
+        if (conversationSocketRegistry.isAttached(conversationId)) {
+            pendingTurnRegistry.takeSessionOpen(conversationId).ifPresent(so -> {
+                conversationSocketRegistry.sendMessage(conversationId,
+                        WebSocketMessage.of(MessageType.SESSION_OPEN, so));
+                log.info("Flushed session.open (late) to agent {} over conversation socket (conv {} session {})",
+                        idleInstance.getId(), conversationId, so.sessionId());
+            });
+            pendingTurnRegistry.take(conversationId).ifPresent(turn -> {
+                boolean delivered = conversationSocketRegistry.sendMessage(conversationId,
+                        WebSocketMessage.of(MessageType.INFERENCE_ASSIGN, turn));
+                if (delivered) {
+                    log.info("Flushed inference.assign (late) to agent {} over conversation socket (conv {})",
+                            idleInstance.getId(), conversationId);
+                }
+            });
+        }
 
         // Phase 9a — archive the dispatched payload so V2 replay has
         // the same inputs the agent saw. Best-effort: never abort
@@ -321,32 +404,52 @@ public class ConversationTurnDispatcher {
                 .filter(m -> !m.isSuperseded())
                 .filter(m -> !conversationNoticeService.isNoAgentNotice(m))
                 .toList();
-        List<ConversationTurnAssignPayload.HistoryEntry> history = buildSlidingWindow(active);
+        List<ConversationTurnAssignPayload.HistoryEntry> historyEntries = buildSlidingWindow(active);
         String userMessage = lastUserContent(active).orElse("");
         long assistantSequenceNo = all.isEmpty() ? 0L : all.get(all.size() - 1).getSequenceNo() + 1;
         String systemPrompt = conversation.getSystemPromptOverride() != null
                 ? conversation.getSystemPromptOverride()
                 : profile.getSystemPrompt();
-        TaskAssignPayload.ModelInfo modelInfo = resolveModel(profile);
-        List<ConversationTurnAssignPayload.AttachmentDescriptor> attachments =
-                buildAttachments(conversationId, active, profile);
 
-        ConversationTurnAssignPayload payload = ConversationTurnAssignPayload.builder()
-                .conversationId(conversationId)
+        // Find existing session for this conversation (sticky path — session already open)
+        Session session = sessionContextAssembler.findActiveSession(conversationId, "CONVERSATION");
+        UUID sessionId = session != null ? session.getId() : conversationId;
+
+        // Resolve tool names from the agent profile (sticky path — no session.open)
+        List<String> activeToolNames = resolveToolNames(profile);
+
+        // Build the inference request spec
+        List<InferenceRequestSpec.HistoryEntry> history = historyEntries.stream()
+                .map(h -> new InferenceRequestSpec.HistoryEntry(h.getRole(), h.getContent()))
+                .toList();
+        List<InferenceRequestSpec.AttachmentDescriptor> attachments =
+                buildAttachments(conversationId, active, profile).stream()
+                        .map(a -> new InferenceRequestSpec.AttachmentDescriptor(
+                                a.getId().toString(), a.getFilename(), a.getMediaType(), a.getSizeBytes(),
+                                a.getInlineText(), a.isImage(), a.getReadContentPath()))
+                        .toList();
+
+        InferenceRequestSpec spec = InferenceRequestSpec.builder()
+                .serviceType("CONVERSATION")
+                .sessionId(sessionId)
+                .requestId(conversationId)
                 .projectId(conversation.getProjectId())
-                .agentId(agent.getId())
-                .assistantSequenceNo(assistantSequenceNo)
-                .systemPrompt(systemPrompt)
+                .sequenceNo(assistantSequenceNo)
+                .governanceProfileCode(governancePolicyResolver.resolveOrgDefault().code())
+                .contextSnapshot(conversation.getContextSnapshot())
+                .contextPinning(conversation.getContextSnapshot() != null ? "PINNED_AT_START" : null)
+                .conversationSystemPrompt(systemPrompt)
                 .pinnedFacts(conversation.getPinnedFacts())
                 .history(history)
                 .userMessage(userMessage)
-                .timeoutSeconds(DEFAULT_TIMEOUT_SECONDS)
-                .model(modelInfo)
                 .attachments(attachments)
+                .activeToolNames(activeToolNames)
                 .build();
 
+        InferenceAssignPayload payload = inferenceRequestAssembler.assemble(spec);
+
         boolean delivered = conversationSocketRegistry.sendMessage(conversationId,
-                WebSocketMessage.of(MessageType.CONVERSATION_TURN_ASSIGN, payload));
+                WebSocketMessage.of(MessageType.INFERENCE_ASSIGN, payload));
         if (delivered) {
             log.info("Flushed sticky turn to BOUND worker {} over conversation socket (conv {} seq {})",
                     boundInstance.getId(), conversationId, assistantSequenceNo);
@@ -426,7 +529,7 @@ public class ConversationTurnDispatcher {
         }
         AgentHost agent = agentOpt.get();
 
-        Optional<AgentProfile> profileOpt = agentProfileRepository.findById(agent.getProfileId());
+        Optional<AgentProfile> profileOpt = agentProfileRepository.findByIdWithTools(agent.getProfileId());
         if (profileOpt.isEmpty()) {
             log.warn("Cannot dispatch summary \u2014 profile {} not found for conv {}",
                     agent.getProfileId(), conversationId);
@@ -455,43 +558,35 @@ public class ConversationTurnDispatcher {
                 ? 0L
                 : all.get(all.size() - 1).getSequenceNo() + 1;
 
-        List<ConversationTurnAssignPayload.HistoryEntry> history = new ArrayList<>();
+        List<InferenceRequestSpec.HistoryEntry> history = new ArrayList<>();
         if (previousSummaryContent != null && !previousSummaryContent.isBlank()) {
-            history.add(ConversationTurnAssignPayload.HistoryEntry.builder()
-                    .role(ConversationMessage.Role.SYSTEM.name())
-                    .content(SUMMARY_WIRE_PREFIX + previousSummaryContent)
-                    .sequenceNo(-1L)
-                    .build());
+            history.add(new InferenceRequestSpec.HistoryEntry(
+                    ConversationMessage.Role.SYSTEM.name(),
+                    SUMMARY_WIRE_PREFIX + previousSummaryContent));
         }
         for (ConversationMessage m : olderBlock) {
-            history.add(ConversationTurnAssignPayload.HistoryEntry.builder()
-                    .role(m.getRole().name())
-                    .content(m.getContent())
-                    .sequenceNo(m.getSequenceNo())
-                    .build());
+            history.add(new InferenceRequestSpec.HistoryEntry(
+                    m.getRole().name(),
+                    m.getContent()));
         }
 
-        // Summariser model: the system setting wins; empty falls back to the
-        // conversation's own model (the profile default).
-        String summarizerCode = systemSettingService.getString(SUMMARIZER_MODEL_CODE_KEY, null);
-        TaskAssignPayload.ModelInfo modelInfo = (summarizerCode != null && !summarizerCode.isBlank())
-                ? resolveModelByCode(summarizerCode)
-                : resolveModel(profile);
-
-        ConversationTurnAssignPayload payload = ConversationTurnAssignPayload.builder()
-                .conversationId(conversationId)
+        InferenceRequestSpec spec = InferenceRequestSpec.builder()
+                .serviceType("CONVERSATION")
+                .sessionId(conversationId)
+                .requestId(conversationId)
                 .projectId(conversation.getProjectId())
-                .agentId(agent.getId())
-                .assistantSequenceNo(assistantSequenceNo)
-                .systemPrompt(SUMMARISER_SYSTEM_PROMPT)
+                .sequenceNo(assistantSequenceNo)
+                .governanceProfileCode(governancePolicyResolver.resolveOrgDefault().code())
+                .contextSnapshot(conversation.getContextSnapshot())
+                .contextPinning(conversation.getContextSnapshot() != null ? "PINNED_AT_START" : null)
+                .conversationSystemPrompt(SUMMARISER_SYSTEM_PROMPT)
                 .pinnedFacts(null)
                 .history(history)
                 .userMessage(SUMMARISER_USER_INSTRUCTION)
-                .timeoutSeconds(DEFAULT_TIMEOUT_SECONDS)
-                .model(modelInfo)
                 .attachments(Collections.emptyList())
-                .purpose("SUMMARY")
                 .build();
+
+        InferenceAssignPayload payload = inferenceRequestAssembler.assemble(spec);
 
         pendingTurnRegistry.enqueue(conversationId, payload);
         log.info("Buffered summarisation turn for agent instance {} (conv {} folding {} msg(s))",
@@ -550,6 +645,21 @@ public class ConversationTurnDispatcher {
      * context; the persisted row keeps its {@code CONTEXT_SUMMARY} role for
      * the transcript's transparency marker (#8a).</p>
      */
+    /**
+     * Resolve tool names from the agent profile for conversation turns.
+     * Returns the tool codes of all ACTIVE tools assigned to the profile.
+     */
+    private List<String> resolveToolNames(AgentProfile profile) {
+        var profileTools = profile.getTools();
+        if (profileTools == null || profileTools.isEmpty()) {
+            return List.of();
+        }
+        return profileTools.stream()
+                .filter(t -> t.getStatus() == ai.myrmec.engine.tool.ToolStatus.ACTIVE)
+                .map(ai.myrmec.engine.tool.Tool::getCode)
+                .toList();
+    }
+
     private List<ConversationTurnAssignPayload.HistoryEntry> buildSlidingWindow(
             List<ConversationMessage> all) {
         if (all == null || all.isEmpty()) {
@@ -858,10 +968,7 @@ public class ConversationTurnDispatcher {
         }
         try {
             Model model = modelService.findByCode(modelCode);
-            String apiKey = null;
-            if (model.isRequiresAuth() && model.getApiKeyEncrypted() != null) {
-                apiKey = modelService.getApiKey(model.getCode());
-            }
+            String apiKey = modelService.getApiKey(model.getCode());
             String apiEndpoint = model.getApiEndpoint();
             if (apiEndpoint == null && model.getProviderConfig() != null) {
                 apiEndpoint = model.getProviderConfig().getBaseUrl();

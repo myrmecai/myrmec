@@ -69,4 +69,5 @@ export default defineConfig({
       stderr: 'pipe',
     },
   ],
+  globalTeardown: './e2e/global-teardown.ts',
 })

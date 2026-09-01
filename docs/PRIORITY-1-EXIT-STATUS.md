@@ -39,9 +39,10 @@ Foundation (#20-25, #27, #32) shipped; SDK ergonomic contract and citation enfor
   - Delivered: TypeScript `async retrieve(knowledgeBaseId, query, options?)` on `ConversationTurnContext`; credentials flow supervisor → worker config → ConversationDispatcher → handler
   - Implementation: Extended AgentWorkerConfig with engineUrl + agentAccessToken; worker instantiates EngineHttpClient from config; ConversationDispatcher wires into ctx closure; 7 new TypeScript tests
   - **Exit criteria met**: SDK method exposed + 19 tests passing (7 new retrieve tests + 12 existing ConversationDispatcher tests) ✅
-- [x] **#29**: Citation enforcement — **✅ DONE 2026-06-23**
-  - Delivered: Java CitationEnforcementService with retrieval detection + citation pattern matching; integrated into AgentWebSocketHandler.handleTaskComplete(); 8 comprehensive test cases
+- [x] **#29**: Citation enforcement — **✅ DONE 2026-06-23; wiring completed 2026-08-17**
+  - Delivered: Java CitationEnforcementService with retrieval detection + citation pattern matching; 8 comprehensive test cases
   - Implementation: CitationEnforcementResult DTO; ExecutionEventRepository.findByAttemptIdAndEventType() query; regex pattern matching for chunk_id references (formats: [^chunk-id], chunk-id); audit-only mode (phase-1)
+  - **Wiring (2026-08-17)**: `AgentWebSocketHandler.handleTaskComplete()` now invokes `CitationEnforcementService.enforceRetrievalCitations()` on each completed attempt and logs violations as audit warnings. (Previously the service existed and was injected but was never called — the "integrated" claim was premature.)
   - **Exit criteria met**: Citation enforcement infrastructure complete + 8/8 tests passing (no-retrieval, retrieval+citations, retrieval-no-citations violation, format variations, malformed data, multiple events, null/empty messages, audit summaries) ✅
   - Phase 2 (future): Implement task blocking/redaction on citation violations when required
 - [x] **#31**: Sync status / last-indexed in UI — ✅ **DONE 2026-06-22**

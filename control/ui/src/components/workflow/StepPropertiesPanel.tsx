@@ -268,6 +268,28 @@ export function StepPropertiesPanel({
           </div>
         </div>
 
+        {/* Pause Mode */}
+        <div>
+          <Label className="text-xs">Pause Mode</Label>
+          <p className="text-xs text-muted-foreground mb-1">
+            Pause execution for manual review before or after the step runs
+          </p>
+          <Select
+            value={localStep.pauseMode || 'NONE'}
+            onValueChange={(v) => handleChange('pauseMode', v as WorkflowStep['pauseMode'])}
+          >
+            <SelectTrigger className="h-8 text-sm" data-testid="step-pause-mode">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="NONE">None (no pause)</SelectItem>
+              <SelectItem value="BEFORE">Before (review before execution)</SelectItem>
+              <SelectItem value="AFTER">After (review after execution)</SelectItem>
+              <SelectItem value="BOTH">Both (review before and after)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
         {/* Transitions */}
         <div>
           <Label className="text-xs mb-2 block">Transitions</Label>

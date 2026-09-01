@@ -51,7 +51,7 @@ export function BudgetFilters({
       <div className="flex items-center gap-2">
         <span className="text-sm text-muted-foreground">Period:</span>
         <Select value={period} onValueChange={(v) => onPeriodChange(v as QuotaPeriod)}>
-          <SelectTrigger className="w-[140px]">
+          <SelectTrigger className="w-[140px]" aria-label="Period">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -67,7 +67,7 @@ export function BudgetFilters({
       <div className="flex items-center gap-2">
         <span className="text-sm text-muted-foreground">Resource:</span>
         <Select value={resourceType} onValueChange={(v) => onResourceTypeChange(v as QuotaResourceType)}>
-          <SelectTrigger className="w-[140px]">
+          <SelectTrigger className="w-[140px]" aria-label="Resource">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

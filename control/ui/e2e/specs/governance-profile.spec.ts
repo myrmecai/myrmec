@@ -1,5 +1,6 @@
 import { test, expect } from '../fixtures'
 import { E2E_ADMIN } from '../helpers/api'
+import { resetGovernanceProfile } from '../helpers/governance'
 
 /**
  * UC-KM-01 — Governance Profile compare matrix and Set As Default.
@@ -12,6 +13,9 @@ import { E2E_ADMIN } from '../helpers/api'
 test.describe('governance profile compare matrix', () => {
   test.beforeEach(async ({ api }) => {
     await api.login(E2E_ADMIN.email, E2E_ADMIN.password)
+    // Reset to STANDARD before each test to avoid state leak from other specs
+    // (e.g. instruction-assets sets FLEXIBLE in its beforeEach).
+    await resetGovernanceProfile(api)
   })
 
   test('compare matrix renders all three profiles with feature groups', async ({

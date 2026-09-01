@@ -1,5 +1,6 @@
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RequiredMark } from '@/components/ui/required-marks'
 import { Textarea } from '@/components/ui/textarea'
 import type { CredentialType, SecretPayload } from '@/lib/api'
 
@@ -50,7 +51,7 @@ export function SecretCredentialFields({ payload, onChange, disabled }: Props) {
     case 'BEARER_TOKEN':
       return (
         <div className="space-y-2">
-          <Label htmlFor="cred-token">Token *</Label>
+          <Label htmlFor="cred-token">Token<RequiredMark /></Label>
           <Input
             id="cred-token"
             type="password"
@@ -67,7 +68,7 @@ export function SecretCredentialFields({ payload, onChange, disabled }: Props) {
       return (
         <>
           <div className="space-y-2">
-            <Label htmlFor="cred-username">Username *</Label>
+            <Label htmlFor="cred-username">Username<RequiredMark /></Label>
             <Input
               id="cred-username"
               value={payload.username}
@@ -77,7 +78,7 @@ export function SecretCredentialFields({ payload, onChange, disabled }: Props) {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="cred-password">Password *</Label>
+            <Label htmlFor="cred-password">Password<RequiredMark /></Label>
             <Input
               id="cred-password"
               type="password"
@@ -95,7 +96,7 @@ export function SecretCredentialFields({ payload, onChange, disabled }: Props) {
       return (
         <>
           <div className="space-y-2">
-            <Label htmlFor="cred-key">Key *</Label>
+            <Label htmlFor="cred-key">Key<RequiredMark /></Label>
             <Input
               id="cred-key"
               type="password"
@@ -122,7 +123,7 @@ export function SecretCredentialFields({ payload, onChange, disabled }: Props) {
     case 'SECRET_KEY':
       return (
         <div className="space-y-2">
-          <Label htmlFor="cred-secret">Secret *</Label>
+          <Label htmlFor="cred-secret">Secret<RequiredMark /></Label>
           <Input
             id="cred-secret"
             type="password"
@@ -139,7 +140,7 @@ export function SecretCredentialFields({ payload, onChange, disabled }: Props) {
       return (
         <>
           <div className="space-y-2">
-            <Label htmlFor="cred-client-id">Client ID *</Label>
+            <Label htmlFor="cred-client-id">Client ID<RequiredMark /></Label>
             <Input
               id="cred-client-id"
               value={payload.clientId}
@@ -149,7 +150,7 @@ export function SecretCredentialFields({ payload, onChange, disabled }: Props) {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="cred-client-secret">Client Secret *</Label>
+            <Label htmlFor="cred-client-secret">Client Secret<RequiredMark /></Label>
             <Input
               id="cred-client-secret"
               type="password"
@@ -167,7 +168,7 @@ export function SecretCredentialFields({ payload, onChange, disabled }: Props) {
       return (
         <>
           <div className="space-y-2">
-            <Label htmlFor="cred-private-key">Private Key (PEM) *</Label>
+            <Label htmlFor="cred-private-key">Private Key (PEM)<RequiredMark /></Label>
             <Textarea
               id="cred-private-key"
               value={payload.privateKey}
@@ -211,7 +212,7 @@ export function SecretCredentialFields({ payload, onChange, disabled }: Props) {
     case 'CUSTOM':
       return (
         <div className="space-y-2">
-          <Label htmlFor="cred-custom">Data (JSON) *</Label>
+          <Label htmlFor="cred-custom">Data (JSON)<RequiredMark /></Label>
           <Textarea
             id="cred-custom"
             value={JSON.stringify(payload.data, null, 2)}

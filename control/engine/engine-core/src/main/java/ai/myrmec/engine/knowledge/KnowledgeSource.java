@@ -58,6 +58,7 @@ public class KnowledgeSource {
 
     @Convert(converter = JsonMapConverter.class)
     @Column(name = "config", columnDefinition = "jsonb")
+    @org.hibernate.annotations.ColumnTransformer(write = "?::jsonb")
     private Map<String, Object> config;
 
     @Column(name = "availability", nullable = false, length = 20)

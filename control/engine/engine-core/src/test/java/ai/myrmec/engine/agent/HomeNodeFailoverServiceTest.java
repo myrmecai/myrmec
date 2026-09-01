@@ -33,7 +33,7 @@ class HomeNodeFailoverServiceTest extends IntegrationTestBase {
 
     @Autowired private TestDataBuilder data;
     @Autowired private HomeNodeFailoverService failover;
-    @Autowired private AgentService agentService;
+    @Autowired private AgentHostService agentService;
     @Autowired private AgentRepository instanceRepository;
     @Autowired private EngineNodeRepository nodeRepository;
     @Autowired private ConversationRepository conversationRepository;

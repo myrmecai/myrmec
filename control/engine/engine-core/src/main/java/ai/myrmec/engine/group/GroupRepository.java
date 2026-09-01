@@ -42,4 +42,30 @@ public interface GroupRepository extends JpaRepository<Group, UUID> {
                 .map(UUID::fromString)
                 .toList();
     }
+
+    /**
+     * Return the given group plus all of its descendants (walking
+     * {@code parent_group_id} downward). Used to resolve projects visible via a
+     * group-scoped role grant, which cascades to the whole subtree.
+     *
+     * <p>Returns IDs as strings for the same H2 native-query reason as
+     * {@link #findAncestorIdStrings(UUID)}.
+     */
+    @Query(value = """
+        WITH RECURSIVE descendants(id, parent_group_id) AS (
+            SELECT id, parent_group_id FROM groups WHERE id = :groupId
+            UNION ALL
+            SELECT g.id, g.parent_group_id
+            FROM groups g
+            JOIN descendants d ON g.parent_group_id = d.id
+        )
+        SELECT CAST(id AS VARCHAR(36)) FROM descendants
+        """, nativeQuery = true)
+    List<String> findDescendantIdStrings(@Param("groupId") UUID groupId);
+
+    default List<UUID> findDescendantIds(UUID groupId) {
+        return findDescendantIdStrings(groupId).stream()
+                .map(UUID::fromString)
+                .toList();
+    }
 }

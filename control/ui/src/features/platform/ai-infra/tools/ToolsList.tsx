@@ -14,6 +14,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RequiredMark } from '@/components/ui/required-marks'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
@@ -48,8 +49,10 @@ import { SortedColumnHeader } from '@/components/data-table2/sorted-column-heade
 
 const toolTypeLabels: Record<ToolType, { label: string; color: string }> = {
   SYSTEM: { label: 'System', color: 'bg-blue-100 text-blue-800' },
+  FILE: { label: 'File', color: 'bg-cyan-100 text-cyan-800' },
   INTEGRATION: { label: 'Integration', color: 'bg-purple-100 text-purple-800' },
   DATABASE: { label: 'Database', color: 'bg-orange-100 text-orange-800' },
+  GIT: { label: 'Git', color: 'bg-indigo-100 text-indigo-800' },
   CUSTOM: { label: 'Custom', color: 'bg-gray-100 text-gray-800' },
 }
 
@@ -174,6 +177,7 @@ export function ToolsList() {
               <Button
                 variant="ghost"
                 size="icon"
+                title="Delete"
                 onClick={async () => {
                   const confirmed = await dialogService.showConfirmDialog({
                     title: 'Delete Tool',
@@ -325,7 +329,7 @@ function ToolForm({ onSubmit, isLoading, error }: ToolFormProps) {
         )}
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label htmlFor="code">Code</Label>
+            <Label htmlFor="code">Code<RequiredMark /></Label>
             <Input
               id="code"
               value={code}
@@ -339,7 +343,7 @@ function ToolForm({ onSubmit, isLoading, error }: ToolFormProps) {
             </p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="name">Name</Label>
+            <Label htmlFor="name">Name<RequiredMark /></Label>
             <Input
               id="name"
               value={name}
@@ -361,7 +365,7 @@ function ToolForm({ onSubmit, isLoading, error }: ToolFormProps) {
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label htmlFor="toolType">Type</Label>
+            <Label htmlFor="toolType">Type<RequiredMark /></Label>
             <select
               id="toolType"
               value={toolType}

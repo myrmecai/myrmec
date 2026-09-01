@@ -597,6 +597,7 @@ function ConversationView({ conversation }: { conversation: Conversation }) {
         // To revert to the old behaviour: replace this block with
         //   setStreaming(prev => { ... mark complete ... })
         //   queryClient.invalidateQueries(['conversation-messages', id])
+        console.log('[SSE] message.complete', { role: p.role, messageId: p.messageId, seq: p.sequenceNo })
         const seq = Number(p.sequenceNo ?? 0)
         queryClient.setQueryData<ConversationMessage[]>(
           ['conversation-messages', conversation.id],
@@ -625,8 +626,25 @@ function ConversationView({ conversation }: { conversation: Conversation }) {
         f.type === 'approval.request' ||
         f.type === 'approval.decision'
       ) {
-        // Phase 7c — either frame mutates the persisted row's approval
-        // status; the REST list is the source of truth so just refetch.
+        // Phase 7c — insert the APPROVAL_REQUEST row directly via
+        // mergeHistory (the engine now includes sequenceNo in the
+        // approval.request broadcast). Also invalidate as a safety net
+        // so the REST refetch picks up anything we missed.
+        if (f.type === 'approval.request' && p.messageId) {
+          queryClient.setQueryData<ConversationMessage[]>(
+            ['conversation-messages', conversation.id],
+            (current) => mergeHistory(current ?? [], {
+              messageId: p.messageId,
+              conversationId: p.conversationId ?? conversation.id,
+              sequenceNo: p.sequenceNo ?? 0,
+              role: 'APPROVAL_REQUEST' as const,
+              content: p.content ?? '',
+              payloadJson: p.payloadJson ?? null,
+              approvalStatus: 'PENDING' as const,
+              expiresAt: p.expiresAt ?? null,
+            }),
+          )
+        }
         queryClient.invalidateQueries({
           queryKey: ['conversation-messages', conversation.id],
         })
@@ -1911,6 +1929,7 @@ function mergeHistory(
     createdAt: String(payload.createdAt ?? new Date().toISOString()),
   }
   if (current.some((m) => m.id === incoming.id)) return current
+  console.log('[mergeHistory] inserting', { role: incoming.role, id: incoming.id, seq: incoming.sequenceNo })
   return [...current, incoming].sort((a, b) => a.sequenceNo - b.sequenceNo)
 }
 

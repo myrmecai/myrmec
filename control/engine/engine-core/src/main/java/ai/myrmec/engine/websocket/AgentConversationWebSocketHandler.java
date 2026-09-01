@@ -1,13 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+
 package ai.myrmec.engine.websocket;
 
-import ai.myrmec.engine.agent.AgentService;
+import ai.myrmec.engine.agent.AgentHostService;
 import ai.myrmec.engine.conversation.dispatch.PendingTurnRegistry;
 import ai.myrmec.engine.node.NodeRegistryService;
 import ai.myrmec.engine.websocket.message.CloseCode;
 import ai.myrmec.engine.websocket.message.MessageType;
 import ai.myrmec.engine.websocket.message.WebSocketMessage;
 import ai.myrmec.engine.websocket.message.payload.ConversationAttachPayload;
-import ai.myrmec.engine.websocket.message.payload.ConversationTurnAssignPayload;
+import ai.myrmec.engine.websocket.message.payload.InferenceAssignPayload;
+import ai.myrmec.engine.websocket.message.payload.SessionOpenPayload;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -41,11 +45,12 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AgentConversationWebSocketHandler extends TextWebSocketHandler {
 
-    private final AgentService agentService;
+    private final AgentHostService agentService;
     private final NodeRegistryService nodeRegistry;
     private final ConversationSocketRegistry conversationSocketRegistry;
     private final PendingTurnRegistry pendingTurnRegistry;
     private final ConversationInboundService conversationInboundService;
+    private final InboundInferenceHandler inboundInferenceHandler;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -95,6 +100,19 @@ public class AgentConversationWebSocketHandler extends TextWebSocketHandler {
                     conversationInboundService.onTaskCancelled(agentInstanceId, payload, message.getPayload());
             case MessageType.APPROVAL_REQUEST ->
                     conversationInboundService.onApprovalRequest(agentInstanceId, payload);
+            // ── Unified Inference Dispatch result frames (§5.5) ──
+            case MessageType.INFERENCE_DELTA ->
+                    inboundInferenceHandler.onInferenceDelta(agentInstanceId, payload, message.getPayload());
+            case MessageType.INFERENCE_COMPLETE ->
+                    inboundInferenceHandler.onInferenceComplete(agentInstanceId, payload, message.getPayload());
+            case MessageType.INFERENCE_FAILED ->
+                    inboundInferenceHandler.onInferenceFailed(agentInstanceId, payload, message.getPayload());
+            case MessageType.INFERENCE_TOOL_CALL ->
+                    inboundInferenceHandler.onInferenceToolCall(agentInstanceId, payload);
+            case MessageType.INFERENCE_TOOL_RESULT ->
+                    inboundInferenceHandler.onInferenceToolResult(agentInstanceId, payload);
+            case MessageType.INFERENCE_CANCELLED ->
+                    inboundInferenceHandler.onInferenceCancelled(agentInstanceId, payload, message.getPayload());
             default -> log.debug("Ignoring unsupported frame type '{}' on conversation socket from agent {}",
                     type, agentInstanceId);
         }
@@ -162,12 +180,23 @@ public class AgentConversationWebSocketHandler extends TextWebSocketHandler {
         // PendingTurnRegistry keyed by conversationId; deliver it now over the
         // freshly-registered socket.
         UUID conversationId = attach.getConversationId();
+
+        // Flush session.open first (if buffered for this conversation)
+        pendingTurnRegistry.takeSessionOpen(conversationId).ifPresent(sessionOpen -> {
+            WebSocketMessage<SessionOpenPayload> sessionMessage =
+                    WebSocketMessage.of(MessageType.SESSION_OPEN, sessionOpen);
+            conversationSocketRegistry.sendMessage(conversationId, sessionMessage);
+            log.info("Flushed session.open to agent {} over conversation socket (conv {} session {})",
+                    agentInstanceId, conversationId, sessionOpen.sessionId());
+        });
+
+        // Then flush the buffered inference.assign
         pendingTurnRegistry.take(conversationId).ifPresent(turn -> {
-            WebSocketMessage<ConversationTurnAssignPayload> message =
-                    WebSocketMessage.of(MessageType.CONVERSATION_TURN_ASSIGN, turn);
+            WebSocketMessage<InferenceAssignPayload> message =
+                    WebSocketMessage.of(MessageType.INFERENCE_ASSIGN, turn);
             boolean delivered = conversationSocketRegistry.sendMessage(conversationId, message);
             if (delivered) {
-                log.info("Flushed buffered turn to agent {} over conversation socket (conv {})",
+                log.info("Flushed buffered inference.assign to agent {} over conversation socket (conv {})",
                         agentInstanceId, conversationId);
             } else {
                 log.warn("Could not flush buffered turn for conv {} — socket vanished immediately after attach",

@@ -31,7 +31,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class TaskMetricsAggregator {
 
-    private static final BigDecimal THOUSAND = new BigDecimal(1000);
+    private static final BigDecimal MILLION = new BigDecimal(1_000_000);
 
     private final ExecutionEventRepository eventRepository;
     private final WorkflowTaskRepository workflowTaskRepository;
@@ -183,19 +183,19 @@ public class TaskMetricsAggregator {
     }
 
     private BigDecimal computeCost(Model model, long promptTokens, long completionTokens) {
-        BigDecimal inputPrice = model.getInputPricePer1kTokens();
-        BigDecimal outputPrice = model.getOutputPricePer1kTokens();
+        BigDecimal inputPrice = model.getInputPrice();
+        BigDecimal outputPrice = model.getOutputPrice();
         if (inputPrice == null && outputPrice == null) {
             return null;
         }
         BigDecimal cost = BigDecimal.ZERO;
         if (inputPrice != null && promptTokens > 0) {
             cost = cost.add(inputPrice.multiply(BigDecimal.valueOf(promptTokens))
-                    .divide(THOUSAND, 6, RoundingMode.HALF_UP));
+                    .divide(MILLION, 6, RoundingMode.HALF_UP));
         }
         if (outputPrice != null && completionTokens > 0) {
             cost = cost.add(outputPrice.multiply(BigDecimal.valueOf(completionTokens))
-                    .divide(THOUSAND, 6, RoundingMode.HALF_UP));
+                    .divide(MILLION, 6, RoundingMode.HALF_UP));
         }
         return cost.setScale(6, RoundingMode.HALF_UP);
     }

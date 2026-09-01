@@ -94,7 +94,7 @@ public class ExecutionSnapshot {
     private String payloadUri;
 
     /** Reserved for V1.1 tiered storage (hex sha256). Null in V1. */
-    @Column(name = "payload_sha256", length = 64)
+    @Column(name = "payload_sha256", length = 64, columnDefinition = "varchar(64)")
     private String payloadSha256;
 
     /** True payload size in bytes (before truncation). */

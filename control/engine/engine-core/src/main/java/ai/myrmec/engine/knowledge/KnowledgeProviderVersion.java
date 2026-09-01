@@ -57,6 +57,7 @@ public class KnowledgeProviderVersion {
 
     @Convert(converter = JsonMapConverter.class)
     @Column(name = "config", columnDefinition = "jsonb")
+    @org.hibernate.annotations.ColumnTransformer(write = "?::jsonb")
     private Map<String, Object> config;
 
     @Column(name = "draft_owner_id")

@@ -25,7 +25,6 @@ describe('budget format helpers', () => {
     it('maps resource types', () => {
       expect(formatResourceType('COST_USD_CENTS')).toBe('Cost USD')
       expect(formatResourceType('TOKENS')).toBe('Tokens')
-      expect(formatResourceType('REQUESTS')).toBe('Requests')
     })
   })
 

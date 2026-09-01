@@ -15,5 +15,7 @@ public enum RequestStatus {
     /** Request was cancelled by user */
     CANCELLED,
     /** Request timed out */
-    TIMEOUT
+    TIMEOUT,
+    /** Request is paused awaiting manual review of a step */
+    PAUSED
 }

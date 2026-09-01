@@ -1,0 +1,109 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+// Generated from myrmec-ee/docs/about-v2.md §4.5 (Security & Compliance).
+import V2Layout from "../../layouts/V2Layout.astro";
+
+const sections = [
+  {
+    icon: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z",
+    title: "Identity, access & scope",
+    points: [
+      ["Per-project access controls", "Every conversation, workflow, agent, knowledge source, secret, and budget is bound to a project. Users only see what their role grants on that project."],
+      ["Scope hierarchy", "SYSTEM → GROUP → PROJECT scopes apply consistently across roles, budgets, retrieval, and audit. Inheritance is explicit and walkable; nothing leaks across scopes by accident."],
+      ["First-class agent identity", "Each agent authenticates with a scoped JWT as its own principal. Stolen developer tokens can't impersonate agents, and stolen agent tokens can't impersonate humans."],
+    ],
+  },
+  {
+    icon: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
+    title: "Human-in-the-loop on destructive actions",
+    points: [
+      ["Risk-classified tools", "Every tool carries a risk class (SAFE / DESTRUCTIVE / IRREVERSIBLE). Projects can require that any destructive tool attempt triggers an approval card."],
+      ["Approval cards with full context", "Approvers see the diff, the SQL, the shell command, or the structured JSON — before any side effect happens. Reject-with-comment loops back to the agent so it can revise."],
+      ["Expiry by default", "Approval requests time out and auto-deny rather than silently leaving a side-effect window open."],
+    ],
+  },
+  {
+    icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+    title: "Budgets, rate limits & cost caps",
+    points: [
+      ["Hierarchical ceilings", "Token and cost budgets at org, group, project, and service level — daily, monthly, or lifetime. Reservations guarantee critical services their allocation."],
+      ["Child-tightens-only", "A project ceiling can never be more generous than its group's; a group ceiling never exceeds the org's. Validation enforces it at write time."],
+      ["Safe rollout", "Enforcement modes (telemetry / warn / block) let you size caps before flipping enforcement on; an 80% warning band warns users before the wall."],
+      ["Clean hard stops", "At the cap, requests are refused with HTTP 429 and a Retry-After header. Upstream provider rate limits are retried with backoff instead of failing the workflow."],
+    ],
+  },
+  {
+    icon: "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z",
+    title: "Prompt-injection & exfiltration defence",
+    points: [
+      ["Outbound secret-leak scanner", "Every assistant turn is scanned for AWS keys, GitHub tokens, OpenAI keys, JWTs, and Slack tokens before it leaves the engine. Block, redact (default), or warn."],
+      ["Untrusted-content wrapping", "Retrieval hits and tool outputs are wrapped in untrusted-content envelopes; embedded tags are neutralised so a poisoned document can't inject new instructions."],
+      ["Tool description hash pinning", "Each tool's description is SHA-256 fingerprinted at approval time. Any drift clears the approval — a compromised connector can't silently change a tool's persuasive text."],
+    ],
+  },
+  {
+    icon: "M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
+    title: "Audit & observability",
+    points: [
+      ["Append-only audit log", "Logins, role grants, secret CRUD, quota changes, knowledge source changes — every privileged action recorded with actor, IP, user-agent, request id, and payload. Deleting a user never wipes their history."],
+      ["Execution snapshots from day one", "Every dispatched turn writes a durable snapshot — prompt, retrieval payloads, tool definitions, approvals, costs — so forensic replay has real history to work against."],
+      ["Centralised audit UI", "Filter by actor, resource, scope, and time without grepping the database."],
+    ],
+  },
+  {
+    icon: "M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01",
+    title: "Deployment posture",
+    points: [
+      ["On-prem or air-gapped", "Runs entirely in your own VPC — no phone-home, no outbound entitlement checks."],
+      ["Multi-model", "Ship-with-yours: Ollama, vLLM, OpenAI, Anthropic, Azure, Bedrock. Mixing local and cloud is a runtime choice, not an architectural fork."],
+      ["No vendor lock for governance", "Connectors, model providers, retrieval providers, and secret stores are pluggable SPI interfaces. Open-source defaults are fully usable; enterprise overrides are drop-in."],
+    ],
+  },
+];
+---
+
+<V2Layout
+  title="Security & Compliance | Myrmec"
+  description="Myrmec ships the controls regulated industries need, on by default: sandboxing, HITL approvals, hierarchical budgets, prompt-injection defence, and append-only audit."
+>
+  <section class="mx-auto max-w-6xl px-6 py-16 md:px-10">
+    <h1 class="text-4xl font-extrabold tracking-tight text-slate-900 md:text-5xl">Security &amp; Compliance</h1>
+    <p class="mt-4 max-w-2xl text-base leading-relaxed text-slate-500">
+      Myrmec is built so security and compliance teams can sign off without turning AI adoption
+      into an indefinite review cycle. The controls regulated industries actually need ship on
+      by default, visible to auditors.
+    </p>
+
+    <div class="mt-14 space-y-6">
+      {sections.map((s) => (
+        <article class="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+          <div class="flex items-center gap-4">
+            <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d={s.icon} />
+              </svg>
+            </div>
+            <h2 class="text-xl font-extrabold tracking-tight text-slate-900">{s.title}</h2>
+          </div>
+          <div class="mt-6 grid gap-x-10 gap-y-6 md:grid-cols-2">
+            {s.points.map(([title, desc]) => (
+              <div>
+                <h3 class="text-sm font-bold text-slate-900">{title}</h3>
+                <p class="mt-1.5 text-sm leading-relaxed text-slate-500">{desc}</p>
+              </div>
+            ))}
+          </div>
+        </article>
+      ))}
+    </div>
+
+    <div class="mt-14 rounded-2xl border border-indigo-200 bg-indigo-50/60 p-8 text-center">
+      <p class="text-base font-semibold text-slate-800">Want to walk through the security model with your team?</p>
+      <a
+        href="/v2/#contact"
+        class="mt-5 inline-block rounded-xl bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+      >Contact Us</a>
+    </div>
+  </section>
+</V2Layout>

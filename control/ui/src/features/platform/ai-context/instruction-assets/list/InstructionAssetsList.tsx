@@ -3,10 +3,11 @@
 
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
 import {
   instructionAssetApi,
+  usersApi,
   type InstructionAsset,
   type InstructionCategory,
   type CreateInstructionAssetRequest,
@@ -45,6 +46,9 @@ import { dialogService } from '@/services/dialog-service'
 import DataTable2 from '@/components/data-table2/data-table2'
 import { SortedColumnHeader } from '@/components/data-table2/sorted-column-header'
 import { CATEGORY_LABELS, STATUS_COLORS } from '../shared/constants'
+import { RequiredMark } from '@/components/ui/required-marks'
+import { Scope, EntityStatus } from '@/lib/domain-constants'
+import { useGovernancePolicy } from '@/features/platform/ai-context/governance-profile/useGovernancePolicy'
 
 export function InstructionAssetsList() {
   const queryClient = useQueryClient()
@@ -57,6 +61,19 @@ export function InstructionAssetsList() {
     queryKey: ['instruction-assets'],
     queryFn: () => instructionAssetApi.list(),
   })
+
+  // Fetch users to resolve updatedBy UUID to name
+  const { data: users } = useQuery({
+    queryKey: ['users'],
+    queryFn: () => usersApi.list(),
+  })
+  const userNameById = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const u of users ?? []) {
+      map[u.id] = u.name
+    }
+    return map
+  }, [users])
 
   const createMutation = useMutation({
     mutationFn: async (data: CreateInstructionAssetRequest & { sourceType?: SourceType }) => {
@@ -114,7 +131,7 @@ export function InstructionAssetsList() {
   })
 
   const filteredAssets = useMemo(
-    () => (assets ?? []).filter((a) => a.status !== 'ARCHIVED'),
+    () => (assets ?? []).filter((a) => a.status !== EntityStatus.ARCHIVED),
     [assets],
   )
 
@@ -185,7 +202,7 @@ export function InstructionAssetsList() {
         <SortedColumnHeader table={table} column={column} title="Last Updated By" />
       ),
       cell: ({ row }) => (
-        <span className="text-sm text-muted-foreground">{row.original.updatedBy ?? '—'}</span>
+        <span className="text-sm text-muted-foreground">{row.original.updatedBy ? (userNameById[row.original.updatedBy] ?? row.original.updatedBy) : '—'}</span>
       ),
     },
     {
@@ -207,17 +224,37 @@ export function InstructionAssetsList() {
                   <Eye className="h-4 w-4 mr-2" /> View
                 </Link>
               </DropdownMenuItem>
-              {asset.status === 'ACTIVE' && (
-                <DropdownMenuItem onClick={() => disableMutation.mutate(asset.id)}>
+              {asset.status === EntityStatus.ACTIVE && (
+                <DropdownMenuItem onClick={async () => {
+                  const confirmed = await dialogService.showConfirmDialog({
+                    title: 'Disable Instruction Asset',
+                    message: `Disable "${asset.name}"? The instruction will stop being included in assembled contexts until it is re-enabled.`,
+                    severity: 'warning',
+                    type: 'warning',
+                    confirmLabel: 'Disable',
+                    cancelLabel: 'Cancel',
+                  })
+                  if (confirmed) disableMutation.mutate(asset.id)
+                }}>
                   <PowerOff className="h-4 w-4 mr-2" /> Disable
                 </DropdownMenuItem>
               )}
-              {asset.status === 'DISABLED' && (
-                <DropdownMenuItem onClick={() => reenableMutation.mutate(asset.id)}>
+              {asset.status === EntityStatus.DISABLED && (
+                <DropdownMenuItem onClick={async () => {
+                  const confirmed = await dialogService.showConfirmDialog({
+                    title: 'Enable Instruction Asset',
+                    message: `Re-enable "${asset.name}"? The instruction will immediately be included in assembled contexts again.`,
+                    severity: 'info',
+                    type: 'warning',
+                    confirmLabel: 'Enable',
+                    cancelLabel: 'Cancel',
+                  })
+                  if (confirmed) reenableMutation.mutate(asset.id)
+                }}>
                   <Power className="h-4 w-4 mr-2" /> Enable
                 </DropdownMenuItem>
               )}
-              {asset.status !== 'ARCHIVED' && (
+              {asset.status !== EntityStatus.ARCHIVED && (
                 <DropdownMenuItem
                   onClick={async () => {
                     const confirmed = await dialogService.showConfirmDialog({
@@ -230,7 +267,7 @@ export function InstructionAssetsList() {
                     })
                     if (confirmed) archiveMutation.mutate(asset.id)
                   }}
-                  disabled={asset.status === 'ACTIVE'}
+                  disabled={asset.status === EntityStatus.ACTIVE}
                 >
                   <Archive className="h-4 w-4 mr-2" /> Archive
                 </DropdownMenuItem>
@@ -311,10 +348,25 @@ function CreateInstructionAssetDialog({
   const [category, setCategory] = useState<InstructionCategory>('STANDARD')
   const [sourceType, setSourceType] = useState<SourceType>('INLINE')
 
+  const { policy: governancePolicy } = useGovernancePolicy()
+
+  // Org-scoped INLINE requires INLINE_INSTRUCTIONS_SCOPE >= ALL
+  const inlineAllowed = governancePolicy
+    ? governancePolicy.allows('INSTRUCTION_SOURCES', 'INLINE') &&
+      governancePolicy.permitsAtLeast('INLINE_INSTRUCTIONS_SCOPE', 'ALL')
+    : true // optimistic: enabled while policy loads (backend 403 is the real gate)
+
+  // If INLINE is currently selected but governance disallows it, auto-switch to GIT
+  useEffect(() => {
+    if (!inlineAllowed && sourceType === 'INLINE') {
+      setSourceType('GIT')
+    }
+  }, [inlineAllowed, sourceType])
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     onCreate({
-      scope: 'ORGANIZATION',
+      scope: Scope.ORGANIZATION,
       name,
       description: description || undefined,
       category,
@@ -335,7 +387,7 @@ function CreateInstructionAssetDialog({
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="name">Name</Label>
+            <Label htmlFor="name">Name<RequiredMark /></Label>
             <Input
               id="name"
               value={name}
@@ -373,10 +425,23 @@ function CreateInstructionAssetDialog({
             <Select value={sourceType} onValueChange={(v) => setSourceType(v as SourceType)}>
               <SelectTrigger id="sourceType"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="INLINE">Inline (text content)</SelectItem>
+                <SelectItem value="INLINE" disabled={!inlineAllowed}>
+                  Inline (text content)
+                  {!inlineAllowed && governancePolicy && (
+                    <span className="text-xs text-muted-foreground ml-2">
+                      (blocked at org scope by {governancePolicy.profileName} profile)
+                    </span>
+                  )}
+                </SelectItem>
                 <SelectItem value="GIT">Git (from repository)</SelectItem>
               </SelectContent>
             </Select>
+            {!inlineAllowed && governancePolicy && (
+              <p className="text-xs text-muted-foreground">
+                Inline instructions are not allowed at organization scope under the {governancePolicy.profileName} governance profile.
+                Switch to Git source or change the governance profile to Flexible.
+              </p>
+            )}
           </div>
           {error && (
             <div className="flex items-center gap-2 text-sm text-destructive">
@@ -406,7 +471,10 @@ function DraftStatusBadge({ assetId }: { assetId: string }) {
   const queryClient = useQueryClient()
   const { data: draft } = useQuery({
     queryKey: ['instruction-asset-drafts', assetId],
-    queryFn: () => instructionAssetApi.getDraftVersion(assetId),
+    // The API returns 204 No Content (→ undefined) when no draft exists.
+    // TanStack Query throws on undefined query data and keeps the stale
+    // cache — so coerce undefined to null to represent "no draft".
+    queryFn: async () => (await instructionAssetApi.getDraftVersion(assetId)) ?? null,
     retry: false,
   })
 

@@ -25,7 +25,7 @@ import org.springframework.web.bind.annotation.*;
 @Tag(name = "Agent", description = "Agent heartbeat and status operations")
 public class AgentController {
 
-    private final AgentService agentService;
+    private final AgentHostService agentService;
 
     @Operation(
             summary = "Record agent heartbeat",

@@ -1,0 +1,448 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Squashed conversations changelog.
+
+        Replaces the following incremental changesets with clean createTable
+        definitions reflecting the FINAL table structure:
+          20260607-01-conversations.xml
+          20260620-01-engine-nodes.xml  (conversations.home_node_id + agent_host_id)
+          20260620-03-conversation-events.xml
+          20260620-04-conversation-message-pinned.xml
+          20260620-06-conversation-message-feedback.xml
+          20260621-01-edit-resend-regenerate.xml
+          20260621-02-conversation-message-attachments.xml
+          20260621-08-conversation-version-pinning.xml
+          20260621-09-conversation-external-seams.xml
+          20260621-12-service-accounts.xml  (conversations.service_account_id FK)
+          20260630-13-conversation-context-snapshot.xml
+    -->
+
+    <!-- ==================================================================== -->
+    <!-- conversations                                                         -->
+    <!-- ==================================================================== -->
+
+    <changeSet id="008-conversations-create-conversations" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="conversations"/>
+            </not>
+        </preConditions>
+        <comment>Conversations — top-level durable session container.</comment>
+
+        <createTable tableName="conversations">
+            <column name="id" type="uuid" defaultValueComputed="gen_random_uuid()">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_conversation_project"
+                             references="projects(id)"/>
+            </column>
+            <column name="agent_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_conversation_agent"
+                             references="agent_hosts(id)"/>
+            </column>
+            <column name="agent_host_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_conversations_agent_host"
+                             references="agent_hosts(id)"/>
+            </column>
+            <column name="home_node_id" type="varchar(255)">
+                <constraints nullable="true" foreignKeyName="fk_conversations_home_node"
+                             references="engine_nodes(node_id)"/>
+            </column>
+            <column name="assistant_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="assistant_version_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="agent_profile_version_id" type="uuid"/>
+            <column name="title" type="varchar(500)"/>
+            <column name="status" type="varchar(20)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="system_prompt_override" type="text"/>
+            <column name="pinned_facts" type="text"/>
+            <column name="source" type="varchar(20)" defaultValue="WEB_UI">
+                <constraints nullable="false"/>
+            </column>
+            <column name="external_user_ref" type="varchar(255)"/>
+            <column name="service_account_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_conversation_service_account"
+                             references="service_accounts(id)"/>
+            </column>
+            <column name="parent_conversation_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_conversation_parent"
+                             references="conversations(id)"/>
+            </column>
+            <column name="role_in_thread" type="varchar(30)" defaultValue="STANDALONE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_conversation_created_by"
+                             references="users(id)"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="context_snapshot" type="jsonb"/>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="008-conversations-conversations-indexes" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_conversation_project_id"/>
+            </not>
+        </preConditions>
+        <createIndex indexName="idx_conversation_project_id" tableName="conversations">
+            <column name="project_id"/>
+        </createIndex>
+        <createIndex indexName="idx_conversation_created_by" tableName="conversations">
+            <column name="created_by"/>
+        </createIndex>
+        <createIndex indexName="idx_conversation_status_updated" tableName="conversations">
+            <column name="status"/>
+            <column name="updated_at"/>
+        </createIndex>
+        <createIndex indexName="idx_conversations_home_node" tableName="conversations">
+            <column name="home_node_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ==================================================================== -->
+    <!-- conversation_messages                                                 -->
+    <!-- ==================================================================== -->
+
+    <changeSet id="008-conversations-create-conversation-messages" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="conversation_messages"/>
+            </not>
+        </preConditions>
+        <comment>Append-only message log. sequence_no is unique per conversation.</comment>
+
+        <createTable tableName="conversation_messages">
+            <column name="id" type="uuid" defaultValueComputed="gen_random_uuid()">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="conversation_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_message_conversation"
+                             references="conversations(id)"/>
+            </column>
+            <column name="sequence_no" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <!-- USER / ASSISTANT / SYSTEM / TOOL / APPROVAL_REQUEST / APPROVAL_RESPONSE / CONTEXT_SUMMARY -->
+            <column name="role" type="varchar(30)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="author_user_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_message_author_user"
+                             references="users(id)"/>
+            </column>
+            <column name="author_agent_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_message_author_agent"
+                             references="agent_hosts(id)"/>
+            </column>
+            <column name="content" type="text"/>
+            <column name="model_code" type="varchar(50)"/>
+            <column name="token_count" type="integer"/>
+            <column name="tool_call_id" type="varchar(100)"/>
+            <column name="payload_json" type="text"/>
+            <column name="parent_message_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_message_parent"
+                             references="conversation_messages(id)"/>
+            </column>
+            <!-- HITL approval columns (from 20260608-01-hitl.xml) -->
+            <column name="approval_status" type="varchar(20)"/>
+            <column name="approver_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_conv_messages_approver"
+                             references="users(id)"/>
+            </column>
+            <column name="expires_at" type="timestamp with time zone"/>
+            <!-- Pin flag (from 20260620-04) -->
+            <column name="pinned" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Feedback columns (from 20260620-06) -->
+            <column name="feedback_rating" type="varchar(10)"/>
+            <column name="feedback_reason" type="text"/>
+            <column name="feedback_by" type="uuid"/>
+            <column name="feedback_at" type="timestamp with time zone"/>
+            <!-- Supersede flag (from 20260621-01) -->
+            <column name="superseded" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="008-conversations-conversation-messages-indexes" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="uq_message_conversation_sequence"/>
+            </not>
+        </preConditions>
+        <createIndex indexName="uq_message_conversation_sequence"
+                     tableName="conversation_messages" unique="true">
+            <column name="conversation_id"/>
+            <column name="sequence_no"/>
+        </createIndex>
+        <createIndex indexName="idx_message_conversation_created"
+                     tableName="conversation_messages">
+            <column name="conversation_id"/>
+            <column name="created_at"/>
+        </createIndex>
+        <createIndex indexName="idx_conv_messages_pinned"
+                     tableName="conversation_messages">
+            <column name="conversation_id"/>
+            <column name="pinned"/>
+        </createIndex>
+        <createIndex indexName="idx_conv_messages_approval_status"
+                     tableName="conversation_messages">
+            <column name="approval_status"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ==================================================================== -->
+    <!-- conversation_events                                                   -->
+    <!-- ==================================================================== -->
+
+    <changeSet id="008-conversations-create-conversation-events" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="conversation_events"/>
+            </not>
+        </preConditions>
+        <comment>Append-only conversation lifecycle event log — metrics + audit source of truth.</comment>
+
+        <createTable tableName="conversation_events">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="conversation_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="seq" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="from_state" type="varchar(20)"/>
+            <column name="to_state" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reason_code" type="varchar(40)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="occurred_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="agent_id" type="uuid"/>
+            <column name="agent_host_id" type="uuid"/>
+            <column name="bind_attempt_no" type="int" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="attributes" type="text"/>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="008-conversations-conversation-events-constraints" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_conversation_events_conversation"/>
+            </not>
+        </preConditions>
+        <addUniqueConstraint
+            tableName="conversation_events"
+            columnNames="conversation_id, seq"
+            constraintName="uq_conversation_events_conversation_seq"/>
+        <addForeignKeyConstraint
+            baseTableName="conversation_events"
+            baseColumnNames="conversation_id"
+            referencedTableName="conversations"
+            referencedColumnNames="id"
+            constraintName="fk_conversation_events_conversation"
+            onDelete="CASCADE"/>
+    </changeSet>
+
+    <changeSet id="008-conversations-conversation-events-indexes" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_conversation_events_reason_code"/>
+            </not>
+        </preConditions>
+        <createIndex tableName="conversation_events" indexName="idx_conversation_events_reason_code">
+            <column name="reason_code"/>
+        </createIndex>
+        <createIndex tableName="conversation_events" indexName="idx_conversation_events_agent_host_id">
+            <column name="agent_host_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ==================================================================== -->
+    <!-- conversation_participants                                             -->
+    <!-- ==================================================================== -->
+
+    <changeSet id="008-conversations-create-conversation-participants" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="conversation_participants"/>
+            </not>
+        </preConditions>
+        <comment>Multi-viewer ACL. Each row grants one user a role in one conversation.</comment>
+
+        <createTable tableName="conversation_participants">
+            <column name="id" type="uuid" defaultValueComputed="gen_random_uuid()">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="conversation_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_participant_conversation"
+                             references="conversations(id)"/>
+            </column>
+            <column name="user_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_participant_user"
+                             references="users(id)"/>
+            </column>
+            <!-- OWNER / EDITOR / VIEWER -->
+            <column name="role" type="varchar(20)" defaultValue="VIEWER">
+                <constraints nullable="false"/>
+            </column>
+            <column name="joined_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="008-conversations-conversation-participants-indexes" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="uq_participant_conversation_user"/>
+            </not>
+        </preConditions>
+        <createIndex indexName="uq_participant_conversation_user"
+                     tableName="conversation_participants" unique="true">
+            <column name="conversation_id"/>
+            <column name="user_id"/>
+        </createIndex>
+        <createIndex indexName="idx_participant_user_id"
+                     tableName="conversation_participants">
+            <column name="user_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ==================================================================== -->
+    <!-- conversation_message_attachments                                      -->
+    <!-- ==================================================================== -->
+
+    <changeSet id="008-conversations-create-conversation-message-attachments" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="conversation_message_attachments"/>
+            </not>
+        </preConditions>
+        <comment>Conversation file/document attachments with scan-gate metadata.</comment>
+
+        <createTable tableName="conversation_message_attachments">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="conversation_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="message_id" type="uuid"/>
+            <column name="uploaded_by" type="uuid"/>
+            <column name="filename" type="varchar(512)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="media_type" type="varchar(150)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="size_bytes" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="sha256" type="varchar(64)"/>
+            <column name="storage_key" type="varchar(512)"/>
+            <column name="scan_status" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="scan_provider" type="varchar(100)"/>
+            <column name="scan_threat" type="varchar(255)"/>
+            <column name="extracted_text" type="text"/>
+            <column name="token_estimate" type="int"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="008-conversations-conversation-message-attachments-constraints" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_cma_conversation"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="conversation_message_attachments"
+            baseColumnNames="conversation_id"
+            referencedTableName="conversations"
+            referencedColumnNames="id"
+            constraintName="fk_cma_conversation"
+            onDelete="CASCADE"/>
+        <addForeignKeyConstraint
+            baseTableName="conversation_message_attachments"
+            baseColumnNames="message_id"
+            referencedTableName="conversation_messages"
+            referencedColumnNames="id"
+            constraintName="fk_cma_message"
+            onDelete="SET NULL"/>
+    </changeSet>
+
+    <changeSet id="008-conversations-conversation-message-attachments-indexes" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="idx_cma_conversation_id"/>
+            </not>
+        </preConditions>
+        <createIndex tableName="conversation_message_attachments"
+                     indexName="idx_cma_conversation_id">
+            <column name="conversation_id"/>
+        </createIndex>
+        <createIndex tableName="conversation_message_attachments"
+                     indexName="idx_cma_message_id">
+            <column name="message_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         Cross-file FK: execution_snapshots.conversation_id → conversations(id)
+         The execution_snapshots table is created in 007-workflows.xml (runs before
+         008). The FK is added here because conversations is created in this file.
+         ================================================================ -->
+
+    <changeSet id="008-conversations-add-snapshot-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="conversations"/>
+            <tableExists tableName="execution_snapshots"/>
+            <not><foreignKeyConstraintExists foreignKeyName="fk_exec_snap_conv"/></not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="execution_snapshots"
+            baseColumnNames="conversation_id"
+            referencedTableName="conversations"
+            referencedColumnNames="id"
+            constraintName="fk_exec_snap_conv"/>
+    </changeSet>
+
+</databaseChangeLog>

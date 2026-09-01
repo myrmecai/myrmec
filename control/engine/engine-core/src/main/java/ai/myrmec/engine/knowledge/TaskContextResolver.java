@@ -2,6 +2,8 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.knowledge;
 
+import ai.myrmec.engine._system.common.DomainConstants.EntityStatus;
+import ai.myrmec.engine._system.common.DomainConstants.Scope;
 import ai.myrmec.engine.instruction.InstructionAsset;
 import ai.myrmec.engine.instruction.InstructionAssetRepository;
 import ai.myrmec.engine.instruction.InstructionAssetVersion;
@@ -48,9 +50,9 @@ public class TaskContextResolver {
 
         // 1. Find org-scoped published instruction assets
         List<InstructionAsset> orgAssets = instructionAssetRepository
-                .findByScopeAndProjectIdIsNull("ORGANIZATION");
+                .findByScopeAndProjectIdIsNull(Scope.ORGANIZATION);
         for (InstructionAsset asset : orgAssets) {
-            if (!"ACTIVE".equals(asset.getStatus()) || asset.getCurrentVersionId() == null) {
+            if (!EntityStatus.ACTIVE.equals(asset.getStatus()) || asset.getCurrentVersionId() == null) {
                 continue;
             }
             TaskContext.KnowledgeEntry entry = buildEntry(asset);
@@ -64,9 +66,9 @@ public class TaskContextResolver {
 
         // 2. Find project-scoped published instruction assets
         List<InstructionAsset> projectAssets = instructionAssetRepository
-                .findByScopeAndProjectId("PROJECT", projectId);
+                .findByScopeAndProjectId(Scope.PROJECT, projectId);
         for (InstructionAsset asset : projectAssets) {
-            if (!"ACTIVE".equals(asset.getStatus()) || asset.getCurrentVersionId() == null) {
+            if (!EntityStatus.ACTIVE.equals(asset.getStatus()) || asset.getCurrentVersionId() == null) {
                 continue;
             }
             TaskContext.KnowledgeEntry entry = buildEntry(asset);
@@ -107,7 +109,7 @@ public class TaskContextResolver {
      */
     private TaskContext.KnowledgeEntry buildEntry(InstructionAsset asset) {
         InstructionAssetVersion version = instructionAssetVersionRepository
-                .findByAssetIdAndStatus(asset.getId(), "PUBLISHED")
+                .findByAssetIdAndStatus(asset.getId(), EntityStatus.PUBLISHED)
                 .orElse(null);
         if (version == null) {
             return null;

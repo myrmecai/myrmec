@@ -130,25 +130,43 @@ public class TaskAttemptService {
         task.setCompletedAt(Instant.now());
 
         boolean rateLimited = ERROR_CODE_RATE_LIMITED.equals(errorCode);
-        boolean retriable = rateLimited && canRetry(task.getId(), MAX_RATE_LIMIT_RETRIES);
+
+        // Resolve the max retries for this task. For rate-limited errors,
+        // use the hard-coded cap as the upper bound but also respect the
+        // step-level maxRetries. For generic errors, use step-level maxRetries.
+        int effectiveMaxRetries = rateLimited
+                ? Math.min(MAX_RATE_LIMIT_RETRIES, task.getMaxRetries() != null ? task.getMaxRetries() : MAX_RATE_LIMIT_RETRIES)
+                : (task.getMaxRetries() != null ? task.getMaxRetries() : 0);
+
+        boolean retriable = canRetry(task.getId(), effectiveMaxRetries);
         if (retriable) {
-            int backoffSeconds = clampBackoff(retryAfterSeconds);
-            Instant nextEligible = Instant.now().plusSeconds(backoffSeconds);
+            // Schedule a retry: flip the task back to PENDING, increment attempt,
+            // clear dispatch fields. For rate-limited errors, apply backoff;
+            // for generic errors, retry immediately.
+            if (rateLimited) {
+                int backoffSeconds = clampBackoff(retryAfterSeconds);
+                Instant nextEligible = Instant.now().plusSeconds(backoffSeconds);
+                task.setNextEligibleAt(nextEligible);
+                log.warn("Task {} hit MODEL_RATE_LIMITED; scheduling retry #{} in {}s (at {})",
+                        task.getId(), task.getAttempt() + 1, backoffSeconds, nextEligible);
+            } else {
+                task.setNextEligibleAt(Instant.now());
+                log.warn("Task {} failed with error '{}'; scheduling retry #{} (maxRetries={})",
+                        task.getId(), errorCode, task.getAttempt() + 1, effectiveMaxRetries);
+            }
             task.setStatus(TaskStatus.PENDING);
             task.setResult(null);
+            task.setErrorMessage(null);
             task.setStartedAt(null);
             task.setCompletedAt(null);
             task.setAgentInstance(null);
             task.setAttempt(task.getAttempt() + 1);
-            task.setNextEligibleAt(nextEligible);
-            log.warn("Task {} hit MODEL_RATE_LIMITED; scheduling retry #{} in {}s (at {})",
-                    task.getId(), task.getAttempt(), backoffSeconds, nextEligible);
-        } else if (rateLimited) {
-            // Rate-limited but retries exhausted — give up.
+        } else {
+            // Retries exhausted (or maxRetries=0) — terminal failure.
             task.setStatus(TaskStatus.COMPLETED);
             task.setResult(TaskResult.FAILURE);
-            log.warn("Task {} hit MODEL_RATE_LIMITED but retries exhausted; failing",
-                    task.getId());
+            log.warn("Task {} failed with error '{}' and retries exhausted; failing",
+                    task.getId(), errorCode);
         }
         workflowTaskRepository.save(task);
 
@@ -162,7 +180,9 @@ public class TaskAttemptService {
 
         log.debug("Attempt {} completed with FAILURE: {}", attemptId, errorCode);
         attempt = taskAttemptRepository.save(attempt);
-        if (rateLimited && !retriable) {
+
+        // Call onTaskFailed only when the task is terminally failed (not retrying).
+        if (!retriable) {
             workflowProgressionService.onTaskFailed(task);
         }
         return attempt;
@@ -248,11 +268,16 @@ public class TaskAttemptService {
 
     /**
      * Check if task can be retried based on max attempts.
+     * {@code maxAttempts} is the number of *retries* allowed after the first
+     * attempt, so the total attempt count is {@code maxAttempts + 1}.
+     * A retry is allowed when the number of already-failed attempts is
+     * less than or equal to {@code maxAttempts} (i.e. we haven't exhausted
+     * the retry budget yet).
      */
     @Transactional(readOnly = true)
     public boolean canRetry(UUID taskId, int maxAttempts) {
         int retryableCount = countRetryableAttempts(taskId);
-        return retryableCount < maxAttempts;
+        return retryableCount <= maxAttempts;
     }
 
     /**

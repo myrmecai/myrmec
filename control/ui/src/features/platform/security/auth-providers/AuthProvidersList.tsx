@@ -18,6 +18,7 @@ import {
   type ProviderMetadataForm,
   validateProviderForm,
 } from '@/lib/auth-provider-metadata'
+import { dialogService } from '@/services/dialog-service'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -133,7 +134,20 @@ export function AuthProvidersList() {
               variant="ghost"
               size="icon"
               disabled={toggleMutation.isPending}
-              onClick={() => toggleMutation.mutate({ provider })}
+              onClick={async () => {
+                if (provider.isEnabled) {
+                  const confirmed = await dialogService.showConfirmDialog({
+                    title: 'Disable Auth Provider',
+                    message: `Disable "${provider.name}"? Users will no longer be able to sign in with this provider while it is disabled.`,
+                    severity: 'warning',
+                    type: 'warning',
+                    confirmLabel: 'Disable',
+                    cancelLabel: 'Cancel',
+                  })
+                  if (!confirmed) return
+                }
+                toggleMutation.mutate({ provider })
+              }}
             >
               <Power className="h-4 w-4" />
             </Button>

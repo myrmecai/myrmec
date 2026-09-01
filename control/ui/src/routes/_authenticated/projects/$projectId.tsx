@@ -23,8 +23,12 @@ function ProjectDetailLayout() {
     from: '/_authenticated/projects/$projectId/knowledge-providers/$id',
     shouldThrow: false,
   })
+  const aiContextPreviewMatch = useMatch({
+    from: '/_authenticated/projects/$projectId/ai-context-preview',
+    shouldThrow: false,
+  })
 
-  if (chatMatch || instructionAssetMatch || knowledgeProviderMatch) {
+  if (chatMatch || instructionAssetMatch || knowledgeProviderMatch || aiContextPreviewMatch) {
     return <Outlet />
   }
 

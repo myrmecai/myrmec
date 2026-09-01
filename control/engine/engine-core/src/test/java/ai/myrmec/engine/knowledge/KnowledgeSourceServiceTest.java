@@ -3,6 +3,9 @@
 package ai.myrmec.engine.knowledge;
 
 import ai.myrmec.engine.IntegrationTestBase;
+import ai.myrmec.engine.governance.GovernanceProfileService;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -23,11 +26,29 @@ class KnowledgeSourceServiceTest extends IntegrationTestBase {
     @Autowired
     private KnowledgeProviderService providerService;
 
+    @Autowired
+    private GovernanceProfileService governanceProfileService;
+
+    @BeforeEach
+    void setFlexibleProfile() {
+        governanceProfileService.setDefaultProfile("FLEXIBLE", null);
+    }
+
+    @AfterEach
+    void resetProfile() {
+        governanceProfileService.setDefaultProfile("STANDARD", null);
+    }
+
     private UUID createPublishedProviderVersion() {
         var provider = providerService.create(
                 "ORGANIZATION", null, "source-test-provider-" + System.nanoTime(), "Source Test Provider",
                 "MANAGED", TEST_ADMIN_ID, "Test Admin");
-        providerService.createDraft(provider.getId(), null, null, TEST_ADMIN_ID, "Test Admin");
+        // create() auto-creates an initial draft — use it directly.
+        providerService.updateDraft(provider.getId(), null,
+                Map.of("responseMapping", Map.of(
+                        "hitsPath", "$.results", "passagePath", "text",
+                        "sourceNamePath", "title", "locatorPath", "url")),
+                TEST_ADMIN_ID, "Test Admin");
         return providerService.publishDraft(provider.getId(), TEST_ADMIN_ID, "Test Admin").getId();
     }
 

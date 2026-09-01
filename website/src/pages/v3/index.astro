@@ -1,0 +1,277 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+// v3 landing page — copy traces to myrmec-ee/docs/about-v2.md.
+import V3Layout from "../../layouts/V3Layout.astro";
+import ArchitectureDiagram from "../../components/v3/ArchitectureDiagram.astro";
+import OrbitDiagram from "../../components/v3/OrbitDiagram.astro";
+
+const personasDecision = [
+  {
+    role: "CTO / Head of Engineering",
+    pain: "Every team rolls its own agent glue; no standard, no reuse; model churn forces rewrites.",
+    gain: "One governed runtime. Capabilities live once in agent profiles; swapping models is configuration, not code.",
+  },
+  {
+    role: "CIO / CISO",
+    pain: "Shadow AI — data flowing into personal accounts and laptop copilots outside the perimeter.",
+    gain: "Every AI action inside the boundary: sandboxed agents, encrypted credentials, append-only audit. Air-gap capable.",
+  },
+  {
+    role: "CFO / Budget owner",
+    pain: "Unpredictable AI invoices. No attribution. Nobody can say which team spent what.",
+    gain: "Budgets cascade org → group → project → service, with hard caps, a kill switch, and per-service cost attribution.",
+  },
+  {
+    role: "Architect / Platform team",
+    pain: "Governance bolted onto prototypes after the fact is where AI platforms go to die.",
+    gain: "Governance by architecture: pluggable SPIs at every layer, single-tenant deployment, no lock-in anywhere.",
+  },
+];
+
+const personasOperators = [
+  ["DevOps / Platform Ops", "Deploy once as containers in your VPC. Agent health, queue depth, and versions in one dashboard."],
+  ["Security & Compliance teams", "Inspectable by design: HITL gates, leak scanning, scope-aligned retrieval — and a self-service audit UI."],
+  ["Business users & Analysts", "No-code workflows and assistants. Citations and approvals make every output trustworthy."],
+  ["Developers", "Build specialised agents with the SDK. Org standards apply automatically to every run."],
+  ["Approvers", "See the exact diff, SQL, or command before it executes. Reject with a comment; the agent revises."],
+  ["Auditors", "\"Prove what the AI did six months ago\" — every turn is snapshotted and replayable."],
+];
+---
+
+<V3Layout
+  title="Myrmec — The governed runtime for AI agents"
+  description="Open-source platform that runs AI agents inside your infrastructure with governance: grounded in your org's knowledge, sandboxed, approval-gated, and audited. Apache-2.0."
+>
+  <!-- ─── HERO ───────────────────────────────────────────────── -->
+  <section class="v3-dot-grid relative overflow-hidden">
+    <div class="mx-auto grid max-w-6xl items-center gap-14 px-6 pb-20 pt-20 md:px-10 md:pt-28 lg:grid-cols-[1.05fr_1fr] lg:pb-28">
+      <!-- Left: pitch -->
+      <div>
+        <p class="v3-reveal inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3.5 py-1.5 text-xs font-semibold tracking-wide text-indigo-700">
+          <span class="inline-block h-2 w-2 rounded-full bg-indigo-500"></span>
+          Governed Agent Runtime · Open Source · Self-Hosted
+        </p>
+
+        <h1 class="v3-reveal-2 mt-6 text-4xl font-extrabold leading-[1.08] tracking-tight text-slate-900 md:text-[3.4rem]">
+          Run AI agents on <span class="text-indigo-600">your</span> infrastructure —
+          <span class="text-indigo-600">under your control.</span>
+        </h1>
+
+        <p class="v3-reveal-3 mt-6 max-w-xl text-lg leading-relaxed text-slate-500">
+          Myrmec is the governed runtime where agents read your organisation's truth and act on
+          it under audit. Agents work in sandboxes, risky actions wait for human approval, and
+          every model call, retrieval, and tool use is recorded for replay.
+        </p>
+
+        <div class="mt-8 flex flex-wrap items-center gap-4">
+          <a
+            href="/v3/get-started"
+            class="rounded-xl bg-indigo-600 px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-indigo-200 transition hover:bg-indigo-500"
+          >Get Started</a>
+          <a
+            href="https://github.com/myrmec"
+            class="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-6 py-3.5 text-sm font-semibold text-slate-700 transition hover:border-slate-500"
+          >
+            <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
+            View on GitHub
+          </a>
+        </div>
+
+        <p class="mt-5 text-xs text-slate-400">
+          Apache-2.0 · no phone-home · single-tenant per instance · air-gap capable
+        </p>
+      </div>
+
+      <!-- Right: the Myrmec nervous system — concentric governance rings -->
+      <div class="v3-reveal-3">
+        <OrbitDiagram />
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── THREE-LEG WEDGE ────────────────────────────────────── -->
+  <section class="border-y border-slate-100 bg-slate-50">
+    <div class="mx-auto max-w-6xl px-6 py-20 md:px-10">
+      <h2 class="text-center text-3xl font-extrabold tracking-tight text-slate-900 md:text-4xl">
+        One runtime, three guarantees
+      </h2>
+      <p class="mx-auto mt-4 max-w-2xl text-center text-base leading-relaxed text-slate-500">
+        Plenty of tools do one of these. Only Myrmec does all three together — that's the wedge.
+      </p>
+
+      <div class="mt-14 grid gap-6 md:grid-cols-3">
+        <article class="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm transition hover:border-indigo-200 hover:shadow-md">
+          <p class="font-mono text-xs font-bold tracking-widest text-indigo-500">01 / READ</p>
+          <h3 class="mt-3 text-xl font-bold text-slate-900">Grounded in your org's truth</h3>
+          <p class="mt-3 text-sm leading-relaxed text-slate-500">
+            Retrieval over your git repos, docs, tickets, and schemas — scoped by the same
+            permissions as everything else. Every answer arrives with citation chips that expand
+            to the exact passage.
+          </p>
+        </article>
+
+        <article class="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm transition hover:border-indigo-200 hover:shadow-md">
+          <p class="font-mono text-xs font-bold tracking-widest text-indigo-500">02 / REASON</p>
+          <h3 class="mt-3 text-xl font-bold text-slate-900">Thinking within guardrails</h3>
+          <p class="mt-3 text-sm leading-relaxed text-slate-500">
+            Governance profiles define what the model sees and may do — budgets, allowed tools,
+            knowledge bindings — assembled per turn, previewable before you deploy, never crossed.
+          </p>
+        </article>
+
+        <article class="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm transition hover:border-indigo-200 hover:shadow-md">
+          <p class="font-mono text-xs font-bold tracking-widest text-indigo-500">03 / ACT</p>
+          <h3 class="mt-3 text-xl font-bold text-slate-900">Acts in sandboxes, under approval</h3>
+          <p class="mt-3 text-sm leading-relaxed text-slate-500">
+            Agents execute in containers scoped to a project workspace. Destructive actions pause
+            behind approval cards; expired requests auto-deny. Nothing runs on anyone's laptop.
+          </p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── ARCHITECTURE ───────────────────────────────────────── -->
+  <section class="mx-auto max-w-6xl px-6 py-20 md:px-10">
+    <h2 class="text-center text-3xl font-extrabold tracking-tight text-slate-900 md:text-4xl">
+      The layer everyone else skips
+    </h2>
+    <p class="mx-auto mt-4 max-w-2xl text-center text-base leading-relaxed text-slate-500">
+      Frameworks give you agent code. Search assistants give you answers. Neither ships the
+      governed runtime in between — that's Myrmec.
+    </p>
+
+    <div class="mt-12">
+      <ArchitectureDiagram />
+    </div>
+
+    <p class="mx-auto mt-8 max-w-3xl text-center text-sm leading-relaxed text-slate-500">
+      Orchestration frameworks are construction kits — they produce agent code, and then your
+      governance story starts from zero. Myrmec is the building those kits help you construct:
+      the runtime, the guardrails, the audit trail, and the UI, shipped.
+    </p>
+  </section>
+
+  <!-- ─── WHO IT'S FOR ───────────────────────────────────────── -->
+  <section class="border-y border-slate-100 bg-slate-50">
+    <div class="mx-auto max-w-6xl px-6 py-20 md:px-10">
+      <h2 class="text-center text-3xl font-extrabold tracking-tight text-slate-900 md:text-4xl">Who Myrmec is for</h2>
+      <p class="mx-auto mt-4 max-w-xl text-center text-base leading-relaxed text-slate-500">
+        Ten stakeholders, ten answers. Starting with the decision-makers.
+      </p>
+
+      <!-- Decision-makers: pain → gain -->
+      <div class="mt-12 grid gap-5 md:grid-cols-2">
+        {personasDecision.map((p) => (
+          <article class="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+            <p class="text-xs font-bold uppercase tracking-widest text-indigo-500">{p.role}</p>
+            <p class="mt-4 text-sm leading-relaxed text-slate-500"><span class="font-semibold text-slate-700">Today:</span> {p.pain}</p>
+            <p class="mt-3 text-sm leading-relaxed text-slate-600"><span class="font-semibold text-emerald-700">With Myrmec:</span> {p.gain}</p>
+          </article>
+        ))}
+      </div>
+
+      <!-- Operators & users: compact strip -->
+      <p class="mt-10 text-center text-xs font-bold uppercase tracking-widest text-slate-400">
+        …and everyone who operates or uses it
+      </p>
+      <div class="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {personasOperators.map(([role, gain]) => (
+          <div class="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+            <p class="text-sm font-bold text-slate-900">{role}</p>
+            <p class="mt-1.5 text-xs leading-relaxed text-slate-500">{gain}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── WHY NOT JUST X ─────────────────────────────────────── -->
+  <section class="mx-auto max-w-6xl px-6 py-20 md:px-10">
+    <h2 class="text-center text-3xl font-extrabold tracking-tight text-slate-900 md:text-4xl">
+      "Why not just …?"
+    </h2>
+    <p class="mx-auto mt-4 max-w-2xl text-center text-base leading-relaxed text-slate-500">
+      There are thousands of AI orchestration products. Honest answers to the obvious
+      alternatives — details on the <a href="/v3/product#compare" class="font-semibold text-indigo-600 hover:underline">Product page</a>.
+    </p>
+
+    <div class="mt-12 grid gap-5 md:grid-cols-2">
+      <div class="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+        <p class="text-sm font-bold text-slate-900">LangChain / AutoGen / CrewAI</p>
+        <p class="mt-2 text-sm leading-relaxed text-slate-500">
+          Great construction kits — completely ungoverned. Auth, RBAC, RAG scoping, approvals,
+          budgets, audit, UI: that's 70% of the work left to you, and exactly what Myrmec ships.
+        </p>
+      </div>
+      <div class="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+        <p class="text-sm font-bold text-slate-900">Copilot / Cursor / Claude Code</p>
+        <p class="mt-2 text-sm leading-relaxed text-slate-500">
+          Laptop-bound, outside the perimeter, no org-wide grounding or audit trail — a veto
+          for security teams. Myrmec agents run in sandboxes a CISO can approve.
+        </p>
+      </div>
+      <div class="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+        <p class="text-sm font-bold text-slate-900">Bedrock Agents / Vertex</p>
+        <p class="mt-2 text-sm leading-relaxed text-slate-500">
+          Governed, but only inside one cloud vendor's ecosystem. Myrmec is multi-model,
+          self-hosted, and open source — governance isn't hostage to a cloud provider.
+        </p>
+      </div>
+      <div class="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+        <p class="text-sm font-bold text-slate-900">Glean &amp; search assistants</p>
+        <p class="mt-2 text-sm leading-relaxed text-slate-500">
+          They read your org's knowledge but can't <em>do</em> anything. Myrmec closes the loop:
+          grounded reading <em>and</em> approved execution in one runtime.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── OPEN SOURCE BANNER ─────────────────────────────────── -->
+  <section class="border-t border-slate-100 bg-slate-50">
+    <div class="mx-auto max-w-6xl px-6 py-20 md:px-10">
+      <div class="rounded-3xl bg-slate-900 p-10 text-center shadow-xl md:p-16">
+        <p class="text-xs font-bold uppercase tracking-widest text-emerald-400">Open core</p>
+        <h2 class="mx-auto mt-3 max-w-2xl text-2xl font-extrabold tracking-tight text-white md:text-3xl">
+          Myrmec Core is open source. Run it forever.
+        </h2>
+        <p class="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-slate-400">
+          Apache-2.0, on any infrastructure you own. The governance runtime stays open —
+          <a href="/v3/roadmap" class="font-semibold text-indigo-300 hover:text-indigo-200">Enterprise features</a>
+          (compliance at scale) come later, and the core never moves behind a paywall.
+        </p>
+        <div class="mt-8 flex flex-wrap justify-center gap-4">
+          <a
+            href="/v3/get-started"
+            class="rounded-xl bg-emerald-500 px-6 py-3 text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-emerald-400"
+          >Get Started</a>
+          <a
+            href="https://github.com/myrmec"
+            class="rounded-xl border border-slate-600 px-6 py-3 text-sm font-semibold text-slate-200 transition hover:border-slate-400 hover:text-white"
+          >Star on GitHub</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── CONTACT ────────────────────────────────────────────── -->
+  <section id="contact" class="mx-auto max-w-3xl px-6 py-20 text-center md:px-10">
+    <h2 class="text-3xl font-extrabold tracking-tight text-slate-900">Talk to us</h2>
+    <p class="mt-4 text-base leading-relaxed text-slate-500">
+      Evaluating a governed agent platform? Questions on deployment, enterprise plans, or
+      contributing — we'd love to hear from you.
+    </p>
+    <div class="mt-8 flex flex-wrap justify-center gap-4">
+      <a
+        href="mailto:hello@myrmec.ai"
+        class="rounded-xl bg-indigo-600 px-8 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500"
+      >hello@myrmec.ai</a>
+      <a
+        href="https://github.com/myrmec"
+        class="rounded-xl border border-slate-300 bg-white px-8 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-500"
+      >Open a GitHub issue</a>
+    </div>
+  </section>
+</V3Layout>

@@ -1,0 +1,93 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+// Pure HTML/CSS architecture diagram — "where Myrmec sits". No JS, works everywhere.
+---
+
+<div class="overflow-x-auto rounded-3xl border border-slate-200 bg-gradient-to-b from-slate-50 to-white p-6 shadow-sm md:p-10">
+  <div class="min-w-[720px]">
+
+    <!-- Row 1: People -->
+    <div class="flex items-stretch justify-center gap-4">
+      <div class="flex flex-col items-center justify-center rounded-xl border border-slate-300 bg-white px-6 py-3 text-center shadow-sm">
+        <p class="text-sm font-bold text-slate-800">Business users</p>
+        <p class="text-xs text-slate-400">no-code</p>
+      </div>
+      <div class="flex flex-col items-center justify-center rounded-xl border border-slate-300 bg-white px-6 py-3 text-center shadow-sm">
+        <p class="text-sm font-bold text-slate-800">Approvers</p>
+        <p class="text-xs text-slate-400">HITL sign-off</p>
+      </div>
+      <div class="flex flex-col items-center justify-center rounded-xl border border-slate-300 bg-white px-6 py-3 text-center shadow-sm">
+        <p class="text-sm font-bold text-slate-800">Auditors</p>
+        <p class="text-xs text-slate-400">full replay</p>
+      </div>
+      <div class="flex items-center pl-1 text-2xl text-slate-300">⇂</div>
+    </div>
+
+    <div class="flex justify-center py-1 text-2xl text-slate-300">↓</div>
+
+    <!-- Row 2: Control plane -->
+    <div class="rounded-2xl border-2 border-indigo-400 bg-indigo-50/70 p-5 shadow-md">
+      <div class="mb-4 text-center">
+        <p class="text-base font-extrabold tracking-tight text-indigo-700">MYRMEC CONTROL PLANE</p>
+        <p class="text-xs text-indigo-500">the governance layer — the part that's missing everywhere else</p>
+      </div>
+      <div class="grid grid-cols-5 gap-3 text-center">
+        <div class="rounded-lg border border-indigo-200 bg-white px-2 py-3">
+          <p class="text-xs font-bold text-slate-700">Models &amp; Budgets</p>
+          <p class="mt-1 text-[11px] leading-snug text-slate-400">caps · quotas · kill switch</p>
+        </div>
+        <div class="rounded-lg border border-indigo-200 bg-white px-2 py-3">
+          <p class="text-xs font-bold text-slate-700">Knowledge</p>
+          <p class="mt-1 text-[11px] leading-snug text-slate-400">RAG · citations · ACLs</p>
+        </div>
+        <div class="rounded-lg border border-indigo-200 bg-white px-2 py-3">
+          <p class="text-xs font-bold text-slate-700">Workflows &amp; Assistants</p>
+          <p class="mt-1 text-[11px] leading-snug text-slate-400">no-code authoring</p>
+        </div>
+        <div class="rounded-lg border border-indigo-200 bg-white px-2 py-3">
+          <p class="text-xs font-bold text-slate-700">Approvals</p>
+          <p class="mt-1 text-[11px] leading-snug text-slate-400">risk-classified HITL</p>
+        </div>
+        <div class="rounded-lg border border-indigo-200 bg-white px-2 py-3">
+          <p class="text-xs font-bold text-slate-700">Audit</p>
+          <p class="mt-1 text-[11px] leading-snug text-slate-400">every call recorded</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex justify-center gap-40 py-1 text-2xl text-slate-300">
+      <span>↓</span><span>↓</span><span>↓</span>
+    </div>
+
+    <!-- Row 3: Agents -->
+    <div class="flex items-stretch justify-center gap-4">
+      <div class="rounded-xl border border-slate-300 bg-white px-6 py-3 text-center shadow-sm">
+        <p class="text-sm font-bold text-slate-800">Sandboxed agents</p>
+        <p class="text-xs text-slate-400">containers · scoped workspace · open SDK</p>
+      </div>
+      <div class="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-3 text-center">
+        <p class="text-sm font-bold text-slate-500">LangChain / AutoGen / CrewAI</p>
+        <p class="text-xs text-slate-400">fit inside here — as agent code</p>
+      </div>
+    </div>
+
+    <div class="flex justify-center py-1 text-2xl text-slate-300">↓</div>
+
+    <!-- Row 4: Your world -->
+    <div class="flex items-stretch justify-center gap-4">
+      <div class="rounded-xl border border-emerald-300 bg-emerald-50 px-6 py-3 text-center">
+        <p class="text-sm font-bold text-emerald-800">Your model providers</p>
+        <p class="text-xs text-emerald-600">OpenAI · Anthropic · Azure · Ollama · vLLM</p>
+      </div>
+      <div class="rounded-xl border border-emerald-300 bg-emerald-50 px-6 py-3 text-center">
+        <p class="text-sm font-bold text-emerald-800">Your systems</p>
+        <p class="text-xs text-emerald-600">git · SQL · APIs · Jira · Confluence</p>
+      </div>
+      <div class="rounded-xl border border-emerald-300 bg-emerald-50 px-6 py-3 text-center">
+        <p class="text-sm font-bold text-emerald-800">Your VPC / on-prem</p>
+        <p class="text-xs text-emerald-600">single-tenant · air-gap capable</p>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,5 +1,6 @@
 import { test, expect } from '../fixtures'
 import { E2E_ADMIN } from '../helpers/api'
+import { confirmDialog } from '../helpers/confirm-dialog'
 
 /**
  * Agents admin — list and create.
@@ -20,14 +21,14 @@ test.describe('agents admin', () => {
   test('agents list renders with heading and table columns', async ({
     adminPage,
   }) => {
-    await adminPage.goto('/platform/ai-infra/agents')
+    await adminPage.goto('/platform/ai-infra/agent-hosts')
 
     await expect(
-      adminPage.getByRole('heading', { name: 'Agents' }),
+      adminPage.getByRole('heading', { name: 'Agent Hosts', exact: true }),
     ).toBeVisible()
 
     await expect(
-      adminPage.getByText('All Agents', { exact: true }),
+      adminPage.getByText('All Agent Hosts', { exact: true }),
     ).toBeVisible()
 
     // Column headers
@@ -54,32 +55,53 @@ test.describe('agents admin', () => {
 
     const agentName = `E2E Agent ${Date.now().toString(36)}`
 
-    await adminPage.goto('/platform/ai-infra/agents')
+    await adminPage.goto('/platform/ai-infra/agent-hosts')
 
     // Open the create dialog
-    await adminPage.getByRole('button', { name: 'New Agent' }).click()
+    await adminPage.getByRole('button', { name: 'New Agent Host' }).click()
     await expect(
-      adminPage.getByRole('heading', { name: 'New Agent' }),
+      adminPage.getByRole('heading', { name: 'New Agent Host' }),
     ).toBeVisible()
 
     // Fill the form
-    await adminPage.getByLabel('Name *').fill(agentName)
+    await adminPage.getByLabel('Name').fill(agentName)
     await adminPage.getByLabel('Description').fill('E2E test agent')
 
-    // Select the agent profile (dropdown)
-    await adminPage.getByLabel('Agent Profile *').click()
-    await adminPage.getByText(profileName).click()
+    // Select the agent profile (native <select> dropdown)
+    const dialog = adminPage.getByRole('dialog')
+    await dialog.getByLabel('Profile').selectOption({ label: profileName })
 
     // Submit
     await adminPage.getByRole('button', { name: 'Create' }).click()
 
-    // The new agent should appear in the table
-    const row = adminPage.getByRole('row', { name: new RegExp(agentName) })
-    await expect(row).toBeVisible({ timeout: 10_000 })
+    // Wait for the dialog to close
+    await expect(adminPage.getByRole('heading', { name: 'New Agent Host' })).not.toBeVisible({ timeout: 10_000 })
+
+    // Reload to ensure the table refreshes with the new agent
+    await adminPage.reload()
+
+    // The new agent should appear in the table — search across pages if needed
+    const nameRegex = new RegExp(agentName)
+    let found = false
+    for (let page = 0; page < 5; page++) {
+      if (await adminPage.getByRole('row', { name: nameRegex }).isVisible({ timeout: 3_000 }).catch(() => false)) {
+        found = true
+        break
+      }
+      const nextButton = adminPage.getByRole('button', { name: /next page|next/i })
+      if (await nextButton.isEnabled({ timeout: 1_000 }).catch(() => false)) {
+        await nextButton.click()
+        await adminPage.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {})
+      } else {
+        break
+      }
+    }
+    expect(found).toBe(true)
+    const row = adminPage.getByRole('row', { name: nameRegex })
 
     // Delete the agent
-    adminPage.once('dialog', (d) => d.accept())
     await row.getByRole('button', { name: 'Delete' }).click()
+    await confirmDialog(adminPage, 'Delete')
 
     await expect(row).toHaveCount(0, { timeout: 10_000 })
 

@@ -13,6 +13,7 @@ import { dialogService } from '@/services/dialog-service'
 import { BudgetForm, type BudgetFormValues } from './components/budget-form'
 import { canCreateBudget } from './lib/budget-permissions'
 import { formatAmount } from './lib/format'
+import { useGovernancePolicy } from '@/features/platform/ai-context/governance-profile/useGovernancePolicy'
 
 interface NewBudgetPageSearch {
   scopeType?: QuotaScope
@@ -24,7 +25,14 @@ export function NewBudgetPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const auth = useAuth()
+  const { policy: governancePolicy } = useGovernancePolicy()
   const search = useSearch({ from: '/_authenticated/budgets/new' }) as NewBudgetPageSearch
+
+  // Governance: BUDGET_OVERRIDE — if the profile doesn't permit PER_SERVICE,
+  // non-org budget overrides are blocked. Disable PROJECT/SERVICE scope options.
+  const budgetOverrideAllowed = governancePolicy
+    ? governancePolicy.permitsAtLeast('BUDGET_OVERRIDE', 'PER_SERVICE')
+    : true // optimistic: allow while loading (backend 403 is the real gate)
 
   const [values, setValues] = useState<BudgetFormValues>({
     scopeType: search.scopeType ?? 'ORG',
@@ -163,6 +171,8 @@ export function NewBudgetPage() {
               mode="create"
               parentScopeLabel={scopeKey ? (scopeKey.type === 'GROUP' ? 'Group' : 'Project') : undefined}
               parentLimit={parentLimit}
+              budgetOverrideAllowed={budgetOverrideAllowed}
+              governanceProfileName={governancePolicy?.profileName ?? null}
               error={createMutation.error instanceof Error ? createMutation.error.message : null}
             />
           </CardContent>

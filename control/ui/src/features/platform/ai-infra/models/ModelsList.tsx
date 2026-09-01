@@ -10,11 +10,11 @@ import {
   type CreateModelRequest,
   type UpdateModelRequest,
   type ModelProviderConfig,
-  type DeploymentType,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RequiredMark } from '@/components/ui/required-marks'
 import {
   Dialog,
   DialogContent,
@@ -30,8 +30,6 @@ import {
   Plus,
   Pencil,
   Trash2,
-  Cloud,
-  Server,
   CheckCircle,
   XCircle,
   AlertCircle,
@@ -55,8 +53,8 @@ export function ModelsList() {
   })
 
   const { data: providers = [] } = useQuery({
-    queryKey: ['providers'],
-    queryFn: providersApi.list,
+    queryKey: ['providers-admin'],
+    queryFn: providersApi.listAll,
   })
 
   const createMutation = useMutation({
@@ -116,6 +114,32 @@ export function ModelsList() {
       cell: ({ row }) => <span className="text-sm">{row.original.providerName}</span>,
     },
     {
+      accessorKey: 'inputPrice',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Input $/1M" />,
+      cell: ({ row }) => (
+        <span className="text-sm tabular-nums">
+          {row.original.inputPrice != null
+            ? row.original.currency === 'USD'
+              ? `$${row.original.inputPrice.toFixed(2)}`
+              : `${row.original.inputPrice.toFixed(2)} ${row.original.currency}`
+            : '—'}
+        </span>
+      ),
+    },
+    {
+      accessorKey: 'outputPrice',
+      header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Output $/1M" />,
+      cell: ({ row }) => (
+        <span className="text-sm tabular-nums">
+          {row.original.outputPrice != null
+            ? row.original.currency === 'USD'
+              ? `$${row.original.outputPrice.toFixed(2)}`
+              : `${row.original.outputPrice.toFixed(2)} ${row.original.currency}`
+            : '—'}
+        </span>
+      ),
+    },
+    {
       accessorKey: 'modelId',
       header: 'Model ID',
       cell: ({ row }) => (
@@ -123,30 +147,12 @@ export function ModelsList() {
       ),
     },
     {
-      accessorKey: 'deploymentType',
-      header: 'Type',
-      cell: ({ row }) =>
-        row.original.deploymentType === 'CLOUD' ? (
-          <span className="inline-flex items-center gap-1 text-blue-600">
-            <Cloud className="h-4 w-4" />
-            Cloud
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 text-purple-600">
-            <Server className="h-4 w-4" />
-            On-Premise
-          </span>
-        ),
-    },
-    {
       accessorKey: 'status',
       header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Status" />,
       cell: ({ row }) => (
         <div className="flex items-center gap-2">
           <StatusBadge status={row.original.status} />
-          {row.original.deploymentType === 'ON_PREMISE' && (
-            <HealthBadge health={row.original.healthStatus} />
-          )}
+          <HealthBadge health={row.original.healthStatus} />
           {row.original.lastTestStatus === 'SUCCESS' && (
             <span title="Last test passed">
               <Zap className="h-4 w-4 text-yellow-500" />
@@ -323,18 +329,10 @@ interface CreateModelFormProps {
 }
 
 function CreateModelForm({ providers, onSubmit, isLoading, error }: CreateModelFormProps) {
-  const [deploymentType, setDeploymentType] = useState<DeploymentType>('CLOUD')
   const [provider, setProvider] = useState<string>('')
 
-  // Filter providers by deployment type
-  const filteredProviders = providers.filter(
-    (p) =>
-      p.code === 'generic' ||
-      p.deploymentType === deploymentType
-  )
-
-  // Set default provider when deployment type or providers change
-  const defaultProvider = filteredProviders.length > 0 ? filteredProviders[0].code : ''
+  // Set default provider when providers load
+  const defaultProvider = providers.length > 0 ? providers[0].code : ''
   if (!provider && defaultProvider) {
     setProvider(defaultProvider)
   }
@@ -350,12 +348,12 @@ function CreateModelForm({ providers, onSubmit, isLoading, error }: CreateModelF
       code: formData.get('code') as string,
       name: formData.get('name') as string,
       provider,
-      deploymentType,
       modelId: formData.get('modelId') as string,
       apiEndpoint: (formData.get('apiEndpoint') as string) || undefined,
-      apiKey: (formData.get('apiKey') as string) || undefined,
-      requiresAuth: formData.get('requiresAuth') === 'on',
       supportsVision: formData.get('supportsVision') === 'on',
+      inputPrice: parseFloat(formData.get('inputPrice') as string) || null,
+      outputPrice: parseFloat(formData.get('outputPrice') as string) || null,
+      currency: (formData.get('currency') as string) || 'USD',
     }
 
     onSubmit(data)
@@ -369,46 +367,9 @@ function CreateModelForm({ providers, onSubmit, isLoading, error }: CreateModelF
       </DialogHeader>
 
       <div className="grid gap-4 py-4">
-        {/* Deployment Type */}
-        <div className="space-y-2">
-          <Label>Deployment Type</Label>
-          <div className="flex gap-4">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="radio"
-                name="deploymentType"
-                checked={deploymentType === 'CLOUD'}
-                onChange={() => {
-                  setDeploymentType('CLOUD')
-                  const cloudProviders = providers.filter((p) => p.deploymentType === 'CLOUD' || p.code === 'generic')
-                  setProvider(cloudProviders.length > 0 ? cloudProviders[0].code : '')
-                }}
-                className="w-4 h-4"
-              />
-              <Cloud className="h-4 w-4" />
-              Cloud
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="radio"
-                name="deploymentType"
-                checked={deploymentType === 'ON_PREMISE'}
-                onChange={() => {
-                  setDeploymentType('ON_PREMISE')
-                  const onPremProviders = providers.filter((p) => p.deploymentType === 'ON_PREMISE' || p.code === 'generic')
-                  setProvider(onPremProviders.length > 0 ? onPremProviders[0].code : '')
-                }}
-                className="w-4 h-4"
-              />
-              <Server className="h-4 w-4" />
-              On-Premise
-            </label>
-          </div>
-        </div>
-
         {/* Code */}
         <div className="space-y-2">
-          <Label htmlFor="code">Model Code *</Label>
+          <Label htmlFor="code">Model Code<RequiredMark /></Label>
           <Input
             id="code"
             name="code"
@@ -423,20 +384,20 @@ function CreateModelForm({ providers, onSubmit, isLoading, error }: CreateModelF
 
         {/* Name */}
         <div className="space-y-2">
-          <Label htmlFor="name">Display Name *</Label>
+          <Label htmlFor="name">Display Name<RequiredMark /></Label>
           <Input id="name" name="name" placeholder="GPT-4 Turbo" required />
         </div>
 
         {/* Provider */}
         <div className="space-y-2">
-          <Label htmlFor="provider">Provider *</Label>
+          <Label htmlFor="provider">Provider<RequiredMark /></Label>
           <select
             id="provider"
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            {filteredProviders.map((p) => (
+            {providers.map((p) => (
               <option key={p.code} value={p.code}>
                 {p.name}
               </option>
@@ -449,11 +410,11 @@ function CreateModelForm({ providers, onSubmit, isLoading, error }: CreateModelF
 
         {/* Model ID */}
         <div className="space-y-2">
-          <Label htmlFor="modelId">Model ID *</Label>
+          <Label htmlFor="modelId">Model ID<RequiredMark /></Label>
           <Input
             id="modelId"
             name="modelId"
-            placeholder={deploymentType === 'CLOUD' ? 'gpt-4-turbo' : 'llama3:70b'}
+            placeholder="gpt-4-turbo"
             required
           />
           <p className="text-xs text-muted-foreground">
@@ -479,22 +440,6 @@ function CreateModelForm({ providers, onSubmit, isLoading, error }: CreateModelF
           )}
         </div>
 
-        {/* Auth section */}
-        {deploymentType === 'ON_PREMISE' && (
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="requiresAuth"
-              name="requiresAuth"
-              defaultChecked={selectedProvider?.requiresAuth}
-              className="w-4 h-4"
-            />
-            <Label htmlFor="requiresAuth" className="text-sm font-normal cursor-pointer">
-              Requires Authentication
-            </Label>
-          </div>
-        )}
-
         {/* Vision / multimodal capability */}
         <div className="flex items-center gap-2">
           <input
@@ -508,25 +453,41 @@ function CreateModelForm({ providers, onSubmit, isLoading, error }: CreateModelF
           </Label>
         </div>
 
-        {/* API Key */}
+        {/* Pricing */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="inputPrice">Input Price / 1M Tokens</Label>
+            <Input
+              id="inputPrice"
+              name="inputPrice"
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="5.00"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="outputPrice">Output Price / 1M Tokens</Label>
+            <Input
+              id="outputPrice"
+              name="outputPrice"
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="15.00"
+            />
+          </div>
+        </div>
         <div className="space-y-2">
-          <Label htmlFor="apiKey">
-            API Key {selectedProvider?.requiresAuth ? '*' : '(optional)'}
-          </Label>
+          <Label htmlFor="currency">Currency</Label>
           <Input
-            id="apiKey"
-            name="apiKey"
-            type="password"
-            placeholder="sk-..."
-            required={selectedProvider?.requiresAuth && deploymentType === 'CLOUD'}
+            id="currency"
+            name="currency"
+            maxLength={3}
+            defaultValue="USD"
+            placeholder="USD"
           />
-          {selectedProvider?.docsUrl && (
-            <p className="text-xs text-muted-foreground">
-              <a href={selectedProvider.docsUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                View API documentation →
-              </a>
-            </p>
-          )}
+          <p className="text-xs text-muted-foreground">3-letter currency code</p>
         </div>
 
         {error && <div className="text-sm text-destructive">{error}</div>}
@@ -556,6 +517,8 @@ interface EditModelFormProps {
 }
 
 function EditModelForm({ model, onSubmit, isLoading, error }: EditModelFormProps) {
+  const [showAdvanced, setShowAdvanced] = useState(false)
+
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     const formData = new FormData(e.currentTarget)
@@ -563,10 +526,20 @@ function EditModelForm({ model, onSubmit, isLoading, error }: EditModelFormProps
     const data: UpdateModelRequest = {
       name: formData.get('name') as string,
       apiEndpoint: (formData.get('apiEndpoint') as string) || undefined,
-      apiKey: (formData.get('apiKey') as string) || undefined,
-      requiresAuth: formData.get('requiresAuth') === 'on',
       supportsVision: formData.get('supportsVision') === 'on',
       status: formData.get('status') as 'ACTIVE' | 'INACTIVE',
+      inputPrice: parseFloat(formData.get('inputPrice') as string) || null,
+      outputPrice: parseFloat(formData.get('outputPrice') as string) || null,
+      currency: (formData.get('currency') as string) || undefined,
+    }
+
+    const infraConfigStr = formData.get('infraConfig') as string
+    if (infraConfigStr?.trim()) {
+      try { (data as Record<string, unknown>).infraConfig = JSON.parse(infraConfigStr) } catch {}
+    }
+    const defaultParamsStr = formData.get('defaultParams') as string
+    if (defaultParamsStr?.trim()) {
+      try { (data as Record<string, unknown>).defaultParams = JSON.parse(defaultParamsStr) } catch {}
     }
 
     onSubmit(data)
@@ -583,7 +556,7 @@ function EditModelForm({ model, onSubmit, isLoading, error }: EditModelFormProps
 
       <div className="grid gap-4 py-4">
         {/* Read-only info */}
-        <div className="grid grid-cols-2 gap-4 p-4 bg-muted rounded-lg">
+        <div className="grid grid-cols-3 gap-4 p-4 bg-muted rounded-lg">
           <div>
             <Label className="text-xs text-muted-foreground">Code</Label>
             <p className="font-mono text-sm">{model.code}</p>
@@ -593,10 +566,6 @@ function EditModelForm({ model, onSubmit, isLoading, error }: EditModelFormProps
             <p className="text-sm">{model.providerName}</p>
           </div>
           <div>
-            <Label className="text-xs text-muted-foreground">Deployment</Label>
-            <p className="text-sm">{model.deploymentType === 'CLOUD' ? 'Cloud' : 'On-Premise'}</p>
-          </div>
-          <div>
             <Label className="text-xs text-muted-foreground">Model ID</Label>
             <p className="font-mono text-sm">{model.modelId}</p>
           </div>
@@ -604,7 +573,7 @@ function EditModelForm({ model, onSubmit, isLoading, error }: EditModelFormProps
 
         {/* Name */}
         <div className="space-y-2">
-          <Label htmlFor="name">Display Name</Label>
+          <Label htmlFor="name">Display Name<RequiredMark /></Label>
           <Input id="name" name="name" defaultValue={model.name} required />
         </div>
 
@@ -617,22 +586,6 @@ function EditModelForm({ model, onSubmit, isLoading, error }: EditModelFormProps
             defaultValue={model.apiEndpoint || ''}
           />
         </div>
-
-        {/* Requires Auth */}
-        {model.deploymentType === 'ON_PREMISE' && (
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="requiresAuth"
-              name="requiresAuth"
-              defaultChecked={model.requiresAuth}
-              className="w-4 h-4"
-            />
-            <Label htmlFor="requiresAuth" className="text-sm font-normal cursor-pointer">
-              Requires Authentication
-            </Label>
-          </div>
-        )}
 
         {/* Vision / multimodal capability */}
         <div className="flex items-center gap-2">
@@ -648,10 +601,43 @@ function EditModelForm({ model, onSubmit, isLoading, error }: EditModelFormProps
           </Label>
         </div>
 
-        {/* API Key */}
+        {/* Pricing */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="inputPrice">Input Price / 1M Tokens</Label>
+            <Input
+              id="inputPrice"
+              name="inputPrice"
+              type="number"
+              step="0.01"
+              min="0"
+              defaultValue={model.inputPrice ?? ''}
+              placeholder="5.00"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="outputPrice">Output Price / 1M Tokens</Label>
+            <Input
+              id="outputPrice"
+              name="outputPrice"
+              type="number"
+              step="0.01"
+              min="0"
+              defaultValue={model.outputPrice ?? ''}
+              placeholder="15.00"
+            />
+          </div>
+        </div>
         <div className="space-y-2">
-          <Label htmlFor="apiKey">API Key (leave empty to keep current)</Label>
-          <Input id="apiKey" name="apiKey" type="password" placeholder="••••••••" />
+          <Label htmlFor="currency">Currency</Label>
+          <Input
+            id="currency"
+            name="currency"
+            maxLength={3}
+            defaultValue={model.currency || ''}
+            placeholder="USD"
+          />
+          <p className="text-xs text-muted-foreground">3-letter currency code</p>
         </div>
 
         {/* Status */}
@@ -666,6 +652,45 @@ function EditModelForm({ model, onSubmit, isLoading, error }: EditModelFormProps
             <option value="ACTIVE">Active</option>
             <option value="INACTIVE">Inactive</option>
           </select>
+        </div>
+
+        {/* Advanced Configuration */}
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground"
+          >
+            {showAdvanced ? '▾' : '▸'} Advanced Configuration
+          </button>
+          {showAdvanced && (
+            <div className="grid gap-4 p-4 border rounded-lg">
+              <div className="space-y-2">
+                <Label htmlFor="infraConfig">Infra Config (JSON)</Label>
+                <textarea
+                  id="infraConfig"
+                  name="infraConfig"
+                  rows={4}
+                  defaultValue={model.infraConfig ? JSON.stringify(model.infraConfig, null, 2) : ''}
+                  placeholder='{"gpu": "A100", "replicas": 2}'
+                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+                <p className="text-xs text-muted-foreground">Optional infrastructure configuration JSON</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="defaultParams">Default Params (JSON)</Label>
+                <textarea
+                  id="defaultParams"
+                  name="defaultParams"
+                  rows={4}
+                  defaultValue={model.defaultParams ? JSON.stringify(model.defaultParams, null, 2) : ''}
+                  placeholder='{"temperature": 0.7, "max_tokens": 4096}'
+                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+                <p className="text-xs text-muted-foreground">Optional default model parameters JSON</p>
+              </div>
+            </div>
+          )}
         </div>
 
         {error && <div className="text-sm text-destructive">{error}</div>}

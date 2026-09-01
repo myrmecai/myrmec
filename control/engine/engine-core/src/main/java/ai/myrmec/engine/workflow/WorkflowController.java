@@ -24,16 +24,19 @@ public class WorkflowController {
     private final WorkflowService workflowService;
 
     @GetMapping
+    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
     public List<WorkflowResponse> findByProject(@PathVariable UUID projectId) {
         return workflowService.findByProject(projectId);
     }
 
     @GetMapping("/published")
+    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
     public List<WorkflowResponse> findPublishedByProject(@PathVariable UUID projectId) {
         return workflowService.findPublishedByProject(projectId);
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
     public WorkflowResponse findById(@PathVariable UUID projectId, @PathVariable UUID id) {
         WorkflowResponse workflow = workflowService.findById(id);
         // Ensure workflow belongs to the project
@@ -44,7 +47,7 @@ public class WorkflowController {
     }
 
     @PostMapping
-    @PreAuthorize("@projectAccess.allowsServiceType(#projectId, 'WORKFLOW')")
+    @PreAuthorize("@projectAccess.canEdit(#projectId, authentication) and @projectAccess.allowsServiceType(#projectId, 'WORKFLOW')")
     public ResponseEntity<WorkflowResponse> create(
             @PathVariable UUID projectId,
             @Valid @RequestBody CreateWorkflowRequest request,

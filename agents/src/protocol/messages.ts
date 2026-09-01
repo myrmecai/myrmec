@@ -57,6 +57,21 @@ export const MessageType = {
 
   // HITL approvals (Agent → Engine)
   APPROVAL_REQUEST: "approval.request",
+
+  // Unified Inference Dispatch — Engine → Agent
+  SESSION_OPEN: "session.open",
+  SESSION_CLOSE: "session.close",
+  INFERENCE_ASSIGN: "inference.assign",
+  INFERENCE_CANCEL: "inference.cancel",
+
+  // Unified Inference Dispatch — Agent → Engine
+  INFERENCE_ACCEPT: "inference.accept",
+  INFERENCE_DELTA: "inference.delta",
+  INFERENCE_TOOL_CALL: "inference.tool_call",
+  INFERENCE_TOOL_RESULT: "inference.tool_result",
+  INFERENCE_COMPLETE: "inference.complete",
+  INFERENCE_FAILED: "inference.failed",
+  INFERENCE_CANCELLED: "inference.cancelled",
 } as const;
 
 export type MessageType = (typeof MessageType)[keyof typeof MessageType];

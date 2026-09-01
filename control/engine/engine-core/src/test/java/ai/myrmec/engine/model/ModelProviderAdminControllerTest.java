@@ -38,8 +38,6 @@ class ModelProviderAdminControllerTest extends IntegrationTestBase {
                 .baseUrl("https://example.invalid/api")
                 .deploymentType(DeploymentType.CLOUD)
                 .requiresAuth(true)
-                .authHeader("Authorization")
-                .authPrefix("Bearer ")
                 .description("Phase 10 #70 spec")
                 .build();
 

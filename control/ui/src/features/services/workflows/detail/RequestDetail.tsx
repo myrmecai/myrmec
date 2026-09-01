@@ -14,6 +14,7 @@ import {
   WorkflowCanvas,
   LogViewer,
   StepRunPanel,
+  TaskPauseCard,
   type StepRunAction,
 } from '@/components/workflow'
 import { useAgentProfiles } from '@/lib/use-agent-profiles'
@@ -59,6 +60,7 @@ const taskStatusColors: Record<TaskStatus, string> = {
   RUNNING: 'bg-yellow-500',
   COMPLETED: 'bg-green-600',
   CANCELLED: 'bg-red-600',
+  PAUSED: 'bg-amber-500',
 }
 
 const taskStatusLabels: Record<TaskStatus, string> = {
@@ -67,6 +69,7 @@ const taskStatusLabels: Record<TaskStatus, string> = {
   RUNNING: 'Running',
   COMPLETED: 'Completed',
   CANCELLED: 'Cancelled',
+  PAUSED: 'Paused',
 }
 
 const taskResultColors: Record<TaskResult, string> = {
@@ -87,6 +90,7 @@ const statusIcons: Record<string, React.ReactNode> = {
   RUNNING: <Loader2 className="h-4 w-4 animate-spin" />,
   COMPLETED: <CheckCircle2 className="h-4 w-4" />,
   CANCELLED: <XCircle className="h-4 w-4" />,
+  PAUSED: <AlertCircle className="h-4 w-4" />,
 }
 
 export function RequestDetail({
@@ -131,7 +135,9 @@ export function RequestDetail({
     enabled: !!projectId,
     refetchInterval: (query) => {
       const data = query.state.data as WorkflowTask[] | undefined
-      return data?.some((t: WorkflowTask) => t.status === 'RUNNING' || t.status === 'READY')
+      return data?.some((t: WorkflowTask) =>
+        t.status === 'RUNNING' || t.status === 'READY' || t.status === 'PENDING'
+      )
         ? 3000
         : false
     },
@@ -280,8 +286,11 @@ export function RequestDetail({
                   ? 'bg-red-600'
                   : request.status === 'RUNNING'
                     ? 'bg-blue-500'
-                    : 'bg-gray-500'
+                    : request.status === 'PAUSED'
+                      ? 'bg-amber-500'
+                      : 'bg-gray-500'
             }
+            data-testid="execution-status-badge"
           >
             {request.status}
           </Badge>
@@ -300,6 +309,25 @@ export function RequestDetail({
         >
           <RefreshCw className="h-4 w-4" />
         </Button>
+        {request.status === 'PENDING' || request.status === 'RUNNING' ? (
+          <Button
+            variant="destructive"
+            size="sm"
+            data-testid="cancel-request-button"
+            onClick={async () => {
+              await workflowsApi.cancelRequest(projectId!, workflowId, requestId)
+              queryClient.invalidateQueries({
+                queryKey: ['workflow-request', projectId, workflowId, requestId],
+              })
+              queryClient.invalidateQueries({
+                queryKey: ['workflow-tasks', projectId, workflowId, requestId],
+              })
+            }}
+          >
+            <X className="h-4 w-4 mr-1" />
+            Cancel
+          </Button>
+        ) : null}
       </div>
 
       {/* Tabs */}
@@ -318,7 +346,7 @@ export function RequestDetail({
         {/* Canvas View */}
         <TabsContent value="canvas" className="space-y-0">
           <div className="flex gap-4 h-[500px]">
-            <div className="flex-1 border rounded-lg overflow-hidden">
+            <div className="flex-1 border rounded-lg overflow-hidden" data-testid="workflow-canvas">
               {workflow && (
                 <WorkflowCanvas
                   steps={stepsWithStatus}
@@ -352,6 +380,22 @@ export function RequestDetail({
               </CardDescription>
             </CardHeader>
             <CardContent>
+              {/* J3: Pause review card — shown when any task is PAUSED */}
+              {tasks?.filter((t) => t.status === 'PAUSED').map((task) => (
+                <div key={task.id} className="mb-4">
+                  <TaskPauseCard
+                    task={task}
+                    onContinue={async (taskId) => {
+                      await workflowsApi.continueTask(taskId)
+                      await queryClient.invalidateQueries({ queryKey: ['workflow-request', workflowId, requestId] })
+                    }}
+                    onStop={async (taskId, reason) => {
+                      await workflowsApi.stopTask(taskId, reason)
+                      await queryClient.invalidateQueries({ queryKey: ['workflow-request', workflowId, requestId] })
+                    }}
+                  />
+                </div>
+              ))}
               {!tasks || tasks.length === 0 ? (
                 <div className="text-center py-12 text-muted-foreground">
                   <Clock className="h-12 w-12 mx-auto mb-4 opacity-50" />
@@ -377,7 +421,7 @@ export function RequestDetail({
                   </TableHeader>
                   <TableBody>
                     {tasks.map((task) => (
-                      <TableRow key={task.id}>
+                      <TableRow key={task.id} data-testid="execution-task-row">
                         <TableCell className="font-medium">
                           {task.stepId}
                         </TableCell>
@@ -501,7 +545,7 @@ export function RequestDetail({
                 {request.errorMessage && (
                   <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
                     <p className="text-sm font-medium text-red-800">Error</p>
-                    <p className="text-sm text-red-600">{request.errorMessage}</p>
+                    <p className="text-sm text-red-600" data-testid="request-error-message">{request.errorMessage}</p>
                   </div>
                 )}
               </CardContent>

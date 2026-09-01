@@ -8,28 +8,8 @@ import { type ColumnDef } from '@tanstack/react-table'
 import {
   connectionConfigApi,
   type ConnectionConfig,
-  type ConnectionType,
-  type CreateConnectionConfigRequest,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ContentAreaLayout } from '@/components/content-area-layout'
@@ -45,6 +25,8 @@ import { dialogService } from '@/services/dialog-service'
 import DataTable2 from '@/components/data-table2/data-table2'
 import { SortedColumnHeader } from '@/components/data-table2/sorted-column-header'
 import { TYPE_LABELS, STATUS_COLORS } from '../shared/constants'
+import { Scope, EntityStatus } from '@/lib/domain-constants'
+import { CreateConnectionConfigWizard } from '../components/CreateConnectionConfigWizard'
 
 export function ConnectionsList() {
   const queryClient = useQueryClient()
@@ -57,34 +39,17 @@ export function ConnectionsList() {
     queryFn: connectionConfigApi.list,
   })
 
-  const [createError, setCreateError] = useState<string | null>(null)
-
   const createMutation = useMutation({
-    mutationFn: async (data: CreateConnectionConfigRequest) => {
-      // Create the config, then auto-create a Draft (Pattern 4 §Rule 4:
-      // "Zone 2 Draft ready for editing")
-      const config = await connectionConfigApi.create(data)
-      await connectionConfigApi.createDraft(config.id)
-      return config
-    },
+    // The wizard handles create + draft + update + publish internally.
+    // This mutation is just a redirect trigger after the wizard calls onCreated.
+    // We keep it for API parity but it's a no-op — the wizard does everything.
+    mutationFn: async (config: ConnectionConfig) => config,
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['connection-configs'] })
       setCreateOpen(false)
-      setCreateError(null)
-      // Show toast (Pattern 4 §Rule 5, Pattern 6)
-      setToastMessage('Connection Config created — please complete and publish.')
+      setToastMessage('Connection Config created and published.')
       setTimeout(() => setToastMessage(null), 5000)
-      // Navigate to detail page in Edit mode (Pattern 4 §Rule 3, 4)
-      navigate({ to: '/platform/connections/$id', params: { id: data.id }, search: { edit: true } })
-    },
-    onError: (error: any) => {
-      // Try to extract field-specific message from validation error details
-      const details = error?.error?.details
-      if (Array.isArray(details) && details.length > 0 && details[0]?.message) {
-        setCreateError(details[0].message)
-      } else {
-        setCreateError(error?.error?.message ?? 'Failed to create connection config')
-      }
+      navigate({ to: '/platform/connections/$id', params: { id: data.id }, search: { edit: false } })
     },
   })
 
@@ -109,7 +74,7 @@ export function ConnectionsList() {
   })
 
   const filteredConfigs = useMemo(
-    () => (configs ?? []).filter((c) => c.status !== 'ARCHIVED'),
+    () => (configs ?? []).filter((c) => c.status !== EntityStatus.ARCHIVED),
     [configs],
   )
 
@@ -121,7 +86,7 @@ export function ConnectionsList() {
       ),
       cell: ({ row }) => (
         <div className="font-medium">
-          <Link to="/platform/connections/$id" params={{ id: row.original.id }} className="hover:underline">
+          <Link to="/platform/connections/$id" params={{ id: row.original.id }} search={{ edit: false }} className="hover:underline">
             {row.original.name}
           </Link>
           {row.original.description && (
@@ -166,21 +131,41 @@ export function ConnectionsList() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem asChild>
-                <Link to="/platform/connections/$id" params={{ id: config.id }}>
+                <Link to="/platform/connections/$id" params={{ id: config.id }} search={{ edit: false }}>
                   <Eye className="h-4 w-4 mr-2" /> View
                 </Link>
               </DropdownMenuItem>
-              {config.status === 'ACTIVE' && (
-                <DropdownMenuItem onClick={() => disableMutation.mutate(config.id)}>
+              {config.status === EntityStatus.ACTIVE && (
+                <DropdownMenuItem onClick={async () => {
+                  const confirmed = await dialogService.showConfirmDialog({
+                    title: 'Disable Connection Config',
+                    message: `Disable "${config.name}"? Services using this connection will no longer be able to resolve its credentials until it is re-enabled.`,
+                    severity: 'warning',
+                    type: 'warning',
+                    confirmLabel: 'Disable',
+                    cancelLabel: 'Cancel',
+                  })
+                  if (confirmed) disableMutation.mutate(config.id)
+                }}>
                   <PowerOff className="h-4 w-4 mr-2" /> Disable
                 </DropdownMenuItem>
               )}
-              {config.status === 'DISABLED' && (
-                <DropdownMenuItem onClick={() => reenableMutation.mutate(config.id)}>
+              {config.status === EntityStatus.DISABLED && (
+                <DropdownMenuItem onClick={async () => {
+                  const confirmed = await dialogService.showConfirmDialog({
+                    title: 'Enable Connection Config',
+                    message: `Re-enable "${config.name}"? Services will immediately be able to resolve its credentials again.`,
+                    severity: 'info',
+                    type: 'warning',
+                    confirmLabel: 'Enable',
+                    cancelLabel: 'Cancel',
+                  })
+                  if (confirmed) reenableMutation.mutate(config.id)
+                }}>
                   <Power className="h-4 w-4 mr-2" /> Enable
                 </DropdownMenuItem>
               )}
-              {config.status !== 'ARCHIVED' && (
+              {config.status !== EntityStatus.ARCHIVED && (
                 <DropdownMenuItem
                   onClick={async () => {
                     const confirmed = await dialogService.showConfirmDialog({
@@ -193,7 +178,7 @@ export function ConnectionsList() {
                     })
                     if (confirmed) archiveMutation.mutate(config.id)
                   }}
-                  disabled={config.status === 'ACTIVE'}
+                  disabled={config.status === EntityStatus.ACTIVE}
                 >
                   <Archive className="h-4 w-4 mr-2" /> Archive
                 </DropdownMenuItem>
@@ -276,87 +261,13 @@ export function ConnectionsList() {
         </CardContent>
       </Card>
 
-      <CreateConnectionConfigDialog
+      <CreateConnectionConfigWizard
         open={createOpen}
-        onOpenChange={(v) => { setCreateOpen(v); if (v) setCreateError(null) }}
-        onCreate={(data) => createMutation.mutate(data)}
-        isPending={createMutation.isPending}
-        error={createError}
+        onOpenChange={setCreateOpen}
+        defaultScope={Scope.ORGANIZATION}
+        onCreated={(config) => createMutation.mutate(config)}
       />
     </div>
     </ContentAreaLayout>
-  )
-}
-
-function CreateConnectionConfigDialog({
-  open,
-  onOpenChange,
-  onCreate,
-  isPending,
-  error,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onCreate: (data: CreateConnectionConfigRequest) => void
-  isPending: boolean
-  error: string | null
-}) {
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const [type, setType] = useState<ConnectionType>('GIT')
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    onCreate({
-      scope: 'ORGANIZATION',
-      name,
-      description: description || undefined,
-      type,
-    })
-    setName('')
-    setDescription('')
-    setType('GIT')
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Create Connection Config</DialogTitle>
-          <DialogDescription>Define a new global connection</DialogDescription>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="name">Name</Label>
-            <Input id="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g., Company Git Repo" required />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="description">Description</Label>
-            <Textarea id="description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Brief description" />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="type">Connection Type</Label>
-            <Select value={type} onValueChange={(v) => setType(v as ConnectionType)}>
-              <SelectTrigger id="type"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {Object.entries(TYPE_LABELS).map(([value, label]) => (
-                  <SelectItem key={value} value={value}>{label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {error && (
-            <div className="flex items-center gap-2 text-sm text-destructive">
-              <AlertCircle className="h-4 w-4" />
-              <span>{error}</span>
-            </div>
-          )}
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={isPending || !name}>{isPending ? 'Creating...' : 'Create'}</Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
   )
 }

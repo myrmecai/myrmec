@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { ContentAreaLayout } from '@/components/content-area-layout'
 import { Rss, RefreshCw, PowerOff } from 'lucide-react'
 import { SYNC_STATUS_COLORS } from '../shared/constants'
+import { dialogService } from '@/services/dialog-service'
 
 export function DataFeedDetail({ feedId }: { feedId: string }) {
   const queryClient = useQueryClient()
@@ -97,7 +98,17 @@ export function DataFeedDetail({ feedId }: { feedId: string }) {
           <RefreshCw className="h-4 w-4 mr-2" /> {syncMutation.isPending ? 'Syncing…' : 'Sync Now'}
         </Button>
         {feed.status === 'ACTIVE' && (
-          <Button variant="outline" onClick={() => disableMutation.mutate()} disabled={disableMutation.isPending}>
+          <Button variant="outline" onClick={async () => {
+            const confirmed = await dialogService.showConfirmDialog({
+              title: 'Disable Data Feed',
+              message: `Disable "${feed.name}"? New documents will stop being ingested from this feed until it is re-enabled.`,
+              severity: 'warning',
+              type: 'warning',
+              confirmLabel: 'Disable',
+              cancelLabel: 'Cancel',
+            })
+            if (confirmed) disableMutation.mutate()
+          }} disabled={disableMutation.isPending}>
             <PowerOff className="h-4 w-4 mr-2" /> Disable
           </Button>
         )}

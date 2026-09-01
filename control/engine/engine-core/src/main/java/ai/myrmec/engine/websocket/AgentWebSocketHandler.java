@@ -1,15 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+
 package ai.myrmec.engine.websocket;
 
 import ai.myrmec.engine._system.security.JwtTokenProvider;
 import ai.myrmec.engine.agent.Agent;
 import ai.myrmec.engine.agent.AgentRepository;
-import ai.myrmec.engine.agent.AgentService;
+import ai.myrmec.engine.agent.AgentHostService;
 import ai.myrmec.engine.conversation.CitationEnforcementResult;
 import ai.myrmec.engine.conversation.CitationEnforcementService;
 import ai.myrmec.engine.conversation.ConversationMessage;
 import ai.myrmec.engine.conversation.ConversationMessageRepository;
 import ai.myrmec.engine.conversation.dispatch.AgentAvailableEvent;
-import ai.myrmec.engine.node.AgentTransport;
+import ai.myrmec.engine.node.NodeTransport;
 import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.project.ProjectRepository;
 import ai.myrmec.engine.tool.RiskClass;
@@ -52,20 +55,21 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
 
     private final JwtTokenProvider jwtTokenProvider;
     private final AgentRepository agentInstanceRepository;
-    private final AgentService agentService;
+    private final AgentHostService agentService;
     private final AgentConnectionManager connectionManager;
     private final ExecutionEventService executionEventService;
     private final TaskAttemptService taskAttemptService;
     private final TaskAttemptRepository taskAttemptRepository;
     private final CitationEnforcementService citationEnforcementService;
     private final ObjectMapper objectMapper;
-    private final AgentTransport agentTransport;
+    private final NodeTransport nodeTransport;
     private final ApplicationEventPublisher eventPublisher;
     private final ToolRepository toolRepository;
     private final WorkflowTaskRepository workflowTaskRepository;
     private final ProjectRepository projectRepository;
     private final ExecutionApprovalService executionApprovalService;
     private final ConversationInboundService conversationInboundService;
+    private final InboundInferenceHandler inboundInferenceHandler;
 
     private static final String ATTR_AGENT_INSTANCE_ID = "agentInstanceId";
     private static final String ATTR_AGENT_NAME = "agentName";
@@ -73,20 +77,21 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     public AgentWebSocketHandler(
             JwtTokenProvider jwtTokenProvider,
             AgentRepository agentInstanceRepository,
-            AgentService agentService,
+            AgentHostService agentService,
             AgentConnectionManager connectionManager,
             ExecutionEventService executionEventService,
             TaskAttemptService taskAttemptService,
             TaskAttemptRepository taskAttemptRepository,
             CitationEnforcementService citationEnforcementService,
             ObjectMapper objectMapper,
-            AgentTransport agentTransport,
+            NodeTransport nodeTransport,
             ApplicationEventPublisher eventPublisher,
             ToolRepository toolRepository,
             WorkflowTaskRepository workflowTaskRepository,
             ProjectRepository projectRepository,
             ExecutionApprovalService executionApprovalService,
-            @org.springframework.context.annotation.Lazy ConversationInboundService conversationInboundService) {
+            @org.springframework.context.annotation.Lazy ConversationInboundService conversationInboundService,
+            InboundInferenceHandler inboundInferenceHandler) {
         this.jwtTokenProvider = jwtTokenProvider;
         this.agentInstanceRepository = agentInstanceRepository;
         this.agentService = agentService;
@@ -96,13 +101,14 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         this.taskAttemptRepository = taskAttemptRepository;
         this.citationEnforcementService = citationEnforcementService;
         this.objectMapper = objectMapper;
-        this.agentTransport = agentTransport;
+        this.nodeTransport = nodeTransport;
         this.eventPublisher = eventPublisher;
         this.toolRepository = toolRepository;
         this.workflowTaskRepository = workflowTaskRepository;
         this.projectRepository = projectRepository;
         this.executionApprovalService = executionApprovalService;
         this.conversationInboundService = conversationInboundService;
+        this.inboundInferenceHandler = inboundInferenceHandler;
     }
 
     @Override
@@ -242,6 +248,31 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                     UUID iid = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
                     conversationInboundService.onTaskCancelled(iid, payloadNode, payload);
                 }
+                // ── Unified Inference Dispatch result frames (§5.5) ──
+                case MessageType.INFERENCE_DELTA -> {
+                    UUID iid = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+                    inboundInferenceHandler.onInferenceDelta(iid, payloadNode, payload);
+                }
+                case MessageType.INFERENCE_COMPLETE -> {
+                    UUID iid = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+                    inboundInferenceHandler.onInferenceComplete(iid, payloadNode, payload);
+                }
+                case MessageType.INFERENCE_FAILED -> {
+                    UUID iid = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+                    inboundInferenceHandler.onInferenceFailed(iid, payloadNode, payload);
+                }
+                case MessageType.INFERENCE_TOOL_CALL -> {
+                    UUID iid = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+                    inboundInferenceHandler.onInferenceToolCall(iid, payloadNode);
+                }
+                case MessageType.INFERENCE_TOOL_RESULT -> {
+                    UUID iid = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+                    inboundInferenceHandler.onInferenceToolResult(iid, payloadNode);
+                }
+                case MessageType.INFERENCE_CANCELLED -> {
+                    UUID iid = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+                    inboundInferenceHandler.onInferenceCancelled(iid, payloadNode, payload);
+                }
                 case MessageType.PONG -> handlePong(session);
                 case MessageType.DISCONNECT -> handleDisconnect(session, payloadNode);
                 default -> log.warn("Unknown message type: {}", type);
@@ -336,33 +367,54 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         // Complete the attempt and update task
         if (attemptId != null) {
             try {
-                // #29 — Citation enforcement: if ctx.retrieve() was called during this
-                // conversation turn, verify that the assistant message contains citations.
-                // Get the most recent ASSISTANT message for this attempt's conversation.
+                // #29 — Citation enforcement (audit-only, non-blocking): if ctx.retrieve()
+                // was called during this attempt, the assistant's final message MUST cite
+                // at least one source chunk. We extract the best-effort assistant text from
+                // the task result and verify citations. Violations are logged as warnings
+                // for audit-trail inspection; the task is NOT failed (see CitationEnforcementResult).
                 TaskAttempt attempt = taskAttemptRepository.findById(attemptId).orElse(null);
                 if (attempt != null && attempt.getTask() != null) {
-                    // Look up the conversation turn to find the associated conversation ID
-                    // For now, we emit an audit-only result (non-blocking) to avoid breaking
-                    // the flow if retrieval/conversation relationship is not yet resolved.
-                    // This can be enhanced in Phase 2 to fail the task or redact output.
-                    
-                    // TODO: In Phase 2, integrate retrieval enforcement to either:
-                    // 1. Fail the task with CITATION_REQUIRED error if violation
-                    // 2. Redact/strip chunk references if absent (audit-only mode)
-                    // For now, log violations as warnings for audit trail inspection.
-                    
-                    log.debug("Task {} attempt {} completed; citation enforcement deferred to Phase 2",
-                            complete.getTaskId(), attemptId);
+                    String assistantText = extractAssistantText(complete.getResult());
+                    if (assistantText != null) {
+                        CitationEnforcementResult citationResult =
+                                citationEnforcementService.enforceRetrievalCitations(attemptId, assistantText);
+                        if (citationResult.isViolation()) {
+                            log.warn("Task {} attempt {} — {}", complete.getTaskId(), attemptId,
+                                    citationResult.summary());
+                        } else {
+                            log.debug("Task {} attempt {} — {}", complete.getTaskId(), attemptId,
+                                    citationResult.summary());
+                        }
+                    }
                 }
-                
+
                 taskAttemptService.completeSuccess(attemptId, complete.getResult());
             } catch (Exception e) {
                 log.error("Failed to complete task attempt: {}", e.getMessage(), e);
             }
         } else {
-            log.warn("No attempt found for completed task {}, skipping attempt update", 
+            log.warn("No attempt found for completed task {}, skipping attempt update",
                     complete.getTaskId());
         }
+    }
+
+    /**
+     * Best-effort extraction of the assistant's final message text from a task result map.
+     * Agents surface the assistant reply under one of several keys depending on the SDK
+     * version; we check the common ones. Returns {@code null} when no text is present,
+     * in which case citation enforcement is skipped for this attempt.
+     */
+    private String extractAssistantText(Map<String, Object> result) {
+        if (result == null) {
+            return null;
+        }
+        for (String key : new String[] { "message", "content", "text", "output", "answer" }) {
+            Object value = result.get(key);
+            if (value instanceof String s && !s.isBlank()) {
+                return s;
+            }
+        }
+        return null;
     }
 
     private void handleTaskFailed(WebSocketSession session, JsonNode payload) {
@@ -767,6 +819,24 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
+     * Send a session.open frame to an agent (Unified Inference Dispatch §6.1).
+     */
+    public boolean sendSessionOpen(UUID agentInstanceId, SessionOpenPayload payload) {
+        WebSocketMessage<SessionOpenPayload> message =
+                WebSocketMessage.of(MessageType.SESSION_OPEN, payload);
+        return connectionManager.sendMessage(agentInstanceId, message);
+    }
+
+    /**
+     * Send an inference.assign frame to an agent (Unified Inference Dispatch §6.2).
+     */
+    public boolean sendInferenceAssign(UUID agentInstanceId, InferenceAssignPayload payload) {
+        WebSocketMessage<InferenceAssignPayload> message =
+                WebSocketMessage.of(MessageType.INFERENCE_ASSIGN, payload);
+        return connectionManager.sendMessage(agentInstanceId, message);
+    }
+
+    /**
      * Send a task cancellation to an agent.
      */
     public boolean cancelTask(UUID agentInstanceId, UUID taskId, String reason) {
@@ -802,9 +872,9 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
-     * Route a control frame to a worker through the cross-node transport
-     * (slice 4b). Resolves the worker's home node ({@code agents.home_node_id})
-     * and lets {@link AgentTransport} short-circuit to the local socket when
+     * Route a control frame to a worker through the unified cross-node
+     * transport. Resolves the worker's home node ({@code agents.home_node_id})
+     * and lets {@link NodeTransport} short-circuit to the local socket when
      * the worker is homed here (always the case on a single node) or relay to
      * the owning peer replica otherwise.
      */
@@ -812,7 +882,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         String homeNodeId = agentInstanceRepository.findById(agentInstanceId)
                 .map(Agent::getHomeNodeId)
                 .orElse(null);
-        return agentTransport.sendToNode(homeNodeId, agentInstanceId, message);
+        return nodeTransport.sendToNode(homeNodeId, agentInstanceId, message);
     }
 
     /**

@@ -6,6 +6,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.Instant;
+import java.util.UUID;
 
 /**
  * AI Model Provider configuration entity.
@@ -54,30 +55,6 @@ public class ModelProviderConfig {
     private boolean requiresAuth = true;
 
     /**
-     * HTTP header name for authentication (e.g., Authorization, x-api-key).
-     */
-    @Column(name = "auth_header", nullable = false, length = 100)
-    private String authHeader = "Authorization";
-
-    /**
-     * Prefix for the auth header value (e.g., "Bearer ", "").
-     */
-    @Column(name = "auth_prefix", nullable = false, length = 50)
-    private String authPrefix = "Bearer ";
-
-    /**
-     * Default health check endpoint path (e.g., /health, /models).
-     */
-    @Column(name = "health_endpoint", length = 200)
-    private String healthEndpoint;
-
-    /**
-     * Endpoint to list available models (e.g., /models, /api/tags).
-     */
-    @Column(name = "models_endpoint", length = 200)
-    private String modelsEndpoint;
-
-    /**
      * URL to provider's API documentation.
      */
     @Column(name = "docs_url", length = 500)
@@ -101,6 +78,14 @@ public class ModelProviderConfig {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private ModelStatus status = ModelStatus.ACTIVE;
+
+    /**
+     * Linked ConnectionConfig that holds the provider's credential in the
+     * secrets vault. Nullable — providers with {@code requiresAuth=false}
+     * need no config.
+     */
+    @Column(name = "connection_config_id")
+    private UUID connectionConfigId;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

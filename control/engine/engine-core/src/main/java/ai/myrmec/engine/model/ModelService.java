@@ -1,11 +1,16 @@
 package ai.myrmec.engine.model;
 
+import ai.myrmec.engine._system.common.DomainConstants;
+import ai.myrmec.engine._system.common.DomainConstants.TestStatus;
 import ai.myrmec.engine.spi.crypto.EncryptionService;
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine.model.dto.CreateModelRequest;
 import ai.myrmec.engine.model.dto.TestModelResponse;
 import ai.myrmec.engine.model.dto.UpdateModelRequest;
+import ai.myrmec.engine.secret.SecretPayload;
+import ai.myrmec.engine.secret.SecretResolverService;
+import ai.myrmec.engine.secret.CredentialType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -38,6 +43,7 @@ public class ModelService {
     private final ModelRepository modelRepository;
     private final ModelProviderConfigRepository providerRepository;
     private final EncryptionService encryptionService;
+    private final SecretResolverService secretResolverService;
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
@@ -91,7 +97,6 @@ public class ModelService {
         model.setCode(request.getCode());
         model.setName(request.getName().trim());
         model.setProvider(request.getProvider());
-        model.setDeploymentType(request.getDeploymentType());
         model.setModelId(request.getModelId().trim());
         
         // Use provider default base URL if not specified
@@ -101,27 +106,24 @@ public class ModelService {
             model.setApiEndpoint(providerConfig.getBaseUrl());
         }
         
-        model.setRequiresAuth(request.getRequiresAuth() != null ? request.getRequiresAuth() : providerConfig.isRequiresAuth());
         model.setSupportsVision(request.getSupportsVision() != null && request.getSupportsVision());
         model.setInfraConfig(request.getInfraConfig());
         model.setDefaultParams(request.getDefaultParams());
+        model.setInputPrice(request.getInputPrice());
+        model.setOutputPrice(request.getOutputPrice());
+        model.setCurrency(request.getCurrency() != null ? request.getCurrency() : "USD");
         model.setStatus(ModelStatus.ACTIVE);
         model.setHealthStatus(HealthStatus.UNKNOWN);
 
-        // Encrypt API key if provided
-        if (request.getApiKey() != null && !request.getApiKey().isBlank()) {
-            model.setApiKeyEncrypted(encryptionService.encrypt(request.getApiKey()));
-        }
-
         model = modelRepository.save(model);
-        log.info("Created model: {} (provider: {}, deployment: {})",
-                request.getCode(), request.getProvider(), request.getDeploymentType());
+        log.info("Created model: {} (provider: {})",
+                request.getCode(), request.getProvider());
         return model;
     }
 
     /**
      * Update an existing model.
-     * Note: Code, provider, deploymentType, and modelId cannot be changed.
+     * Note: Code, provider, and modelId cannot be changed.
      */
     @Transactional
     public Model update(String code, UpdateModelRequest request) {
@@ -134,14 +136,6 @@ public class ModelService {
 
         if (request.getApiEndpoint() != null) {
             model.setApiEndpoint(request.getApiEndpoint().trim().isEmpty() ? null : request.getApiEndpoint().trim());
-        }
-
-        if (request.getApiKey() != null && !request.getApiKey().isBlank()) {
-            model.setApiKeyEncrypted(encryptionService.encrypt(request.getApiKey()));
-        }
-
-        if (request.getRequiresAuth() != null) {
-            model.setRequiresAuth(request.getRequiresAuth());
         }
 
         if (request.getSupportsVision() != null) {
@@ -159,6 +153,10 @@ public class ModelService {
         if (request.getStatus() != null) {
             model.setStatus(request.getStatus());
         }
+
+        if (request.getInputPrice() != null) model.setInputPrice(request.getInputPrice());
+        if (request.getOutputPrice() != null) model.setOutputPrice(request.getOutputPrice());
+        if (request.getCurrency() != null) model.setCurrency(request.getCurrency());
 
         model = modelRepository.save(model);
         log.info("Updated model: {}", code);
@@ -195,12 +193,14 @@ public class ModelService {
                     .timeout(TEST_TIMEOUT)
                     .GET();
 
-            // Add auth header if required
-            if (model.isRequiresAuth() && model.getApiKeyEncrypted() != null) {
-                String apiKey = encryptionService.decrypt(model.getApiKeyEncrypted());
-                String authHeader = providerConfig != null ? providerConfig.getAuthHeader() : "Authorization";
-                String authPrefix = providerConfig != null ? providerConfig.getAuthPrefix() : "Bearer ";
-                requestBuilder.header(authHeader, authPrefix + apiKey);
+            // Resolve credential from the provider's linked ConnectionConfig
+            if (providerConfig != null && providerConfig.getConnectionConfigId() != null) {
+                String apiKey = getApiKey(code);
+                if (apiKey != null) {
+                    String authHeader = "Authorization";
+                    String authPrefix = "Bearer ";
+                    requestBuilder.header(authHeader, authPrefix + apiKey);
+                }
             }
 
             HttpResponse<String> response = httpClient.send(
@@ -209,14 +209,14 @@ public class ModelService {
             );
 
             if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                status = "SUCCESS";
+                status = TestStatus.SUCCESS;
                 message = "Connection successful";
             } else {
-                status = "FAILED";
+                status = TestStatus.FAILED;
                 message = "HTTP " + response.statusCode() + ": " + response.body();
             }
         } catch (Exception e) {
-            status = "FAILED";
+            status = TestStatus.FAILED;
             message = e.getClass().getSimpleName() + ": " + e.getMessage();
             log.warn("Connection test failed for model {}: {}", code, message);
         }
@@ -249,15 +249,26 @@ public class ModelService {
     }
 
     /**
-     * Get the decrypted API key for a model.
-     * Used internally for making API calls.
+     * Get the decrypted API key for a model, resolving the credential
+     * from the provider's linked {@code ConnectionConfig} → secrets vault.
+     * Returns {@code null} when the provider has no linked config.
      */
     public String getApiKey(String code) {
         Model model = findByCode(code);
-        if (model.getApiKeyEncrypted() == null) {
+        ModelProviderConfig provider = providerRepository.findById(model.getProvider()).orElse(null);
+        if (provider == null || provider.getConnectionConfigId() == null) {
             return null;
         }
-        return encryptionService.decrypt(model.getApiKeyEncrypted());
+        SecretPayload payload = secretResolverService.resolveOneOf(
+                provider.getConnectionConfigId(), null,
+                CredentialType.BEARER_TOKEN, CredentialType.API_KEY,
+                CredentialType.SECRET_KEY);
+        return switch (payload) {
+            case SecretPayload.BearerToken bt -> bt.token();
+            case SecretPayload.ApiKey ak -> ak.key();
+            case SecretPayload.SecretKey sk -> sk.secret();
+            default -> null;
+        };
     }
 
     private String getTestEndpoint(Model model, ModelProviderConfig providerConfig) {
@@ -279,11 +290,6 @@ public class ModelService {
             return baseEndpoint.replaceAll("/+$", "") + healthEndpoint;
         }
         
-        // Use provider's default health endpoint
-        if (providerConfig != null && providerConfig.getHealthEndpoint() != null) {
-            return baseEndpoint.replaceAll("/+$", "") + providerConfig.getHealthEndpoint();
-        }
-
         // Fallback to /v1/models for OpenAI-compatible APIs
         return baseEndpoint.replaceAll("/+$", "") + "/models";
     }
@@ -319,18 +325,13 @@ public class ModelService {
     }
 
     private void validateDeploymentRequirements(CreateModelRequest request, ModelProviderConfig providerConfig) {
-        if (request.getDeploymentType() == DeploymentType.ON_PREMISE) {
+        if (providerConfig.getDeploymentType() == DeploymentType.ON_PREMISE) {
             // On-premise models require endpoint (unless provider has default)
             if ((request.getApiEndpoint() == null || request.getApiEndpoint().isBlank()) 
                     && providerConfig.getBaseUrl() == null) {
                 throw new BadRequestException("API endpoint is required for on-premise models");
             }
         } else {
-            // Cloud models require API key if provider requires auth
-            if (providerConfig.isRequiresAuth() 
-                    && (request.getApiKey() == null || request.getApiKey().isBlank())) {
-                throw new BadRequestException("API key is required for cloud provider: " + providerConfig.getName());
-            }
             // Some providers like Azure require endpoint
             if (providerConfig.getBaseUrl() == null 
                     && (request.getApiEndpoint() == null || request.getApiEndpoint().isBlank())) {

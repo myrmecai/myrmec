@@ -1,0 +1,256 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+// Visionary "governance nervous system" diagram — concentric capability rings
+// radiating from the Control Plane nucleus, with trusted data flowing outward.
+// Pure CSS, no JS, no images. Rendered at any width.
+---
+
+<div class="myrmec-orbit relative mx-auto aspect-square w-full max-w-[560px]" role="img" aria-label="Myrmec governance architecture: the control plane nucleus at the centre, rings of knowledge, agents, and approvals around it, connecting safely to your models, systems, and people on the outside">
+  <!-- ─── outer halo (your world) ─────────────────────────────── -->
+  <div class="absolute inset-0 rounded-full border border-slate-200 bg-gradient-to-br from-slate-50 to-white shadow-[inset_0_0_60px_rgba(226,232,240,0.5)]"></div>
+
+  <!-- outside world nodes -->
+  <div class="halo-node left-[6%] top-[14%]">🤖 OpenAI · Anthropic</div>
+  <div class="halo-node left-[10%] bottom-[18%]">🗄️ git · SQL · Jira</div>
+  <div class="halo-node right-[8%] top-[12%]">☁️ Ollama · vLLM · Bedrock</div>
+  <div class="halo-node right-[5%] bottom-[20%]">📄 docs · Confluence · Notion</div>
+  <div class="halo-node left-1/2 top-[3%] -translate-x-1/2">👥 users · approvers · auditors</div>
+  <div class="halo-node bottom-[4%] left-1/2 -translate-x-1/2">🏢 your VPC · on-prem · air-gap</div>
+
+  <!-- trusted-flow spokes (CSS lines radiating outward) -->
+  <div class="spoke spoke-0"></div>
+  <div class="spoke spoke-1"></div>
+  <div class="spoke spoke-2"></div>
+  <div class="spoke spoke-3"></div>
+  <div class="spoke spoke-4"></div>
+  <div class="spoke spoke-5"></div>
+
+  <!-- ─── ring 3: execution & trust ───────────────────────────── -->
+  <div class="orbit-ring ring-3">
+    <div class="orbit-label label-r3-a">⚡ workflows</div>
+    <div class="orbit-label label-r3-b">💬 assistants</div>
+    <div class="orbit-label label-r3-c">🔑 HITL approvals</div>
+    <div class="orbit-label label-r3-d">🧾 audit replay</div>
+  </div>
+
+  <!-- ─── ring 2: execution agents ────────────────────────────── -->
+  <div class="orbit-ring ring-2">
+    <div class="orbit-label label-r2-a">📦 sandboxed agents</div>
+    <div class="orbit-label label-r2-b">🛠️ risk-classified tools</div>
+    <div class="orbit-label label-r2-c">📎 attachments</div>
+  </div>
+
+  <!-- ─── ring 1: knowledge ───────────────────────────────────── -->
+  <div class="orbit-ring ring-1">
+    <div class="orbit-label label-r1-a">📚 knowledge + citations</div>
+    <div class="orbit-label label-r1-b">🔍 scoped retrieval</div>
+  </div>
+
+  <!-- ─── nucleus: the control plane ──────────────────────────── -->
+  <div class="nucleus">
+    <div class="nucleus-core">
+      <img src="/logo-mark.svg" alt="Myrmec" class="h-10 w-10 drop-shadow" />
+      <p class="nucleus-title">Control Plane</p>
+      <p class="nucleus-subtitle">governance, budgets, audit</p>
+      <div class="nucleus-badges">
+        <span>RBAC</span><span>quotas</span><span>encryption</span>
+      </div>
+    </div>
+    <!-- pulsing aura -->
+    <div class="nucleus-aura"></div>
+  </div>
+
+  <!-- ─── tagline orbiting the diagram ────────────────────────── -->
+  <div class="tagline tagline-top">read · reason · act</div>
+  <div class="tagline tagline-bottom">under audit</div>
+</div>
+
+<style>
+  /* ---------------------------------------------------------- */
+  /*  base ring shells                                           */
+  /* ---------------------------------------------------------- */
+  .orbit-ring {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    translate: -50% -50%;
+    border: 1.5px solid rgba(99, 102, 241, 0.22);
+    border-radius: 9999px;
+    background: radial-gradient(circle, rgba(238, 242, 255, 0.35) 0%, transparent 70%);
+    box-shadow: inset 0 0 40px rgba(99, 102, 241, 0.04);
+  }
+  .ring-1 { width: 54%; height: 54%; }
+  .ring-2 { width: 74%; height: 74%; }
+  .ring-3 { width: 94%; height: 94%; }
+
+  /* ---------------------------------------------------------- */
+  /*  labels pinned around each ring                             */
+  /* ---------------------------------------------------------- */
+  .orbit-label {
+    position: absolute;
+    translate: -50% -50%;
+    white-space: nowrap;
+    border-radius: 9999px;
+    border: 1px solid rgba(99, 102, 241, 0.35);
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(4px);
+    padding: 0.35rem 0.75rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #4338ca;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  }
+
+  /* ring-1 knowledge — left & right */
+  .label-r1-a { left: 12%;  top: 50%; }
+  .label-r1-b { right: 4%;  top: 50%; }
+
+  /* ring-2 agents — upper-left, upper-right, bottom */
+  .label-r2-a { left: 18%;  top: 13%; }
+  .label-r2-b { right: 8%;  top: 18%; }
+  .label-r2-c { left: 50%;  bottom: 3%; }
+
+  /* ring-3 execution — four corners of the circle */
+  .label-r3-a { left: 16%;  top: 8%;  }
+  .label-r3-b { right: 7%;  top: 10%; }
+  .label-r3-c { right: 4%;  bottom: 10%; }
+  .label-r3-d { left: 10%;  bottom: 13%; }
+
+  /* ---------------------------------------------------------- */
+  /*  centre nucleus                                             */
+  /* ---------------------------------------------------------- */
+  .nucleus {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    translate: -50% -50%;
+    width: 34%;
+    aspect-ratio: 1;
+    z-index: 10;
+  }
+  .nucleus-core {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    height: 100%;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    border-radius: 9999px;
+    border: 2px solid #6366f1;
+    background: radial-gradient(circle, #eef2ff 0%, #ffffff 65%);
+    box-shadow:
+      0 4px 20px rgba(99, 102, 241, 0.25),
+      inset 0 0 30px rgba(99, 102, 241, 0.08);
+    text-align: center;
+    padding: 1rem;
+  }
+  .nucleus-title {
+    margin-top: 0.4rem;
+    font-size: 0.82rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    color: #312e81;
+  }
+  .nucleus-subtitle {
+    font-size: 0.6rem;
+    color: #64748b;
+  }
+  .nucleus-badges {
+    display: flex;
+    gap: 0.3rem;
+    margin-top: 0.4rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .nucleus-badges span {
+    border-radius: 9999px;
+    background: #6366f1;
+    color: #fff;
+    font-size: 0.52rem;
+    font-weight: 700;
+    padding: 0.15rem 0.5rem;
+    letter-spacing: 0.02em;
+  }
+  .nucleus-aura {
+    position: absolute;
+    inset: -12%;
+    border-radius: 9999px;
+    background: radial-gradient(circle, rgba(99, 102, 241, 0.18) 0%, transparent 65%);
+    animation: auraPulse 3.2s ease-in-out infinite;
+    z-index: 1;
+  }
+  @keyframes auraPulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50%       { transform: scale(1.06); opacity: 0.6; }
+  }
+
+  /* ---------------------------------------------------------- */
+  /*  spokes = trusted channels between centre and halo          */
+  /* ---------------------------------------------------------- */
+  .spoke {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 47%;
+    height: 2px;
+    background: linear-gradient(90deg, #6366f1 0%, rgba(99, 102, 241, 0.1) 100%);
+    transform-origin: 0 50%;
+    mask-image: linear-gradient(90deg, transparent 0%, black 12%, black 88%, transparent 100%);
+    opacity: 0.5;
+  }
+  .spoke-0 { transform: rotate(-15deg); }
+  .spoke-1 { transform: rotate(15deg); }
+  .spoke-2 { transform: rotate(90deg); }
+  .spoke-3 { transform: rotate(180deg); }
+  .spoke-4 { transform: rotate(200deg); }
+  .spoke-5 { transform: rotate(270deg); }
+
+  /* ---------------------------------------------------------- */
+  /*  halo nodes (the world around myrmec)                       */
+  /* ---------------------------------------------------------- */
+  .halo-node {
+    position: absolute;
+    white-space: nowrap;
+    border-radius: 9999px;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #475569;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  }
+
+  /* ---------------------------------------------------------- */
+  /*  taglines orbiting the whole diagram                        */
+  /* ---------------------------------------------------------- */
+  .tagline {
+    position: absolute;
+    left: 50%;
+    translate: -50% 0;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: #6366f1;
+    opacity: 0.75;
+  }
+  .tagline-top { top: 2%; }
+  .tagline-bottom { bottom: 0%; }
+
+  /* ---------------------------------------------------------- */
+  /*  small screens: stack the world, keep rings legible         */
+  /* ---------------------------------------------------------- */
+  @media (max-width: 700px) {
+    .label-r1-a { left: 6%; }
+    .label-r1-b { right: 0%; }
+    .label-r3-a, .label-r3-d { display: none; }   /* reduce clutter */
+    .label-r2-c { display: none; }
+    .nucleus-title { font-size: 1rem; }
+    .nucleus-badges { display: none; }
+  }
+</style>

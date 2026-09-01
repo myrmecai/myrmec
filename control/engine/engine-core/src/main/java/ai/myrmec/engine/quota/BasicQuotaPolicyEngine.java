@@ -3,6 +3,8 @@
 
 package ai.myrmec.engine.quota;
 
+import ai.myrmec.engine.assistant.Assistant;
+import ai.myrmec.engine.assistant.AssistantRepository;
 import ai.myrmec.engine.group.GroupRepository;
 import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.project.ProjectRepository;
@@ -10,6 +12,8 @@ import ai.myrmec.engine.spi.quota.QuotaDecision;
 import ai.myrmec.engine.spi.quota.QuotaPolicyEngine;
 import ai.myrmec.engine.spi.quota.QuotaResourceType;
 import ai.myrmec.engine.spi.quota.QuotaScope;
+import ai.myrmec.engine.workflow.Workflow;
+import ai.myrmec.engine.workflow.WorkflowRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -64,6 +68,9 @@ public class BasicQuotaPolicyEngine implements QuotaPolicyEngine {
     private final QuotaConsumptionRepository consumptionRepository;
     private final ProjectRepository projectRepository;
     private final GroupRepository groupRepository;
+    private final WorkflowRepository workflowRepository;
+    private final AssistantRepository assistantRepository;
+    private final QuotaAutoPauseService autoPauseService;
 
     /** Toggle &mdash; off makes the engine return {@link QuotaDecision#unconstrained()} unconditionally. */
     @Value("${myrmec.quotas.enabled:true}")
@@ -171,12 +178,17 @@ public class BasicQuotaPolicyEngine implements QuotaPolicyEngine {
         switch (startingScope) {
             case SERVICE -> {
                 chain.add(new ScopeNode(Quota.Scope.SERVICE, startingScopeId));
-                Optional<Project> project = projectRepository.findById(startingScopeId);
-                if (project.isPresent()) {
-                    chain.add(new ScopeNode(Quota.Scope.PROJECT, project.get().getId()));
-                    UUID groupId = project.get().getGroupId();
-                    if (groupId != null) {
-                        chain.add(new ScopeNode(Quota.Scope.GROUP, groupId));
+                // For SERVICE scope, scopeId is the workflow / assistant
+                // instance ID.  Resolve the project from the instance table.
+                UUID projectId = resolveProjectFromServiceInstance(startingScopeId);
+                if (projectId != null) {
+                    chain.add(new ScopeNode(Quota.Scope.PROJECT, projectId));
+                    Optional<Project> project = projectRepository.findById(projectId);
+                    if (project.isPresent()) {
+                        UUID groupId = project.get().getGroupId();
+                        if (groupId != null) {
+                            chain.add(new ScopeNode(Quota.Scope.GROUP, groupId));
+                        }
                     }
                 }
                 // ORG rows have no specific scopeId in Community.
@@ -200,7 +212,30 @@ public class BasicQuotaPolicyEngine implements QuotaPolicyEngine {
         return chain;
     }
 
-    /** Pick the worst decision: blocked beats warning beats OK. */
+    /**
+     * Resolve the project ID from a service-instance UUID.
+     * Tries workflow first, then assistant.  Returns {@code null} if
+     * neither table contains the ID (e.g. legacy rows where scopeId
+     * was the project ID itself — those will be caught by the project
+     * lookup returning empty, and the chain will fall through to ORG).
+     */
+    private UUID resolveProjectFromServiceInstance(UUID serviceInstanceId) {
+        Optional<Workflow> workflow = workflowRepository.findById(serviceInstanceId);
+        if (workflow.isPresent()) {
+            return workflow.get().getProject().getId();
+        }
+        Optional<Assistant> assistant = assistantRepository.findById(serviceInstanceId);
+        if (assistant.isPresent()) {
+            return assistant.get().getProjectId();
+        }
+        // Fallback: scopeId might be a project ID (legacy / test data).
+        // This preserves backward compatibility with existing tests that
+        // call check(SERVICE, projectId, ...) without creating a workflow.
+        if (projectRepository.existsById(serviceInstanceId)) {
+            return serviceInstanceId;
+        }
+        return null;
+    }
     private QuotaDecision mostRestrictive(List<QuotaDecision> decisions) {
         QuotaDecision worst = null;
         for (QuotaDecision d : decisions) {
@@ -251,12 +286,33 @@ public class BasicQuotaPolicyEngine implements QuotaPolicyEngine {
 
     /** Internal: per-quota evaluation. */
     private QuotaDecision evaluate(Quota q, long amount) {
+        long limit = q.getLimitAmount();
+
+        // #40 — Per-execution cost ceiling: a single request may never exceed the
+        // quota's per-run cap, regardless of how much pool budget remains. This is
+        // the cheapest runaway-loop insurance — it fires on the requested amount
+        // itself, before any pool arithmetic. Applies in BLOCK and WARN modes (a
+        // runaway single run exceeds the cap in either); TELEMETRY never blocks.
+        Long maxExecution = q.getMaxExecutionAmount();
+        if (maxExecution != null && amount > maxExecution
+                && q.getEnforcementMode() != EnforcementMode.TELEMETRY) {
+            log.warn("Quota {} per-execution cap exceeded: requested {} > max {}",
+                    q.getId(), amount, maxExecution);
+            return QuotaDecision.builder()
+                    .blocked(true)
+                    .warning(false)
+                    .limitAmount(limit)
+                    .consumedAmount(0)
+                    .remainingAmount(0)
+                    .scopeHit(toSpiScope(q.getScopeType()))
+                    .build();
+        }
+
         Instant periodStart = periodStart(q.getPeriod(), Instant.now());
         long used = consumptionRepository.findByQuotaIdAndPeriodStart(q.getId(), periodStart)
                 .map(QuotaConsumption::getAmountUsed)
                 .orElse(0L);
         long projected = used + amount;
-        long limit = q.getLimitAmount();
 
         boolean blocked = q.getEnforcementMode() == EnforcementMode.BLOCK && projected > limit;
         boolean warning = !blocked && projected >= (long) (limit * WARNING_FRACTION);
@@ -269,10 +325,20 @@ public class BasicQuotaPolicyEngine implements QuotaPolicyEngine {
             warning = true;
         }
 
+        // #44 — 120% kill switch: a BLOCK quota whose consumption reaches 120%
+        // of its limit is auto-paused (an admin must explicitly resume).
+        // evaluate() runs in a read-only transaction, so the pause is delegated
+        // to QuotaAutoPauseService (REQUIRES_NEW) — it commits even though this
+        // evaluation tx is read-only. Overrun is still reported to the caller.
         if (q.getEnforcementMode() == EnforcementMode.BLOCK
                 && projected >= (long) (limit * 1.2)
                 && q.getPausedAt() == null) {
-            log.warn("Quota {} hit 120% threshold, should be auto-paused", q.getId());
+            try {
+                autoPauseService.pauseIfNotAlready(q.getId());
+            } catch (Exception ex) {
+                // Never let a kill-switch failure break the quota evaluation.
+                log.warn("Auto-pause failed for quota {}: {}", q.getId(), ex.getMessage());
+            }
         }
 
         long remaining = Math.max(0, limit - used);

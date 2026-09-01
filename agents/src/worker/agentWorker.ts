@@ -19,30 +19,23 @@ import {
   agentReleasePayloadSchema,
 } from "../protocol/agentFrames.js";
 import type { Logger } from "../models/index.js";
-import {
-  TaskDispatcher,
-  ConversationDispatcher,
-  type ModelResolver,
-} from "../executor/index.js";
-import type { Tool } from "../executor/types.js";
+import { InferenceExecutor } from "../executor/InferenceExecutor.js";
+import { SessionRegistry } from "../session/SessionRegistry.js";
+import { ApprovalCoordinator } from "../executor/ApprovalCoordinator.js";
+import type { SessionOpenPayload, InferenceAssignPayload, InferenceCancelPayload } from "../protocol/inferenceFrames.js";
+import type { ChatModelFactory, SessionToolFactory } from "../executor/providers.js";
 import type { EngineHttpClient } from "../transport/httpClient.js";
-import { resolveChatModel } from "../models/resolveModel.js";
 import type { WorkerInbound, WorkerOutbound } from "./agentWorkerProtocol.js";
 
 export interface AgentWorkerOptions {
   /** Emit a frame back to the Supervisor for routing (the worker's only sink). */
   post: (message: WorkerOutbound) => void;
-  /** Resolve a model per task/turn from the engine descriptor. Defaults to the
-   * built-in provider resolver (OpenAI-compatible, Anthropic, Google). */
-  resolveModel?: ModelResolver;
-  /** Tools the worker can offer; constructed in-isolate (a later registry
-   * slice fills this in). Defaults to none. */
-  tools?: Tool[];
+  /** Factory that resolves a ChatModel for each session. */
+  chatModelFactory: ChatModelFactory;
+  /** Factory that resolves tool implementations for each session. */
+  sessionToolFactory: SessionToolFactory;
   /** Iteration cap forwarded to the executor. */
   maxIterations?: number;
-  /** Max bytes an image attachment may be to inline as a native image part
-   * (#103 Slice A). */
-  maxImageBytes?: number;
   /** HTTP client for engine RPC (retrieval, etc.). Optional. */
   httpClient?: EngineHttpClient;
   /** Current agent access token for auth on RPC calls. Optional. */
@@ -51,8 +44,8 @@ export interface AgentWorkerOptions {
 }
 
 export class AgentWorker {
-  private readonly tasks: TaskDispatcher;
-  private readonly conversations: ConversationDispatcher;
+  private readonly sessions: SessionRegistry;
+  private readonly inference: InferenceExecutor;
   private readonly log: Logger;
 
   constructor(options: AgentWorkerOptions) {
@@ -61,59 +54,65 @@ export class AgentWorker {
       options.post({ kind: "frame", frame });
       return Promise.resolve();
     };
-    const resolveModel: ModelResolver = options.resolveModel ?? resolveChatModel;
 
-    this.tasks = new TaskDispatcher({
-      send,
-      resolveModel,
-      tools: options.tools,
-      maxIterations: options.maxIterations,
+    // Unified Inference Dispatch (§6–§7)
+    this.sessions = new SessionRegistry({
+      chatModelFactory: options.chatModelFactory,
+      sessionToolFactory: options.sessionToolFactory,
       logger: this.log,
     });
-    this.conversations = new ConversationDispatcher({
+
+    // HITL approval coordinator — emits approval.request frames over the
+    // worker's send sink and blocks until the matching approval.decision
+    // arrives (routed by the Supervisor back to the executor's
+    // handleApprovalDecision). One coordinator is shared by all in-flight
+    // turns in this worker.
+    const approvals = new ApprovalCoordinator({
       send,
-      resolveModel,
+      logger: this.log,
+    });
+
+    this.inference = new InferenceExecutor({
+      registry: this.sessions,
+      send,
       httpClient: options.httpClient,
       agentAccessToken: options.agentAccessToken,
-      ...(options.maxImageBytes !== undefined
-        ? { maxImageBytes: options.maxImageBytes }
-        : {}),
+      maxIterations: options.maxIterations,
+      approvals,
       logger: this.log,
     });
   }
 
-  /** True while a workflow task is executing. */
+  /** True while an inference turn is executing. */
   get isBusy(): boolean {
-    return this.tasks.isBusy;
-  }
-
-  /** In-flight approval requests awaiting a decision. */
-  get pendingApprovals(): number {
-    return this.conversations.pendingApprovals;
+    return this.inference.isBusy;
   }
 
   /** Dispatch an inbound message from the Supervisor. */
-  handle(message: WorkerInbound): void {
+  async handle(message: WorkerInbound): Promise<void> {
     if (message.kind !== "envelope") {
       this.log.warn("AgentWorker: unknown inbound message", message);
       return;
     }
     const { frame } = message;
     switch (frame.type) {
-      case MessageType.TASK_ASSIGN:
-        this.tasks.handleAssign(frame.payload);
+      // ── Unified Inference Dispatch (§5) ──
+      case MessageType.SESSION_OPEN:
+        await this.handleSessionOpen(frame.payload);
         return;
-      case MessageType.TASK_CANCEL:
-        this.tasks.handleCancel(frame.payload);
+      case MessageType.SESSION_CLOSE:
+        this.handleSessionClose(frame.payload);
         return;
-      case MessageType.CONVERSATION_TURN_ASSIGN:
-        this.conversations.handleTurnAssign(frame.payload);
+      case MessageType.INFERENCE_ASSIGN:
+        this.inference.handleAssign(frame.payload as InferenceAssignPayload);
         return;
-      case MessageType.CONVERSATION_TURN_CANCEL:
-        this.conversations.handleTurnCancel(frame.payload);
+      case MessageType.INFERENCE_CANCEL:
+        this.inference.handleCancel(frame.payload as InferenceCancelPayload);
         return;
       case MessageType.APPROVAL_DECISION:
-        this.conversations.handleApprovalDecision(frame.payload);
+        // Approval decisions are routed to the InferenceExecutor's
+        // internal ApprovalCoordinator.
+        this.inference.handleApprovalDecision(frame.payload);
         return;
       case MessageType.AGENT_BIND:
         this.handleBind(frame.payload);
@@ -123,6 +122,30 @@ export class AgentWorker {
         return;
       default:
         this.log.warn("AgentWorker: unhandled frame type", frame.type);
+    }
+  }
+
+  /**
+   * `session.open` (§5.2) — establish a session: instantiate the model once,
+   * register tools, store knowledge-source handles.
+   */
+  private async handleSessionOpen(payload: unknown): Promise<void> {
+    try {
+      await this.sessions.open(payload as SessionOpenPayload);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.log.error("AgentWorker: failed to open session:", message);
+    }
+  }
+
+  /**
+   * `session.close` (§5.2) — tear down a session: dispose the model, drop
+   * the entry.
+   */
+  private handleSessionClose(payload: unknown): void {
+    const p = payload as { sessionId?: string };
+    if (p.sessionId) {
+      this.sessions.close(p.sessionId);
     }
   }
 

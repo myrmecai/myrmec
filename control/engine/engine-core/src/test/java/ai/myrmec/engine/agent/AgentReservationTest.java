@@ -20,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AgentReservationTest extends IntegrationTestBase {
 
     @Autowired private TestDataBuilder data;
-    @Autowired private AgentService agentService;
+    @Autowired private AgentHostService agentService;
     @Autowired private AgentRepository instanceRepository;
 
     @Test

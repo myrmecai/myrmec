@@ -12,10 +12,10 @@ import java.util.UUID;
  * Immutable retrieval request handed to a {@link RetrievalProvider}.
  *
  * <p>Engine builds this from the agent's {@code ctx.retrieve()} call and
- * resolves {@code knowledgeBaseId} from the calling project's access scope
+ * resolves {@code knowledgeSourceId} from the calling project's access scope
  * before dispatch. Providers MUST treat the value as read-only.</p>
  *
- * @param knowledgeBaseId   non-null KB the query targets; resolution and ACL
+ * @param knowledgeSourceId non-null knowledge source the query targets; resolution and ACL
  *                          enforcement happen before the SPI is invoked.
  * @param query             non-blank natural-language query string. Providers
  *                          may rewrite or expand for embedding lookup but the
@@ -27,7 +27,7 @@ import java.util.UUID;
  *                          use an empty map to indicate no filters.
  */
 public record RetrievalQuery(
-    @NotNull UUID knowledgeBaseId,
+    @NotNull UUID knowledgeSourceId,
     @NotBlank String query,
     @Min(1) int topK,
     @NotNull Map<String, String> filters

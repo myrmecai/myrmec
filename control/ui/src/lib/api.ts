@@ -558,14 +558,12 @@ export interface ModelProviderConfig {
   baseUrl: string | null
   deploymentType: DeploymentType
   requiresAuth: boolean
-  authHeader?: string
-  authPrefix?: string
-  healthEndpoint?: string | null
-  modelsEndpoint?: string | null
   docsUrl?: string | null
   description?: string | null
   isSystem?: boolean
   status: ModelStatus
+  connectionConfigId?: string | null
+  connectionConfigName?: string | null
   createdAt?: string
   updatedAt?: string | null
 }
@@ -583,6 +581,7 @@ export const providersApi = {
   update: (code: string, req: UpdateModelProviderRequest) =>
     api.put<ModelProviderConfig>(`/admin/providers/${code}`, req),
   delete: (code: string) => api.delete<void>(`/admin/providers/${code}`),
+  test: (code: string) => api.post<TestModelResponse>(`/admin/providers/${code}/test`),
 }
 
 export interface CreateModelProviderRequest {
@@ -591,12 +590,9 @@ export interface CreateModelProviderRequest {
   baseUrl?: string | null
   deploymentType: DeploymentType
   requiresAuth: boolean
-  authHeader?: string | null
-  authPrefix?: string | null
-  healthEndpoint?: string | null
-  modelsEndpoint?: string | null
   docsUrl?: string | null
   description?: string | null
+  connectionConfigId?: string | null
 }
 
 export interface UpdateModelProviderRequest {
@@ -604,13 +600,10 @@ export interface UpdateModelProviderRequest {
   baseUrl?: string | null
   deploymentType?: DeploymentType
   requiresAuth?: boolean
-  authHeader?: string | null
-  authPrefix?: string | null
-  healthEndpoint?: string | null
-  modelsEndpoint?: string | null
   docsUrl?: string | null
   description?: string | null
   status?: ModelStatus
+  connectionConfigId?: string | null
 }
 
 // Models API
@@ -619,10 +612,8 @@ export interface Model {
   name: string
   provider: string
   providerName: string
-  deploymentType: DeploymentType
   modelId: string
   apiEndpoint: string | null
-  requiresAuth: boolean
   supportsVision: boolean
   infraConfig: Record<string, unknown> | null
   defaultParams: Record<string, unknown> | null
@@ -631,6 +622,9 @@ export interface Model {
   lastHealthCheck: string | null
   lastTestedAt: string | null
   lastTestStatus: string | null
+  inputPrice: number | null
+  outputPrice: number | null
+  currency: string
   createdAt: string
   updatedAt: string | null
 }
@@ -639,25 +633,26 @@ export interface CreateModelRequest {
   code: string
   name: string
   provider: string
-  deploymentType: DeploymentType
   modelId: string
   apiEndpoint?: string
-  apiKey?: string
-  requiresAuth?: boolean
   supportsVision?: boolean
   infraConfig?: Record<string, unknown>
   defaultParams?: Record<string, unknown>
+  inputPrice?: number | null
+  outputPrice?: number | null
+  currency?: string
 }
 
 export interface UpdateModelRequest {
   name?: string
   apiEndpoint?: string
-  apiKey?: string
-  requiresAuth?: boolean
   supportsVision?: boolean
   infraConfig?: Record<string, unknown>
   defaultParams?: Record<string, unknown>
   status?: ModelStatus
+  inputPrice?: number | null
+  outputPrice?: number | null
+  currency?: string
 }
 
 export interface TestModelResponse {
@@ -737,10 +732,10 @@ export const agentProfilesApi = {
   activate: (id: string) => api.post<void>(`/admin/agent-profiles/${id}/activate`),
 }
 
-// Agents API
+// Agent Hosts API
 export type AgentStatus = 'ACTIVE' | 'INACTIVE'
 
-export interface Agent {
+export interface AgentHost {
   id: string
   name: string
   description: string | null
@@ -757,12 +752,12 @@ export interface Agent {
   updatedAt: string | null
 }
 
-export interface AgentWithKey {
-  agent: Agent
+export interface AgentHostWithKey {
+  agent: AgentHost
   registrationKey: string
 }
 
-export interface CreateAgentRequest {
+export interface CreateAgentHostRequest {
   name: string
   description?: string
   profileId: string
@@ -772,7 +767,7 @@ export interface CreateAgentRequest {
   maxAgents?: number
 }
 
-export interface UpdateAgentRequest {
+export interface UpdateAgentHostRequest {
   name?: string
   description?: string
   profileId?: string
@@ -783,25 +778,25 @@ export interface UpdateAgentRequest {
   status?: AgentStatus
 }
 
-export const agentsApi = {
-  list: () => api.get<Agent[]>('/admin/agents'),
-  get: (id: string) => api.get<Agent>(`/admin/agents/${id}`),
-  create: (data: CreateAgentRequest) => api.post<AgentWithKey>('/admin/agents', data),
-  update: (id: string, data: UpdateAgentRequest) =>
-    api.put<Agent>(`/admin/agents/${id}`, data),
-  delete: (id: string) => api.delete<void>(`/admin/agents/${id}`),
+export const agentHostsApi = {
+  list: () => api.get<AgentHost[]>('/admin/agent-hosts'),
+  get: (id: string) => api.get<AgentHost>(`/admin/agent-hosts/${id}`),
+  create: (data: CreateAgentHostRequest) => api.post<AgentHostWithKey>('/admin/agent-hosts', data),
+  update: (id: string, data: UpdateAgentHostRequest) =>
+    api.put<AgentHost>(`/admin/agent-hosts/${id}`, data),
+  delete: (id: string) => api.delete<void>(`/admin/agent-hosts/${id}`),
   regenerateKey: (id: string) =>
-    api.post<{ registrationKey: string }>(`/admin/agents/${id}/regenerate-key`),
+    api.post<{ registrationKey: string }>(`/admin/agent-hosts/${id}/regenerate-key`),
   /**
    * List the ephemeral worker replicas of an agent host together with their
    * runtime FSM status (IDLE/RESERVED/CONNECTING/BOUND/DRAINING/DEAD).
    */
-  workers: (id: string) => api.get<AgentWorker[]>(`/admin/agents/${id}/workers`),
+  workers: (id: string) => api.get<AgentWorker[]>(`/admin/agent-hosts/${id}/workers`),
   /**
    * Aggregated runtime-health snapshot for an agent host: online/idle/busy/
    * stale instance counts, total queue depth, and heartbeat freshness (#69).
    */
-  health: (id: string) => api.get<AgentHealthSnapshot>(`/admin/agents/${id}/health`),
+  health: (id: string) => api.get<AgentHealthSnapshot>(`/admin/agent-hosts/${id}/health`),
 }
 
 // Aggregated agent-host health (#69). Mirrors engine AgentHealthSnapshot.
@@ -1476,6 +1471,8 @@ export interface InstructionAsset {
   description: string | null
   category: InstructionCategory
   status: InstructionAssetStatus
+  availability?: string | null
+  sourceType?: SourceType | null
   currentVersionId: string | null
   publishedAt: string | null
   publishedBy: string | null
@@ -1639,6 +1636,23 @@ export const knowledgeProviderApi = {
     api.post<KnowledgeProviderVersion>(`/admin/knowledge-providers/${id}/versions/${versionId}/clone`),
 }
 
+export interface InstructionBinding {
+  id: string
+  projectId: string
+  instructionAssetId: string
+  enabled: boolean
+}
+
+export const instructionBindingApi = {
+  list: (projectId: string) =>
+    api.get<InstructionBinding[]>(`/admin/projects/${projectId}/instruction-bindings`),
+  update: (projectId: string, assetId: string, enabled: boolean) =>
+    api.put<InstructionBinding>(
+      `/admin/projects/${projectId}/instruction-bindings/${assetId}`,
+      { enabled },
+    ),
+}
+
 // --- Knowledge Sources ---
 
 export interface KnowledgeSource {
@@ -1647,6 +1661,11 @@ export interface KnowledgeSource {
   description: string | null
   providerVersionId: string
   config: Record<string, unknown> | null
+  scope?: string | null
+  projectId?: string | null
+  status?: string
+  availability?: string | null
+  priority?: number
   createdBy: string | null
   createdAt: string
   updatedAt: string
@@ -1665,7 +1684,8 @@ export interface UpdateKnowledgeSourceRequest {
 }
 
 export const knowledgeSourceApi = {
-  list: () => api.get<KnowledgeSource[]>('/admin/knowledge-sources'),
+  list: (includeArchived = false) =>
+    api.get<KnowledgeSource[]>(`/admin/knowledge-sources?includeArchived=${includeArchived}`),
   get: (id: string) => api.get<KnowledgeSource>(`/admin/knowledge-sources/${id}`),
   listByProvider: (providerId: string) =>
     api.get<KnowledgeSource[]>(`/admin/knowledge-providers/${providerId}/knowledge-sources`),

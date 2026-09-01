@@ -154,6 +154,10 @@ public class Conversation {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    @Column(name = "context_snapshot", columnDefinition = "jsonb")
+    private ai.myrmec.engine.context.ContextSnapshot contextSnapshot;
+
     @PrePersist
     void onCreate() {
         createdAt = Instant.now();

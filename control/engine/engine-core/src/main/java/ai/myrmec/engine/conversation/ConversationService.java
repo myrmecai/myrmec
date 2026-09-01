@@ -53,7 +53,10 @@ public class ConversationService {
     @org.springframework.context.annotation.Lazy
     private final ai.myrmec.engine.agent.AgentRepository agentInstanceRepository;
     @org.springframework.context.annotation.Lazy
-    private final ai.myrmec.engine.agent.AgentService agentService;
+    private final ai.myrmec.engine.agent.AgentHostService agentService;
+    private final ai.myrmec.engine.inference.SessionContextAssembler sessionContextAssembler;
+    private final ai.myrmec.engine.governance.GovernancePolicyResolver governancePolicyResolver;
+    private final ai.myrmec.engine.context.InstructionAssetVersionResolver instructionAssetVersionResolver;
 
     /** Create a new conversation and seed an OWNER participant row. */
     @Transactional
@@ -110,6 +113,10 @@ public class ConversationService {
         if (assistantId != null) {
             pinAssistantVersion(conversation, projectId, assistantId);
         }
+
+        // Build and set the context snapshot if the governance profile has CONTEXT_PINNING=ON
+        ai.myrmec.engine.context.ContextSnapshot snapshot = buildContextSnapshot(projectId);
+        conversation.setContextSnapshot(snapshot);
 
         conversation = conversationRepository.save(conversation);
 
@@ -352,7 +359,7 @@ public class ConversationService {
         if (lastSpace > AUTO_TITLE_MAX / 2) {
             cut = cut.substring(0, lastSpace);
         }
-        return cut.strip() + "â€¦";
+        return cut.strip() + "\u2026";
     }
 
     @Transactional(readOnly = true)
@@ -627,7 +634,8 @@ public class ConversationService {
 
     /**
      * Release any worker still BOUND to this conversation back to the warm
-     * pool (Â§9.5). Called when the conversation is archived or closed.
+     * pool (§9.5). Called when the conversation is archived or closed.
+     * Also closes any active inference sessions for this conversation.
      */
     private void releaseBoundWorker(UUID conversationId) {
         try {
@@ -638,6 +646,9 @@ public class ConversationService {
                         log.info("Released BOUND worker {} for archived conversation {}",
                                 instance.getId(), conversationId);
                     });
+            // Close any active CONVERSATION sessions for this conversation
+            // (the session stays open across turns; close it here on archive).
+            sessionContextAssembler.closeSessionsByRefId(conversationId, "CONVERSATION");
         } catch (Exception e) {
             log.warn("Failed to release BOUND worker for conversation {}: {}",
                     conversationId, e.getMessage());
@@ -815,4 +826,32 @@ public class ConversationService {
     public record ApprovalDecisionResult(
             ConversationMessage request,
             ConversationMessage response) { }
+
+    /**
+     * Build a {@link ai.myrmec.engine.context.ContextSnapshot} for the project
+     * if the governance profile has {@code CONTEXT_PINNING=ON} (PINNED_AT_START).
+     * Returns null for {@code IMMEDIATE_EFFECT} profiles.
+     */
+    private ai.myrmec.engine.context.ContextSnapshot buildContextSnapshot(UUID projectId) {
+        var policy = governancePolicyResolver.resolve(
+                ai.myrmec.engine.governance.GovernanceScope.ofProject(projectId));
+        String contextPinning = ai.myrmec.engine.governance.ProductFeature.CONTEXT_PINNING
+                .runtimeName(policy.single(ai.myrmec.engine.governance.ProductFeature.CONTEXT_PINNING));
+
+        if (!"PINNED_AT_START".equals(contextPinning)) {
+            return null;
+        }
+
+        java.util.List<UUID> instructionVersionIds = instructionAssetVersionResolver
+                .resolveActiveVersionIdsForProject(projectId);
+
+        // Knowledge source IDs: mirror the same logic SessionContextAssembler uses
+        java.util.List<UUID> knowledgeSourceIds = sessionContextAssembler
+                .resolveActiveKnowledgeSourceIds(projectId);
+
+        return new ai.myrmec.engine.context.ContextSnapshot(
+                policy.code(),
+                instructionVersionIds,
+                knowledgeSourceIds);
+    }
 }

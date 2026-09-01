@@ -70,13 +70,15 @@ export class LangChainChatModel implements ChatModel {
     for await (const chunk of stream) {
       const content = extractText(chunk.content);
       const usage = extractUsage(chunk.usage_metadata);
-      // Skip wholly empty heartbeat chunks; surface text and/or usage.
-      if (content.length === 0 && usage === undefined) {
+      const toolCalls = extractToolCalls(chunk.tool_calls);
+      // Skip wholly empty heartbeat chunks; surface text, usage, and/or tool calls.
+      if (content.length === 0 && usage === undefined && toolCalls === undefined) {
         continue;
       }
       yield {
         ...(content.length > 0 ? { content } : {}),
         ...(usage !== undefined ? { usage } : {}),
+        ...(toolCalls !== undefined ? { toolCalls } : {}),
       };
     }
   }

@@ -9,7 +9,7 @@ export const Route = createFileRoute('/_authenticated/platform/ai-infra')({
         { label: 'Models', to: '/platform/ai-infra/models' },
         { label: 'Model Providers', to: '/platform/ai-infra/providers' },
         { label: 'Agent Profiles', to: '/platform/ai-infra/agent-profiles' },
-        { label: 'Agents', to: '/platform/ai-infra/agents' },
+        { label: 'Agent Hosts', to: '/platform/ai-infra/agent-hosts' },
         { label: 'Tools', to: '/platform/ai-infra/tools' },
       ]}
     />

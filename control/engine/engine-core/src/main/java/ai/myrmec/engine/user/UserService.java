@@ -1,5 +1,7 @@
 package ai.myrmec.engine.user;
 
+import ai.myrmec.engine._system.common.DomainConstants.AuditAction;
+import ai.myrmec.engine._system.common.ResourceType;
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
@@ -137,7 +139,7 @@ public class UserService {
 
         log.info("Assigned role {} ({}) to user {} (group={}, project={}, granted by={})",
                 role, scopeType, userId, groupId, projectId, grantedByUserId);
-        auditEventService.recordEvent("User", userId, "USER_ROLE_GRANTED", scopeType.name(),
+        auditEventService.recordEvent(ResourceType.USER, userId, AuditAction.USER_ROLE_GRANTED, scopeType.name(),
                 scopeType == UserRole.ScopeType.PROJECT ? projectId : null,
                 grantedByUserId, "USER",
                 null, null, null, null,

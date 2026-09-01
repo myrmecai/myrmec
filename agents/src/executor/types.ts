@@ -69,6 +69,8 @@ export interface ModelResponse {
 export interface ModelStreamChunk {
   content?: string;
   usage?: TokenUsage;
+  /** Tool calls that may arrive during streaming (typically on the final chunk). */
+  toolCalls?: ModelToolCall[];
 }
 
 /** The static description of a tool handed to the model adapter. */
@@ -79,9 +81,17 @@ export interface ToolSpec {
   parameters?: Record<string, unknown>;
 }
 
+/** Risk classification for a tool, as sent by the engine in session.open. */
+export type RiskClass = "SAFE" | "DESTRUCTIVE" | "IRREVERSIBLE";
+
 /** A callable tool: its spec plus an async invocation. */
 export interface Tool extends ToolSpec {
   invoke(args: Record<string, unknown>): Promise<unknown>;
+}
+
+/** A tool with its risk class, as catalogued in the session. */
+export interface SessionTool extends Tool {
+  riskClass: RiskClass;
 }
 
 /** The model adapter seam. The real implementation (LangChain JS / provider

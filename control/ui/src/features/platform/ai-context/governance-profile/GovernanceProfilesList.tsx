@@ -38,6 +38,7 @@ export function GovernanceProfilesList() {
     mutationFn: (code: string) => governanceApi.setDefault(code),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['governance-profiles'] })
+      queryClient.invalidateQueries({ queryKey: ['governance-profile-current'] })
       setConfirmProfile(null)
     },
   })

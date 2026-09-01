@@ -77,4 +77,18 @@ public class ResourceNotFoundException extends RuntimeException {
     public static ResourceNotFoundException agentProfile(Object id) {
         return new ResourceNotFoundException("AgentProfile", id);
     }
+
+    /**
+     * Factory method for knowledge chunk not found.
+     */
+    public static ResourceNotFoundException knowledgeChunk(Object id) {
+        return new ResourceNotFoundException("KnowledgeChunk", id);
+    }
+
+    /**
+     * Factory method for knowledge source not found.
+     */
+    public static ResourceNotFoundException knowledgeSource(Object id) {
+        return new ResourceNotFoundException("KnowledgeSource", id);
+    }
 }

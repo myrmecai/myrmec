@@ -1,5 +1,8 @@
 package ai.myrmec.engine.secret;
 
+import ai.myrmec.engine._system.common.DomainConstants.ActorType;
+import ai.myrmec.engine._system.common.DomainConstants.AuditAction;
+import ai.myrmec.engine._system.common.ResourceType;
 import ai.myrmec.engine._system.exception.DuplicateResourceException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine.project.Project;
@@ -106,10 +109,10 @@ public class SecretService {
         secret = secretRepository.save(secret);
         log.info("Updated secret {} ({})", secret.getName(), id);
         auditEventService.recordEvent(
-                "SECRET", secret.getId(), "SECRET_UPDATED",
+                ResourceType.SECRET, secret.getId(), AuditAction.UPDATED,
                 secret.getProject() == null ? "ORGANIZATION" : "PROJECT",
                 secret.getProject() == null ? null : secret.getProject().getId(),
-                null, "SYSTEM",
+                null, ActorType.SYSTEM,
                 null, null, null, null,
                 java.util.Map.of("name", secret.getName(), "type", secret.getType().name()));
         return SecretResponse.from(secret);
@@ -123,10 +126,10 @@ public class SecretService {
         secret = secretRepository.save(secret);
         log.info("Updated secret metadata for {} ({})", secret.getName(), id);
         auditEventService.recordEvent(
-                "SECRET", secret.getId(), "SECRET_METADATA_UPDATED",
+                ResourceType.SECRET, secret.getId(), AuditAction.METADATA_UPDATED,
                 secret.getProject() == null ? "ORGANIZATION" : "PROJECT",
                 secret.getProject() == null ? null : secret.getProject().getId(),
-                null, "SYSTEM",
+                null, ActorType.SYSTEM,
                 null, null, null, null,
                 java.util.Map.of("name", secret.getName()));
         return SecretResponse.from(secret);
@@ -153,10 +156,10 @@ public class SecretService {
         secretRepository.delete(secret);
         log.info("Deleted secret {} ({})", secret.getName(), id);
         auditEventService.recordEvent(
-                "SECRET", id, "SECRET_DELETED",
+                ResourceType.SECRET, id, AuditAction.DELETED,
                 secret.getProject() == null ? "ORGANIZATION" : "PROJECT",
                 secret.getProject() == null ? null : secret.getProject().getId(),
-                null, "SYSTEM",
+                null, ActorType.SYSTEM,
                 null, null, null, null,
                 java.util.Map.of("name", secret.getName()));
     }
@@ -187,11 +190,11 @@ public class SecretService {
         log.info("Created secret {} (type={}, scope={})",
                 secret.getName(), secret.getType(), secret.isGlobal() ? "GLOBAL" : "PROJECT");
         auditEventService.recordEvent(
-                "SECRET", secret.getId(), "SECRET_CREATED",
+                ResourceType.SECRET, secret.getId(), AuditAction.CREATED,
                 secret.isGlobal() ? "ORGANIZATION" : "PROJECT",
                 secret.isGlobal() ? null : secret.getProject().getId(),
                 currentUserId != null ? currentUserId : null,
-                "SYSTEM",
+                ActorType.SYSTEM,
                 null, null, null, null,
                 java.util.Map.of("name", secret.getName(), "type", secret.getType().name()));
         return SecretResponse.from(secret);

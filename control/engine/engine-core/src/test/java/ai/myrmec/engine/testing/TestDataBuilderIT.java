@@ -2,7 +2,7 @@ package ai.myrmec.engine.testing;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.agent.AgentHost;
-import ai.myrmec.engine.agent.AgentCreationResult;
+import ai.myrmec.engine.agent.AgentHostCreationResult;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileRepository;
 import ai.myrmec.engine.agent.AgentHostRepository;
@@ -49,7 +49,7 @@ class TestDataBuilderIT extends IntegrationTestBase {
         assertThat(profile.getId()).isNotNull();
         assertThat(agentProfileRepository.findById(profile.getId())).isPresent();
 
-        AgentCreationResult result = data.agent()
+        AgentHostCreationResult result = data.agent()
                 .named("td-build-agent")
                 .withProfile(profile)
                 .inProject(project)

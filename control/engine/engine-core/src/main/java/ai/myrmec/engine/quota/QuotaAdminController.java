@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+
 package ai.myrmec.engine.quota;
 
 import ai.myrmec.engine.governance.GovernancePolicyEnforcer;
@@ -24,6 +27,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.time.Instant;
 
 /**
  * Phase 8d &mdash; admin CRUD for {@link Quota} rows and a read-only
@@ -44,6 +48,7 @@ public class QuotaAdminController {
     private final QuotaPolicyEngine quotaPolicyEngine;
     private final GovernancePolicyEnforcer governanceEnforcer;
     private final BudgetAuthorization budgetAuthorization;
+    private final QuotaConsumptionRepository consumptionRepository;
 
     @GetMapping
     public List<QuotaResponse> list(
@@ -116,7 +121,7 @@ public class QuotaAdminController {
             Authentication authentication) {
         Quota q = quotaRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Quota not found: " + id));
-        requireMutate(q, req.resolvedQuotaType(), authentication);
+        requireMutate(q, req.resolvedQuotaType() != null ? req.resolvedQuotaType() : q.getQuotaType(), authentication);
 
         // Governance: BUDGET_OVERRIDE — the create path already gated the scope,
         // and update does not change the quota's scope, so no enforcement is needed here.
@@ -189,7 +194,7 @@ public class QuotaAdminController {
     @GetMapping("/consumption")
     public Map<String, Object> consumption(
             @RequestParam("scopeType") String scopeType,
-            @RequestParam("scopeId") UUID scopeId,
+            @RequestParam(name = "scopeId", required = false) UUID scopeId,
             @RequestParam("resourceType") String resourceType,
             @RequestParam(name = "amount", defaultValue = "0") long amount,
             Authentication authentication) {
@@ -208,6 +213,43 @@ public class QuotaAdminController {
         body.put("remainingAmount", d.getRemainingAmount());
         body.put("scopeHit", d.getScopeHit() != null ? d.getScopeHit().name() : null);
         return body;
+    }
+
+    /**
+     * Seed-only endpoint to inject consumption directly into the
+     * {@link QuotaConsumption} table. Used by e2e tests to pre-consume
+     * tokens without making real LLM calls. Sets the absolute amount
+     * (not additive) for the current period bucket.
+     *
+     * <p>Gated by PLATFORM_ADMIN — this is test infrastructure, not
+     * a production consumption path.</p>
+     */
+    @PostMapping("/{id}/consumption")
+    public ResponseEntity<Void> setConsumption(
+            @PathVariable("id") UUID id,
+            @RequestBody Map<String, Object> body,
+            Authentication authentication) {
+        Quota q = quotaRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Quota not found: " + id));
+        BudgetPermissions perms = budgetAuthorization.permissionsFor(
+                q.getScopeType(), q.getScopeId(), authentication);
+        if (!perms.canView()) {
+            throw new AccessDeniedException(
+                    "Cannot set consumption at " + q.getScopeType() + "/" + q.getScopeId());
+        }
+        long amount = ((Number) body.get("amountUsed")).longValue();
+        Instant periodStart = BasicQuotaPolicyEngine.periodStart(q.getPeriod(), Instant.now());
+        QuotaConsumption bucket = consumptionRepository
+                .findByQuotaIdAndPeriodStart(q.getId(), periodStart)
+                .orElseGet(() -> {
+                    QuotaConsumption c = new QuotaConsumption();
+                    c.setQuotaId(q.getId());
+                    c.setPeriodStart(periodStart);
+                    return c;
+                });
+        bucket.setAmountUsed(amount);
+        consumptionRepository.save(bucket);
+        return ResponseEntity.noContent().build();
     }
 
     private void requireView(Quota.Scope scope, UUID scopeId, Authentication authentication) {

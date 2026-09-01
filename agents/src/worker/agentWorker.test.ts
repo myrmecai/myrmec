@@ -5,23 +5,15 @@ import { describe, it, expect, vi } from "vitest";
 import { AgentWorker } from "./agentWorker.js";
 import type { WorkerInbound, WorkerOutbound } from "./agentWorkerProtocol.js";
 import { MessageType } from "../protocol/messages.js";
-import type {
-  ChatModel,
-  ModelResponse,
-  ModelStreamChunk,
-} from "../executor/types.js";
+import type { ChatModelFactory, SessionToolFactory } from "../executor/providers.js";
 
-/** A model that streams two text chunks then a usage-only chunk. */
-class StreamModel implements ChatModel {
-  async invoke(): Promise<ModelResponse> {
-    return { content: "Hello" };
-  }
-  async *stream(): AsyncIterable<ModelStreamChunk> {
-    yield { content: "Hel" };
-    yield { content: "lo" };
-    yield { usage: { completionTokens: 5 } };
-  }
-}
+/** No-op factories for tests that don't exercise model/tool resolution. */
+const noopChatModelFactory: ChatModelFactory = {
+  resolve: async () => { throw new Error("test does not exercise model resolution") },
+};
+const noopSessionToolFactory: SessionToolFactory = {
+  resolve: async () => new Map(),
+};
 
 function inbound(type: string, payload: unknown): WorkerInbound {
   return {
@@ -54,7 +46,7 @@ function turnPayload(overrides: Record<string, unknown> = {}) {
 describe("AgentWorker", () => {
   it("routes a conversation.turn.assign and posts deltas + complete out", async () => {
     const { post, frames, typesSent } = sink();
-    const worker = new AgentWorker({ post, resolveModel: () => new StreamModel() });
+    const worker = new AgentWorker({ post, chatModelFactory: noopChatModelFactory, sessionToolFactory: noopSessionToolFactory });
 
     worker.handle(
       inbound(MessageType.CONVERSATION_TURN_ASSIGN, turnPayload()),
@@ -78,7 +70,8 @@ describe("AgentWorker", () => {
     const warn = vi.fn();
     const worker = new AgentWorker({
       post,
-      resolveModel: () => new StreamModel(),
+      chatModelFactory: noopChatModelFactory,
+      sessionToolFactory: noopSessionToolFactory,
       logger: { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() },
     });
 
@@ -94,7 +87,8 @@ describe("AgentWorker", () => {
     const warn = vi.fn();
     const worker = new AgentWorker({
       post,
-      resolveModel: () => new StreamModel(),
+      chatModelFactory: noopChatModelFactory,
+      sessionToolFactory: noopSessionToolFactory,
       logger: { debug, info: vi.fn(), warn, error: vi.fn() },
     });
 
@@ -115,7 +109,8 @@ describe("AgentWorker", () => {
     const warn = vi.fn();
     const worker = new AgentWorker({
       post,
-      resolveModel: () => new StreamModel(),
+      chatModelFactory: noopChatModelFactory,
+      sessionToolFactory: noopSessionToolFactory,
       logger: { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() },
     });
 
@@ -129,7 +124,8 @@ describe("AgentWorker", () => {
     const warn = vi.fn();
     const worker = new AgentWorker({
       post,
-      resolveModel: () => new StreamModel(),
+      chatModelFactory: noopChatModelFactory,
+      sessionToolFactory: noopSessionToolFactory,
       logger: { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() },
     });
 
@@ -149,7 +145,8 @@ describe("AgentWorker", () => {
     const warn = vi.fn();
     const worker = new AgentWorker({
       post,
-      resolveModel: () => new StreamModel(),
+      chatModelFactory: noopChatModelFactory,
+      sessionToolFactory: noopSessionToolFactory,
       logger: { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() },
     });
 
@@ -162,6 +159,6 @@ describe("AgentWorker", () => {
 
   it("constructs with the built-in resolver when none is injected", () => {
     const { post } = sink();
-    expect(() => new AgentWorker({ post })).not.toThrow();
+    expect(() => new AgentWorker({ post, chatModelFactory: noopChatModelFactory, sessionToolFactory: noopSessionToolFactory })).not.toThrow();
   });
 });

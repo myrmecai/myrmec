@@ -1,5 +1,8 @@
 package ai.myrmec.engine.attachment;
 
+import ai.myrmec.engine._system.common.DomainConstants.ActorType;
+import ai.myrmec.engine._system.common.DomainConstants.AuditAction;
+import ai.myrmec.engine._system.common.ResourceType;
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine.audit.AuditEventService;
@@ -139,7 +142,7 @@ public class AttachmentService {
                     : AttachmentScanStatus.ERROR);
             row.setScanThreat(scan.threat());
             ConversationMessageAttachment quarantined = attachmentRepository.save(row);
-            audit("ATTACHMENT_QUARANTINED", conversationId, quarantined.getId(), actorUserId,
+            audit(AuditAction.QUARANTINED, conversationId, quarantined.getId(), actorUserId,
                     Map.of(
                             "filename", filename,
                             "mediaType", mediaType,
@@ -166,7 +169,7 @@ public class AttachmentService {
             log.warn("Attachment text extraction failed for {} ({}): {}", filename, mediaType, ex.getMessage());
         }
         ConversationMessageAttachment saved = attachmentRepository.save(row);
-        audit("ATTACHMENT_UPLOADED", conversationId, saved.getId(), actorUserId,
+        audit(AuditAction.UPLOADED, conversationId, saved.getId(), actorUserId,
                 Map.of(
                         "filename", filename,
                         "mediaType", mediaType,
@@ -204,7 +207,7 @@ public class AttachmentService {
             row.setMessageId(messageId);
         }
         List<ConversationMessageAttachment> bound = attachmentRepository.saveAll(unbound);
-        audit("ATTACHMENT_BOUND", conversationId, messageId, actorUserId,
+        audit(AuditAction.BOUND, conversationId, messageId, actorUserId,
                 Map.of("messageId", messageId.toString(), "count", bound.size()));
         return bound;
     }
@@ -236,7 +239,7 @@ public class AttachmentService {
             blobStore.delete(row.getStorageKey());
         }
         attachmentRepository.delete(row);
-        audit("ATTACHMENT_DELETED", conversationId, attachmentId, actorUserId,
+        audit(AuditAction.DELETED, conversationId, attachmentId, actorUserId,
                 Map.of("filename", row.getFilename()));
     }
 
@@ -289,8 +292,8 @@ public class AttachmentService {
         Map<String, Object> body = new LinkedHashMap<>(payload);
         body.put("conversationId", conversationId.toString());
         try {
-            auditEventService.recordEvent("ConversationMessageAttachment", attachmentId, action,
-                    "ORGANIZATION", null, actorUserId, actorUserId != null ? "USER" : "SYSTEM",
+            auditEventService.recordEvent(ResourceType.CONVERSATION_ATTACHMENT, attachmentId, action,
+                    "ORGANIZATION", null, actorUserId, actorUserId != null ? ActorType.USER : ActorType.SYSTEM,
                     null, null, null, null, body);
         } catch (Exception e) {
             log.warn("Audit of {} failed (continuing): {}", action, e.getMessage());

@@ -26,6 +26,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RequiredMark } from '@/components/ui/required-marks'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
@@ -1013,7 +1014,7 @@ function CreateWorkflowDialog({
 
       <div className="grid gap-4 py-4">
         <div className="grid gap-2">
-          <Label htmlFor="create-project">Project *</Label>
+          <Label htmlFor="create-project">Project<RequiredMark /></Label>
           <Select
             value={projectId}
             onValueChange={(v) =>
@@ -1040,7 +1041,7 @@ function CreateWorkflowDialog({
         </div>
 
         <div className="grid gap-2">
-          <Label htmlFor="create-name">Name *</Label>
+          <Label htmlFor="create-name">Name<RequiredMark /></Label>
           <Input
             id="create-name"
             placeholder="e.g., Code Review Pipeline"
@@ -1128,7 +1129,7 @@ function EditWorkflowDialog({
         <input type="hidden" {...register('projectId')} />
 
         <div className="grid gap-2">
-          <Label htmlFor="edit-name">Name *</Label>
+          <Label htmlFor="edit-name">Name<RequiredMark /></Label>
           <Input id="edit-name" {...register('name')} />
           {errors.name && (
             <p className="text-xs text-red-600">{errors.name.message}</p>

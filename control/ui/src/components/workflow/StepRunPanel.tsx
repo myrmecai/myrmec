@@ -45,6 +45,7 @@ const taskStatusColors: Record<TaskStatus, string> = {
   RUNNING: 'bg-yellow-500',
   COMPLETED: 'bg-green-600',
   CANCELLED: 'bg-red-600',
+  PAUSED: 'bg-amber-500',
 }
 
 const taskStatusLabels: Record<TaskStatus, string> = {
@@ -53,6 +54,7 @@ const taskStatusLabels: Record<TaskStatus, string> = {
   RUNNING: 'Running',
   COMPLETED: 'Completed',
   CANCELLED: 'Cancelled',
+  PAUSED: 'Paused',
 }
 
 const taskResultColors: Record<TaskResult, string> = {

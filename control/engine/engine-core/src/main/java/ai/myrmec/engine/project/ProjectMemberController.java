@@ -17,7 +17,12 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Manage project-scoped user memberships — viewers/editors of the project (or SYSTEM_ADMIN).
+ * Manage project-scoped user memberships — viewers/editors of the project.
+ *
+ * <p>Member management is owner-level (see {@code ProjectAccessEvaluator#canOwn}):
+ * project-scoped {@code PROJECT_OWNER} or system-wide {@code ORG_ADMIN} (governance
+ * bypass). A project EDITOR cannot add/remove members — granting roles, including
+ * {@code PROJECT_OWNER}, is a governance action reserved to owners.
  */
 @RestController
 @RequestMapping("/api/v1/projects/{projectId}/members")
@@ -33,13 +38,13 @@ public class ProjectMemberController {
     }
 
     @GetMapping("/candidates")
-    @PreAuthorize("@projectAccess.canEdit(#projectId, authentication)")
+    @PreAuthorize("@projectAccess.canOwn(#projectId, authentication)")
     public List<ProjectMemberCandidate> listCandidates(@PathVariable UUID projectId) {
         return projectMemberService.listCandidates(projectId);
     }
 
     @PostMapping
-    @PreAuthorize("@projectAccess.canEdit(#projectId, authentication)")
+    @PreAuthorize("@projectAccess.canOwn(#projectId, authentication)")
     public ResponseEntity<ProjectMemberResponse> assign(
             @PathVariable UUID projectId,
             @Valid @RequestBody AssignProjectMemberRequest request,
@@ -49,7 +54,7 @@ public class ProjectMemberController {
     }
 
     @DeleteMapping("/{userId}/roles/{roleId}")
-    @PreAuthorize("@projectAccess.canEdit(#projectId, authentication)")
+    @PreAuthorize("@projectAccess.canOwn(#projectId, authentication)")
     public ResponseEntity<Void> remove(
             @PathVariable UUID projectId,
             @PathVariable UUID userId,

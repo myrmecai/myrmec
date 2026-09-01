@@ -1,6 +1,7 @@
 package ai.myrmec.engine.conversation.dispatch;
 
-import ai.myrmec.engine.websocket.message.payload.ConversationTurnAssignPayload;
+import ai.myrmec.engine.websocket.message.payload.InferenceAssignPayload;
+import ai.myrmec.engine.websocket.message.payload.SessionOpenPayload;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -10,7 +11,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Per-replica buffer that holds an assembled {@code conversation.turn.assign}
+ * Per-replica buffer that holds an assembled {@code inference.assign}
  * payload until the worker opens + attaches its conversation socket
  * (agent-concurrency §9.4).
  *
@@ -31,15 +32,18 @@ import java.util.concurrent.ConcurrentHashMap;
 public class PendingTurnRegistry {
 
     /** conversationId → the turn awaiting its conversation socket. */
-    private final Map<UUID, ConversationTurnAssignPayload> pending = new ConcurrentHashMap<>();
+    private final Map<UUID, InferenceAssignPayload> pending = new ConcurrentHashMap<>();
+
+    /** conversationId → session.open payload awaiting flush (sent before the first turn). */
+    private final Map<UUID, SessionOpenPayload> pendingSessionOpen = new ConcurrentHashMap<>();
 
     /**
      * Buffer a turn for delivery once the worker's conversation socket
      * attaches. A newer turn for the same conversation displaces an older
      * un-flushed one (the latest dispatch wins).
      */
-    public void enqueue(UUID conversationId, ConversationTurnAssignPayload payload) {
-        ConversationTurnAssignPayload previous = pending.put(conversationId, payload);
+    public void enqueue(UUID conversationId, InferenceAssignPayload payload) {
+        InferenceAssignPayload previous = pending.put(conversationId, payload);
         if (previous != null) {
             log.warn("Replacing an un-flushed pending turn for conversation {}", conversationId);
         }
@@ -49,12 +53,23 @@ public class PendingTurnRegistry {
      * Remove and return the buffered turn for a conversation, if any. Called by
      * the conversation-socket handler on {@code conversation.attach}.
      */
-    public Optional<ConversationTurnAssignPayload> take(UUID conversationId) {
+    public Optional<InferenceAssignPayload> take(UUID conversationId) {
         return Optional.ofNullable(pending.remove(conversationId));
     }
 
     /** Drop a buffered turn without delivering it (e.g. on reservation teardown). */
     public void discard(UUID conversationId) {
         pending.remove(conversationId);
+        pendingSessionOpen.remove(conversationId);
+    }
+
+    /** Buffer a session.open payload to send before the first inference.assign. */
+    public void enqueueSessionOpen(UUID conversationId, SessionOpenPayload payload) {
+        pendingSessionOpen.put(conversationId, payload);
+    }
+
+    /** Remove and return the buffered session.open, if any. */
+    public Optional<SessionOpenPayload> takeSessionOpen(UUID conversationId) {
+        return Optional.ofNullable(pendingSessionOpen.remove(conversationId));
     }
 }

@@ -4,7 +4,9 @@
 import { test, expect } from '../fixtures'
 import type { Page } from '@playwright/test'
 import { E2E_ADMIN } from '../helpers/api'
-import { createVersionedEntityTests, type VersionedEntityConfig } from './versioned-entity-standard.spec'
+import { confirmDialog } from '../helpers/confirm-dialog'
+import { createVersionedEntityTests, type VersionedEntityConfig } from '../helpers/versioned-entity-standard'
+import { setGovernanceProfile, resetGovernanceProfile } from '../helpers/governance'
 
 /**
  * UC-KM-02 - Manage Org Instruction Assets
@@ -48,8 +50,8 @@ async function findAssetByName(api: any, name: string): Promise<string | null> {
 
 /**
  * Custom create-and-publish flow for Instruction Assets:
- * 1. Quick-Create (Name + Category) → auto-navigates to detail with Draft created
- * 2. Draft is already created with INLINE source type
+ * 1. Quick-Create (Name + Category + GIT source type) → auto-navigates to detail with Draft created
+ * 2. Draft is created with GIT source type (INLINE is blocked by STANDARD governance at org scope)
  * 3. Publish directly (Save Draft API is broken — no update endpoint)
  */
 async function createInstructionAssetAndPublish(page: Page, _config: VersionedEntityConfig, name: string): Promise<void> {
@@ -57,12 +59,16 @@ async function createInstructionAssetAndPublish(page: Page, _config: VersionedEn
   await page.goto('/platform/ai-context/instruction-assets')
   await page.getByRole('button', { name: 'New Instruction' }).click()
   await page.getByLabel('Name').fill(name)
+  // Select GIT source type — INLINE is blocked at org scope under STANDARD governance
+  await page.getByLabel('Source Type').click()
+  await page.getByRole('option', { name: /Git/i }).click()
   await page.getByRole('button', { name: /Create/i }).click()
   // Auto-navigates to detail page with Draft already created (Pattern 4 §Rule 4)
   await expect(page).toHaveURL(/\/platform\/ai-context\/instruction-assets\/[^/]+$/, { timeout: 10_000 })
   await expect(page.getByText(/Draft.*v1/i)).toBeVisible({ timeout: 10_000 })
   // Publish directly (Save Draft API is broken — no update endpoint)
   await page.getByRole('button', { name: /Publish/i }).click()
+  await confirmDialog(page, 'Publish')
   await expect(page.getByText(/Published Version/i)).toBeVisible({ timeout: 10_000 })
 }
 
@@ -102,6 +108,12 @@ createVersionedEntityTests({
   // Custom create-and-publish flow
   customCreateDraftAndPublish: createInstructionAssetAndPublish,
   customFillDraftAndSave: fillInlineDraftAndSave,
+  // Select GIT source type in Quick-Create dialog — INLINE is blocked at org
+  // scope under STANDARD governance (INLINE_INSTRUCTIONS_SCOPE=PROJECT_SERVICE).
+  preCreateAction: async (page) => {
+    await page.getByLabel('Source Type').click()
+    await page.getByRole('option', { name: /Git/i }).click()
+  },
   adminEmail: E2E_ADMIN.email,
   adminPassword: E2E_ADMIN.password,
 })
@@ -111,6 +123,13 @@ createVersionedEntityTests({
 test.describe('UC-KM-02 instruction assets - entity-specific tests', () => {
   test.beforeEach(async ({ api }) => {
     await api.login(E2E_ADMIN.email, E2E_ADMIN.password)
+    // Org-scoped INLINE instruction assets require FLEXIBLE governance
+    // (STANDARD blocks INLINE at org scope: INLINE_INSTRUCTIONS_SCOPE=PROJECT_SERVICE)
+    await setGovernanceProfile(api, 'FLEXIBLE')
+  })
+
+  test.afterEach(async ({ api }) => {
+    await resetGovernanceProfile(api)
   })
 
   // T-IA-01: Quick-create dialog shows Name, Category, Source Type (3 fields)
@@ -197,6 +216,7 @@ test.describe('UC-KM-02 instruction assets - entity-specific tests', () => {
       }
       // Publish
       await adminPage.getByRole('button', { name: /Publish/i }).click()
+      await confirmDialog(adminPage, 'Publish')
       await expect(adminPage.getByText(/Published Version/i)).toBeVisible({ timeout: 10_000 })
       // Verify content visible in published version (in a <pre> tag)
       await expect(adminPage.getByText('Test instruction: Always use parameterized queries.').first()).toBeVisible({ timeout: 5_000 })
@@ -273,6 +293,7 @@ test.describe('UC-KM-02 instruction assets - entity-specific tests', () => {
         await expect(saveBtn).toBeDisabled({ timeout: 5_000 })
       }
       await adminPage.getByRole('button', { name: /Publish/i }).click()
+      await confirmDialog(adminPage, 'Publish')
       await expect(adminPage.getByText(/Published Version/i)).toBeVisible({ timeout: 10_000 })
 
       // Click Preview on the published version
@@ -352,6 +373,7 @@ test.describe('UC-KM-02 instruction assets - entity-specific tests', () => {
         }
       }
       await adminPage.getByRole('button', { name: /Publish/i }).click()
+      await confirmDialog(adminPage, 'Publish')
       await expect(adminPage.getByText(/Published Version.*v1/i)).toBeVisible({ timeout: 10_000 })
 
       // Edit Zone 1 — change category to PERSONA
@@ -381,6 +403,7 @@ test.describe('UC-KM-02 instruction assets - entity-specific tests', () => {
       await expect(adminPage.getByText(/Draft.*v1/i)).toBeVisible({ timeout: 10_000 })
       // Publish directly (Draft was auto-created with CONVERSATION + WORKFLOW)
       await adminPage.getByRole('button', { name: /Publish/i }).click()
+      await confirmDialog(adminPage, 'Publish')
       await expect(adminPage.getByText(/Published Version/i)).toBeVisible({ timeout: 10_000 })
       // Verify both service types visible in published version
       await expect(adminPage.getByText('CONVERSATION').first()).toBeVisible()
@@ -408,6 +431,7 @@ test.describe('UC-KM-02 instruction assets - entity-specific tests', () => {
       await expect(adminPage.getByText(/Draft.*v1/i)).toBeVisible({ timeout: 10_000 })
       // Publish directly
       await adminPage.getByRole('button', { name: /Publish/i }).click()
+      await confirmDialog(adminPage, 'Publish')
       await expect(adminPage.getByText(/Published Version/i)).toBeVisible({ timeout: 10_000 })
       // Verify REQUIRED is shown in published version
       await expect(adminPage.getByText('REQUIRED').first()).toBeVisible()
@@ -480,6 +504,7 @@ test.describe('UC-KM-02 instruction assets - entity-specific tests', () => {
 
       // Publish and verify values persist in published version
       await adminPage.getByRole('button', { name: /Publish/i }).click()
+      await confirmDialog(adminPage, 'Publish')
       await expect(adminPage.getByText(/Published Version/i)).toBeVisible({ timeout: 10_000 })
       await expect(adminPage.getByText('v2.0.0').first()).toBeVisible({ timeout: 5_000 })
       await expect(adminPage.getByText('docs/**/*.md').first()).toBeVisible({ timeout: 5_000 })
@@ -500,6 +525,7 @@ test.describe('UC-KM-02 instruction assets - entity-specific tests', () => {
       await adminPage.getByRole('button', { name: /Create/i }).click()
       await expect(adminPage).toHaveURL(/\/platform\/ai-context\/instruction-assets\/[^/]+$/, { timeout: 10_000 })
       await adminPage.getByRole('button', { name: /Publish/i }).click()
+      await confirmDialog(adminPage, 'Publish')
       await expect(adminPage.getByText(/Published Version/i)).toBeVisible({ timeout: 10_000 })
 
       // Navigate back to list page

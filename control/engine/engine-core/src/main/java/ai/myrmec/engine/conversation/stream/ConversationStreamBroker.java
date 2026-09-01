@@ -1,5 +1,6 @@
 package ai.myrmec.engine.conversation.stream;
 
+import ai.myrmec.engine.node.NodeTransport;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -20,11 +21,10 @@ import java.util.concurrent.CopyOnWriteArraySet;
  * concrete transport so producers and the cross-instance fan-out stay
  * neutral.</p>
  *
- * <p>Cross-instance fan-out (Phase 6f) is delegated to a
- * {@link ConversationStreamFanout} bean: the default
- * {@link NoopConversationStreamFanout} keeps single-instance behaviour
- * identical to Phase 6c, and clustered deployments inject the
- * Postgres LISTEN/NOTIFY variant.</p>
+ * <p>Cross-instance fan-out is delegated to the unified
+ * {@link NodeTransport} bean: the OSS {@code DirectRpcNodeTransport} uses
+ * HTTP RPC for both point-to-point and fan-out; EE deployments provide a
+ * Redis-backed bean through the same SPI.</p>
  *
  * <p>Thread-safety: subscribers per conversation are kept in a
  * {@link CopyOnWriteArraySet} so {@link #broadcast} can iterate without
@@ -37,20 +37,20 @@ public class ConversationStreamBroker {
     /** conversationId → live sinks tuned to that conversation. */
     private final Map<UUID, Set<ConversationSubscriber>> subscribers = new ConcurrentHashMap<>();
 
-    private final ConversationStreamFanout fanout;
+    private final NodeTransport nodeTransport;
 
-    public ConversationStreamBroker(ConversationStreamFanout fanout) {
-        this.fanout = fanout;
+    public ConversationStreamBroker(NodeTransport nodeTransport) {
+        this.nodeTransport = nodeTransport;
     }
 
     /**
-     * Register the local-only delivery callback with the fanout so frames
+     * Register the local-only delivery callback with the transport so frames
      * arriving from peer instances re-enter the broker without triggering
-     * another {@link ConversationStreamFanout#publish}.
+     * another {@link NodeTransport#publishToPeers}.
      */
     @PostConstruct
     void wireRemoteHandler() {
-        fanout.setRemoteHandler(this::deliverLocal);
+        nodeTransport.setFanoutHandler(this::deliverLocal);
     }
 
     public void subscribe(UUID conversationId, ConversationSubscriber subscriber) {
@@ -81,7 +81,7 @@ public class ConversationStreamBroker {
     public int broadcast(UUID conversationId, String jsonFrame) {
         int delivered = deliverLocal(conversationId, jsonFrame);
         try {
-            fanout.publish(conversationId, jsonFrame);
+            nodeTransport.publishToPeers(conversationId, jsonFrame);
         } catch (RuntimeException e) {
             // A flaky cross-instance bridge must never fail the local turn.
             log.warn("Cross-instance fanout publish failed for conversation {}: {}",
@@ -93,7 +93,7 @@ public class ConversationStreamBroker {
     /**
      * Local-only delivery path. Used both as the implementation of
      * {@link #broadcast} and as the callback handed to the
-     * {@link ConversationStreamFanout} for inbound remote frames.
+     * {@link NodeTransport} for inbound remote frames.
      */
     int deliverLocal(UUID conversationId, String jsonFrame) {
         Set<ConversationSubscriber> set = subscribers.get(conversationId);
@@ -127,5 +127,16 @@ public class ConversationStreamBroker {
     public int subscriberCount(UUID conversationId) {
         Set<ConversationSubscriber> set = subscribers.get(conversationId);
         return set == null ? 0 : set.size();
+    }
+
+    /**
+     * Deliver a frame arriving from a peer instance to local subscribers.
+     * Called by {@code StreamRelayController} on the receiving side of a
+     * cross-instance fan-out. Delegates to {@link #deliverLocal} — the
+     * same path used for local delivery — so the frame reaches SSE
+     * subscribers identically regardless of origin.
+     */
+    public void deliverRemote(UUID conversationId, String jsonFrame) {
+        deliverLocal(conversationId, jsonFrame);
     }
 }

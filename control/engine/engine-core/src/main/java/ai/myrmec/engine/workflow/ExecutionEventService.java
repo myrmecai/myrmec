@@ -4,6 +4,7 @@ import ai.myrmec.engine.workflow.dto.ExecutionEventResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -150,13 +151,13 @@ public class ExecutionEventService {
      * and returned chunk/source IDs + scores so an AUDITOR can replay which
      * knowledge fed an answer. IDs and scores only, never passage text.
      */
-    @Transactional
-    public ExecutionEvent recordRetrieval(UUID taskId, UUID attemptId, UUID knowledgeBaseId,
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public ExecutionEvent recordRetrieval(UUID taskId, UUID attemptId, UUID knowledgeSourceId,
                                           String query, int topK,
                                           List<UUID> chunkIds, List<UUID> sourceIds,
                                           List<Double> scores) {
         ExecutionEvent event = ExecutionEvent.retrieval(
-                taskId, attemptId, knowledgeBaseId, query, topK, chunkIds, sourceIds, scores);
+                taskId, attemptId, knowledgeSourceId, query, topK, chunkIds, sourceIds, scores);
         event = eventRepository.save(event);
         publishEvent(event);
         return event;

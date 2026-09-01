@@ -1,6 +1,5 @@
 package ai.myrmec.engine;
 
-import ai.myrmec.engine.model.DeploymentType;
 import ai.myrmec.engine.model.Model;
 import ai.myrmec.engine.model.ModelStatus;
 import ai.myrmec.engine.project.Project;
@@ -77,8 +76,6 @@ public class TestDataFactory {
             this.model = new Model();
             this.model.setCode(code);
             this.model.setName(code);
-            this.model.setDeploymentType(DeploymentType.CLOUD);
-            this.model.setRequiresAuth(true);
             this.model.setStatus(ModelStatus.ACTIVE);
             this.model.setCreatedAt(Instant.now());
         }
@@ -100,16 +97,6 @@ public class TestDataFactory {
 
         public ModelBuilder apiEndpoint(String endpoint) {
             model.setApiEndpoint(endpoint);
-            return this;
-        }
-
-        public ModelBuilder apiKeyEncrypted(byte[] encrypted) {
-            model.setApiKeyEncrypted(encrypted);
-            return this;
-        }
-
-        public ModelBuilder deploymentType(DeploymentType type) {
-            model.setDeploymentType(type);
             return this;
         }
 

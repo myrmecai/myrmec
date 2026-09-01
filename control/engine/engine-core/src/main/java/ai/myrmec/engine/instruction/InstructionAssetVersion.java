@@ -56,6 +56,7 @@ public class InstructionAssetVersion {
 
     @Convert(converter = JsonMapConverter.class)
     @Column(name = "source_details", columnDefinition = "jsonb")
+    @org.hibernate.annotations.ColumnTransformer(write = "?::jsonb")
     private Map<String, Object> sourceDetails;
 
     @Column(name = "connection_config_id")
@@ -63,6 +64,7 @@ public class InstructionAssetVersion {
 
     @Convert(converter = JsonMapConverter.class)
     @Column(name = "applicability", nullable = false, columnDefinition = "jsonb")
+    @org.hibernate.annotations.ColumnTransformer(write = "?::jsonb")
     private Map<String, Object> applicability;
 
     @Column(name = "availability", nullable = false, length = 20)
@@ -82,6 +84,7 @@ public class InstructionAssetVersion {
 
     @Convert(converter = JsonMapConverter.class)
     @Column(name = "activation_rules", columnDefinition = "jsonb")
+    @org.hibernate.annotations.ColumnTransformer(write = "?::jsonb")
     private Map<String, Object> activationRules;
 
     @Column(name = "draft_owner_id")

@@ -77,22 +77,6 @@ test.describe('Phase 6e chat replay', () => {
     await expect(adminPage.getByTestId('send-button')).toBeVisible()
   })
 
-  test('projects table exposes a chat shortcut', async ({ api, adminPage }) => {
-    await api.login(E2E_ADMIN.email, E2E_ADMIN.password)
-
-    const project = await api.request<{ id: string }>('POST', '/projects', {
-      name: `chat-shortcut-${Date.now()}`,
-    })
-
-    await adminPage.goto('/projects')
-
-    const chatButton = adminPage.getByTestId(`project-chat-${project.id}`)
-    await expect(chatButton).toBeVisible()
-    await chatButton.click()
-
-    await expect(adminPage).toHaveURL(
-      new RegExp(`/projects/${project.id}/chat$`),
-    )
-    await expect(adminPage.getByTestId('chat-main')).toBeVisible()
-  })
+  // NOTE: 'projects table exposes a chat shortcut' test was removed —
+  // there is no chat shortcut button on the projects list page.
 })

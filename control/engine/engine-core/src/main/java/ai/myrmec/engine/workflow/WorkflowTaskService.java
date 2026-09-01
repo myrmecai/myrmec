@@ -54,7 +54,14 @@ public class WorkflowTaskService {
                 task.getStartedAt(),
                 task.getCompletedAt(),
                 task.getKnowledgeSourceIds(),
-                task.getMetrics()
+                task.getCurrentAttempt() != null ? task.getCurrentAttempt().getId() : null,
+                null, // attempts list — not populated in this path
+                task.getMetrics(),
+                task.getPauseMode(),
+                task.getPauseState(),
+                task.getPauseReason(),
+                task.getPausedAt(),
+                task.getNextEligibleAt()
         );
     }
 }

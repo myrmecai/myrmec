@@ -2,7 +2,7 @@ package ai.myrmec.engine.websocket;
 
 import ai.myrmec.engine.agent.Agent;
 import ai.myrmec.engine.agent.AgentRepository;
-import ai.myrmec.engine.agent.AgentService;
+import ai.myrmec.engine.agent.AgentHostService;
 import ai.myrmec.engine.conversation.ContextSummaryMarker;
 import ai.myrmec.engine.conversation.ConversationMessage;
 import ai.myrmec.engine.conversation.ConversationService;
@@ -45,7 +45,7 @@ import java.util.UUID;
 public class ConversationInboundService {
 
     private final AgentRepository agentInstanceRepository;
-    private final AgentService agentService;
+    private final AgentHostService agentService;
     private final ConversationService conversationService;
     private final ConversationStreamBroker conversationStreamBroker;
     private final SecretLeakService secretLeakService;
@@ -341,9 +341,9 @@ public class ConversationInboundService {
                     req.getConversationId(), agentInstanceId, e.getMessage(), e);
             return;
         }
-        // Broadcast to viewers with both ids populated so the UI knows which row
-        // to render and the originating agent's other viewers (multi-tab admin)
-        // see the same envelope.
+        // Broadcast the approval.request envelope so the UI knows to refetch.
+        // Also bridge a message.complete envelope so the UI's mergeHistory can
+        // insert the APPROVAL_REQUEST row directly — no REST refetch needed.
         ApprovalRequestPayload broadcast = ApprovalRequestPayload.builder()
                 .conversationId(req.getConversationId())
                 .clientRequestId(req.getClientRequestId())
@@ -351,6 +351,7 @@ public class ConversationInboundService {
                 .content(persisted.getContent())
                 .payloadJson(persisted.getPayloadJson())
                 .expiresAt(persisted.getExpiresAt())
+                .sequenceNo(persisted.getSequenceNo())
                 .build();
         WebSocketMessage<ApprovalRequestPayload> envelope =
                 WebSocketMessage.of(MessageType.APPROVAL_REQUEST, broadcast);
@@ -359,6 +360,19 @@ public class ConversationInboundService {
             conversationStreamBroker.broadcast(req.getConversationId(), json);
         } catch (Exception e) {
             log.warn("Failed to serialise approval.request envelope for conv {}: {}",
+                    req.getConversationId(), e.getMessage());
+        }
+        // Bridge a message.complete envelope so the UI's mergeHistory can
+        // insert the APPROVAL_REQUEST row directly — no REST refetch needed.
+        // Pattern matches InboundInferenceHandler.handleConversationComplete().
+        try {
+            Map<String, Object> mcEnvelope = buildHistoryEnvelope(persisted);
+            String mcFrame = objectMapper.writeValueAsString(mcEnvelope);
+            conversationStreamBroker.broadcast(req.getConversationId(), mcFrame);
+            log.info("Bridged message.complete for APPROVAL_REQUEST on conv {} (seq {})",
+                    req.getConversationId(), persisted.getSequenceNo());
+        } catch (Exception e) {
+            log.warn("Failed to build message.complete bridge for APPROVAL_REQUEST conv {}: {}",
                     req.getConversationId(), e.getMessage());
         }
         log.info("Agent {} requested approval on conv {} (clientId {}, persisted as {})",
@@ -391,6 +405,18 @@ public class ConversationInboundService {
         }
         if (msg.getTokenCount() != null) {
             payload.put("tokenCount", msg.getTokenCount());
+        }
+        if (msg.getPayloadJson() != null) {
+            payload.put("payloadJson", msg.getPayloadJson());
+        }
+        if (msg.getApprovalStatus() != null) {
+            payload.put("approvalStatus", msg.getApprovalStatus().name());
+        }
+        if (msg.getApproverId() != null) {
+            payload.put("approverId", msg.getApproverId().toString());
+        }
+        if (msg.getExpiresAt() != null) {
+            payload.put("expiresAt", msg.getExpiresAt().toString());
         }
         payload.put("pinned", msg.isPinned());
         if (msg.getCreatedAt() != null) {

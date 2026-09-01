@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Squashed changelog: sessions table.
+        A session binds a service interaction (conversation, workflow run, etc.)
+        to a project and carries context pins for the active context builder.
+    -->
+
+    <!-- ================================================================
+         sessions
+         ================================================================ -->
+    <changeSet id="013-sessions-create-sessions" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="sessions"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="sessions">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="service_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="ref_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="context_pins" type="jsonb"/>
+            <column name="status" type="varchar(20)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="closed_at" type="timestamp with time zone"/>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="sessions"
+            baseColumnNames="project_id"
+            constraintName="fk_sessions_project"
+            referencedTableName="projects"
+            referencedColumnNames="id"/>
+
+        <createIndex indexName="idx_sessions_ref_id" tableName="sessions">
+            <column name="ref_id"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

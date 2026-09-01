@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+
 package ai.myrmec.engine.quota.dto;
 
 import ai.myrmec.engine.quota.EnforcementMode;
@@ -22,7 +25,7 @@ import java.util.Map;
 public class UpdateQuotaRequest {
 
     @Min(0)
-    long limitAmount;
+    Long limitAmount;
 
     /** @deprecated use {@link #quotaType} and {@link #enforcementMode} */
     @Deprecated(forRemoval = false)
@@ -37,10 +40,21 @@ public class UpdateQuotaRequest {
 
     Map<String, Object> tags;
 
+    /**
+     * Resolve the quota type, returning {@code null} if neither {@code quotaType}
+     * nor the deprecated {@code enforced} field is provided. This signals the
+     * service to keep the existing value (partial update).
+     */
     public QuotaType resolvedQuotaType() {
-        return quotaType != null ? QuotaType.valueOf(quotaType) : QuotaType.CEILING;
+        return quotaType != null ? QuotaType.valueOf(quotaType) : null;
     }
 
+    /**
+     * Resolve the enforcement mode, returning {@code null} if neither
+     * {@code enforcementMode} nor the deprecated {@code enforced} field is
+     * provided. This signals the service to keep the existing value (partial
+     * update).
+     */
     public EnforcementMode resolvedEnforcementMode() {
         if (enforcementMode != null) {
             return EnforcementMode.valueOf(enforcementMode);
@@ -48,6 +62,6 @@ public class UpdateQuotaRequest {
         if (enforced != null) {
             return Boolean.TRUE.equals(enforced) ? EnforcementMode.BLOCK : EnforcementMode.TELEMETRY;
         }
-        return EnforcementMode.BLOCK;
+        return null;
     }
 }

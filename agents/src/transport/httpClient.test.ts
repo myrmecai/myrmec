@@ -48,7 +48,7 @@ describe("EngineHttpClient.retrieve", () => {
   it("posts to /agent/retrieve with the bearer token and parses hits", async () => {
     const { calls } = stubFetch({ body: [hit] });
     const hits = await makeClient().retrieve("tok", {
-      knowledgeBaseId: "kb-1",
+      knowledgeSourceId: "kb-1",
       query: "hello",
     });
 
@@ -58,13 +58,13 @@ describe("EngineHttpClient.retrieve", () => {
     const headers = calls[0].init.headers as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer tok");
     const body = JSON.parse(calls[0].init.body as string);
-    expect(body).toEqual({ knowledgeBaseId: "kb-1", query: "hello", topK: 5 });
+    expect(body).toEqual({ knowledgeSourceId: "kb-1", query: "hello", topK: 5 });
   });
 
   it("includes audit context when supplied", async () => {
     const { calls } = stubFetch({ body: [] });
     await makeClient().retrieve("tok", {
-      knowledgeBaseId: "kb-1",
+      knowledgeSourceId: "kb-1",
       query: "hello",
       topK: 3,
       taskId: "task-9",
@@ -73,7 +73,7 @@ describe("EngineHttpClient.retrieve", () => {
 
     const body = JSON.parse(calls[0].init.body as string);
     expect(body).toEqual({
-      knowledgeBaseId: "kb-1",
+      knowledgeSourceId: "kb-1",
       query: "hello",
       topK: 3,
       taskId: "task-9",
@@ -84,7 +84,7 @@ describe("EngineHttpClient.retrieve", () => {
   it("omits audit context when absent", async () => {
     const { calls } = stubFetch({ body: [] });
     await makeClient().retrieve("tok", {
-      knowledgeBaseId: "kb-1",
+      knowledgeSourceId: "kb-1",
       query: "hello",
     });
 
@@ -97,7 +97,7 @@ describe("EngineHttpClient.retrieve", () => {
   it("returns an empty list when the provider yields nothing", async () => {
     stubFetch({ body: [] });
     const hits = await makeClient().retrieve("tok", {
-      knowledgeBaseId: "kb-1",
+      knowledgeSourceId: "kb-1",
       query: "hello",
     });
     expect(hits).toEqual([]);
@@ -106,7 +106,7 @@ describe("EngineHttpClient.retrieve", () => {
   it("throws EngineHttpError on a 4xx response", async () => {
     stubFetch({ status: 400, body: { errorCode: "VALIDATION_ERROR" } });
     await expect(
-      makeClient().retrieve("tok", { knowledgeBaseId: "kb-1", query: "" }),
+      makeClient().retrieve("tok", { knowledgeSourceId: "kb-1", query: "" }),
     ).rejects.toBeInstanceOf(EngineHttpError);
   });
 });

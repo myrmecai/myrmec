@@ -1,5 +1,7 @@
 package ai.myrmec.engine.setting;
 
+import ai.myrmec.engine._system.common.DomainConstants.AuditAction;
+import ai.myrmec.engine._system.common.ResourceType;
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine.audit.AuditEventService;
@@ -32,7 +34,7 @@ import java.util.UUID;
 public class SystemSettingService {
 
     /** Audit action for a settings change. */
-    public static final String AUDIT_ACTION = "SYSTEM_SETTING_UPDATED";
+    public static final String AUDIT_ACTION = AuditAction.SETTING_CHANGED;
 
     private final SystemSettingRepository repository;
     private final AuditEventService auditEventService;
@@ -133,7 +135,7 @@ public class SystemSettingService {
 
         /* Audit the setting change */
         auditEventService.recordEvent(
-                "SystemSetting", null, AUDIT_ACTION,
+                ResourceType.SYSTEM_SETTING, null, AUDIT_ACTION,
                 "ORGANIZATION", null,
                 actorUserId, actorUserId != null ? "USER" : "SYSTEM",
                 null, null, null, null,

@@ -54,4 +54,7 @@ public class ApprovalRequestPayload {
 
     /** Wall-clock deadline; null = no expiry (admin will sweep). */
     private Instant expiresAt;
+
+    /** Engine-assigned sequence number of the persisted row. */
+    private Long sequenceNo;
 }

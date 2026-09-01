@@ -4,7 +4,8 @@
 import { test, expect } from '../fixtures'
 import type { Page } from '@playwright/test'
 import { E2E_ADMIN } from '../helpers/api'
-import { createVersionedEntityTests, type VersionedEntityConfig } from './versioned-entity-standard.spec'
+import { confirmDialog } from '../helpers/confirm-dialog'
+import { createVersionedEntityTests, type VersionedEntityConfig } from '../helpers/versioned-entity-standard'
 
 /**
  * UC-KM-03 - Manage Org Knowledge Providers
@@ -57,7 +58,7 @@ async function createProviderAndPublish(page: Page, _config: VersionedEntityConf
   await page.getByRole('button', { name: /Create/i }).click()
   // Auto-navigates to detail page with Draft already created (Pattern 4 §Rule 4)
   await expect(page).toHaveURL(/\/platform\/ai-context\/knowledge-providers\/[^/]+$/, { timeout: 10_000 })
-  await expect(page.getByText(/Draft.*v1/i)).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText('Draft (v1)', { exact: false })).toBeVisible({ timeout: 10_000 })
 
   // Fill required Zone 2 fields
   await page.getByLabel('Hits Path').fill('$.results')
@@ -69,10 +70,13 @@ async function createProviderAndPublish(page: Page, _config: VersionedEntityConf
   const saveBtn = page.getByRole('button', { name: /Save Draft/i })
   await expect(saveBtn).toBeEnabled({ timeout: 5_000 })
   await saveBtn.click()
-  await expect(saveBtn).toBeDisabled({ timeout: 5_000 })
+  // Wait for save to complete — the Save Draft button either becomes disabled
+  // or disappears entirely (depending on whether the draft is "clean")
+  await expect(saveBtn).toBeHidden({ timeout: 10_000 })
 
   // Publish
   await page.getByRole('button', { name: /Publish/i }).click()
+  await confirmDialog(page, 'Publish')
   await expect(page.getByText(/Published Version/i)).toBeVisible({ timeout: 10_000 })
 }
 
@@ -191,7 +195,7 @@ test.describe('UC-KM-03 knowledge providers - entity-specific tests', () => {
       await adminPage.getByLabel('Name').fill(name)
       await adminPage.getByRole('button', { name: /Create/i }).click()
       await expect(adminPage).toHaveURL(/\/platform\/ai-context\/knowledge-providers\/[^/]+$/, { timeout: 10_000 })
-      await expect(adminPage.getByText(/Draft.*v1/i)).toBeVisible({ timeout: 10_000 })
+      await expect(adminPage.getByText('Draft (v1)', { exact: false })).toBeVisible({ timeout: 10_000 })
 
       // Fill Zone 2 fields
       await adminPage.getByLabel('Hits Path').fill('$.results')
@@ -222,14 +226,15 @@ test.describe('UC-KM-03 knowledge providers - entity-specific tests', () => {
       await saveBtn.click()
       await expect(saveBtn).toBeDisabled({ timeout: 5_000 })
 
-      // Verify saved values visible
-      await expect(adminPage.getByText('$.results').first()).toBeVisible({ timeout: 5_000 })
-      await expect(adminPage.getByText('$.text').first()).toBeVisible({ timeout: 5_000 })
-      await expect(adminPage.getByText('$.source').first()).toBeVisible({ timeout: 5_000 })
-      await expect(adminPage.getByText('$.url').first()).toBeVisible({ timeout: 5_000 })
+      // Verify saved values visible (draft form retains input values after save)
+      await expect(adminPage.locator('#hitsPath')).toHaveValue('$.results')
+      await expect(adminPage.locator('#passagePath')).toHaveValue('$.text')
+      await expect(adminPage.locator('#sourceNamePath')).toHaveValue('$.source')
+      await expect(adminPage.locator('#locatorPath')).toHaveValue('$.url')
 
       // Publish
       await adminPage.getByRole('button', { name: /Publish/i }).click()
+      await confirmDialog(adminPage, 'Publish')
       await expect(adminPage.getByText(/Published Version/i)).toBeVisible({ timeout: 10_000 })
 
       // Verify values persist in published version
@@ -247,7 +252,7 @@ test.describe('UC-KM-03 knowledge providers - entity-specific tests', () => {
     try {
       // Create and publish
       await createProviderAndPublish(adminPage, {} as VersionedEntityConfig, name)
-      await expect(adminPage.getByText(/Published Version.*v1/i)).toBeVisible({ timeout: 5_000 })
+      await expect(adminPage.getByText('Published Version (v1)', { exact: false })).toBeVisible({ timeout: 5_000 })
 
       // Click Edit in Zone 1
       await adminPage.getByRole('button', { name: /Edit/i }).click()
@@ -267,11 +272,14 @@ test.describe('UC-KM-03 knowledge providers - entity-specific tests', () => {
     try {
       // Create and publish v1
       await createProviderAndPublish(adminPage, {} as VersionedEntityConfig, name)
-      await expect(adminPage.getByText(/Published Version.*v1/i)).toBeVisible({ timeout: 5_000 })
+      await expect(adminPage.getByText('Published Version (v1)', { exact: false })).toBeVisible({ timeout: 5_000 })
 
       // Create new version (Draft)
       await adminPage.getByRole('button', { name: /New Draft Version/i }).click()
-      await expect(adminPage.getByText(/Draft.*v2/i)).toBeVisible({ timeout: 10_000 })
+      await expect(adminPage.getByText('Draft (v2)', { exact: false })).toBeVisible({ timeout: 10_000 })
+
+      // Switch to Knowledge Sources tab
+      await adminPage.getByRole('button', { name: 'Knowledge Sources' }).last().click()
 
       // Verify [Add] button is visible in Knowledge Sources section
       await expect(adminPage.getByRole('button', { name: /Add/i })).toBeVisible({ timeout: 5_000 })
@@ -287,7 +295,7 @@ test.describe('UC-KM-03 knowledge providers - entity-specific tests', () => {
     try {
       // Create and publish
       await createProviderAndPublish(adminPage, {} as VersionedEntityConfig, name)
-      await expect(adminPage.getByText(/Published Version.*v1/i)).toBeVisible({ timeout: 5_000 })
+      await expect(adminPage.getByText('Published Version (v1)', { exact: false })).toBeVisible({ timeout: 5_000 })
 
       // [Add] button should NOT be visible on published version (no Draft)
       await expect(adminPage.getByRole('button', { name: /Add/i })).toHaveCount(0)
@@ -304,11 +312,14 @@ test.describe('UC-KM-03 knowledge providers - entity-specific tests', () => {
     try {
       // Create and publish v1
       await createProviderAndPublish(adminPage, {} as VersionedEntityConfig, name)
-      await expect(adminPage.getByText(/Published Version.*v1/i)).toBeVisible({ timeout: 5_000 })
+      await expect(adminPage.getByText('Published Version (v1)', { exact: false })).toBeVisible({ timeout: 5_000 })
 
       // Create new version (Draft)
       await adminPage.getByRole('button', { name: /New Draft Version/i }).click()
-      await expect(adminPage.getByText(/Draft.*v2/i)).toBeVisible({ timeout: 10_000 })
+      await expect(adminPage.getByText('Draft (v2)', { exact: false })).toBeVisible({ timeout: 10_000 })
+
+      // Switch to Knowledge Sources tab
+      await adminPage.getByRole('button', { name: 'Knowledge Sources' }).last().click()
 
       // Click [Add] in Knowledge Sources section
       await adminPage.getByRole('button', { name: /Add/i }).click()
@@ -342,11 +353,14 @@ test.describe('UC-KM-03 knowledge providers - entity-specific tests', () => {
     try {
       // Create and publish v1
       await createProviderAndPublish(adminPage, {} as VersionedEntityConfig, name)
-      await expect(adminPage.getByText(/Published Version.*v1/i)).toBeVisible({ timeout: 5_000 })
+      await expect(adminPage.getByText('Published Version (v1)', { exact: false })).toBeVisible({ timeout: 5_000 })
 
       // Create new version (Draft)
       await adminPage.getByRole('button', { name: /New Draft Version/i }).click()
-      await expect(adminPage.getByText(/Draft.*v2/i)).toBeVisible({ timeout: 10_000 })
+      await expect(adminPage.getByText('Draft (v2)', { exact: false })).toBeVisible({ timeout: 10_000 })
+
+      // Switch to Knowledge Sources tab
+      await adminPage.getByRole('button', { name: 'Knowledge Sources' }).last().click()
 
       // Add a source first
       await adminPage.getByRole('button', { name: /Add/i }).click()
@@ -391,11 +405,14 @@ test.describe('UC-KM-03 knowledge providers - entity-specific tests', () => {
     try {
       // Create and publish v1
       await createProviderAndPublish(adminPage, {} as VersionedEntityConfig, name)
-      await expect(adminPage.getByText(/Published Version.*v1/i)).toBeVisible({ timeout: 5_000 })
+      await expect(adminPage.getByText('Published Version (v1)', { exact: false })).toBeVisible({ timeout: 5_000 })
 
       // Create new version (Draft)
       await adminPage.getByRole('button', { name: /New Draft Version/i }).click()
-      await expect(adminPage.getByText(/Draft.*v2/i)).toBeVisible({ timeout: 10_000 })
+      await expect(adminPage.getByText('Draft (v2)', { exact: false })).toBeVisible({ timeout: 10_000 })
+
+      // Switch to Knowledge Sources tab
+      await adminPage.getByRole('button', { name: 'Knowledge Sources' }).last().click()
 
       // Add a source
       await adminPage.getByRole('button', { name: /Add/i }).click()
@@ -412,13 +429,13 @@ test.describe('UC-KM-03 knowledge providers - entity-specific tests', () => {
       await sourceRow.getByRole('button', { name: /Delete/i }).click()
 
       // Verify confirmation dialog
-      const confirmDialog = adminPage.getByRole('dialog')
-      await expect(confirmDialog).toBeVisible({ timeout: 5_000 })
-      await expect(confirmDialog.getByText(new RegExp(`Delete ${sourceName}`))).toBeVisible()
+      const deleteDialog = adminPage.getByRole('dialog')
+      await expect(deleteDialog).toBeVisible({ timeout: 5_000 })
+      await expect(deleteDialog.getByText(new RegExp(`Delete ${sourceName}`))).toBeVisible()
 
       // Confirm deletion
-      await confirmDialog.getByRole('button', { name: /Confirm|Delete|Yes/i }).click()
-      await expect(confirmDialog).not.toBeVisible({ timeout: 5_000 })
+      await deleteDialog.getByRole('button', { name: /Confirm|Delete|Yes/i }).click()
+      await expect(deleteDialog).not.toBeVisible({ timeout: 5_000 })
 
       // Verify source removed from table
       await expect(adminPage.getByText(sourceName)).toHaveCount(0)
@@ -435,11 +452,14 @@ test.describe('UC-KM-03 knowledge providers - entity-specific tests', () => {
     try {
       // Create and publish v1
       await createProviderAndPublish(adminPage, {} as VersionedEntityConfig, name)
-      await expect(adminPage.getByText(/Published Version.*v1/i)).toBeVisible({ timeout: 5_000 })
+      await expect(adminPage.getByText('Published Version (v1)', { exact: false })).toBeVisible({ timeout: 5_000 })
 
       // Create new version (Draft)
       await adminPage.getByRole('button', { name: /New Draft Version/i }).click()
-      await expect(adminPage.getByText(/Draft.*v2/i)).toBeVisible({ timeout: 10_000 })
+      await expect(adminPage.getByText('Draft (v2)', { exact: false })).toBeVisible({ timeout: 10_000 })
+
+      // Switch to Knowledge Sources tab
+      await adminPage.getByRole('button', { name: 'Knowledge Sources' }).last().click()
 
       // Add a source
       await adminPage.getByRole('button', { name: /Add/i }).click()
@@ -450,11 +470,16 @@ test.describe('UC-KM-03 knowledge providers - entity-specific tests', () => {
       await addDialog.getByRole('button', { name: /Save/i }).click()
       await expect(addDialog).not.toBeVisible({ timeout: 5_000 })
 
+      // Switch back to Details tab to publish
+      await adminPage.getByRole('button', { name: 'Details' }).click()
+
       // Publish v2
       await adminPage.getByRole('button', { name: /Publish/i }).click()
-      await expect(adminPage.getByText(/Published Version.*v2/i)).toBeVisible({ timeout: 10_000 })
+      await confirmDialog(adminPage, 'Publish')
+      await expect(adminPage.getByText('Published Version (v2)', { exact: false })).toBeVisible({ timeout: 10_000 })
 
-      // Verify source is visible in published version (snapshotted)
+      // Switch to Knowledge Sources tab to verify source is visible in published version
+      await adminPage.getByRole('button', { name: 'Knowledge Sources' }).last().click()
       await expect(adminPage.getByText(sourceName).first()).toBeVisible({ timeout: 5_000 })
 
       // Verify source editing is locked (no [Add] button on published version)
@@ -472,11 +497,13 @@ test.describe('UC-KM-03 knowledge providers - entity-specific tests', () => {
     try {
       // Create, add a source, and publish
       await createProviderAndPublish(adminPage, {} as VersionedEntityConfig, name)
-      await expect(adminPage.getByText(/Published Version.*v1/i)).toBeVisible({ timeout: 5_000 })
+      await expect(adminPage.getByText('Published Version (v1)', { exact: false })).toBeVisible({ timeout: 5_000 })
 
       // Create new version, add a source, publish v2
       await adminPage.getByRole('button', { name: /New Draft Version/i }).click()
-      await expect(adminPage.getByText(/Draft.*v2/i)).toBeVisible({ timeout: 10_000 })
+      await expect(adminPage.getByText('Draft (v2)', { exact: false })).toBeVisible({ timeout: 10_000 })
+      // Switch to Knowledge Sources tab
+      await adminPage.getByRole('button', { name: 'Knowledge Sources' }).last().click()
       await adminPage.getByRole('button', { name: /Add/i }).click()
       const addDialog = adminPage.getByRole('dialog')
       await expect(addDialog).toBeVisible({ timeout: 5_000 })
@@ -484,8 +511,11 @@ test.describe('UC-KM-03 knowledge providers - entity-specific tests', () => {
       await addDialog.getByLabel('Path').fill('/api/v1/retrieval')
       await addDialog.getByRole('button', { name: /Save/i }).click()
       await expect(addDialog).not.toBeVisible({ timeout: 5_000 })
+      // Switch back to Details tab to publish
+      await adminPage.getByRole('button', { name: 'Details' }).click()
       await adminPage.getByRole('button', { name: /Publish/i }).click()
-      await expect(adminPage.getByText(/Published Version.*v2/i)).toBeVisible({ timeout: 10_000 })
+      await confirmDialog(adminPage, 'Publish')
+      await expect(adminPage.getByText('Published Version (v2)', { exact: false })).toBeVisible({ timeout: 10_000 })
 
       // Go to list page and execute Disable
       await adminPage.goto('/platform/ai-context/knowledge-providers')
@@ -495,9 +525,9 @@ test.describe('UC-KM-03 knowledge providers - entity-specific tests', () => {
       await adminPage.getByRole('menuitem', { name: /Disable/i }).click()
 
       // Verify confirmation dialog warns about linked sources
-      const confirmDialog = adminPage.getByRole('dialog')
-      await expect(confirmDialog).toBeVisible({ timeout: 5_000 })
-      await expect(confirmDialog.getByText(/knowledge source/i)).toBeVisible()
+      const disableDialog = adminPage.getByRole('dialog')
+      await expect(disableDialog).toBeVisible({ timeout: 5_000 })
+      await expect(disableDialog.getByText(/knowledge source/i)).toBeVisible()
     } finally {
       const id = await findProviderByName(api, name)
       if (id) await cleanupProvider(api, id)
@@ -510,22 +540,58 @@ test.describe('UC-KM-03 knowledge providers - entity-specific tests', () => {
     try {
       // Create and publish v1
       await createProviderAndPublish(adminPage, {} as VersionedEntityConfig, name)
-      await expect(adminPage.getByText(/Published Version.*v1/i)).toBeVisible({ timeout: 5_000 })
+      await expect(adminPage.getByText('Published Version (v1)', { exact: false })).toBeVisible({ timeout: 5_000 })
 
       // Create new version (v2) and publish
       await adminPage.getByRole('button', { name: /New Draft Version/i }).click()
-      await expect(adminPage.getByText(/Draft.*v2/i)).toBeVisible({ timeout: 10_000 })
+      await expect(adminPage.getByText('Draft (v2)', { exact: false })).toBeVisible({ timeout: 10_000 })
       await adminPage.getByRole('button', { name: /Publish/i }).click()
-      await expect(adminPage.getByText(/Published Version.*v2/i)).toBeVisible({ timeout: 10_000 })
+      await confirmDialog(adminPage, 'Publish')
+      await expect(adminPage.getByText('Published Version (v2)', { exact: false })).toBeVisible({ timeout: 10_000 })
+
+      // Switch to Version History tab to see [Clone as Draft]
+      await adminPage.getByRole('button', { name: 'Version History' }).click()
 
       // v1 should be ARCHIVED — click [Clone as Draft] on v1 in Version History
       const cloneButton = adminPage.getByRole('button', { name: /Clone as Draft/i })
       await expect(cloneButton.first()).toBeVisible({ timeout: 5_000 })
       await cloneButton.first().click()
-      await expect(adminPage.getByText(/Draft.*v3/i)).toBeVisible({ timeout: 10_000 })
+      // Switch back to Details tab to see the new Draft
+      await adminPage.getByRole('button', { name: 'Details' }).click()
+      await expect(adminPage.getByText('Draft (v3)', { exact: false })).toBeVisible({ timeout: 10_000 })
     } finally {
       const id = await findProviderByName(api, name)
       if (id) await cleanupProvider(api, id)
+    }
+  })
+})
+
+// VER-12: Publish without draft returns 400 (API-level edge case, unique to this spec)
+test.describe('VER-12 — Publish without draft', () => {
+  test('publishing a knowledge provider with no draft returns 400', async ({ api }) => {
+    await api.login(E2E_ADMIN.email, E2E_ADMIN.password)
+    const suffix = Date.now().toString(36)
+    let providerId: string | null = null
+    try {
+      // Create a knowledge provider — this auto-creates a v1 DRAFT.
+      const provider = await api.request<{ id: string }>('POST', BASE, {
+        scope: 'ORG',
+        name: `E2E VER-12 Provider ${suffix}`,
+        type: 'EXTERNAL',
+      })
+      providerId = provider.id
+
+      // Discard the auto-created draft so the provider has no draft
+      await api.request('DELETE', `${BASE}/${providerId}/drafts`)
+
+      // Attempt to publish without a draft
+      const res = await api.rawRequest('POST', `${BASE}/${providerId}/publish`)
+
+      expect(res.status).toBe(400)
+      const body = res.body as { message?: string; errorCode?: string }
+      expect(body.message).toMatch(/No draft version exists to publish/i)
+    } finally {
+      if (providerId) await cleanupProvider(api, providerId)
     }
   })
 })

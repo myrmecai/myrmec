@@ -80,8 +80,8 @@ class TaskMetricsAggregatorTest {
 
         Model gpt4o = new Model();
         gpt4o.setModelId("gpt-4o");
-        gpt4o.setInputPricePer1kTokens(new BigDecimal("0.005000")); // $5 / 1M
-        gpt4o.setOutputPricePer1kTokens(new BigDecimal("0.015000")); // $15 / 1M
+        gpt4o.setInputPrice(new BigDecimal("5.0")); // $5 / 1M
+        gpt4o.setOutputPrice(new BigDecimal("15.0")); // $15 / 1M
         gpt4o.setCurrency("USD");
         when(modelRepository.findAll()).thenReturn(List.of(gpt4o));
 

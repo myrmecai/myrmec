@@ -8,7 +8,7 @@ import java.util.Map;
 
 /**
  * Request DTO for updating a model.
- * Code, provider, deploymentType, and modelId cannot be changed.
+ * Code, provider, and modelId cannot be changed.
  */
 @Data
 public class UpdateModelRequest {
@@ -19,11 +19,6 @@ public class UpdateModelRequest {
     @Size(max = 500, message = "API endpoint cannot exceed 500 characters")
     private String apiEndpoint;
 
-    @Size(max = 500, message = "API key cannot exceed 500 characters")
-    private String apiKey;
-
-    private Boolean requiresAuth;
-
     private Boolean supportsVision;
 
     private Map<String, Object> infraConfig;
@@ -31,4 +26,9 @@ public class UpdateModelRequest {
     private Map<String, Object> defaultParams;
 
     private ModelStatus status;
+
+    private java.math.BigDecimal inputPrice;
+    private java.math.BigDecimal outputPrice;
+    @Size(max = 3)
+    private String currency;
 }

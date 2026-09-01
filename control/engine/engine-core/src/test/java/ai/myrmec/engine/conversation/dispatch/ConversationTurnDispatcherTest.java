@@ -6,7 +6,7 @@ import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileRepository;
 import ai.myrmec.engine.agent.AgentHostRepository;
-import ai.myrmec.engine.agent.AgentService;
+import ai.myrmec.engine.agent.AgentHostService;
 import ai.myrmec.engine.attachment.ConversationMessageAttachment;
 import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.conversation.ConversationMessage;
@@ -16,7 +16,9 @@ import ai.myrmec.engine.model.Model;
 import ai.myrmec.engine.model.ModelService;
 import ai.myrmec.engine.websocket.AgentConnectionManager;
 import ai.myrmec.engine.websocket.AgentWebSocketHandler;
-import ai.myrmec.engine.websocket.message.payload.ConversationTurnAssignPayload;
+import ai.myrmec.engine.inference.InferenceRequestSpec;
+import ai.myrmec.engine.inference.SessionContextAssembler;
+import ai.myrmec.engine.inference.InferenceRequestAssembler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -57,13 +59,16 @@ class ConversationTurnDispatcherTest {
     private AgentWebSocketHandler webSocketHandler;
     private ModelService modelService;
     private ai.myrmec.engine.snapshot.SnapshotWriter snapshotWriter;
-    private AgentService agentService;
+    private AgentHostService agentService;
     private ai.myrmec.engine.node.NodeRegistryService nodeRegistry;
     private PendingTurnRegistry pendingTurnRegistry;
     private ai.myrmec.engine.websocket.ConversationSocketRegistry conversationSocketRegistry;
     private ai.myrmec.engine.attachment.AttachmentService attachmentService;
     private ai.myrmec.engine.setting.SystemSettingService systemSettingService;
     private ai.myrmec.engine.conversation.ConversationNoticeService conversationNoticeService;
+    private SessionContextAssembler sessionContextAssembler;
+    private InferenceRequestAssembler inferenceRequestAssembler;
+    private ai.myrmec.engine.governance.GovernancePolicyResolver governancePolicyResolver;
 
     private ConversationTurnDispatcher dispatcher;
 
@@ -78,13 +83,26 @@ class ConversationTurnDispatcherTest {
         webSocketHandler = mock(AgentWebSocketHandler.class);
         modelService = mock(ModelService.class);
         snapshotWriter = mock(ai.myrmec.engine.snapshot.SnapshotWriter.class);
-        agentService = mock(AgentService.class);
+        agentService = mock(AgentHostService.class);
         nodeRegistry = mock(ai.myrmec.engine.node.NodeRegistryService.class);
         pendingTurnRegistry = mock(PendingTurnRegistry.class);
         conversationSocketRegistry = mock(ai.myrmec.engine.websocket.ConversationSocketRegistry.class);
         attachmentService = mock(ai.myrmec.engine.attachment.AttachmentService.class);
         systemSettingService = mock(ai.myrmec.engine.setting.SystemSettingService.class);
         conversationNoticeService = mock(ai.myrmec.engine.conversation.ConversationNoticeService.class);
+        sessionContextAssembler = mock(SessionContextAssembler.class);
+        inferenceRequestAssembler = mock(InferenceRequestAssembler.class);
+        governancePolicyResolver = mock(ai.myrmec.engine.governance.GovernancePolicyResolver.class);
+        when(governancePolicyResolver.resolveOrgDefault())
+                .thenReturn(new ai.myrmec.engine.governance.EffectivePolicy(
+                        ai.myrmec.engine.governance.BuiltInGovernanceProfile.STANDARD));
+        // The dispatcher always calls sessionContextAssembler.assemble(...) to
+        // build the session.open frame; stub it with a non-null payload so the
+        // assemble path that reads sessionOpen.sessionId() doesn't NPE.
+        when(sessionContextAssembler.assemble(any(), any(), any(), any()))
+                .thenReturn(new ai.myrmec.engine.websocket.message.payload.SessionOpenPayload(
+                        UUID.randomUUID(), "CONVERSATION", null, null,
+                        null, null, java.util.List.of(), java.util.List.of(), false));
         when(attachmentService.listForMessage(any()))
                 .thenReturn(java.util.List.of());
         when(systemSettingService.getInt(any(), anyLong()))
@@ -112,7 +130,10 @@ class ConversationTurnDispatcherTest {
                 attachmentService,
                 systemSettingService,
                 new com.fasterxml.jackson.databind.ObjectMapper(),
-                conversationNoticeService);
+                conversationNoticeService,
+                sessionContextAssembler,
+                inferenceRequestAssembler,
+                governancePolicyResolver);
     }
 
     @Test
@@ -149,7 +170,7 @@ class ConversationTurnDispatcherTest {
 
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
         when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findById(profileId)).thenReturn(Optional.of(profile));
+        when(agentProfileRepository.findByIdWithTools(profileId)).thenReturn(Optional.of(profile));
         when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
                 .thenReturn(List.of(instance));
         when(connectionManager.isAgentIdle(instanceId)).thenReturn(true);
@@ -162,29 +183,22 @@ class ConversationTurnDispatcherTest {
 
         assertThat(dispatched).isTrue();
 
-        ArgumentCaptor<ConversationTurnAssignPayload> captor =
-                ArgumentCaptor.forClass(ConversationTurnAssignPayload.class);
-        verify(pendingTurnRegistry).enqueue(eq(conversationId), captor.capture());
+        ArgumentCaptor<InferenceRequestSpec> captor =
+                ArgumentCaptor.forClass(InferenceRequestSpec.class);
+        verify(inferenceRequestAssembler).assemble(captor.capture());
 
-        ConversationTurnAssignPayload payload = captor.getValue();
-        assertThat(payload.getConversationId()).isEqualTo(conversationId);
-        assertThat(payload.getProjectId()).isEqualTo(projectId);
-        assertThat(payload.getAgentId()).isEqualTo(agentId);
+        InferenceRequestSpec spec = captor.getValue();
+        assertThat(spec.getRequestId()).isEqualTo(conversationId);
+        assertThat(spec.getProjectId()).isEqualTo(projectId);
         // System-prompt override wins over the profile default.
-        assertThat(payload.getSystemPrompt()).isEqualTo("Custom override.");
-        assertThat(payload.getPinnedFacts()).isEqualTo("Pin one fact.");
-        // assistantSequenceNo is one past the last persisted row (USER seq 2 \u2192 ASSISTANT seq 3).
-        assertThat(payload.getAssistantSequenceNo()).isEqualTo(3L);
+        assertThat(spec.getConversationSystemPrompt()).isEqualTo("Custom override.");
+        assertThat(spec.getPinnedFacts()).isEqualTo("Pin one fact.");
         // userMessage convenience field carries the most-recent USER content.
-        assertThat(payload.getUserMessage()).isEqualTo("How are you?");
-        // History preserves order + role + sequence_no.
-        assertThat(payload.getHistory()).hasSize(3);
-        assertThat(payload.getHistory().get(0).getRole()).isEqualTo("USER");
-        assertThat(payload.getHistory().get(0).getSequenceNo()).isEqualTo(0L);
-        assertThat(payload.getHistory().get(2).getContent()).isEqualTo("How are you?");
-        // No model configured \u2192 modelInfo is null but the turn still ships.
-        assertThat(payload.getModel()).isNull();
-        assertThat(payload.getTimeoutSeconds()).isEqualTo(ConversationTurnDispatcher.DEFAULT_TIMEOUT_SECONDS);
+        assertThat(spec.getUserMessage()).isEqualTo("How are you?");
+        // History preserves order + role + content.
+        assertThat(spec.getHistory()).hasSize(3);
+        assertThat(spec.getHistory().get(0).role()).isEqualTo("USER");
+        assertThat(spec.getHistory().get(2).content()).isEqualTo("How are you?");
     }
 
     @Test
@@ -215,7 +229,7 @@ class ConversationTurnDispatcherTest {
 
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
         when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findById(profileId)).thenReturn(Optional.of(profile));
+        when(agentProfileRepository.findByIdWithTools(profileId)).thenReturn(Optional.of(profile));
         when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
                 .thenReturn(List.of(instance));
         when(connectionManager.isAgentIdle(instanceId)).thenReturn(true);
@@ -227,10 +241,10 @@ class ConversationTurnDispatcherTest {
 
         dispatcher.dispatch(conversationId);
 
-        ArgumentCaptor<ConversationTurnAssignPayload> captor =
-                ArgumentCaptor.forClass(ConversationTurnAssignPayload.class);
-        verify(pendingTurnRegistry).enqueue(eq(conversationId), captor.capture());
-        assertThat(captor.getValue().getSystemPrompt()).isEqualTo("Profile default prompt.");
+        ArgumentCaptor<InferenceRequestSpec> captor =
+                ArgumentCaptor.forClass(InferenceRequestSpec.class);
+        verify(inferenceRequestAssembler).assemble(captor.capture());
+        assertThat(captor.getValue().getConversationSystemPrompt()).isEqualTo("Profile default prompt.");
     }
 
     @Test
@@ -274,7 +288,7 @@ class ConversationTurnDispatcherTest {
 
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
         when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findById(profileId)).thenReturn(Optional.of(profile));
+        when(agentProfileRepository.findByIdWithTools(profileId)).thenReturn(Optional.of(profile));
         when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
                 .thenReturn(List.of(instance));
         when(connectionManager.isAgentIdle(instanceId)).thenReturn(true);
@@ -289,17 +303,16 @@ class ConversationTurnDispatcherTest {
         boolean dispatched = dispatcher.dispatch(conversationId);
         assertThat(dispatched).isTrue();
 
-        ArgumentCaptor<ConversationTurnAssignPayload> captor =
-                ArgumentCaptor.forClass(ConversationTurnAssignPayload.class);
-        verify(pendingTurnRegistry).enqueue(eq(conversationId), captor.capture());
+        ArgumentCaptor<InferenceRequestSpec> captor =
+                ArgumentCaptor.forClass(InferenceRequestSpec.class);
+        verify(inferenceRequestAssembler).assemble(captor.capture());
 
-        ConversationTurnAssignPayload payload = captor.getValue();
-        assertThat(payload.getAttachments()).hasSize(1);
-        ConversationTurnAssignPayload.AttachmentDescriptor descriptor = payload.getAttachments().get(0);
-        assertThat(descriptor.getId()).isEqualTo(attachmentId);
-        assertThat(descriptor.getInlineText()).isNull();
-        assertThat(descriptor.isInlineTextOmittedBySize()).isTrue();
-        assertThat(descriptor.getReadContentPath())
+        InferenceRequestSpec spec = captor.getValue();
+        assertThat(spec.getAttachments()).hasSize(1);
+        InferenceRequestSpec.AttachmentDescriptor descriptor = spec.getAttachments().get(0);
+        assertThat(descriptor.id()).isEqualTo(attachmentId.toString());
+        assertThat(descriptor.inlineText()).isNull();
+        assertThat(descriptor.readContentPath())
                 .isEqualTo("/api/v1/agent/conversations/" + conversationId
                         + "/attachments/" + attachmentId + "/content");
     }
@@ -326,7 +339,7 @@ class ConversationTurnDispatcherTest {
 
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
         when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findById(profileId)).thenReturn(Optional.of(new AgentProfile()));
+        when(agentProfileRepository.findByIdWithTools(profileId)).thenReturn(Optional.of(new AgentProfile()));
         when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
                 .thenReturn(List.of(instance));
         when(connectionManager.isAgentIdle(instanceId)).thenReturn(false);
@@ -394,7 +407,7 @@ class ConversationTurnDispatcherTest {
 
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
         when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findById(profileId)).thenReturn(Optional.of(profile));
+        when(agentProfileRepository.findByIdWithTools(profileId)).thenReturn(Optional.of(profile));
         when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
                 .thenReturn(List.of(instance));
         when(connectionManager.isAgentIdle(instanceId)).thenReturn(true);
@@ -406,24 +419,21 @@ class ConversationTurnDispatcherTest {
         boolean dispatched = dispatcher.dispatch(conversationId);
         assertThat(dispatched).isTrue();
 
-        ArgumentCaptor<ConversationTurnAssignPayload> captor =
-                ArgumentCaptor.forClass(ConversationTurnAssignPayload.class);
-        verify(pendingTurnRegistry).enqueue(eq(conversationId), captor.capture());
-        List<ConversationTurnAssignPayload.HistoryEntry> history = captor.getValue().getHistory();
+        ArgumentCaptor<InferenceRequestSpec> captor =
+                ArgumentCaptor.forClass(InferenceRequestSpec.class);
+        verify(inferenceRequestAssembler).assemble(captor.capture());
+        List<InferenceRequestSpec.HistoryEntry> history = captor.getValue().getHistory();
 
         // Window = [summary(@3), asst(@4), user(@5)] — the folded turns 0..2 are gone.
         assertThat(history).hasSize(3);
         // The summary anchors the front, shipped as a SYSTEM entry with the label.
-        assertThat(history.get(0).getRole()).isEqualTo("SYSTEM");
-        assertThat(history.get(0).getSequenceNo()).isEqualTo(3L);
-        assertThat(history.get(0).getContent())
+        assertThat(history.get(0).role()).isEqualTo("SYSTEM");
+        assertThat(history.get(0).content())
                 .startsWith("[Summary of earlier conversation]")
                 .contains("They discussed onboarding.");
-        assertThat(history.get(1).getSequenceNo()).isEqualTo(4L);
-        assertThat(history.get(2).getRole()).isEqualTo("USER");
-        assertThat(history.get(2).getContent()).isEqualTo("fresh question");
-        // None of the folded raw turns leak through.
-        assertThat(history).noneMatch(h -> h.getSequenceNo() <= 2L);
+        assertThat(history.get(1).content()).isEqualTo("fresh reply");
+        assertThat(history.get(2).role()).isEqualTo("USER");
+        assertThat(history.get(2).content()).isEqualTo("fresh question");
     }
 
     // ===================== #103 Slice A — native image PARTS ====================
@@ -460,12 +470,10 @@ class ConversationTurnDispatcherTest {
 
         assertThat(dispatcher.dispatch(conversationId)).isTrue();
 
-        ConversationTurnAssignPayload.AttachmentDescriptor d = captureSingleAttachment(conversationId);
-        assertThat(d.isImage()).isTrue();
-        assertThat(d.getInlineText()).isNull();
-        assertThat(d.isInlineTextOmittedBySize()).isFalse();
-        assertThat(d.isInlineTextOmittedByBudget()).isFalse();
-        assertThat(d.getReadContentPath())
+        InferenceRequestSpec.AttachmentDescriptor d = captureSingleAttachment(conversationId);
+        assertThat(d.image()).isTrue();
+        assertThat(d.inlineText()).isNull();
+        assertThat(d.readContentPath())
                 .isEqualTo("/api/v1/agent/conversations/" + conversationId
                         + "/attachments/" + attachmentId + "/content");
     }
@@ -502,11 +510,9 @@ class ConversationTurnDispatcherTest {
 
         assertThat(dispatcher.dispatch(conversationId)).isTrue();
 
-        ConversationTurnAssignPayload.AttachmentDescriptor d = captureSingleAttachment(conversationId);
-        assertThat(d.isImage()).isFalse();
-        assertThat(d.getInlineText()).isNull();
-        assertThat(d.isInlineTextOmittedBySize()).isFalse();
-        assertThat(d.isInlineTextOmittedByBudget()).isFalse();
+        InferenceRequestSpec.AttachmentDescriptor d = captureSingleAttachment(conversationId);
+        assertThat(d.image()).isFalse();
+        assertThat(d.inlineText()).isNull();
     }
 
     // ============== #103 Slice B — inline-ratio threshold policy ===============
@@ -549,16 +555,13 @@ class ConversationTurnDispatcherTest {
 
         assertThat(dispatcher.dispatch(conversationId)).isTrue();
 
-        List<ConversationTurnAssignPayload.AttachmentDescriptor> ds = captureAttachments(conversationId);
+        List<InferenceRequestSpec.AttachmentDescriptor> ds = captureAttachments(conversationId);
         assertThat(ds).hasSize(2);
         // First (upload order) is inlined within budget.
-        assertThat(ds.get(0).getInlineText()).isNotNull();
-        assertThat(ds.get(0).isInlineTextOmittedByBudget()).isFalse();
-        // Second breaches the aggregate budget \u2192 demoted to read-on-demand.
-        assertThat(ds.get(1).getInlineText()).isNull();
-        assertThat(ds.get(1).isInlineTextOmittedByBudget()).isTrue();
-        assertThat(ds.get(1).isInlineTextOmittedBySize()).isFalse();
-        assertThat(ds.get(1).getReadContentPath())
+        assertThat(ds.get(0).inlineText()).isNotNull();
+        // Second breaches the aggregate budget → demoted to read-on-demand.
+        assertThat(ds.get(1).inlineText()).isNull();
+        assertThat(ds.get(1).readContentPath())
                 .isEqualTo("/api/v1/agent/conversations/" + conversationId
                         + "/attachments/" + att2 + "/content");
     }
@@ -600,14 +603,12 @@ class ConversationTurnDispatcherTest {
 
         assertThat(dispatcher.dispatch(conversationId)).isTrue();
 
-        List<ConversationTurnAssignPayload.AttachmentDescriptor> ds = captureAttachments(conversationId);
+        List<InferenceRequestSpec.AttachmentDescriptor> ds = captureAttachments(conversationId);
         assertThat(ds).hasSize(2);
-        // Exactly at the ratio budget \u2192 inlined.
-        assertThat(ds.get(0).getInlineText()).isNotNull();
-        assertThat(ds.get(0).isInlineTextOmittedByBudget()).isFalse();
-        // One token over \u2192 demoted.
-        assertThat(ds.get(1).getInlineText()).isNull();
-        assertThat(ds.get(1).isInlineTextOmittedByBudget()).isTrue();
+        // Exactly at the ratio budget → inlined.
+        assertThat(ds.get(0).inlineText()).isNotNull();
+        // One token over → demoted.
+        assertThat(ds.get(1).inlineText()).isNull();
     }
 
     @Test
@@ -642,10 +643,8 @@ class ConversationTurnDispatcherTest {
 
         assertThat(dispatcher.dispatch(conversationId)).isTrue();
 
-        ConversationTurnAssignPayload.AttachmentDescriptor d = captureSingleAttachment(conversationId);
-        assertThat(d.getInlineText()).isNull();
-        assertThat(d.isInlineTextOmittedBySize()).isTrue();
-        assertThat(d.isInlineTextOmittedByBudget()).isFalse();
+        InferenceRequestSpec.AttachmentDescriptor d = captureSingleAttachment(conversationId);
+        assertThat(d.inlineText()).isNull();
     }
 
     // ----- shared fixtures for the #103 attachment tests -----
@@ -696,23 +695,23 @@ class ConversationTurnDispatcherTest {
                            UUID instanceId, UUID agentId, UUID conversationId) {
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
         when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findById(agent.getProfileId())).thenReturn(Optional.of(profile));
+        when(agentProfileRepository.findByIdWithTools(agent.getProfileId())).thenReturn(Optional.of(profile));
         when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
                 .thenReturn(List.of(instance));
         when(connectionManager.isAgentIdle(instanceId)).thenReturn(true);
         when(agentService.reserveInstance(eq(instanceId), any(), any())).thenReturn(true);
     }
 
-    private ConversationTurnAssignPayload.AttachmentDescriptor captureSingleAttachment(UUID conversationId) {
-        List<ConversationTurnAssignPayload.AttachmentDescriptor> ds = captureAttachments(conversationId);
+    private InferenceRequestSpec.AttachmentDescriptor captureSingleAttachment(UUID conversationId) {
+        List<InferenceRequestSpec.AttachmentDescriptor> ds = captureAttachments(conversationId);
         assertThat(ds).hasSize(1);
         return ds.get(0);
     }
 
-    private List<ConversationTurnAssignPayload.AttachmentDescriptor> captureAttachments(UUID conversationId) {
-        ArgumentCaptor<ConversationTurnAssignPayload> captor =
-                ArgumentCaptor.forClass(ConversationTurnAssignPayload.class);
-        verify(pendingTurnRegistry).enqueue(eq(conversationId), captor.capture());
+    private List<InferenceRequestSpec.AttachmentDescriptor> captureAttachments(UUID conversationId) {
+        ArgumentCaptor<InferenceRequestSpec> captor =
+                ArgumentCaptor.forClass(InferenceRequestSpec.class);
+        verify(inferenceRequestAssembler).assemble(captor.capture());
         return captor.getValue().getAttachments();
     }
 

@@ -274,7 +274,7 @@ public class ExecutionEvent {
      * {@code ctx.retrieve()} query. Stores IDs and scores only — never the
      * retrieved passage text — so the row stays an audit/replay pointer.
      */
-    public static ExecutionEvent retrieval(UUID taskId, UUID attemptId, UUID knowledgeBaseId,
+    public static ExecutionEvent retrieval(UUID taskId, UUID attemptId, UUID knowledgeSourceId,
                                            String query, int topK,
                                            java.util.List<UUID> chunkIds,
                                            java.util.List<UUID> sourceIds,
@@ -286,7 +286,7 @@ public class ExecutionEvent {
         int hitCount = chunkIds == null ? 0 : chunkIds.size();
         event.setMessage("Retrieved " + hitCount + " chunk(s)");
         java.util.LinkedHashMap<String, Object> data = new java.util.LinkedHashMap<>();
-        if (knowledgeBaseId != null) data.put("knowledgeBaseId", knowledgeBaseId.toString());
+        if (knowledgeSourceId != null) data.put("knowledgeSourceId", knowledgeSourceId.toString());
         if (query != null) data.put("query", query);
         data.put("topK", topK);
         data.put("hitCount", hitCount);

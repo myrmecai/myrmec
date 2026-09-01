@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RequiredMark } from '@/components/ui/required-marks'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
@@ -258,6 +259,15 @@ export function ProjectsList() {
                   View
                 </Link>
               </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link
+                  to="/projects/$projectId/chat"
+                  params={{ projectId: project.id }}
+                  data-testid={`project-chat-${project.id}`}
+                >
+                  Chat
+                </Link>
+              </DropdownMenuItem>
               {canTransfer && (
                 <DropdownMenuItem onClick={() => setMoveProject(project)}>
                   Move to group
@@ -490,7 +500,7 @@ function CreateProjectForm({ groups, onSubmit, isLoading, error }: CreateProject
           </div>
         )}
         <div className="space-y-2">
-          <Label htmlFor="name">Name</Label>
+          <Label htmlFor="name">Name<RequiredMark /></Label>
           <Input
             id="name"
             value={name}

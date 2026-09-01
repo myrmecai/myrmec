@@ -2,6 +2,8 @@ package ai.myrmec.engine.quota;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.TestDataFactory;
+import ai.myrmec.engine._system.common.DomainConstants.AuditAction;
+import ai.myrmec.engine._system.common.ResourceType;
 import ai.myrmec.engine.audit.AuditEvent;
 import ai.myrmec.engine.audit.AuditEventRepository;
 import ai.myrmec.engine.group.Group;
@@ -44,8 +46,8 @@ class QuotaServiceTest extends IntegrationTestBase {
 
         List<AuditEvent> rows = auditEventRepository.findAll();
         assertThat(rows).anyMatch(r ->
-                "QUOTA_CREATED".equals(r.getEventType())
-                        && "Quota".equals(r.getEntityType())
+                AuditAction.CREATED.equals(r.getEventType())
+                        && ResourceType.QUOTA.equals(r.getEntityType())
                         && q.getId().equals(r.getEntityId()));
     }
 
@@ -63,7 +65,7 @@ class QuotaServiceTest extends IntegrationTestBase {
         assertThat(updated.isEnforced()).isFalse();
 
         long updatedAudits = auditEventRepository.findAll().stream()
-                .filter(r -> "QUOTA_UPDATED".equals(r.getEventType()))
+                .filter(r -> AuditAction.UPDATED.equals(r.getEventType()))
                 .count();
         assertThat(updatedAudits).isEqualTo(1L);
     }
@@ -80,7 +82,7 @@ class QuotaServiceTest extends IntegrationTestBase {
 
         assertThat(quotaService.findByScope(Quota.Scope.PROJECT, projectId)).isEmpty();
         long deletedAudits = auditEventRepository.findAll().stream()
-                .filter(r -> "QUOTA_DELETED".equals(r.getEventType()))
+                .filter(r -> AuditAction.DELETED.equals(r.getEventType()))
                 .count();
         assertThat(deletedAudits).isEqualTo(1L);
     }
@@ -159,7 +161,7 @@ class QuotaServiceTest extends IntegrationTestBase {
         assertThat(paused.getPausedBy()).isEqualTo(pausedBy);
 
         long pausedAudits = auditEventRepository.findAll().stream()
-                .filter(r -> "QUOTA_PAUSED".equals(r.getEventType()))
+                .filter(r -> AuditAction.PAUSED.equals(r.getEventType()))
                 .count();
         assertThat(pausedAudits).isEqualTo(1L);
     }
@@ -182,7 +184,7 @@ class QuotaServiceTest extends IntegrationTestBase {
         assertThat(resumed.getPausedBy()).isNull();
 
         long resumedAudits = auditEventRepository.findAll().stream()
-                .filter(r -> "QUOTA_RESUMED".equals(r.getEventType()))
+                .filter(r -> AuditAction.RESUMED.equals(r.getEventType()))
                 .count();
         assertThat(resumedAudits).isEqualTo(1L);
     }
@@ -198,7 +200,7 @@ class QuotaServiceTest extends IntegrationTestBase {
         quotaService.update(q.getId(), 1000L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null);
 
         long changeAudits = auditEventRepository.findAll().stream()
-                .filter(r -> "QUOTA_LIMIT_CHANGED".equals(r.getEventType()))
+                .filter(r -> AuditAction.QUOTA_LIMIT_CHANGED.equals(r.getEventType()))
                 .count();
         assertThat(changeAudits).isEqualTo(1L);
     }

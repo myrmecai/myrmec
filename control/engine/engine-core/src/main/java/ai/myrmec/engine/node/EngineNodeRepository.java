@@ -49,4 +49,7 @@ public interface EngineNodeRepository extends JpaRepository<EngineNode, String> 
             WHERE n.status = ai.myrmec.engine.node.EngineNode.Status.DOWN
             """)
     List<String> findDownNodeIds();
+
+    /** All replicas with the given status (used by fan-out to enumerate peers). */
+    List<EngineNode> findByStatus(EngineNode.Status status);
 }

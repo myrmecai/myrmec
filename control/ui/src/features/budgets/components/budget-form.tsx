@@ -50,6 +50,10 @@ interface BudgetFormProps {
   parentLimit?: number | null
   /** If editing, the original resource+period are locked. */
   disabledFields?: Array<keyof BudgetFormValues>
+  /** Whether the governance profile allows non-org budget overrides. */
+  budgetOverrideAllowed?: boolean
+  /** Governance profile name, for showing the lock reason. */
+  governanceProfileName?: string | null
   error?: string | null
 }
 
@@ -63,7 +67,6 @@ const SCOPE_OPTIONS: { value: QuotaScope; label: string }[] = [
 const RESOURCE_OPTIONS: { value: QuotaResourceType; label: string }[] = [
   { value: 'COST_USD_CENTS', label: 'Cost USD' },
   { value: 'TOKENS', label: 'Tokens' },
-  { value: 'REQUESTS', label: 'Requests' },
 ]
 
 const PERIOD_OPTIONS: { value: QuotaPeriod; label: string }[] = [
@@ -83,6 +86,8 @@ export function BudgetForm({
   parentScopeLabel,
   parentLimit,
   disabledFields = [],
+  budgetOverrideAllowed = true,
+  governanceProfileName = null,
   error,
 }: BudgetFormProps) {
   const isSubmitting = isLoading ?? false
@@ -131,9 +136,26 @@ export function BudgetForm({
               <SelectValue placeholder="Select scope type" />
             </SelectTrigger>
             <SelectContent>
-              {SCOPE_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-              ))}
+              {SCOPE_OPTIONS.map((opt) => {
+                // Governance: BUDGET_OVERRIDE — disable PROJECT/SERVICE when the
+                // profile doesn't permit non-org overrides (threshold: PER_SERVICE).
+                const governanceDisabled = !budgetOverrideAllowed
+                  && (opt.value === 'PROJECT' || opt.value === 'SERVICE')
+                return (
+                  <SelectItem
+                    key={opt.value}
+                    value={opt.value}
+                    disabled={governanceDisabled}
+                  >
+                    {opt.label}
+                    {governanceDisabled && governanceProfileName && (
+                      <span className="text-xs text-muted-foreground ml-2">
+                        (locked by {governanceProfileName} profile)
+                      </span>
+                    )}
+                  </SelectItem>
+                )
+              })}
             </SelectContent>
           </Select>
         </div>
@@ -219,6 +241,7 @@ export function BudgetForm({
             value={values.limitAmount}
             onChange={(e) => update({ limitAmount: e.target.value })}
             placeholder={values.resourceType === 'COST_USD_CENTS' ? 'e.g. 10000 = $100.00' : 'e.g. 100000'}
+            data-testid="quota-limit-input"
           />
           {parentHint && <p className="text-xs text-muted-foreground">{parentHint}</p>}
         </div>
@@ -317,7 +340,7 @@ export function BudgetForm({
           <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting}>
           Cancel
         </Button>
-        <Button type="submit" disabled={isSubmitting}>
+        <Button type="submit" disabled={isSubmitting} data-testid="quota-save-button">
           {isSubmitting ? 'Saving...' : primaryLabel}
         </Button>
       </div>

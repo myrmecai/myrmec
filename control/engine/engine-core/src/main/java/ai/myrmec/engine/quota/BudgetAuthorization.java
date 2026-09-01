@@ -5,12 +5,16 @@ package ai.myrmec.engine.quota;
 
 import ai.myrmec.engine._system.security.GroupAccessEvaluator;
 import ai.myrmec.engine._system.security.ProjectAccessEvaluator;
+import ai.myrmec.engine.assistant.Assistant;
+import ai.myrmec.engine.assistant.AssistantRepository;
 import ai.myrmec.engine.group.GroupRepository;
 import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.project.ProjectRepository;
 import ai.myrmec.engine.quota.dto.BudgetPermissions;
 import ai.myrmec.engine.user.UserPrincipal;
 import ai.myrmec.engine.user.UserRole;
+import ai.myrmec.engine.workflow.Workflow;
+import ai.myrmec.engine.workflow.WorkflowRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Component;
@@ -51,6 +55,32 @@ public class BudgetAuthorization {
     private final GroupAccessEvaluator groupAccess;
     private final ProjectRepository projectRepository;
     private final GroupRepository groupRepository;
+    private final WorkflowRepository workflowRepository;
+    private final AssistantRepository assistantRepository;
+
+    /**
+     * Resolve the project ID from a SERVICE-scope scopeId (workflow / assistant
+     * instance UUID).  Falls back to treating scopeId as a project ID for
+     * backward compatibility with legacy data.
+     */
+    private UUID resolveProjectIdForService(UUID scopeId) {
+        if (scopeId == null) {
+            return null;
+        }
+        Optional<Workflow> wf = workflowRepository.findById(scopeId);
+        if (wf.isPresent()) {
+            return wf.get().getProject().getId();
+        }
+        Optional<Assistant> asst = assistantRepository.findById(scopeId);
+        if (asst.isPresent()) {
+            return asst.get().getProjectId();
+        }
+        // Legacy: scopeId might be the project ID itself.
+        if (projectRepository.existsById(scopeId)) {
+            return scopeId;
+        }
+        return null;
+    }
 
     /**
      * Permission snapshot for the given scope.
@@ -64,17 +94,21 @@ public class BudgetAuthorization {
             return BudgetPermissions.none();
         }
 
+        // For SERVICE scope, resolve the project ID from the instance.
+        UUID effectiveProjectId = scopeType == Quota.Scope.SERVICE
+                ? resolveProjectIdForService(scopeId) : scopeId;
+
         boolean platformAdmin = user.hasSystemRole(UserRole.Role.PLATFORM_ADMIN);
         boolean systemBudgetOwner = user.hasSystemRole(UserRole.Role.BUDGET_OWNER);
         boolean orgAdmin = user.isOrgAdmin();
         boolean systemCanManage = platformAdmin || systemBudgetOwner;
 
-        boolean canView = canView(scopeType, scopeId, user, authentication, platformAdmin, orgAdmin, systemBudgetOwner);
-        boolean canDefineCeiling = canDefineCeiling(scopeType, scopeId, user, systemCanManage);
+        boolean canView = canView(scopeType, effectiveProjectId, user, authentication, platformAdmin, orgAdmin, systemBudgetOwner);
+        boolean canDefineCeiling = canDefineCeiling(scopeType, effectiveProjectId, user, systemCanManage);
         boolean canDefineReservation = canDefineCeiling && scopeType != Quota.Scope.ORG;
-        boolean canDefineService = canDefineServiceBudget(scopeType, scopeId, user, systemCanManage);
+        boolean canDefineService = canDefineServiceBudget(scopeType, effectiveProjectId, user, systemCanManage);
         boolean canMutateServiceBudget = scopeType == Quota.Scope.SERVICE
-                && (canDefineService || hasProjectOwnerOrEditor(user, scopeId));
+                && (canDefineService || hasProjectOwnerOrEditor(user, effectiveProjectId));
 
         return new BudgetPermissions(
                 canView,

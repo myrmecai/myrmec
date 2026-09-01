@@ -63,6 +63,24 @@ public class GlobalExceptionHandler {
                 .body(ErrorResponse.resourceNotFound(ex.getResourceType(), ex.getIdentifier()));
     }
 
+    @ExceptionHandler(ai.myrmec.engine.knowledge.RetrievalProviderNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleRetrievalProviderNotFound(
+            ai.myrmec.engine.knowledge.RetrievalProviderNotFoundException ex) {
+        log.warn("Retrieval provider not found: {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND)
+                .body(ErrorResponse.of("RESOURCE_NOT_FOUND", ex.getMessage()));
+    }
+
+    @ExceptionHandler(ai.myrmec.engine.knowledge.RetrievalForbiddenException.class)
+    public ResponseEntity<ErrorResponse> handleRetrievalForbidden(
+            ai.myrmec.engine.knowledge.RetrievalForbiddenException ex) {
+        log.warn("Retrieval forbidden: {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(ErrorResponse.of("FORBIDDEN", ex.getMessage()));
+    }
+
     @ExceptionHandler(ResourceInUseException.class)
     public ResponseEntity<ErrorResponse> handleResourceInUse(ResourceInUseException ex) {
         log.warn("Resource in use: {}", ex.getMessage());
@@ -171,6 +189,27 @@ public class GlobalExceptionHandler {
                 .body(ErrorResponse.of("FORBIDDEN", "Access denied"));
     }
 
+    // ==================== Governance ====================
+
+    @ExceptionHandler(ai.myrmec.engine.governance.GovernanceViolationException.class)
+    public ResponseEntity<ErrorResponse> handleGovernanceViolation(
+            ai.myrmec.engine.governance.GovernanceViolationException ex) {
+        log.warn("Governance violation: {} (feature={}, attempted={})",
+                ex.getMessage(), ex.getFeature().name(), ex.getAttemptedValue());
+        java.util.Map<String, Object> details = new java.util.LinkedHashMap<>();
+        details.put("feature", ex.getFeature().name());
+        details.put("attemptedValue", ex.getAttemptedValue());
+        details.put("allowedValues", ex.getAllowedValues());
+        details.put("profileCode", ex.getProfileCode());
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(ErrorResponse.builder()
+                        .errorCode("GOVERNANCE_VIOLATION")
+                        .message(ex.getMessage())
+                        .details(details)
+                        .build());
+    }
+
     // ==================== Technical Exceptions ====================
 
     @ExceptionHandler(Exception.class)
@@ -181,6 +220,22 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(ErrorResponse.of("INTERNAL_ERROR", "An unexpected error occurred. Please try again later."));
+    }
+
+    /**
+     * Handle errors that occur during an SSE stream response. The response
+     * is already committed as {@code text/event-stream}, so we cannot write
+     * a JSON {@link ErrorResponse} — the servlet container would throw
+     * {@code HttpMessageNotWritableException}. Just log and let the stream
+     * close naturally; the client detects the dropped connection.
+     */
+    @ExceptionHandler(java.io.IOException.class)
+    public void handleSseIOException(java.io.IOException ex, jakarta.servlet.http.HttpServletResponse response) {
+        if ("text/event-stream".equals(response.getContentType())) {
+            log.debug("SSE stream error (client likely disconnected): {}", ex.getMessage());
+            return; // response is already committed; nothing to write
+        }
+        log.error("Unexpected I/O error", ex);
     }
 
     // ==================== Helper Methods ====================

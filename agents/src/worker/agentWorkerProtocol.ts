@@ -50,4 +50,13 @@ export interface AgentWorkerConfig {
   engineUrl?: string;
   /** Current agent access token for auth on engine calls. */
   agentAccessToken?: string;
+  /** ChatModel factory mode: `'stub'` for deterministic E2E tests,
+   * `'real'` for production (LangChain). Defaults to `'real'`. */
+  chatModelMode?: "stub" | "real";
+  /** SessionTool factory mode: `'stub'` for deterministic E2E tests,
+   * `'real'` for production. Defaults to `'real'`. */
+  sessionToolMode?: "stub" | "real";
+  /** Path to a handler module (only used when mode='stub'). The worker
+   * dynamically imports this file to load test-specific LLM/tool handlers. */
+  stubModulePath?: string;
 }

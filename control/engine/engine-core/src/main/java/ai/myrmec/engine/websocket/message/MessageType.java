@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+
 package ai.myrmec.engine.websocket.message;
 
 /**
@@ -187,4 +190,39 @@ public final class MessageType {
      * re-pick another candidate (agent-concurrency §9.5).
      */
     public static final String AGENT_BIND_NACK = "agent.bind.nack";
+
+    // ==================== Unified Inference Dispatch (§5.1) ====================
+
+    /** Engine → Agent. Establish a session; deliver workspace, tool catalog, KB catalog, model. Sent once. */
+    public static final String SESSION_OPEN = "session.open";
+
+    /** Engine → Agent. Tear down a session (conversation unbind / execution end). */
+    public static final String SESSION_CLOSE = "session.close";
+
+    /** Engine → Agent. One LLM turn/step: assembled messages[], active tools, generation config. */
+    public static final String INFERENCE_ASSIGN = "inference.assign";
+
+    /** Agent → Engine. Agent acknowledges it has started the turn. */
+    public static final String INFERENCE_ACCEPT = "inference.accept";
+
+    /** Agent → Engine. Streaming text chunk (only when stream=true). */
+    public static final String INFERENCE_DELTA = "inference.delta";
+
+    /** Agent → Engine. Agent's model requested a tool. */
+    public static final String INFERENCE_TOOL_CALL = "inference.tool_call";
+
+    /** Agent → Engine. Result of a tool execution. */
+    public static final String INFERENCE_TOOL_RESULT = "inference.tool_result";
+
+    /** Agent → Engine. Final assistant content + token usage. */
+    public static final String INFERENCE_COMPLETE = "inference.complete";
+
+    /** Agent → Engine. Turn failed (with error code/hint). */
+    public static final String INFERENCE_FAILED = "inference.failed";
+
+    /** Engine → Agent. Cancel an in-flight turn. */
+    public static final String INFERENCE_CANCEL = "inference.cancel";
+
+    /** Agent → Engine. Ack of cancellation (+ partial content). */
+    public static final String INFERENCE_CANCELLED = "inference.cancelled";
 }

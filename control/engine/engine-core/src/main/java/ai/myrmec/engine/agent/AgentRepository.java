@@ -118,4 +118,20 @@ public interface AgentRepository extends JpaRepository<Agent, UUID> {
     @Query("SELECT a FROM Agent a WHERE a.status IN :statuses AND a.homeNodeId IN :homeNodeIds")
     List<Agent> findByStatusInAndHomeNodeIdIn(@Param("statuses") List<Agent.Status> statuses,
                                               @Param("homeNodeIds") List<String> homeNodeIds);
+
+    /**
+     * Atomically transition a worker from {@code RESERVED} to
+     * {@code CONNECTING} (agent-concurrency §9.5). The
+     * {@code status = RESERVED} guard makes this a compare-and-set: if the
+     * worker has already advanced to {@code BOUND} (because
+     * {@code attachConversation} won the race), the update affects zero rows
+     * and the caller treats the late bind.ack as a harmless no-op.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE Agent a SET a.status = :connecting, a.stateChangedAt = :now "
+            + "WHERE a.id = :id AND a.status = :reserved")
+    int connectIfReserved(@Param("id") UUID id,
+                          @Param("reserved") Agent.Status reserved,
+                          @Param("connecting") Agent.Status connecting,
+                          @Param("now") Instant now);
 }

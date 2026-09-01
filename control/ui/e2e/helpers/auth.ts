@@ -75,3 +75,40 @@ export async function loginAsAdmin(page: Page): Promise<void> {
     ] as const,
   )
 }
+
+/**
+ * Generic login helper — same localStorage seeding as {@link loginAsAdmin}
+ * but accepts any email/password. Used by the multi-user RBAC fixtures
+ * (ownerPage, editorPage, viewerPage).
+ *
+ * Call this BEFORE navigating to an authenticated route.
+ */
+export async function loginAs(
+  page: Page,
+  email: string,
+  password: string,
+): Promise<void> {
+  const api = new ApiClient()
+  const { accessToken, refreshToken } = await api.login(email, password)
+  const payload = decodeJwt(accessToken)
+  const user = {
+    email: payload.email ?? payload.sub ?? email,
+    roles: payload.roles ?? [],
+  }
+
+  await page.addInitScript(
+    ([access, refresh, userJson, accessKey, refreshKey, userKey]) => {
+      window.localStorage.setItem(accessKey, access)
+      window.localStorage.setItem(refreshKey, refresh)
+      window.localStorage.setItem(userKey, userJson)
+    },
+    [
+      accessToken,
+      refreshToken,
+      JSON.stringify(user),
+      ACCESS_TOKEN_KEY,
+      REFRESH_TOKEN_KEY,
+      USER_KEY,
+    ] as const,
+  )
+}

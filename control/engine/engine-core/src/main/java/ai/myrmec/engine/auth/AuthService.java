@@ -7,7 +7,7 @@ import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.Agent;
 import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.agent.AgentHostRepository;
-import ai.myrmec.engine.agent.AgentService;
+import ai.myrmec.engine.agent.AgentHostService;
 import ai.myrmec.engine.auth.dto.RefreshRequest;
 import ai.myrmec.engine.auth.dto.RefreshResponse;
 import ai.myrmec.engine.auth.dto.RegisterRequest;
@@ -27,7 +27,7 @@ import java.util.UUID;
 public class AuthService {
 
     private final RegistrationKeyService registrationKeyService;
-    private final AgentService agentService;
+    private final AgentHostService agentService;
     private final AgentHostRepository agentRepository;
     private final AgentRepository agentInstanceRepository;
     private final JwtTokenProvider jwtTokenProvider;

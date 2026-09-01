@@ -58,7 +58,7 @@ export function KnowledgeSourceDetail({ sourceId }: { sourceId: string }) {
         <div className="flex items-center gap-2">
           <Badge variant="outline">{source.availability}</Badge>
           <div className="flex items-center gap-1">
-            <div className={`h-2 w-2 rounded-full ${STATUS_COLORS[source.status] || 'bg-gray-400'}`} />
+            <div className={`h-2 w-2 rounded-full ${STATUS_COLORS[source.status ?? ''] || 'bg-gray-400'}`} />
             <span className="text-sm">{source.status}</span>
           </div>
         </div>
@@ -88,7 +88,17 @@ export function KnowledgeSourceDetail({ sourceId }: { sourceId: string }) {
 
       <div className="flex items-center gap-2 mt-6">
         {source.status === 'ACTIVE' && (
-          <Button variant="outline" onClick={() => disableMutation.mutate()} disabled={disableMutation.isPending}>
+          <Button variant="outline" onClick={async () => {
+            const confirmed = await dialogService.showConfirmDialog({
+              title: 'Disable Knowledge Source',
+              message: `Disable "${source.name}"? It will stop being included in assembled contexts until it is re-enabled.`,
+              severity: 'warning',
+              type: 'warning',
+              confirmLabel: 'Disable',
+              cancelLabel: 'Cancel',
+            })
+            if (confirmed) disableMutation.mutate()
+          }} disabled={disableMutation.isPending}>
             <PowerOff className="h-4 w-4 mr-2" /> Disable
           </Button>
         )}

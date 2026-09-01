@@ -56,6 +56,7 @@ public class ConnectionConfigVersion {
 
     @Convert(converter = JsonMapConverter.class)
     @Column(name = "config", columnDefinition = "jsonb")
+    @org.hibernate.annotations.ColumnTransformer(write = "?::jsonb")
     private Map<String, Object> config;
 
     @Column(name = "test_status", length = 20)

@@ -323,7 +323,7 @@ export function WorkflowCanvas({
 
         {!readOnly && (
           <Panel position="top-left" className="flex gap-2">
-            <Button size="sm" onClick={handleAddStep}>
+            <Button size="sm" onClick={handleAddStep} data-testid="add-step-button">
               <Plus className="h-4 w-4 mr-1" />
               Add Step
             </Button>

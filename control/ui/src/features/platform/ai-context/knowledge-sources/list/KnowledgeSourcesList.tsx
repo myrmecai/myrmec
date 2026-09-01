@@ -11,6 +11,7 @@ import {
   type KnowledgeProvider,
 } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import { ContentAreaLayout } from '@/components/content-area-layout'
 import { AlertCircle, ExternalLink } from 'lucide-react'
 import DataTable2 from '@/components/data-table2/data-table2'
@@ -19,7 +20,7 @@ import { SortedColumnHeader } from '@/components/data-table2/sorted-column-heade
 export function KnowledgeSourcesList() {
   const { data: sources, isLoading, error } = useQuery({
     queryKey: ['knowledge-sources'],
-    queryFn: knowledgeSourceApi.list,
+    queryFn: () => knowledgeSourceApi.list(),
   })
 
   const { data: providers } = useQuery({
@@ -75,11 +76,36 @@ export function KnowledgeSourcesList() {
           <Link to="/platform/ai-context/knowledge-sources/$id" params={{ id: row.original.id }} className="hover:underline">
             {row.original.name}
           </Link>
-          {row.original.description && (
-            <span className="text-xs text-muted-foreground block">{row.original.description}</span>
-          )}
         </div>
       ),
+    },
+    {
+      accessorKey: 'description',
+      header: 'Description',
+      enableSorting: false,
+      cell: ({ row }) => (
+        <span className="text-sm text-muted-foreground">{row.original.description || '—'}</span>
+      ),
+    },
+    {
+      id: 'method',
+      header: 'Method',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const cfg = row.original.config as Record<string, unknown> | null
+        const httpConfig = cfg?.httpConfig as Record<string, unknown> | undefined
+        return <Badge variant="outline">{(httpConfig?.method as string) ?? '—'}</Badge>
+      },
+    },
+    {
+      id: 'path',
+      header: 'Path',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const cfg = row.original.config as Record<string, unknown> | null
+        const httpConfig = cfg?.httpConfig as Record<string, unknown> | undefined
+        return <span className="text-sm font-mono">{(httpConfig?.path as string) ?? '—'}</span>
+      },
     },
     {
       id: 'provider',

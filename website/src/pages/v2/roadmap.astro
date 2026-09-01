@@ -1,0 +1,152 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+import V2Layout from "../../layouts/V2Layout.astro";
+
+const shipped = [
+  { title: "Workflows", desc: "Deterministic multi-step agentic execution with retries, live logs, and step-level status." },
+  { title: "Assistants & chat", desc: "Conversational sessions with streaming, attachments, and shared project scope." },
+  { title: "Knowledge & RAG", desc: "Git, file, and SaaS connectors; retrieval with citations on every answer." },
+  { title: "Human-in-the-loop", desc: "Risk-classified tools, approval cards with full context, expiry auto-deny." },
+  { title: "Budgets & quotas", desc: "Org → group → project → service spend hierarchy with enforcement modes and kill switch." },
+  { title: "Audit log", desc: "Append-only user-action and execution audit trail with a centralised UI." },
+  { title: "RBAC & scopes", desc: "Eight roles across SYSTEM / GROUP / PROJECT scopes with explicit inheritance." },
+  { title: "Multi-model", desc: "OpenAI, Anthropic, Azure, Bedrock, Ollama, vLLM — a configuration change, not a code change." },
+];
+
+const eeGroups = [
+  {
+    theme: "Compliance & Governance",
+    items: [
+      "Hash-chained tamper-evident audit (SOC2)",
+      "Tiered audit storage (hot + cold)",
+      "PII detection / DLP on prompts",
+      "SIEM export (Splunk, QRadar, Sentinel)",
+      "Data classification gates",
+      "Session replay timeline",
+      "Moderated Conversations",
+      "Content Safety Filter",
+    ],
+  },
+  {
+    theme: "Scale & High Availability",
+    items: [
+      "Clustered fan-out (multi-instance engine)",
+      "Enterprise transport adapters (Redis / NATS)",
+      "Air-gapped / on-prem reference deployment",
+      "Conversation retention, legal hold & eDiscovery",
+    ],
+  },
+  {
+    theme: "FinOps",
+    items: [
+      "CSV / Parquet chargeback reports",
+      "Multi-currency budgets",
+      "Quota groups (shared budget pools)",
+      "Cost-optimisation suggestions",
+    ],
+  },
+  {
+    theme: "Enterprise Integrations",
+    items: [
+      "SharePoint / Microsoft Graph connector",
+      "Azure AI Search retrieval adapter",
+      "Per-step approver pinning",
+      "Group-level service-type defaults",
+    ],
+  },
+];
+
+const exploring = [
+  "`myr session` CLI client",
+  "Multimodal chat (image, voice)",
+  "Deterministic / counterfactual replay modes",
+  "Group & multi-agent sessions",
+  "Priority-weighted token budgeting",
+];
+---
+
+<V2Layout
+  title="Roadmap | Myrmec"
+  description="What's shipped in Myrmec Core (open source) and what's planned for Myrmec Enterprise. No dates — just direction."
+>
+  <section class="mx-auto max-w-6xl px-6 py-16 md:px-10">
+    <h1 class="text-4xl font-extrabold tracking-tight text-slate-900 md:text-5xl">Roadmap</h1>
+    <p class="mt-4 max-w-2xl text-base leading-relaxed text-slate-500">
+      Myrmec is open core: <strong class="text-slate-700">Myrmec Core</strong> is Apache-2.0 and
+      free forever; <strong class="text-slate-700">Myrmec Enterprise</strong> adds compliance,
+      scale, and FinOps capabilities for regulated and large organisations. We ship by direction,
+      not by date — no timelines here, just what's done and what's coming.
+    </p>
+
+    <!-- ─── SHIPPED ──────────────────────────────────────────── -->
+    <div class="mt-14">
+      <div class="flex items-center gap-3">
+        <span class="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500"></span>
+        <h2 class="text-2xl font-extrabold tracking-tight text-slate-900">Shipped — Myrmec Core (Open Source)</h2>
+      </div>
+      <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {shipped.map((f) => (
+          <div class="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-5">
+            <p class="text-sm font-bold text-slate-900">{f.title}</p>
+            <p class="mt-2 text-xs leading-relaxed text-slate-500">{f.desc}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    <!-- ─── PLANNED EE ───────────────────────────────────────── -->
+    <div class="mt-16">
+      <div class="flex items-center gap-3">
+        <span class="inline-flex h-2.5 w-2.5 rounded-full bg-indigo-500"></span>
+        <h2 class="text-2xl font-extrabold tracking-tight text-slate-900">Planned — Myrmec Enterprise</h2>
+      </div>
+      <p class="mt-3 text-sm text-slate-500">
+        The open-source core stays fully usable on its own. Enterprise adds governance at scale
+        for regulated industries.
+      </p>
+      <div class="mt-6 grid gap-5 md:grid-cols-2">
+        {eeGroups.map((g) => (
+          <div class="rounded-2xl border border-indigo-200 bg-white p-6 shadow-sm">
+            <p class="text-sm font-bold uppercase tracking-wide text-indigo-600">{g.theme}</p>
+            <ul class="mt-4 space-y-2.5">
+              {g.items.map((item) => (
+                <li class="flex items-start gap-2.5 text-sm text-slate-600">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+      <div class="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-6 text-center">
+        <p class="text-sm text-slate-600">
+          Interested in any of these? We'd love to talk about your requirements.
+        </p>
+        <a
+          href="/v2/#contact"
+          class="mt-4 inline-block rounded-xl bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500"
+        >Contact Us</a>
+      </div>
+    </div>
+
+    <!-- ─── EXPLORING ────────────────────────────────────────── -->
+    <div class="mt-16">
+      <div class="flex items-center gap-3">
+        <span class="inline-flex h-2.5 w-2.5 rounded-full bg-slate-300"></span>
+        <h2 class="text-2xl font-extrabold tracking-tight text-slate-900">Exploring</h2>
+      </div>
+      <p class="mt-3 text-sm text-slate-500">Ideas under consideration — tell us what matters to you.</p>
+      <div class="mt-6 flex flex-wrap gap-3">
+        {exploring.map((item) => (
+          <span class="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 shadow-sm">
+            {item}
+          </span>
+        ))}
+      </div>
+    </div>
+  </section>
+</V2Layout>

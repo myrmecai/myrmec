@@ -38,7 +38,7 @@ test.describe('Phase 7d approval card', () => {
     // 1) Inject one APPROVAL_REQUEST row into the messages list.
     let decisionStatus: 'PENDING' | 'APPROVED' | 'REJECTED' = 'PENDING'
     await adminPage.route(
-      `**/api/v1/conversations/${conversation.id}/messages`,
+      `**/api/v1/conversations/${conversation.id}/messages*`,
       async (route) => {
         await route.fulfill({
           status: 200,
@@ -63,6 +63,12 @@ test.describe('Phase 7d approval card', () => {
               approvalStatus: decisionStatus,
               approverId: null,
               expiresAt: null,
+              pinned: false,
+              feedbackRating: null,
+              feedbackReason: null,
+              feedbackBy: null,
+              feedbackAt: null,
+              superseded: false,
               createdAt: new Date().toISOString(),
             },
           ]),
@@ -132,7 +138,7 @@ test.describe('Phase 7d approval card', () => {
     const approvalId = '33333333-3333-3333-3333-333333333333'
 
     await adminPage.route(
-      `**/api/v1/conversations/${conversation.id}/messages`,
+      `**/api/v1/conversations/${conversation.id}/messages*`,
       async (route) => {
         await route.fulfill({
           status: 200,
@@ -159,6 +165,12 @@ test.describe('Phase 7d approval card', () => {
               approvalStatus: 'PENDING',
               approverId: null,
               expiresAt: null,
+              pinned: false,
+              feedbackRating: null,
+              feedbackReason: null,
+              feedbackBy: null,
+              feedbackAt: null,
+              superseded: false,
               createdAt: new Date().toISOString(),
             },
           ]),

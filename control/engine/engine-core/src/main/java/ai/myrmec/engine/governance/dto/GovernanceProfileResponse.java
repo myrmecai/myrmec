@@ -2,57 +2,51 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.governance.dto;
 
-import ai.myrmec.engine.governance.GovernanceProfile;
+import ai.myrmec.engine.governance.GovernanceProfileDefinition;
 
-import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 
 /**
- * Governance Profile response — includes both the raw policies map
- * (for backward compatibility) and the structured feature groups
- * (for the compare matrix UI).
+ * Governance Profile response — the compare-matrix payload for the UI.
+ *
+ * <p>After the governance-enforcement rewrite (G2/G3), built-in profiles are
+ * hardcoded Java enums implementing {@link GovernanceProfileDefinition}.
+ * The legacy raw-JSONB {@code policies} map, the {@code isBuiltIn}/{@code isSystem}
+ * flags, and the DB timestamps ({@code createdAt}/{@code updatedAt}) have been
+ * removed — the UI never consumed them and they have no source for in-code
+ * built-ins. The response now carries only what the compare matrix renders.</p>
  *
  * @param code             profile code (STRICT, STANDARD, FLEXIBLE)
  * @param name             display name
  * @param description      short description
- * @param isBuiltIn        always true in V1
- * @param isSystem         true = cannot be deleted
  * @param isCurrentDefault true if this is the current org-level default
- * @param policies         raw policies JSONB (legacy)
  * @param groups           structured feature groups for the compare matrix
- * @param createdAt        creation timestamp
- * @param updatedAt        last update timestamp
  */
 public record GovernanceProfileResponse(
         String code,
         String name,
         String description,
-        Boolean isBuiltIn,
-        Boolean isSystem,
         Boolean isCurrentDefault,
-        Map<String, Object> policies,
-        List<FeatureGroupResponse> groups,
-        Instant createdAt,
-        Instant updatedAt) {
+        List<FeatureGroupResponse> groups) {
 
-    public static GovernanceProfileResponse from(GovernanceProfile p) {
-        return from(p, false, null);
-    }
-
-    public static GovernanceProfileResponse from(GovernanceProfile p,
+    public static GovernanceProfileResponse from(GovernanceProfileDefinition d,
                                                   boolean isCurrentDefault,
                                                   List<FeatureGroupResponse> groups) {
         return new GovernanceProfileResponse(
-                p.getCode(),
-                p.getName(),
-                p.getDescription(),
-                p.getIsBuiltIn(),
-                p.getIsSystem(),
+                d.code(),
+                d.displayName(),
+                d.builtIn() ? builtInDescription(d.code()) : "",
                 isCurrentDefault,
-                p.getPolicies(),
-                groups,
-                p.getCreatedAt(),
-                p.getUpdatedAt());
+                groups);
+    }
+
+    /** Human-readable descriptions for the three built-in profiles. */
+    private static String builtInDescription(String code) {
+        return switch (code) {
+            case "STRICT" -> "Banking / Compliance — maximum governance, Git-only sources, hard caps.";
+            case "STANDARD" -> "Enterprise default — balanced governance, Git + Inline, managed + external providers.";
+            case "FLEXIBLE" -> "Pilot / Startup — minimal governance, all source types, configurable budgets.";
+            default -> "";
+        };
     }
 }

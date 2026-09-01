@@ -48,7 +48,7 @@ public enum EventType {
      * {@code ctx.retrieve()} query). Records the query and the returned
      * chunk IDs / source IDs / scores so an AUDITOR can replay exactly
      * which knowledge fed an answer; never the passage text itself.
-     * Data: { knowledgeBaseId, query, topK, hitCount, chunkIds[],
+     * Data: { knowledgeSourceId, query, topK, hitCount, chunkIds[],
      *         sourceIds[], scores[] }
      */
     RETRIEVAL

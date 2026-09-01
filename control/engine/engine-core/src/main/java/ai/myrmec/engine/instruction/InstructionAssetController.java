@@ -2,6 +2,8 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.instruction;
 
+import ai.myrmec.engine._system.common.DomainConstants;
+import ai.myrmec.engine._system.common.DomainConstants.ActorType;
 import ai.myrmec.engine._system.security.CurrentUser;
 import ai.myrmec.engine.instruction.dto.CreateDraftRequest;
 import ai.myrmec.engine.instruction.dto.CreateInstructionAssetRequest;
@@ -42,9 +44,9 @@ public class InstructionAssetController {
                     .map(InstructionAssetResponse::from)
                     .toList());
         }
-        return ResponseEntity.ok(service.findAllOrgScoped().stream()
-                .map(InstructionAssetResponse::from)
-                .toList());
+        // Org-scoped list includes the published version's availability so the
+        // UI can show REQUIRED/OPTIONAL badges without a separate fetch per asset.
+        return ResponseEntity.ok(service.findAllOrgScopedWithAvailability());
     }
 
     @GetMapping("/api/v1/admin/instruction-assets/{id}")
@@ -85,7 +87,7 @@ public class InstructionAssetController {
                 request.description(),
                 request.category(),
                 userId,
-                userId != null ? userId.toString() : "SYSTEM");
+                userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(InstructionAssetResponse.from(asset));
     }
@@ -103,7 +105,7 @@ public class InstructionAssetController {
                 request.description(),
                 request.category(),
                 userId,
-                userId != null ? userId.toString() : "SYSTEM");
+                userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.ok(InstructionAssetResponse.from(asset));
     }
 
@@ -124,7 +126,7 @@ public class InstructionAssetController {
                 request.priority(),
                 request.activationRules(),
                 userId,
-                userId != null ? userId.toString() : "SYSTEM");
+                userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(InstructionAssetVersionResponse.from(draft));
     }
@@ -155,7 +157,7 @@ public class InstructionAssetController {
     public ResponseEntity<InstructionAssetVersionResponse> publish(
             @PathVariable UUID id,
             @CurrentUser UUID userId) {
-        var published = service.publishDraft(id, userId, userId != null ? userId.toString() : "SYSTEM");
+        var published = service.publishDraft(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.ok(InstructionAssetVersionResponse.from(published));
     }
 
@@ -165,7 +167,7 @@ public class InstructionAssetController {
     public ResponseEntity<Void> discardDraft(
             @PathVariable UUID id,
             @CurrentUser UUID userId) {
-        service.discardDraft(id, userId, userId != null ? userId.toString() : "SYSTEM");
+        service.discardDraft(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.noContent().build();
     }
 
@@ -176,7 +178,7 @@ public class InstructionAssetController {
             @PathVariable UUID id,
             @CurrentUser UUID userId) {
         return ResponseEntity.ok(InstructionAssetResponse.from(
-                service.disable(id, userId, userId != null ? userId.toString() : "SYSTEM")));
+                service.disable(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM)));
     }
 
     @PostMapping("/api/v1/admin/instruction-assets/{id}/reenable")
@@ -186,7 +188,7 @@ public class InstructionAssetController {
             @PathVariable UUID id,
             @CurrentUser UUID userId) {
         return ResponseEntity.ok(InstructionAssetResponse.from(
-                service.reenable(id, userId, userId != null ? userId.toString() : "SYSTEM")));
+                service.reenable(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM)));
     }
 
     @PostMapping("/api/v1/admin/instruction-assets/{id}/archive")
@@ -196,6 +198,6 @@ public class InstructionAssetController {
             @PathVariable UUID id,
             @CurrentUser UUID userId) {
         return ResponseEntity.ok(InstructionAssetResponse.from(
-                service.archive(id, userId, userId != null ? userId.toString() : "SYSTEM")));
+                service.archive(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM)));
     }
 }

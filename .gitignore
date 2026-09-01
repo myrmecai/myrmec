@@ -2,6 +2,10 @@
 .idea/
 .vscode/
 *.iml
+.classpath
+.factorypath
+.project
+.settings/
 
 # Build outputs
 target/

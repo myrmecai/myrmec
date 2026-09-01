@@ -1,21 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import {
   instructionAssetApi,
+  instructionBindingApi,
   knowledgeProviderApi,
 } from '@/lib/api'
+import type { InstructionAsset } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { BookOpen, Database, FileSearch } from 'lucide-react'
+import { BookOpen, Database, FileSearch, Eye } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { ProjectInstructionAssets } from './ProjectInstructionAssets'
 import { ProjectKnowledgeProviders } from './ProjectKnowledgeProviders'
+import { Scope, EntityStatus, Availability } from '@/lib/domain-constants'
 
 export function ProjectAIContext({ projectId }: { projectId: string }) {
   const [activeSubTab, setActiveSubTab] = useState<'assets' | 'providers' | 'sources'>('assets')
+  const queryClient = useQueryClient()
 
-  // Fetch org-level items for the "inherited" display
+  // Fetch org-level items for the "inherited" display.
+  // The org-scoped list endpoint now includes `availability` on each asset,
+  // so we no longer need a separate published-version fetch per asset.
   const { data: orgAssets } = useQuery({
     queryKey: ['instruction-assets', 'org'],
     queryFn: () => instructionAssetApi.list(),
@@ -25,15 +33,54 @@ export function ProjectAIContext({ projectId }: { projectId: string }) {
     queryFn: () => knowledgeProviderApi.list(),
   })
 
-  const inheritedAssets = orgAssets?.filter((a) => a.scope === 'ORGANIZATION' && a.status === 'ACTIVE') ?? []
-  const inheritedProviders = orgProviders?.filter((p) => p.scope === 'ORGANIZATION' && p.status === 'ACTIVE') ?? []
+  // Fetch existing bindings for this project
+  const { data: bindings } = useQuery({
+    queryKey: ['instruction-bindings', projectId],
+    queryFn: () => instructionBindingApi.list(projectId),
+  })
+
+  const inheritedAssets = orgAssets?.filter((a) => a.scope === Scope.ORGANIZATION && a.status === EntityStatus.ACTIVE) ?? []
+  const inheritedProviders = orgProviders?.filter((p) => p.scope === Scope.ORGANIZATION && p.status === EntityStatus.ACTIVE) ?? []
+
+  // Build a map of assetId → enabled (from bindings)
+  const bindingMap = new Map<string, boolean>()
+  bindings?.forEach((b) => {
+    bindingMap.set(b.instructionAssetId, b.enabled)
+  })
+
+  // Mutation to toggle a binding
+  const toggleMutation = useMutation({
+    mutationFn: ({ assetId, enabled }: { assetId: string; enabled: boolean }) =>
+      instructionBindingApi.update(projectId, assetId, enabled),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['instruction-bindings', projectId] })
+    },
+  })
+
+  function isAssetEnabled(asset: InstructionAsset): boolean {
+    const availability = asset.availability
+    if (availability === Availability.REQUIRED) return true
+    const binding = bindingMap.get(asset.id)
+    // OPTIONAL assets: enabled if binding exists and is true, else false
+    return binding ?? false
+  }
 
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">AI Context</CardTitle>
-          <CardDescription>Project-scoped and inherited organization AI context resources</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base">AI Context</CardTitle>
+              <CardDescription>Project-scoped and inherited organization AI context resources</CardDescription>
+            </div>
+            <Button asChild variant="outline" size="sm">
+              <Link to="/projects/$projectId/ai-context-preview" params={{ projectId }}>
+                <Eye className="h-4 w-4 mr-2" />
+                Preview Context
+              </Link>
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {/* Sub-tab headers */}
@@ -70,12 +117,39 @@ export function ProjectAIContext({ projectId }: { projectId: string }) {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-2">
-                      {inheritedAssets.map((a) => (
-                        <div key={a.id} className="flex items-center justify-between text-sm">
-                          <span className="font-medium">{a.name}</span>
-                          <Badge variant="outline">{a.status}</Badge>
-                        </div>
-                      ))}
+                      {inheritedAssets.map((a) => {
+                        const availability = a.availability
+                        const enabled = isAssetEnabled(a)
+                        const isOptional = availability === Availability.OPTIONAL
+                        return (
+                          <div
+                            key={a.id}
+                            data-testid={`inherited-instruction-asset-${a.id}`}
+                            className="flex items-center justify-between text-sm"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{a.name}</span>
+                              <Badge
+                                data-testid={`availability-badge-${a.id}`}
+                                variant={availability === Availability.REQUIRED ? 'default' : 'secondary'}
+                                className="text-xs"
+                              >
+                                {availability ?? '—'}
+                              </Badge>
+                            </div>
+                            <input
+                              type="checkbox"
+                              data-testid={`enabled-switch-${a.id}`}
+                              checked={enabled}
+                              disabled={!isOptional || toggleMutation.isPending}
+                              onChange={(e) =>
+                                toggleMutation.mutate({ assetId: a.id, enabled: e.target.checked })
+                              }
+                              className="h-4 w-4"
+                            />
+                          </div>
+                        )
+                      })}
                     </div>
                   </CardContent>
                 </Card>

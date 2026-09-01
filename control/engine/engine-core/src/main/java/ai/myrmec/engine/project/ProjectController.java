@@ -4,6 +4,7 @@ import ai.myrmec.engine.project.dto.CreateProjectRequest;
 import ai.myrmec.engine.project.dto.MoveProjectGroupRequest;
 import ai.myrmec.engine.project.dto.ProjectResponse;
 import ai.myrmec.engine.project.dto.UpdateProjectRequest;
+import ai.myrmec.engine.user.UserPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -11,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -28,9 +30,13 @@ public class ProjectController {
     private final ProjectService projectService;
 
     @GetMapping
-    @Operation(summary = "List all projects")
-    public ResponseEntity<List<ProjectResponse>> listProjects() {
-        List<Project> projects = projectService.findAll();
+    @Operation(summary = "List projects visible to the caller")
+    public ResponseEntity<List<ProjectResponse>> listProjects(Authentication authentication) {
+        // RBAC-05: scope-filter — return only projects the caller can view,
+        // not every project in the org.
+        UserPrincipal user = authentication != null && authentication.getPrincipal() instanceof UserPrincipal up
+                ? up : null;
+        List<Project> projects = projectService.findAllVisibleTo(user);
         List<ProjectResponse> response = projects.stream()
                 .map(ProjectResponse::from)
                 .toList();
@@ -39,6 +45,7 @@ public class ProjectController {
 
     @GetMapping("/{id}")
     @Operation(summary = "Get project by ID")
+    @PreAuthorize("@projectAccess.canView(#id, authentication)")
     public ResponseEntity<ProjectResponse> getProject(@PathVariable UUID id) {
         Project project = projectService.findById(id);
         return ResponseEntity.ok(ProjectResponse.from(project));

@@ -1,5 +1,6 @@
 import { test, expect } from '../fixtures'
 import { E2E_ADMIN } from '../helpers/api'
+import { confirmDialog } from '../helpers/confirm-dialog'
 
 /**
  * Global Secrets — comprehensive E2E coverage.
@@ -238,8 +239,8 @@ test.describe('global secrets', () => {
     await expect(row).toBeVisible()
 
     // Delete via UI
-    adminPage.once('dialog', (d) => d.accept())
     await row.getByRole('button', { name: 'Delete' }).click()
+    await confirmDialog(adminPage, 'Delete')
 
     // Row should disappear
     await expect(row).toHaveCount(0, { timeout: 10_000 })
@@ -278,8 +279,8 @@ test.describe('global secrets', () => {
       await expect(row).toBeVisible()
 
       // Attempt to delete — should be blocked with RESOURCE_IN_USE
-      adminPage.once('dialog', (d) => d.accept())
       await row.getByRole('button', { name: 'Delete' }).click()
+      await confirmDialog(adminPage, 'Delete')
 
       // The row should still be visible (delete was blocked)
       await expect(row).toBeVisible({ timeout: 10_000 })

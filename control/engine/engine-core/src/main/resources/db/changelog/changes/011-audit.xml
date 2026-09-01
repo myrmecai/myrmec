@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+      Squashed audit schema — final table structure.
+
+      Replaces:
+        20260630-12-audit-events.xml
+        20260820-01-audit-hash-chain.xml
+
+      The old audit_log table (deprecated and dropped in
+      20260630-00-05-deprecate-audit-log.xml) is NOT included.
+    -->
+
+    <!-- ================================================================ -->
+    <!-- audit_events                                                     -->
+    <!-- ================================================================ -->
+
+    <changeSet id="011-audit-create-audit-events" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="audit_events"/>
+            </not>
+        </preConditions>
+        <comment>Audit Events — append-only event log. BIGINT PK for append optimization. Hash-chained.</comment>
+
+        <createTable tableName="audit_events">
+            <column name="id" type="bigint" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="event_type" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="entity_type" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="entity_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="version_id" type="uuid"/>
+            <column name="scope_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_ae_project"
+                             references="projects(id)"/>
+            </column>
+            <column name="actor_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_ae_actor"
+                             references="users(id)"/>
+            </column>
+            <column name="actor_display_name" type="varchar(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="timestamp" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reason_code" type="varchar(50)"/>
+            <column name="before_snapshot" type="jsonb"/>
+            <column name="after_snapshot" type="jsonb"/>
+            <column name="metadata" type="jsonb"/>
+            <column name="prev_event_hash" type="varchar(64)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="event_hash" type="varchar(64)">
+                <constraints nullable="true"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <!-- Index: (entity_type, entity_id, timestamp) — entity history query -->
+    <changeSet id="011-audit-ae-index-entity" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <indexExists indexName="idx_ae_entity_time"/>
+        </preConditions>
+        <createIndex indexName="idx_ae_entity_time" tableName="audit_events">
+            <column name="entity_type"/>
+            <column name="entity_id"/>
+            <column name="timestamp"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- Index: (scope_type, project_id, timestamp) — scope-based query -->
+    <changeSet id="011-audit-ae-index-scope" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <indexExists indexName="idx_ae_scope"/>
+        </preConditions>
+        <createIndex indexName="idx_ae_scope" tableName="audit_events">
+            <column name="scope_type"/>
+            <column name="project_id"/>
+            <column name="timestamp"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- Index: (actor_id, timestamp) — actor activity query -->
+    <changeSet id="011-audit-ae-index-actor" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <indexExists indexName="idx_ae_actor"/>
+        </preConditions>
+        <createIndex indexName="idx_ae_actor" tableName="audit_events">
+            <column name="actor_id"/>
+            <column name="timestamp"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- Index: (event_type, timestamp) — event type query -->
+    <changeSet id="011-audit-ae-index-event-type" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <indexExists indexName="idx_ae_event_type"/>
+        </preConditions>
+        <createIndex indexName="idx_ae_event_type" tableName="audit_events">
+            <column name="event_type"/>
+            <column name="timestamp"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- Index: (scope_type, project_id, id) — chain verification walk -->
+    <changeSet id="011-audit-ae-index-chain-walk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <indexExists indexName="idx_ae_chain_walk"/>
+        </preConditions>
+        <comment>Index for chain verification walk (scope + project + ascending id).</comment>
+        <createIndex indexName="idx_ae_chain_walk" tableName="audit_events">
+            <column name="scope_type"/>
+            <column name="project_id"/>
+            <column name="id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================ -->
+    <!-- audit_chain_heads                                                -->
+    <!-- ================================================================ -->
+
+    <changeSet id="011-audit-create-audit-chain-heads" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="audit_chain_heads"/>
+            </not>
+        </preConditions>
+        <comment>Per-scope chain state for tamper-evident audit log.</comment>
+
+        <createTable tableName="audit_chain_heads">
+            <column name="id" type="bigint" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="scope_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="head_hash" type="varchar(64)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="chaining_active" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone">
+                <constraints nullable="true"/>
+            </column>
+            <column name="version_column" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <!-- Unique constraint on (scope_type, project_id) — one head per scope -->
+    <changeSet id="011-audit-audit-chain-heads-unique" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <uniqueConstraintExists tableName="audit_chain_heads" constraintName="uc_ach_scope"/>
+        </preConditions>
+        <addUniqueConstraint tableName="audit_chain_heads" constraintName="uc_ach_scope"
+                             columnNames="scope_type, project_id"/>
+    </changeSet>
+
+</databaseChangeLog>

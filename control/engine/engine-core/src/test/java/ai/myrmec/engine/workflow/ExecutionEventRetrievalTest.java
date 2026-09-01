@@ -38,7 +38,7 @@ class ExecutionEventRetrievalTest {
         assertThat(event.getCreatedAt()).isNotNull();
 
         assertThat(event.getData())
-                .containsEntry("knowledgeBaseId", kbId.toString())
+                .containsEntry("knowledgeSourceId", kbId.toString())
                 .containsEntry("query", "parental leave policy")
                 .containsEntry("topK", 3)
                 .containsEntry("hitCount", 2)

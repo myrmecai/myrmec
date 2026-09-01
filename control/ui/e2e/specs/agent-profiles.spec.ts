@@ -1,5 +1,6 @@
 import { test, expect } from '../fixtures'
 import { E2E_ADMIN } from '../helpers/api'
+import { confirmDialog } from '../helpers/confirm-dialog'
 
 /**
  * Agent Profiles admin — list, create, delete.
@@ -51,8 +52,8 @@ test.describe('agent profiles admin', () => {
     await expect(row).toBeVisible({ timeout: 10_000 })
 
     // Delete the profile
-    adminPage.once('dialog', (d) => d.accept())
     await row.getByRole('button', { name: 'Delete' }).click()
+    await confirmDialog(adminPage, 'Delete')
 
     await expect(row).toHaveCount(0, { timeout: 10_000 })
   })

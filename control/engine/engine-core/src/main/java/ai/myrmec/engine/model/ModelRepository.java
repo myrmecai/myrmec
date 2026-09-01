@@ -37,11 +37,6 @@ public interface ModelRepository extends JpaRepository<Model, String> {
     List<Model> findByStatus(ModelStatus status);
 
     /**
-     * Find all models with a specific deployment type.
-     */
-    List<Model> findByDeploymentType(DeploymentType deploymentType);
-
-    /**
      * Find all models with a specific provider.
      */
     List<Model> findByProvider(String provider);
@@ -51,12 +46,5 @@ public interface ModelRepository extends JpaRepository<Model, String> {
      */
     default List<Model> findAllActive() {
         return findByStatus(ModelStatus.ACTIVE);
-    }
-
-    /**
-     * Find all on-premise models (for health monitoring).
-     */
-    default List<Model> findAllOnPremise() {
-        return findByDeploymentType(DeploymentType.ON_PREMISE);
     }
 }

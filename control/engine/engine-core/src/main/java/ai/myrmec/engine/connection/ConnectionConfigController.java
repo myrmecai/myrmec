@@ -2,6 +2,8 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.connection;
 
+import ai.myrmec.engine._system.common.DomainConstants;
+import ai.myrmec.engine._system.common.DomainConstants.ActorType;
 import ai.myrmec.engine._system.security.CurrentUser;
 import ai.myrmec.engine.connection.dto.ConnectionConfigResponse;
 import ai.myrmec.engine.connection.dto.ConnectionConfigVersionResponse;
@@ -89,7 +91,7 @@ public class ConnectionConfigController {
                 request.type(),
                 request.credentialSecretId(),
                 userId,
-                userId != null ? userId.toString() : "SYSTEM");
+                userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ConnectionConfigResponse.from(config));
     }
@@ -109,7 +111,7 @@ public class ConnectionConfigController {
                 request.description(),
                 request.credentialSecretId(),
                 userId,
-                userId != null ? userId.toString() : "SYSTEM");
+                userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.ok(ConnectionConfigResponse.from(config));
     }
 
@@ -121,7 +123,7 @@ public class ConnectionConfigController {
     public ResponseEntity<ConnectionConfigVersionResponse> createDraft(
             @PathVariable UUID id,
             @CurrentUser UUID userId) {
-        var draft = service.createDraft(id, userId, userId != null ? userId.toString() : "SYSTEM");
+        var draft = service.createDraft(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ConnectionConfigVersionResponse.from(draft));
     }
@@ -143,7 +145,7 @@ public class ConnectionConfigController {
     public ResponseEntity<ConnectionConfigVersionResponse> publish(
             @PathVariable UUID id,
             @CurrentUser UUID userId) {
-        var published = service.publishDraft(id, userId, userId != null ? userId.toString() : "SYSTEM");
+        var published = service.publishDraft(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.ok(ConnectionConfigVersionResponse.from(published));
     }
 
@@ -153,7 +155,7 @@ public class ConnectionConfigController {
     public ResponseEntity<Void> discardDraft(
             @PathVariable UUID id,
             @CurrentUser UUID userId) {
-        service.discardDraft(id, userId, userId != null ? userId.toString() : "SYSTEM");
+        service.discardDraft(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.noContent().build();
     }
 
@@ -180,7 +182,7 @@ public class ConnectionConfigController {
             @PathVariable UUID id,
             @CurrentUser UUID userId) {
         return ResponseEntity.ok(ConnectionConfigResponse.from(
-                service.disable(id, userId, userId != null ? userId.toString() : "SYSTEM")));
+                service.disable(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM)));
     }
 
     @PostMapping("/api/v1/admin/connection-configs/{id}/reenable")
@@ -190,7 +192,7 @@ public class ConnectionConfigController {
             @PathVariable UUID id,
             @CurrentUser UUID userId) {
         return ResponseEntity.ok(ConnectionConfigResponse.from(
-                service.reenable(id, userId, userId != null ? userId.toString() : "SYSTEM")));
+                service.reenable(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM)));
     }
 
     @PostMapping("/api/v1/admin/connection-configs/{id}/archive")
@@ -200,7 +202,7 @@ public class ConnectionConfigController {
             @PathVariable UUID id,
             @CurrentUser UUID userId) {
         return ResponseEntity.ok(ConnectionConfigResponse.from(
-                service.archive(id, userId, userId != null ? userId.toString() : "SYSTEM")));
+                service.archive(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM)));
     }
 
     @DeleteMapping("/api/v1/admin/connection-configs/{id}")
@@ -209,7 +211,7 @@ public class ConnectionConfigController {
     public ResponseEntity<Void> delete(
             @PathVariable UUID id,
             @CurrentUser UUID userId) {
-        service.delete(id, userId, userId != null ? userId.toString() : "SYSTEM");
+        service.delete(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.noContent().build();
     }
 }

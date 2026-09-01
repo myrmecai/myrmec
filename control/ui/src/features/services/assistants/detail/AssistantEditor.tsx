@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RequiredMark } from '@/components/ui/required-marks'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Card,
@@ -122,7 +123,17 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
           assistantId={assistantId}
           draft={draft}
           onSaved={invalidate}
-          onPublish={() => publishMutation.mutate()}
+          onPublish={async () => {
+            const confirmed = await dialogService.showConfirmDialog({
+              title: 'Publish Assistant',
+              message: `Publish "${assistant.name}"? The published version becomes live immediately and cannot be edited — open a new draft to change it.`,
+              severity: 'warning',
+              type: 'warning',
+              confirmLabel: 'Publish',
+              cancelLabel: 'Cancel',
+            })
+            if (confirmed) publishMutation.mutate()
+          }}
           onDiscard={async () => {
             const confirmed = await dialogService.showConfirmDialog({
               title: 'Discard Draft',
@@ -182,7 +193,7 @@ function ParentSection({
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="a-name">Name</Label>
+          <Label htmlFor="a-name">Name<RequiredMark /></Label>
           <Input
             id="a-name"
             value={name}
@@ -322,6 +333,22 @@ function DraftSection({
   const pinnedProfile = profiles?.find((p) => p.id === agentProfileId)
   const availableTools = pinnedProfile?.toolCodes ?? []
 
+  // Dirty: any local field diverges from the saved draft.
+  const dirty =
+    agentProfileId !== (draft.agentProfileId ?? '') ||
+    greeting !== (draft.greetingMessage ?? '') ||
+    addendum !== (draft.addendum ?? '') ||
+    hitlMode !== (draft.hitlOverrideMode ?? 'INHERIT') ||
+    maxIdle !== String(draft.maxIdleMinutes ?? 30) ||
+    maxAge !== (draft.maxSessionAgeHours != null ? String(draft.maxSessionAgeHours) : '') ||
+    JSON.stringify(reach) !== JSON.stringify(draft.usableVia ?? ['WEB_UI']) ||
+    JSON.stringify(disabledTools) !== JSON.stringify(draft.disabledTools ?? []) ||
+    kbBindings !== (draft.kbBindings ?? []).join(', ')
+
+  // Publish gate (mirrors backend AssistantVersionService.validatePublishGate):
+  // agent profile pinned and at least one reach channel selected.
+  const canPublish = agentProfileId !== '' && reach.length > 0
+
   const saveMutation = useMutation({
     mutationFn: () => {
       const body: UpdateAssistantDraftRequest = {
@@ -363,7 +390,7 @@ function DraftSection({
       </CardHeader>
       <CardContent className="space-y-5">
         <div className="space-y-2">
-          <Label htmlFor="d-profile">Agent profile (brain)</Label>
+          <Label htmlFor="d-profile">Agent profile (brain)<RequiredMark /></Label>
           <Select value={agentProfileId} onValueChange={setAgentProfileId}>
             <SelectTrigger id="d-profile">
               <SelectValue placeholder="Select an agent profile" />
@@ -403,7 +430,7 @@ function DraftSection({
         </div>
 
         <div className="space-y-2">
-          <Label>Reach</Label>
+          <Label>Reach<RequiredMark /></Label>
           <div className="flex gap-4">
             {REACH_OPTIONS.map((opt) => (
               <label key={opt} className="flex items-center gap-2 text-sm">
@@ -512,7 +539,12 @@ function DraftSection({
             <Save className="h-4 w-4 mr-2" />
             Save draft
           </Button>
-          <Button size="sm" onClick={onPublish} disabled={publishing}>
+          <Button
+            size="sm"
+            onClick={onPublish}
+            disabled={publishing || dirty || !canPublish}
+            title={dirty ? 'Save your changes before publishing.' : !canPublish ? 'Pick an agent profile and at least one reach channel.' : undefined}
+          >
             <Send className="h-4 w-4 mr-2" />
             {publishing ? 'Publishing…' : 'Publish'}
           </Button>

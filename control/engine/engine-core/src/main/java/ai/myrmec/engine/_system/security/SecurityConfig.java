@@ -57,6 +57,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/conversations/*/stream").permitAll()
                         // Health check
                         .requestMatchers("/actuator/health").permitAll()
+                        // License tier info for E2E harness (read-only, no secrets)
+                        .requestMatchers("/actuator/info").permitAll()
                         // OpenAPI documentation
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         // Node-to-node mesh relay - guarded by a shared secret in the
@@ -67,6 +69,13 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/knowledge/webhooks/**").permitAll()
                         // Agent endpoints - require AGENT role
                         .requestMatchers("/api/v1/agent/**").hasRole("AGENT")
+                        // Quota/budget admin endpoints - authenticated users are allowed through;
+                        // QuotaAdminController enforces scope-aware BUDGET_OWNER/PLATFORM_ADMIN
+                        // authorization via BudgetAuthorization.
+                        .requestMatchers("/api/v1/admin/quotas/**").authenticated()
+                        // Budget dashboard endpoints - authenticated users are allowed through;
+                        // BudgetController enforces scope-aware view authorization.
+                        .requestMatchers("/api/v1/budgets/**").authenticated()
                         // Admin endpoints - PLATFORM_ADMIN (tech) or ORG_ADMIN (governance).
                         // Individual controllers tighten further with @PreAuthorize.
                         .requestMatchers("/api/v1/admin/**").hasAnyRole("PLATFORM_ADMIN", "ORG_ADMIN")

@@ -5,12 +5,14 @@ package ai.myrmec.engine.quota;
 
 import ai.myrmec.engine._system.security.GroupAccessEvaluator;
 import ai.myrmec.engine._system.security.ProjectAccessEvaluator;
+import ai.myrmec.engine.assistant.AssistantRepository;
 import ai.myrmec.engine.group.GroupRepository;
 import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.project.ProjectRepository;
 import ai.myrmec.engine.quota.dto.BudgetPermissions;
 import ai.myrmec.engine.user.UserPrincipal;
 import ai.myrmec.engine.user.UserRole;
+import ai.myrmec.engine.workflow.WorkflowRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -41,14 +43,22 @@ class BudgetAuthorizationTest {
     @Mock private GroupAccessEvaluator groupAccess;
     @Mock private ProjectRepository projectRepository;
     @Mock private GroupRepository groupRepository;
+    @Mock private WorkflowRepository workflowRepository;
+    @Mock private AssistantRepository assistantRepository;
 
     private BudgetAuthorization authorization;
 
     @BeforeEach
     void setUp() {
-        authorization = new BudgetAuthorization(projectAccess, groupAccess, projectRepository, groupRepository);
+        authorization = new BudgetAuthorization(projectAccess, groupAccess, projectRepository,
+                groupRepository, workflowRepository, assistantRepository);
         lenient().when(projectAccess.canView(any(), any())).thenReturn(false);
         lenient().when(groupAccess.canView(any(), any())).thenReturn(false);
+        // For SERVICE-scope permission checks, the service instance is
+        // resolved to a project ID. In these unit tests the "service"
+        // scopeId is a project UUID, so the project-exists fallback
+        // must return true.
+        lenient().when(projectRepository.existsById(any(UUID.class))).thenReturn(true);
     }
 
     private static Authentication auth(String... claims) {

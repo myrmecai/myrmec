@@ -16,6 +16,10 @@
 import { parentPort, workerData } from "node:worker_threads";
 import { AgentWorker } from "./agentWorker.js";
 import { EngineHttpClient } from "../transport/httpClient.js";
+import {
+  createChatModelFactory,
+  createSessionToolFactory,
+} from "../executor/providers.js";
 import type { AgentWorkerConfig, WorkerInbound } from "./agentWorkerProtocol.js";
 
 if (!parentPort) {
@@ -34,10 +38,23 @@ if (config.engineUrl && config.agentAccessToken) {
   });
 }
 
+// Construct execution provider factories from config.
+// Async because the stub implementation is loaded via dynamic import().
+const chatModelFactory = await createChatModelFactory({
+  mode: config.chatModelMode ?? "real",
+  stubModulePath: config.stubModulePath,
+});
+const sessionToolFactory = await createSessionToolFactory({
+  mode: config.sessionToolMode ?? "real",
+  stubModulePath: config.stubModulePath,
+});
+
 const worker = new AgentWorker({
   post: (message) => port.postMessage(message),
   httpClient,
   agentAccessToken: config.agentAccessToken,
+  chatModelFactory,
+  sessionToolFactory,
   ...(config.maxIterations !== undefined
     ? { maxIterations: config.maxIterations }
     : {}),
@@ -46,6 +63,6 @@ const worker = new AgentWorker({
     : {}),
 });
 
-port.on("message", (message: WorkerInbound) => {
-  worker.handle(message);
+port.on("message", async (message: WorkerInbound) => {
+  await worker.handle(message);
 });

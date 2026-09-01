@@ -3,6 +3,8 @@
 package ai.myrmec.engine.knowledge;
 
 import ai.myrmec.engine._system.exception.BadRequestException;
+import ai.myrmec.engine._system.common.DomainConstants;
+import ai.myrmec.engine._system.common.DomainConstants.ActorType;
 import ai.myrmec.engine._system.security.CurrentUser;
 import ai.myrmec.engine.knowledge.dto.CreateKnowledgeSourceRequest;
 import ai.myrmec.engine.knowledge.dto.KnowledgeSourceResponse;
@@ -27,9 +29,11 @@ public class KnowledgeSourceController {
 
     @GetMapping("/api/v1/admin/knowledge-sources")
     @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasRole('ORG_ADMIN')")
-    @Operation(summary = "List all org-scoped knowledge sources")
-    public ResponseEntity<List<KnowledgeSourceResponse>> list() {
-        return ResponseEntity.ok(service.findAllOrgScoped().stream()
+    @Operation(summary = "List all org-scoped knowledge sources",
+            description = "Excludes sources of ARCHIVED providers by default; pass includeArchived=true to include them.")
+    public ResponseEntity<List<KnowledgeSourceResponse>> list(
+            @RequestParam(defaultValue = "false") boolean includeArchived) {
+        return ResponseEntity.ok(service.findAllOrgScoped(includeArchived).stream()
                 .map(KnowledgeSourceResponse::from).toList());
     }
 
@@ -55,7 +59,7 @@ public class KnowledgeSourceController {
     @Operation(summary = "Disable a knowledge source")
     public ResponseEntity<KnowledgeSourceResponse> disable(@PathVariable UUID id, @CurrentUser UUID userId) {
         return ResponseEntity.ok(KnowledgeSourceResponse.from(
-                service.disable(id, userId, userId != null ? userId.toString() : "SYSTEM")));
+                service.disable(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM)));
     }
 
     @PostMapping("/api/v1/admin/knowledge-sources/{id}/archive")
@@ -63,6 +67,6 @@ public class KnowledgeSourceController {
     @Operation(summary = "Archive a knowledge source")
     public ResponseEntity<KnowledgeSourceResponse> archive(@PathVariable UUID id, @CurrentUser UUID userId) {
         return ResponseEntity.ok(KnowledgeSourceResponse.from(
-                service.archive(id, userId, userId != null ? userId.toString() : "SYSTEM")));
+                service.archive(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM)));
     }
 }

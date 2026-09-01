@@ -29,6 +29,7 @@ import { Plus, AlertCircle, RefreshCw } from 'lucide-react'
 import { SYNC_STATUS_COLORS } from '../shared/constants'
 import DataTable2 from '@/components/data-table2/data-table2'
 import { SortedColumnHeader } from '@/components/data-table2/sorted-column-header'
+import { Scope, EntityStatus } from '@/lib/domain-constants'
 
 export function DataFeedsList() {
   const queryClient = useQueryClient()
@@ -123,7 +124,7 @@ export function DataFeedsList() {
               <RefreshCw className="h-3 w-3 mr-1" />
               Sync
             </Button>
-            {feed.status === 'ACTIVE' && (
+            {feed.status === EntityStatus.ACTIVE && (
               <Button size="sm" variant="outline" onClick={() => disableMutation.mutate(feed.id)}>
                 Disable
               </Button>
@@ -211,13 +212,13 @@ function CreateDataFeedDialog({
     queryFn: () => knowledgeProviderApi.list(),
   })
 
-  const publishedProviders = providers?.filter((p) => p.status === 'ACTIVE') || []
+  const publishedProviders = providers?.filter((p) => p.status === EntityStatus.ACTIVE) || []
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!publishedProviders.length) return
     onCreate({
-      scope: 'ORGANIZATION',
+      scope: Scope.ORGANIZATION,
       name,
       description: description || undefined,
       providerVersionId: publishedProviders[0]?.currentVersionId || '',

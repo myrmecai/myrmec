@@ -1,8 +1,6 @@
 package ai.myrmec.engine.model.dto;
 
-import ai.myrmec.engine.model.DeploymentType;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -28,9 +26,6 @@ public class CreateModelRequest {
     @Size(max = 50, message = "Provider code cannot exceed 50 characters")
     private String provider;
 
-    @NotNull(message = "Deployment type is required")
-    private DeploymentType deploymentType;
-
     @NotBlank(message = "Model ID is required")
     @Size(max = 100, message = "Model ID cannot exceed 100 characters")
     private String modelId;
@@ -38,14 +33,14 @@ public class CreateModelRequest {
     @Size(max = 500, message = "API endpoint cannot exceed 500 characters")
     private String apiEndpoint;
 
-    @Size(max = 500, message = "API key cannot exceed 500 characters")
-    private String apiKey;
-
-    private Boolean requiresAuth;
-
     private Boolean supportsVision;
 
     private Map<String, Object> infraConfig;
 
     private Map<String, Object> defaultParams;
+
+    private java.math.BigDecimal inputPrice;
+    private java.math.BigDecimal outputPrice;
+    @Size(max = 3)
+    private String currency;
 }

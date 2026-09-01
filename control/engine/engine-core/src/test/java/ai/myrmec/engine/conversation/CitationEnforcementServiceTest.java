@@ -66,7 +66,7 @@ class CitationEnforcementServiceTest {
         event.setEventType(EventType.RETRIEVAL);
         event.setAttemptId(attemptId);
         event.setData(Map.of(
-                "knowledgeBaseId", "kb-123",
+                "knowledgeSourceId", "kb-123",
                 "query", "test query",
                 "chunkIds", List.of(chunkId1, chunkId2),
                 "hitCount", 2
@@ -99,7 +99,7 @@ class CitationEnforcementServiceTest {
         event.setEventType(EventType.RETRIEVAL);
         event.setAttemptId(attemptId);
         event.setData(Map.of(
-                "knowledgeBaseId", "kb-123",
+                "knowledgeSourceId", "kb-123",
                 "query", "test query",
                 "chunkIds", List.of(chunkId1, chunkId2),
                 "hitCount", 2

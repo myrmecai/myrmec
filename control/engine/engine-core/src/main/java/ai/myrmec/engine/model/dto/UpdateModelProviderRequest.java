@@ -6,6 +6,8 @@ import jakarta.validation.constraints.Size;
 import lombok.Builder;
 import lombok.Value;
 
+import java.util.UUID;
+
 /**
  * Phase 10 #70 &mdash; request body for {@code PUT /api/v1/admin/providers/{code}}.
  *
@@ -26,22 +28,16 @@ public class UpdateModelProviderRequest {
 
     Boolean requiresAuth;
 
-    @Size(max = 100)
-    String authHeader;
-
-    @Size(max = 50)
-    String authPrefix;
-
-    @Size(max = 200)
-    String healthEndpoint;
-
-    @Size(max = 200)
-    String modelsEndpoint;
-
     @Size(max = 500)
     String docsUrl;
 
     String description;
 
     ModelStatus status;
+
+    /**
+     * Linked ConnectionConfig holding the provider's credential in the
+     * secrets vault. Pass null to leave unchanged; pass UUID to link.
+     */
+    UUID connectionConfigId;
 }

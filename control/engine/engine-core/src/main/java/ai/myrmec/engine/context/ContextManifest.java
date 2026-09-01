@@ -2,9 +2,7 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.context;
 
-import ai.myrmec.engine._system.common.JsonListMapConverter;
 import jakarta.persistence.Column;
-import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -14,6 +12,8 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.util.List;
@@ -42,8 +42,11 @@ public class ContextManifest {
     @Column(name = "id", nullable = false, updatable = false)
     private UUID id;
 
-    @Column(name = "conversation_id", nullable = false)
-    private UUID conversationId;
+    @Column(name = "session_id")
+    private UUID sessionId;
+
+    @Column(name = "service_type", nullable = false, length = 20)
+    private String serviceType;
 
     @Column(name = "message_id")
     private UUID messageId;
@@ -66,27 +69,27 @@ public class ContextManifest {
     @Column(name = "truncated", nullable = false)
     private Boolean truncated;
 
-    @Convert(converter = JsonListMapConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "instructions_included", nullable = false, columnDefinition = "jsonb")
     private List<Map<String, Object>> instructionsIncluded;
 
-    @Convert(converter = JsonListMapConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "instructions_excluded", columnDefinition = "jsonb")
     private List<Map<String, Object>> instructionsExcluded;
 
-    @Convert(converter = JsonListMapConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "instructions_truncated", columnDefinition = "jsonb")
     private List<Map<String, Object>> instructionsTruncated;
 
-    @Convert(converter = JsonListMapConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "knowledge_retrieved", columnDefinition = "jsonb")
     private List<Map<String, Object>> knowledgeRetrieved;
 
-    @Convert(converter = JsonListMapConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "knowledge_included", columnDefinition = "jsonb")
     private List<Map<String, Object>> knowledgeIncluded;
 
-    @Convert(converter = JsonListMapConverter.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "knowledge_truncated", columnDefinition = "jsonb")
     private List<Map<String, Object>> knowledgeTruncated;
 

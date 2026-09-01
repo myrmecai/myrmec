@@ -2,6 +2,8 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.knowledge;
 
+import ai.myrmec.engine._system.common.DomainConstants;
+import ai.myrmec.engine._system.common.DomainConstants.ActorType;
 import ai.myrmec.engine._system.security.CurrentUser;
 import ai.myrmec.engine.knowledge.dto.CreateDataFeedRequest;
 import ai.myrmec.engine.knowledge.dto.DataFeedResponse;
@@ -48,7 +50,7 @@ public class DataFeedController {
         var feed = service.create(request.scope(), request.projectId(), request.name(),
                 request.description(), request.providerVersionId(), request.datasetName(),
                 request.connectionConfigId(), request.connectionDetails(), request.syncSchedule(),
-                userId, userId != null ? userId.toString() : "SYSTEM");
+                userId, userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.status(HttpStatus.CREATED).body(DataFeedResponse.from(feed));
     }
 
@@ -57,7 +59,7 @@ public class DataFeedController {
     @Operation(summary = "Trigger a sync for a data feed")
     public ResponseEntity<DataFeedResponse> triggerSync(@PathVariable UUID id, @CurrentUser UUID userId) {
         return ResponseEntity.ok(DataFeedResponse.from(
-                service.triggerSync(id, userId, userId != null ? userId.toString() : "SYSTEM")));
+                service.triggerSync(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM)));
     }
 
     @PostMapping("/api/v1/admin/data-feeds/{id}/disable")
@@ -65,6 +67,6 @@ public class DataFeedController {
     @Operation(summary = "Disable a data feed")
     public ResponseEntity<DataFeedResponse> disable(@PathVariable UUID id, @CurrentUser UUID userId) {
         return ResponseEntity.ok(DataFeedResponse.from(
-                service.disable(id, userId, userId != null ? userId.toString() : "SYSTEM")));
+                service.disable(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM)));
     }
 }

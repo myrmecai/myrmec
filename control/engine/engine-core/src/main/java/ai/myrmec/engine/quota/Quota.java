@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+
 package ai.myrmec.engine.quota;
 
 import ai.myrmec.engine._system.common.JsonMapConverter;
@@ -52,8 +55,26 @@ public class Quota {
     @Column(name = "scope_type", nullable = false, length = 20)
     private Scope scopeType;
 
-    @Column(name = "scope_id", nullable = false)
+    /**
+     * Polymorphic scope identifier.  For {@code ORG} this is {@code null}
+     * (no org entity in Community).  For {@code GROUP} / {@code PROJECT}
+     * it is the group / project UUID.  For {@code SERVICE} it is the
+     * workflow or assistant instance UUID — <em>not</em> the project ID.
+     *
+     * @see #projectId
+     */
+    @Column(name = "scope_id")
     private UUID scopeId;
+
+    /**
+     * Denormalised project reference for {@code SERVICE}-scope rows.
+     * Populated at create time so {@code BudgetService} can find all
+     * service-instance budgets under a project without joining through
+     * the workflow / assistant tables.  {@code null} for non-SERVICE
+     * scopes.
+     */
+    @Column(name = "project_id")
+    private UUID projectId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "resource_type", nullable = false, length = 20)

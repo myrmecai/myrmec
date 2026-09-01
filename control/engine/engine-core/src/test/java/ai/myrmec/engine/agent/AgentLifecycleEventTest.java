@@ -28,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AgentLifecycleEventTest extends IntegrationTestBase {
 
     @Autowired private TestDataBuilder data;
-    @Autowired private AgentService agentService;
+    @Autowired private AgentHostService agentService;
     @Autowired private AgentReaperService reaper;
     @Autowired private AgentRepository instanceRepository;
     @Autowired private ConversationRepository conversationRepository;

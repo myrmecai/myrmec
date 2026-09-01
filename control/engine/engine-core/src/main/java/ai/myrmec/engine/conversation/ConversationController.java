@@ -59,7 +59,7 @@ public class ConversationController {
     private final ApprovalDecisionDispatcher approvalDecisionDispatcher;
     private final ai.myrmec.engine.attachment.AttachmentService attachmentService;
     private final ConversationSummaryService conversationSummaryService;
-    private final ai.myrmec.engine.agent.AgentService agentService;
+    private final ai.myrmec.engine.agent.AgentHostService agentService;
 
     @PostMapping
     @Operation(summary = "Create a new conversation under a project")
@@ -166,12 +166,17 @@ public class ConversationController {
         // #103 — bind any freshly uploaded, scan-clean attachments to this turn
         // before dispatch so the agent receives them with the message.
         attachmentService.bindUnboundToMessage(id, saved.getId(), userId);
-        // Phase 6d \u2014 fire-and-forget dispatch to an idle agent instance.
+        // Phase 6d — fire-and-forget dispatch to an idle agent instance.
         // Failures (no idle agent, no pinned agentId, etc.) are logged by
         // the dispatcher; the REST response still reports the USER row was
         // saved so the UI can render it optimistically.
+        // QuotaExceededException is NOT caught here — it propagates to the
+        // GlobalExceptionHandler which maps it to HTTP 429 + Retry-After,
+        // so the UI's quota-exceeded banner interceptor fires.
         try {
             turnDispatcher.dispatch(id);
+        } catch (ai.myrmec.engine._system.exception.QuotaExceededException e) {
+            throw e; // re-throw — let GlobalExceptionHandler map to 429
         } catch (Exception e) {
             log.warn("Turn dispatch threw for conversation {}: {}", id, e.getMessage(), e);
         }

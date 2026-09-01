@@ -1,0 +1,1045 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Squashed changelog: AI Context / Knowledge domain.
+        Replaces all incremental changesets for connection_configs,
+        connection_config_versions, instruction_assets,
+        instruction_asset_versions, knowledge_providers,
+        knowledge_provider_versions, knowledge_sources,
+        knowledge_chunks, data_feeds, context_manifests,
+        assistants, assistant_version, assistant_grants,
+        and assistant_context_bindings with clean createTable
+        definitions reflecting the FINAL table structure.
+    -->
+
+    <!-- ================================================================
+         connection_configs
+         ================================================================ -->
+    <changeSet id="012-ai-context-create-connection-configs" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="connection_configs"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="connection_configs">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="scope" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="INCOMPLETE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="credential_secret_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="current_version_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="published_at" type="timestamp with time zone"/>
+            <column name="published_by" type="uuid"/>
+            <column name="created_by" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_by" type="uuid"/>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="connection_configs"
+            baseColumnNames="project_id"
+            constraintName="fk_conn_config_project"
+            referencedTableName="projects"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <addForeignKeyConstraint
+            baseTableName="connection_configs"
+            baseColumnNames="credential_secret_id"
+            constraintName="fk_conn_config_credential_secret"
+            referencedTableName="secrets"
+            referencedColumnNames="id"
+            onDelete="SET NULL"/>
+
+        <createIndex indexName="uq_conn_config_scope_project_name" tableName="connection_configs" unique="true">
+            <column name="scope"/>
+            <column name="project_id"/>
+            <column name="name"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         connection_config_versions
+         ================================================================ -->
+    <changeSet id="012-ai-context-create-connection-config-versions" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="connection_config_versions"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="connection_config_versions">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="connection_config_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="version_number" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="parent_version_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="status" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="url" type="varchar(2000)"/>
+            <column name="config" type="jsonb"/>
+            <column name="test_status" type="varchar(20)"/>
+            <column name="last_test_at" type="timestamp with time zone"/>
+            <column name="last_test_error" type="text"/>
+            <column name="draft_owner_id" type="uuid"/>
+            <column name="published_at" type="timestamp with time zone"/>
+            <column name="published_by" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="connection_config_versions"
+            baseColumnNames="connection_config_id"
+            constraintName="fk_conn_config_version_config"
+            referencedTableName="connection_configs"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <addForeignKeyConstraint
+            baseTableName="connection_config_versions"
+            baseColumnNames="parent_version_id"
+            constraintName="fk_conn_config_version_parent"
+            referencedTableName="connection_config_versions"
+            referencedColumnNames="id"
+            onDelete="SET NULL"/>
+
+        <addForeignKeyConstraint
+            baseTableName="connection_configs"
+            baseColumnNames="current_version_id"
+            constraintName="fk_conn_config_current_version"
+            referencedTableName="connection_config_versions"
+            referencedColumnNames="id"
+            onDelete="SET NULL"/>
+
+        <sql dbms="postgresql">
+            CREATE UNIQUE INDEX uq_conn_config_version_draft
+            ON connection_config_versions (connection_config_id)
+            WHERE status = 'DRAFT';
+        </sql>
+
+        <sql dbms="postgresql">
+            CREATE UNIQUE INDEX uq_conn_config_version_published
+            ON connection_config_versions (connection_config_id)
+            WHERE status = 'PUBLISHED';
+        </sql>
+    </changeSet>
+
+    <!-- ================================================================
+         instruction_assets
+         ================================================================ -->
+    <changeSet id="012-ai-context-create-instruction-assets" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="instruction_assets"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="instruction_assets">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="scope" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="category" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="current_version_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="published_at" type="timestamp with time zone"/>
+            <column name="published_by" type="uuid"/>
+            <column name="created_by" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_by" type="uuid"/>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="instruction_assets"
+            baseColumnNames="project_id"
+            constraintName="fk_instr_asset_project"
+            referencedTableName="projects"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <createIndex indexName="uq_instr_asset_scope_project_name" tableName="instruction_assets" unique="true">
+            <column name="scope"/>
+            <column name="project_id"/>
+            <column name="name"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         instruction_asset_versions
+         ================================================================ -->
+    <changeSet id="012-ai-context-create-instruction-asset-versions" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="instruction_asset_versions"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="instruction_asset_versions">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="asset_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="version_number" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="parent_version_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="status" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="source_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="source_details" type="jsonb"/>
+            <column name="connection_config_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="applicability" type="jsonb">
+                <constraints nullable="false"/>
+            </column>
+            <column name="availability" type="varchar(20)" defaultValue="OPTIONAL">
+                <constraints nullable="false"/>
+            </column>
+            <column name="priority" type="int" defaultValueNumeric="1000">
+                <constraints nullable="false"/>
+            </column>
+            <column name="estimated_tokens" type="int"/>
+            <column name="git_commit" type="varchar(40)"/>
+            <column name="inline_version" type="int"/>
+            <column name="activation_rules" type="jsonb"/>
+            <column name="draft_owner_id" type="uuid"/>
+            <column name="published_at" type="timestamp with time zone"/>
+            <column name="published_by" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="instruction_asset_versions"
+            baseColumnNames="asset_id"
+            constraintName="fk_instr_asset_version_asset"
+            referencedTableName="instruction_assets"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <addForeignKeyConstraint
+            baseTableName="instruction_asset_versions"
+            baseColumnNames="parent_version_id"
+            constraintName="fk_instr_asset_version_parent"
+            referencedTableName="instruction_asset_versions"
+            referencedColumnNames="id"
+            onDelete="SET NULL"/>
+
+        <addForeignKeyConstraint
+            baseTableName="instruction_asset_versions"
+            baseColumnNames="connection_config_id"
+            constraintName="fk_instr_asset_version_conn_config"
+            referencedTableName="connection_configs"
+            referencedColumnNames="id"
+            onDelete="SET NULL"/>
+
+        <addForeignKeyConstraint
+            baseTableName="instruction_assets"
+            baseColumnNames="current_version_id"
+            constraintName="fk_instr_asset_current_version"
+            referencedTableName="instruction_asset_versions"
+            referencedColumnNames="id"
+            onDelete="SET NULL"/>
+    </changeSet>
+
+    <!-- ================================================================
+         knowledge_providers
+         ================================================================ -->
+    <changeSet id="012-ai-context-create-knowledge-providers" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="knowledge_providers"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="knowledge_providers">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="scope" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="current_version_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="published_at" type="timestamp with time zone"/>
+            <column name="published_by" type="uuid"/>
+            <column name="created_by" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_by" type="uuid"/>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="knowledge_providers"
+            baseColumnNames="project_id"
+            constraintName="fk_kp_project"
+            referencedTableName="projects"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <createIndex indexName="uq_kp_scope_project_name" tableName="knowledge_providers" unique="true">
+            <column name="scope"/>
+            <column name="project_id"/>
+            <column name="name"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         knowledge_provider_versions
+         ================================================================ -->
+    <changeSet id="012-ai-context-create-knowledge-provider-versions" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="knowledge_provider_versions"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="knowledge_provider_versions">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="provider_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="version_number" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="parent_version_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="status" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="connection_config_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="config" type="jsonb"/>
+            <column name="draft_owner_id" type="uuid"/>
+            <column name="published_at" type="timestamp with time zone"/>
+            <column name="published_by" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="knowledge_provider_versions"
+            baseColumnNames="provider_id"
+            constraintName="fk_kp_version_provider"
+            referencedTableName="knowledge_providers"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <addForeignKeyConstraint
+            baseTableName="knowledge_provider_versions"
+            baseColumnNames="parent_version_id"
+            constraintName="fk_kp_version_parent"
+            referencedTableName="knowledge_provider_versions"
+            referencedColumnNames="id"
+            onDelete="SET NULL"/>
+
+        <addForeignKeyConstraint
+            baseTableName="knowledge_provider_versions"
+            baseColumnNames="connection_config_id"
+            constraintName="fk_kp_version_conn_config"
+            referencedTableName="connection_configs"
+            referencedColumnNames="id"
+            onDelete="SET NULL"/>
+
+        <addForeignKeyConstraint
+            baseTableName="knowledge_providers"
+            baseColumnNames="current_version_id"
+            constraintName="fk_kp_current_version"
+            referencedTableName="knowledge_provider_versions"
+            referencedColumnNames="id"
+            onDelete="SET NULL"/>
+    </changeSet>
+
+    <!-- ================================================================
+         knowledge_sources
+         ================================================================ -->
+    <changeSet id="012-ai-context-create-knowledge-sources" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="knowledge_sources"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="knowledge_sources">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="scope" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="status" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="provider_version_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="config" type="jsonb"/>
+            <column name="availability" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="priority" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_by" type="uuid"/>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="knowledge_sources"
+            baseColumnNames="project_id"
+            constraintName="fk_ks_project"
+            referencedTableName="projects"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <addForeignKeyConstraint
+            baseTableName="knowledge_sources"
+            baseColumnNames="provider_version_id"
+            constraintName="fk_ks_provider_version"
+            referencedTableName="knowledge_provider_versions"
+            referencedColumnNames="id"
+            onDelete="RESTRICT"/>
+
+        <createIndex indexName="uq_ks_scope_project_provider_name" tableName="knowledge_sources" unique="true">
+            <column name="scope"/>
+            <column name="project_id"/>
+            <column name="provider_version_id"/>
+            <column name="name"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         knowledge_chunks
+         ================================================================ -->
+    <changeSet id="012-ai-context-create-knowledge-chunks" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="knowledge_chunks"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="knowledge_chunks">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="knowledge_source_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="locator" type="varchar(2000)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="content" type="text">
+                <constraints nullable="false"/>
+            </column>
+            <column name="content_hash" type="varchar(64)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="sequence_no" type="bigint"/>
+            <column name="metadata_json" type="text"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="knowledge_chunks"
+            baseColumnNames="knowledge_source_id"
+            constraintName="fk_knowledge_chunk_source"
+            referencedTableName="knowledge_sources"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <createIndex indexName="uq_knowledge_chunk_source_locator" tableName="knowledge_chunks" unique="true">
+            <column name="knowledge_source_id"/>
+            <column name="locator"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         data_feeds
+         ================================================================ -->
+    <changeSet id="012-ai-context-create-data-feeds" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="data_feeds"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="data_feeds">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="scope" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="status" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="provider_version_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="dataset_name" type="varchar(200)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="connection_config_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="connection_details" type="jsonb"/>
+            <column name="sync_schedule" type="varchar(100)"/>
+            <column name="sync_status" type="varchar(20)" defaultValue="IDLE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_sync_at" type="timestamp with time zone"/>
+            <column name="chunk_count" type="int"/>
+            <column name="error_message" type="text"/>
+            <column name="created_by" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_by" type="uuid"/>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="data_feeds"
+            baseColumnNames="project_id"
+            constraintName="fk_df_project"
+            referencedTableName="projects"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <addForeignKeyConstraint
+            baseTableName="data_feeds"
+            baseColumnNames="provider_version_id"
+            constraintName="fk_df_provider_version"
+            referencedTableName="knowledge_provider_versions"
+            referencedColumnNames="id"
+            onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint
+            baseTableName="data_feeds"
+            baseColumnNames="connection_config_id"
+            constraintName="fk_df_conn_config"
+            referencedTableName="connection_configs"
+            referencedColumnNames="id"
+            onDelete="SET NULL"/>
+
+        <createIndex indexName="uq_df_scope_project_provider_name" tableName="data_feeds" unique="true">
+            <column name="scope"/>
+            <column name="project_id"/>
+            <column name="provider_version_id"/>
+            <column name="name"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         context_manifests
+         ================================================================ -->
+    <changeSet id="012-ai-context-create-context-manifests" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="context_manifests"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="context_manifests">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="session_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="service_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="message_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="sequence_no" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="governance_profile_code" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="context_pinning" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="total_tokens" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="budget_tokens" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="truncated" type="boolean">
+                <constraints nullable="false"/>
+            </column>
+            <column name="instructions_included" type="jsonb">
+                <constraints nullable="false"/>
+            </column>
+            <column name="instructions_excluded" type="jsonb"/>
+            <column name="instructions_truncated" type="jsonb"/>
+            <column name="knowledge_retrieved" type="jsonb"/>
+            <column name="knowledge_included" type="jsonb"/>
+            <column name="knowledge_truncated" type="jsonb"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <createIndex indexName="idx_cm_session" tableName="context_manifests">
+            <column name="session_id"/>
+        </createIndex>
+
+        <createIndex indexName="idx_cm_message" tableName="context_manifests">
+            <column name="message_id"/>
+        </createIndex>
+
+        <createIndex indexName="idx_cm_profile_created" tableName="context_manifests">
+            <column name="governance_profile_code"/>
+            <column name="created_at"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         assistants
+         ================================================================ -->
+    <changeSet id="012-ai-context-create-assistants" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="assistants"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="assistants">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="name" type="varchar(120)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="current_version_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="disabled" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="archived_at" type="timestamp with time zone"/>
+            <column name="created_by" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="assistants"
+            baseColumnNames="project_id"
+            constraintName="fk_assistants_project"
+            referencedTableName="projects"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+    </changeSet>
+
+    <!-- ================================================================
+         assistant_version  (singular table name)
+         ================================================================ -->
+    <changeSet id="012-ai-context-create-assistant-version" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="assistant_version"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="assistant_version">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="assistant_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="version_number" type="varchar(20)"/>
+            <column name="bump_type" type="varchar(10)"/>
+            <column name="status" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="parent_version_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="draft_owner_id" type="uuid"/>
+            <column name="agent_profile_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="agent_profile_version_id" type="uuid"/>
+            <column name="addendum" type="text"/>
+            <column name="greeting_message" type="text">
+                <constraints nullable="false"/>
+            </column>
+            <column name="max_idle_minutes" type="int" defaultValueNumeric="30">
+                <constraints nullable="false"/>
+            </column>
+            <column name="max_session_age_hours" type="int"/>
+            <column name="kb_bindings" type="text"/>
+            <column name="disabled_tools" type="text"/>
+            <column name="hitl_override_mode" type="varchar(20)" defaultValue="STRICT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="usable_via" type="text"/>
+            <column name="attachments_enabled" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="attachment_retention_ttl" type="int"/>
+            <column name="attachment_max_file_size" type="int"/>
+            <column name="attachment_type_allowlist" type="text"/>
+            <column name="published_at" type="timestamp with time zone"/>
+            <column name="published_by" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="assistant_version"
+            baseColumnNames="assistant_id"
+            constraintName="fk_assistant_version_assistant"
+            referencedTableName="assistants"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <addForeignKeyConstraint
+            baseTableName="assistant_version"
+            baseColumnNames="parent_version_id"
+            constraintName="fk_assistant_version_parent"
+            referencedTableName="assistant_version"
+            referencedColumnNames="id"
+            onDelete="SET NULL"/>
+
+        <addForeignKeyConstraint
+            baseTableName="assistant_version"
+            baseColumnNames="agent_profile_id"
+            constraintName="fk_assistant_version_agent_profile"
+            referencedTableName="agent_profiles"
+            referencedColumnNames="id"
+            onDelete="SET NULL"/>
+
+        <addForeignKeyConstraint
+            baseTableName="assistants"
+            baseColumnNames="current_version_id"
+            constraintName="fk_assistants_current_version"
+            referencedTableName="assistant_version"
+            referencedColumnNames="id"
+            onDelete="SET NULL"/>
+    </changeSet>
+
+    <!-- ================================================================
+         assistant_grants
+         ================================================================ -->
+    <changeSet id="012-ai-context-create-assistant-grants" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="assistant_grants"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="assistant_grants">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="assistant_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="principal_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="principal_id" type="varchar(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="permission" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="granted_at" type="timestamp with time zone">
+                <constraints nullable="false"/>
+            </column>
+            <column name="granted_by" type="uuid"/>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="assistant_grants"
+            baseColumnNames="assistant_id"
+            constraintName="fk_assistant_grant_assistant"
+            referencedTableName="assistants"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <addUniqueConstraint
+            tableName="assistant_grants"
+            constraintName="uq_assistant_grant_principal_permission"
+            columnNames="assistant_id, principal_type, principal_id, permission"/>
+    </changeSet>
+
+    <!-- ================================================================
+         assistant_context_bindings
+         ================================================================ -->
+    <changeSet id="012-ai-context-create-assistant-context-bindings" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="assistant_context_bindings"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="assistant_context_bindings">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="assistant_version_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="binding_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="target_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="enabled" type="boolean">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="assistant_context_bindings"
+            baseColumnNames="assistant_version_id"
+            constraintName="fk_acb_assistant_version"
+            referencedTableName="assistant_version"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <createIndex indexName="uq_acb_version_type_target" tableName="assistant_context_bindings" unique="true">
+            <column name="assistant_version_id"/>
+            <column name="binding_type"/>
+            <column name="target_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         Cross-file FKs: tables created in earlier files that reference
+         tables created in this file (012). Added at the end so all
+         referenced tables exist at creation time.
+
+         1. conversations.assistant_id → assistants(id)        (008→012)
+         2. conversations.assistant_version_id → assistant_version(id)  (008→012)
+         3. project_instruction_bindings.instruction_asset_id → instruction_assets(id)  (002→012)
+         4. project_provider_bindings.provider_id → knowledge_providers(id)  (002→012)
+         5. model_providers.connection_config_id → connection_configs(id)  (004→012)
+         ================================================================ -->
+
+    <changeSet id="012-ai-context-add-conversation-assistant-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_conversation_assistant"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="conversations"
+            baseColumnNames="assistant_id"
+            referencedTableName="assistants"
+            referencedColumnNames="id"
+            constraintName="fk_conversation_assistant"/>
+    </changeSet>
+
+    <changeSet id="012-ai-context-add-conversation-assistant-version-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_conversation_assistant_version"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="conversations"
+            baseColumnNames="assistant_version_id"
+            referencedTableName="assistant_version"
+            referencedColumnNames="id"
+            constraintName="fk_conversation_assistant_version"/>
+    </changeSet>
+
+    <changeSet id="012-ai-context-add-project-instruction-binding-asset-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_pib_instruction_asset"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="project_instruction_bindings"
+            baseColumnNames="instruction_asset_id"
+            referencedTableName="instruction_assets"
+            referencedColumnNames="id"
+            constraintName="fk_pib_instruction_asset"/>
+    </changeSet>
+
+    <changeSet id="012-ai-context-add-project-provider-binding-provider-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_ppb_provider"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="project_provider_bindings"
+            baseColumnNames="provider_id"
+            referencedTableName="knowledge_providers"
+            referencedColumnNames="id"
+            constraintName="fk_ppb_provider"/>
+    </changeSet>
+
+    <changeSet id="012-ai-context-add-model-providers-connection-config-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_mp_connection_config"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="model_providers"
+            baseColumnNames="connection_config_id"
+            referencedTableName="connection_configs"
+            referencedColumnNames="id"
+            constraintName="fk_mp_connection_config"
+            onDelete="SET NULL"/>
+    </changeSet>
+
+</databaseChangeLog>

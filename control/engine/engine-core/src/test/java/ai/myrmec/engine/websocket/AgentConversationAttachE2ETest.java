@@ -2,7 +2,7 @@ package ai.myrmec.engine.websocket;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.agent.Agent;
-import ai.myrmec.engine.agent.AgentCreationResult;
+import ai.myrmec.engine.agent.AgentHostCreationResult;
 import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentRepository;
@@ -79,7 +79,7 @@ class AgentConversationAttachE2ETest extends IntegrationTestBase {
                 .named("attach-profile")
                 .withSystemPrompt("You are an attach tester.")
                 .create();
-        AgentCreationResult created = data.agent()
+        AgentHostCreationResult created = data.agent()
                 .named("attach-agent")
                 .withProfile(profile)
                 .inProject(project)
@@ -138,7 +138,7 @@ class AgentConversationAttachE2ETest extends IntegrationTestBase {
                 .named("attach-reject-profile")
                 .withSystemPrompt("nope")
                 .create();
-        AgentCreationResult created = data.agent()
+        AgentHostCreationResult created = data.agent()
                 .named("attach-reject-agent")
                 .withProfile(profile)
                 .inProject(project)

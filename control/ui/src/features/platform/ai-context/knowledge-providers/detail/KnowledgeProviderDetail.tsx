@@ -3,7 +3,7 @@
 
 import { Link } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   knowledgeProviderApi,
   knowledgeSourceApi,
@@ -49,6 +49,8 @@ import {
   Pencil,
 } from 'lucide-react'
 import { STATUS_COLORS } from '../shared/constants'
+import { ConnectionConfigSelect } from '@/features/platform/connections/components/ConnectionConfigSelect'
+import { RequiredMark, DraftRequiredMark } from '@/components/ui/required-marks'
 import { dialogService } from '@/services/dialog-service'
 
 export function KnowledgeProviderDetail({ providerId, projectId }: { providerId: string; projectId?: string }) {
@@ -58,6 +60,19 @@ export function KnowledgeProviderDetail({ providerId, projectId }: { providerId:
     queryKey: ['knowledge-provider', providerId],
     queryFn: () => knowledgeProviderApi.get(providerId),
   })
+
+  // Fetch connection configs to resolve connectionConfigId to name
+  const { data: connectionConfigs } = useQuery({
+    queryKey: ['connection-configs'],
+    queryFn: connectionConfigApi.list,
+  })
+  const connectionConfigNameById = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const c of connectionConfigs ?? []) {
+      map[c.id] = c.name
+    }
+    return map
+  }, [connectionConfigs])
 
   const { data: publishedVersion } = useQuery({
     queryKey: ['knowledge-provider-published', providerId],
@@ -242,12 +257,52 @@ export function KnowledgeProviderDetail({ providerId, projectId }: { providerId:
             setZone1Editing(false)
           })
         }}
+        lifecycle={
+          <div className="flex items-center gap-2">
+            {provider.status === 'ACTIVE' && (
+              <Button size="sm" variant="outline" onClick={async () => {
+                const confirmed = await dialogService.showConfirmDialog({
+                  title: 'Disable Knowledge Provider',
+                  message: `Disable "${provider.name}"? Projects will stop retrieving knowledge from this provider until it is re-enabled.`,
+                  severity: 'warning',
+                  type: 'warning',
+                  confirmLabel: 'Disable',
+                  cancelLabel: 'Cancel',
+                })
+                if (confirmed) disableMutation.mutate()
+              }} disabled={disableMutation.isPending}>
+                Disable
+              </Button>
+            )}
+            {provider.status === 'DISABLED' && (
+              <>
+                <Button size="sm" variant="outline" onClick={async () => {
+                  const confirmed = await dialogService.showConfirmDialog({
+                    title: 'Re-enable Knowledge Provider',
+                    message: `Re-enable "${provider.name}"? Projects will immediately start retrieving knowledge from this provider again.`,
+                    severity: 'info',
+                    type: 'warning',
+                    confirmLabel: 'Re-enable',
+                    cancelLabel: 'Cancel',
+                  })
+                  if (confirmed) reenableMutation.mutate()
+                }} disabled={reenableMutation.isPending}>
+                  Re-enable
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => archiveMutation.mutate()} disabled={archiveMutation.isPending}>
+                  Archive
+                </Button>
+              </>
+            )}
+          </div>
+        }
       />
 
       {/* Zone 2: Published Version */}
       {hasPublished && !hasDraft && (
         <PublishedVersionSection
           version={publishedVersion!}
+          connectionConfigNameById={connectionConfigNameById}
           onNewDraft={() => createDraftMutation.mutate()}
           newVersionPending={createDraftMutation.isPending}
           hideNewDraft={zone1Editing}
@@ -259,7 +314,17 @@ export function KnowledgeProviderDetail({ providerId, projectId }: { providerId:
         <DraftSection
           providerId={providerId}
           version={draftVersion!}
-          onPublish={() => publishMutation.mutate()}
+          onPublish={async () => {
+            const confirmed = await dialogService.showConfirmDialog({
+              title: 'Publish Knowledge Provider',
+              message: `Publish version ${draftVersion?.versionNumber ?? ''} of "${provider.name}"? The published version becomes live immediately and cannot be edited — open a new draft to change it.`,
+              severity: 'warning',
+              type: 'warning',
+              confirmLabel: 'Publish',
+              cancelLabel: 'Cancel',
+            })
+            if (confirmed) publishMutation.mutate()
+          }}
           onDiscard={async () => {
             const confirmed = await dialogService.showConfirmDialog({
               title: 'Discard Draft',
@@ -357,25 +422,6 @@ export function KnowledgeProviderDetail({ providerId, projectId }: { providerId:
         </Card>
       )}
 
-      {/* Actions */}
-      <div className="flex items-center gap-2 mt-6">
-        {provider.status === 'ACTIVE' && (
-          <Button variant="outline" onClick={() => disableMutation.mutate()} disabled={disableMutation.isPending}>
-            Disable
-          </Button>
-        )}
-        {provider.status === 'DISABLED' && (
-          <>
-            <Button variant="outline" onClick={() => reenableMutation.mutate()} disabled={reenableMutation.isPending}>
-              Re-enable
-            </Button>
-            <Button variant="outline" onClick={() => archiveMutation.mutate()} disabled={archiveMutation.isPending}>
-              Archive
-            </Button>
-          </>
-        )}
-      </div>
-
       {/* Delete Source Confirmation Dialog */}
       {deleteSource && (
         <Dialog open onOpenChange={(o) => { if (!o) setDeleteSource(null) }}>
@@ -428,12 +474,14 @@ function Zone1Section({
   onEdit,
   onCancel,
   onSave,
+  lifecycle,
 }: {
   provider: KnowledgeProvider
   editing: boolean
   onEdit: () => void
   onCancel: () => void
   onSave: (name: string, description: string) => void
+  lifecycle?: React.ReactNode
 }) {
   const [name, setName] = useState(provider.name)
   const [description, setDescription] = useState(provider.description ?? '')
@@ -447,8 +495,13 @@ function Zone1Section({
     <Card className="mb-6">
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base">Identity & Metadata</CardTitle>
-          {!editing && <Button size="sm" variant="outline" onClick={onEdit}>Edit</Button>}
+          <CardTitle className="text-base">Identity &amp; Metadata</CardTitle>
+          {!editing && (
+            <div className="flex items-center gap-2">
+              {lifecycle}
+              <Button size="sm" variant="outline" onClick={onEdit}>Edit</Button>
+            </div>
+          )}
         </div>
       </CardHeader>
       <CardContent>
@@ -498,11 +551,13 @@ function Zone1Section({
 
 function PublishedVersionSection({
   version,
+  connectionConfigNameById,
   onNewDraft,
   newVersionPending,
   hideNewDraft,
 }: {
   version: KnowledgeProviderVersion
+  connectionConfigNameById: Record<string, string>
   onNewDraft: () => void
   newVersionPending: boolean
   hideNewDraft: boolean
@@ -523,7 +578,7 @@ function PublishedVersionSection({
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid grid-cols-2 gap-4 text-sm">
-          <div><dt className="text-muted-foreground">Connection Config</dt><dd>{version.connectionConfigId || '—'}</dd></div>
+          <div><dt className="text-muted-foreground">Connection Config</dt><dd>{version.connectionConfigId ? (connectionConfigNameById[version.connectionConfigId] ?? version.connectionConfigId) : '—'}</dd></div>
           {config?.maxTopK != null && (
             <div><dt className="text-muted-foreground">Max Top-K</dt><dd>{String(config.maxTopK)}</dd></div>
           )}
@@ -574,10 +629,6 @@ function DraftSection({
   discarding: boolean
 }) {
   const queryClient = useQueryClient()
-  const { data: connectionConfigs } = useQuery({
-    queryKey: ['connection-configs'],
-    queryFn: connectionConfigApi.list,
-  })
 
   const initialConfig = version.config as Record<string, unknown> | null
   const initialMapping = initialConfig?.responseMapping as Record<string, string> | undefined
@@ -648,15 +699,14 @@ function DraftSection({
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
-          <Label>Connection Config</Label>
-          <Select value={connectionConfigId} onValueChange={setConnectionConfigId}>
-            <SelectTrigger><SelectValue placeholder="Select a connection config" /></SelectTrigger>
-            <SelectContent>
-              {(connectionConfigs ?? []).filter((c) => c.status === 'ACTIVE').map((c) => (
-                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Label>Connection Config<DraftRequiredMark /></Label>
+          <ConnectionConfigSelect
+            value={connectionConfigId || null}
+            onChange={(id) => setConnectionConfigId(id ?? '')}
+          />
+          <p className="text-xs text-muted-foreground">
+            Connection config holding the credentials for the retrieval endpoint.
+          </p>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
@@ -676,19 +726,19 @@ function DraftSection({
           <Label className="text-sm font-semibold">Response Mapping</Label>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label htmlFor="hitsPath">Hits Path</Label>
+              <Label htmlFor="hitsPath">Hits Path<RequiredMark /></Label>
               <Input id="hitsPath" value={hitsPath} onChange={(e) => setHitsPath(e.target.value)} placeholder="$.results" />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="passagePath">Passage Path</Label>
+              <Label htmlFor="passagePath">Passage Path<RequiredMark /></Label>
               <Input id="passagePath" value={passagePath} onChange={(e) => setPassagePath(e.target.value)} placeholder="$.text" />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="sourceNamePath">Source Name Path</Label>
+              <Label htmlFor="sourceNamePath">Source Name Path<RequiredMark /></Label>
               <Input id="sourceNamePath" value={sourceNamePath} onChange={(e) => setSourceNamePath(e.target.value)} placeholder="$.source" />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="locatorPath">Locator Path</Label>
+              <Label htmlFor="locatorPath">Locator Path<RequiredMark /></Label>
               <Input id="locatorPath" value={locatorPath} onChange={(e) => setLocatorPath(e.target.value)} placeholder="$.url" />
             </div>
             <div className="space-y-1">
@@ -696,27 +746,21 @@ function DraftSection({
               <Input id="scorePath" value={scorePath} onChange={(e) => setScorePath(e.target.value)} placeholder="$.score" />
             </div>
           </div>
+          <p className="text-xs text-muted-foreground">
+            Fields marked with <span className="text-red-500">*</span> are required before publishing.
+          </p>
         </div>
-        {/* Saved config summary (read-only display of saved values) */}
-        {version.config && (
-          <div className="space-y-1 text-sm bg-muted/30 rounded-md p-3">
-            <Label className="text-muted-foreground">Saved Configuration</Label>
-            {initialMapping?.hitsPath && <div><span className="text-muted-foreground">Hits Path:</span> {initialMapping.hitsPath}</div>}
-            {initialMapping?.passagePath && <div><span className="text-muted-foreground">Passage Path:</span> {initialMapping.passagePath}</div>}
-            {initialMapping?.sourceNamePath && <div><span className="text-muted-foreground">Source Name Path:</span> {initialMapping.sourceNamePath}</div>}
-            {initialMapping?.locatorPath && <div><span className="text-muted-foreground">Locator Path:</span> {initialMapping.locatorPath}</div>}
-            {initialMapping?.scorePath && <div><span className="text-muted-foreground">Score Path:</span> {initialMapping.scorePath}</div>}
-            {initialConfig?.maxTopK != null && <div><span className="text-muted-foreground">Max Top-K:</span> {String(initialConfig.maxTopK)}</div>}
-            {initialConfig?.similarityThreshold != null && <div><span className="text-muted-foreground">Similarity Threshold:</span> {String(initialConfig.similarityThreshold)}</div>}
-            {initialConfig?.timeoutMs != null && <div><span className="text-muted-foreground">Timeout (ms):</span> {String(initialConfig.timeoutMs)}</div>}
-          </div>
-        )}
 
         <div className="flex items-center gap-2 pt-2">
           <Button size="sm" onClick={() => saveMutation.mutate()} disabled={!dirty || saveMutation.isPending}>
             {saveMutation.isPending ? 'Saving…' : 'Save Draft'}
           </Button>
-          <Button size="sm" onClick={onPublish} disabled={publishing || !canPublish}>
+          <Button
+            size="sm"
+            onClick={onPublish}
+            disabled={publishing || !canPublish || dirty}
+            title={dirty ? 'Save your changes before publishing.' : !canPublish ? 'Fill all fields marked with * before publishing.' : undefined}
+          >
             {publishing ? 'Publishing…' : 'Publish'}
           </Button>
           <Button size="sm" variant="ghost" className="text-destructive" onClick={onDiscard} disabled={discarding}>
@@ -761,29 +805,39 @@ function KnowledgeSourcesSection({
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
+                <TableHead>Method</TableHead>
+                <TableHead>Path</TableHead>
                 <TableHead>Description</TableHead>
                 {hasDraft && <TableHead>Actions</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sources.map((s) => (
-                <TableRow key={s.id}>
-                  <TableCell className="font-medium">{s.name}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{s.description || '—'}</TableCell>
-                  {hasDraft && (
+              {sources.map((s) => {
+                const cfg = s.config as Record<string, unknown> | null
+                const httpConfig = cfg?.httpConfig as Record<string, unknown> | undefined
+                return (
+                  <TableRow key={s.id}>
+                    <TableCell className="font-medium">{s.name}</TableCell>
                     <TableCell>
-                      <div className="flex gap-1">
-                        <Button size="sm" variant="ghost" onClick={() => onEdit(s)}>
-                          <Pencil className="h-3 w-3" /> Edit
-                        </Button>
-                        <Button size="sm" variant="ghost" className="text-destructive" onClick={() => onDelete(s)}>
-                          <Trash2 className="h-3 w-3" /> Delete
-                        </Button>
-                      </div>
+                      <Badge variant="outline">{(httpConfig?.method as string) ?? '—'}</Badge>
                     </TableCell>
-                  )}
-                </TableRow>
-              ))}
+                    <TableCell className="text-sm font-mono">{(httpConfig?.path as string) ?? '—'}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{s.description || '—'}</TableCell>
+                    {hasDraft && (
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => onEdit(s)}>
+                            <Pencil className="h-3 w-3" /> Edit
+                          </Button>
+                          <Button size="sm" variant="ghost" className="text-destructive" onClick={() => onDelete(s)}>
+                            <Trash2 className="h-3 w-3" /> Delete
+                          </Button>
+                        </div>
+                      </TableCell>
+                    )}
+                  </TableRow>
+                )
+              })}
             </TableBody>
           </Table>
         ) : (
@@ -859,7 +913,7 @@ function AddEditKnowledgeSourceDialog({
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="ks-name">Name</Label>
+            <Label htmlFor="ks-name">Name<RequiredMark /></Label>
             <Input id="ks-name" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="space-y-2">
@@ -867,7 +921,7 @@ function AddEditKnowledgeSourceDialog({
             <Input id="ks-description" value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="ks-path">Path</Label>
+            <Label htmlFor="ks-path">Path<RequiredMark /></Label>
             <Input id="ks-path" value={path} onChange={(e) => setPath(e.target.value)} placeholder="/api/v1/retrieval" />
           </div>
           <div className="grid grid-cols-2 gap-4">

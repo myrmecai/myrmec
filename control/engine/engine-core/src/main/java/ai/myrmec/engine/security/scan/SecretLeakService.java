@@ -1,6 +1,9 @@
 package ai.myrmec.engine.security.scan;
 
+import ai.myrmec.engine._system.common.DomainConstants.AuditAction;
+import ai.myrmec.engine._system.common.ResourceType;
 import ai.myrmec.engine.audit.AuditEventService;
+import ai.myrmec.engine.setting.SystemSettingService;
 import ai.myrmec.engine.spi.security.SecretLeakHit;
 import ai.myrmec.engine.spi.security.SecretLeakScanner;
 import lombok.Getter;
@@ -55,23 +58,31 @@ public class SecretLeakService {
         }
     }
 
+    /** Well-known system setting key that overrides the env default at runtime. */
+    public static final String SETTING_KEY = "secret_leak_mode";
+
     private final SecretLeakScanner scanner;
     private final AuditEventService auditEventService;
-    @Getter
-    private final Mode mode;
+    private final SystemSettingService systemSettingService;
     @Getter
     private final boolean enabled;
+    @Getter
+    private final Mode defaultMode;
 
     public SecretLeakService(
             SecretLeakScanner scanner,
             AuditEventService auditEventService,
+            SystemSettingService systemSettingService,
             @Value("${myrmec.security.secret-leak.enabled:true}") boolean enabled,
             @Value("${myrmec.security.secret-leak.mode:REDACT}") String mode) {
         this.scanner = scanner;
         this.auditEventService = auditEventService;
+        this.systemSettingService = systemSettingService;
         this.enabled = enabled;
-        this.mode = Mode.parse(mode);
+        this.defaultMode = Mode.parse(mode);
     }
+
+
 
     /**
      * Scan the assistant turn before it leaves the engine.
@@ -106,10 +117,14 @@ public class SecretLeakService {
         }
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("scannerId", scanner.getId());
-        payload.put("mode", mode.name());
+        payload.put("mode", resolveMode().name());
         payload.put("ruleCounts", ruleCounts);
         try {
-            // Resolve actor from security context (null for system actions)
+            // Resolve actor from security context (null for system actions).
+            // OUTPUT_SECRET_LEAK is emitted from the WebSocket worker path where
+            // there is typically no authenticated user; actor_id is nullable so
+            // we leave it null rather than inventing a UUID that would violate
+            // the users(id) foreign key.
             UUID actorId = null;
             String actorName = "SYSTEM";
             var auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
@@ -118,18 +133,19 @@ public class SecretLeakService {
                 actorName = up.getName() != null ? up.getName() : "UNKNOWN";
             }
             auditEventService.recordEvent(
-                    "ConversationMessage", messageId,
-                    "OUTPUT_SECRET_LEAK",
+                    ResourceType.CONVERSATION, conversationId,
+                    AuditAction.OUTPUT_SECRET_LEAK,
                     "ORGANIZATION", null,
-                    actorId != null ? actorId : java.util.UUID.randomUUID(),
+                    actorId,
                     actorName,
                     null, null, null, payload, null);
         } catch (Exception ex) {
             log.warn("Audit of OUTPUT_SECRET_LEAK failed (continuing): {}", ex.getMessage());
         }
+        Mode effectiveMode = resolveMode();
         log.warn("Secret leak detected on outbound text (conv={}, msg={}, hits={}, mode={})",
-                conversationId, messageId, ruleCounts, mode);
-        return switch (mode) {
+                conversationId, messageId, ruleCounts, effectiveMode);
+        return switch (effectiveMode) {
             case BLOCK -> Result.blocked(ruleCounts);
             case REDACT -> Result.redacted(redact(text, hits), ruleCounts);
             case WARN -> Result.warned(text, ruleCounts);
@@ -189,6 +205,15 @@ public class SecretLeakService {
      * trail (in-process verification of mode + redaction).
      */
     static SecretLeakService forTest(SecretLeakScanner scanner, AuditEventService audit, Mode mode) {
-        return new SecretLeakService(scanner, audit, true, mode.name());
+        return new SecretLeakService(scanner, audit, null, true, mode.name());
+    }
+
+    /** Resolve the effective mode for a test instance that has no SystemSettingService. */
+    private Mode resolveMode() {
+        if (systemSettingService == null) {
+            return defaultMode;
+        }
+        String configured = systemSettingService.getString(SETTING_KEY, "");
+        return configured.isBlank() ? defaultMode : Mode.parse(configured);
     }
 }

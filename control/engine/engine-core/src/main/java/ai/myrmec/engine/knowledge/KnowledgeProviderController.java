@@ -2,6 +2,8 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.knowledge;
 
+import ai.myrmec.engine._system.common.DomainConstants;
+import ai.myrmec.engine._system.common.DomainConstants.ActorType;
 import ai.myrmec.engine._system.security.CurrentUser;
 import ai.myrmec.engine.knowledge.dto.CreateKnowledgeProviderRequest;
 import ai.myrmec.engine.knowledge.dto.CreateProviderDraftRequest;
@@ -78,7 +80,7 @@ public class KnowledgeProviderController {
             @CurrentUser UUID userId) {
         var provider = service.create(request.scope(), request.projectId(), request.name(),
                 request.description(), request.type(), userId,
-                userId != null ? userId.toString() : "SYSTEM");
+                userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.status(HttpStatus.CREATED).body(KnowledgeProviderResponse.from(provider));
     }
 
@@ -90,7 +92,7 @@ public class KnowledgeProviderController {
             @Valid @RequestBody CreateProviderDraftRequest request,
             @CurrentUser UUID userId) {
         var draft = service.createDraft(id, request.connectionConfigId(), request.config(),
-                userId, userId != null ? userId.toString() : "SYSTEM");
+                userId, userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.status(HttpStatus.CREATED).body(KnowledgeProviderVersionResponse.from(draft));
     }
 
@@ -102,7 +104,7 @@ public class KnowledgeProviderController {
             @Valid @RequestBody UpdateProviderDraftRequest request,
             @CurrentUser UUID userId) {
         var updated = service.updateDraft(id, request.connectionConfigId(), request.config(),
-                userId, userId != null ? userId.toString() : "SYSTEM");
+                userId, userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.ok(KnowledgeProviderVersionResponse.from(updated));
     }
 
@@ -114,7 +116,7 @@ public class KnowledgeProviderController {
             @Valid @RequestBody UpdateKnowledgeProviderRequest request,
             @CurrentUser UUID userId) {
         var updated = service.updateZone1(id, request.name(), request.description(),
-                userId, userId != null ? userId.toString() : "SYSTEM");
+                userId, userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.ok(KnowledgeProviderResponse.from(updated));
     }
 
@@ -133,7 +135,7 @@ public class KnowledgeProviderController {
             @PathVariable UUID id, @PathVariable UUID versionId,
             @CurrentUser UUID userId) {
         var draft = service.cloneVersion(id, versionId,
-                userId, userId != null ? userId.toString() : "SYSTEM");
+                userId, userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.status(HttpStatus.CREATED).body(KnowledgeProviderVersionResponse.from(draft));
     }
 
@@ -142,7 +144,7 @@ public class KnowledgeProviderController {
     @Operation(summary = "Archive a disabled provider")
     public ResponseEntity<KnowledgeProviderResponse> archive(@PathVariable UUID id, @CurrentUser UUID userId) {
         return ResponseEntity.ok(KnowledgeProviderResponse.from(
-                service.archive(id, userId, userId != null ? userId.toString() : "SYSTEM")));
+                service.archive(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM)));
     }
 
     @PostMapping("/api/v1/admin/knowledge-providers/{id}/unarchive")
@@ -150,14 +152,14 @@ public class KnowledgeProviderController {
     @Operation(summary = "Un-archive (rollback to DISABLED)")
     public ResponseEntity<KnowledgeProviderResponse> unarchive(@PathVariable UUID id, @CurrentUser UUID userId) {
         return ResponseEntity.ok(KnowledgeProviderResponse.from(
-                service.unarchive(id, userId, userId != null ? userId.toString() : "SYSTEM")));
+                service.unarchive(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM)));
     }
 
     @DeleteMapping("/api/v1/admin/knowledge-providers/{id}")
     @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasRole('ORG_ADMIN')")
     @Operation(summary = "Delete a knowledge provider (cleanup/e2e)")
     public ResponseEntity<Void> delete(@PathVariable UUID id, @CurrentUser UUID userId) {
-        service.delete(id, userId, userId != null ? userId.toString() : "SYSTEM");
+        service.delete(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.noContent().build();
     }
 
@@ -179,7 +181,7 @@ public class KnowledgeProviderController {
             @Valid @RequestBody CreateKnowledgeSourceRequest request,
             @CurrentUser UUID userId) {
         var source = service.addKnowledgeSource(id, request.name(), request.description(),
-                request.config(), userId, userId != null ? userId.toString() : "SYSTEM");
+                request.config(), userId, userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.status(HttpStatus.CREATED).body(KnowledgeSourceResponse.from(source));
     }
 
@@ -191,7 +193,7 @@ public class KnowledgeProviderController {
             @Valid @RequestBody UpdateKnowledgeSourceRequest request,
             @CurrentUser UUID userId) {
         var updated = service.updateKnowledgeSource(id, request.name(), request.description(),
-                request.config(), userId, userId != null ? userId.toString() : "SYSTEM");
+                request.config(), userId, userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.ok(KnowledgeSourceResponse.from(updated));
     }
 
@@ -199,7 +201,7 @@ public class KnowledgeProviderController {
     @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasRole('ORG_ADMIN')")
     @Operation(summary = "Delete a knowledge source")
     public ResponseEntity<Void> deleteKnowledgeSource(@PathVariable UUID id, @CurrentUser UUID userId) {
-        service.deleteKnowledgeSource(id, userId, userId != null ? userId.toString() : "SYSTEM");
+        service.deleteKnowledgeSource(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.noContent().build();
     }
 
@@ -208,7 +210,7 @@ public class KnowledgeProviderController {
     @Operation(summary = "Publish the current draft")
     public ResponseEntity<KnowledgeProviderVersionResponse> publish(
             @PathVariable UUID id, @CurrentUser UUID userId) {
-        var published = service.publishDraft(id, userId, userId != null ? userId.toString() : "SYSTEM");
+        var published = service.publishDraft(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.ok(KnowledgeProviderVersionResponse.from(published));
     }
 
@@ -216,7 +218,7 @@ public class KnowledgeProviderController {
     @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasRole('ORG_ADMIN')")
     @Operation(summary = "Discard the current draft")
     public ResponseEntity<Void> discardDraft(@PathVariable UUID id, @CurrentUser UUID userId) {
-        service.discardDraft(id, userId, userId != null ? userId.toString() : "SYSTEM");
+        service.discardDraft(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.noContent().build();
     }
 
@@ -225,7 +227,7 @@ public class KnowledgeProviderController {
     @Operation(summary = "Disable a knowledge provider")
     public ResponseEntity<KnowledgeProviderResponse> disable(@PathVariable UUID id, @CurrentUser UUID userId) {
         return ResponseEntity.ok(KnowledgeProviderResponse.from(
-                service.disable(id, userId, userId != null ? userId.toString() : "SYSTEM")));
+                service.disable(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM)));
     }
 
     @PostMapping("/api/v1/admin/knowledge-providers/{id}/reenable")
@@ -233,6 +235,6 @@ public class KnowledgeProviderController {
     @Operation(summary = "Re-enable a knowledge provider")
     public ResponseEntity<KnowledgeProviderResponse> reenable(@PathVariable UUID id, @CurrentUser UUID userId) {
         return ResponseEntity.ok(KnowledgeProviderResponse.from(
-                service.reenable(id, userId, userId != null ? userId.toString() : "SYSTEM")));
+                service.reenable(id, userId, userId != null ? userId.toString() : ActorType.SYSTEM)));
     }
 }

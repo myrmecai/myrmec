@@ -2,11 +2,11 @@ package ai.myrmec.engine.conversation;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.agent.AgentHost;
-import ai.myrmec.engine.agent.AgentCreationResult;
+import ai.myrmec.engine.agent.AgentHostCreationResult;
 import ai.myrmec.engine.agent.Agent;
 import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.agent.AgentProfile;
-import ai.myrmec.engine.agent.AgentService;
+import ai.myrmec.engine.agent.AgentHostService;
 import ai.myrmec.engine.conversation.dto.ApprovalDecisionRequest;
 import ai.myrmec.engine.node.EngineNode;
 import ai.myrmec.engine.node.EngineNodeRepository;
@@ -60,7 +60,7 @@ class HitlApprovalLoopE2ETest extends IntegrationTestBase {
     @Autowired private TestDataBuilder data;
     @Autowired private ConversationService conversationService;
     @Autowired private AgentRepository agentInstanceRepository;
-    @Autowired private AgentService agentService;
+    @Autowired private AgentHostService agentService;
     @Autowired private AgentConversationWebSocketHandler conversationHandler;
     @Autowired private ConversationSocketRegistry conversationSocketRegistry;
     @Autowired private NodeRegistryService nodeRegistry;
@@ -76,7 +76,7 @@ class HitlApprovalLoopE2ETest extends IntegrationTestBase {
                 .named("hitl-loop-profile")
                 .withSystemPrompt("test")
                 .create();
-        AgentCreationResult created = data.agent()
+        AgentHostCreationResult created = data.agent()
                 .named("hitl-loop-agent")
                 .withProfile(profile)
                 .inProject(project)

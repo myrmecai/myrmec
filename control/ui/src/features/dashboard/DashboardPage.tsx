@@ -13,13 +13,13 @@ export function DashboardPage() {
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard
-          title="Total Agents"
+          title="Total Agent Hosts"
           value="0"
-          description="Registered agents"
+          description="Registered agent hosts"
           icon={<Bot className="h-4 w-4 text-muted-foreground" />}
         />
         <StatCard
-          title="Active Agents"
+          title="Active Agent Hosts"
           value="0"
           description="Currently online"
           icon={<Activity className="h-4 w-4 text-muted-foreground" />}

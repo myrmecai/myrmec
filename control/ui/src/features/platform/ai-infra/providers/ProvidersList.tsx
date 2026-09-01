@@ -9,11 +9,14 @@ import {
   type DeploymentType,
   type ModelProviderConfig,
   type ModelStatus,
+  type TestModelResponse,
   type UpdateModelProviderRequest,
 } from '@/lib/api'
+import { ConnectionConfigSelect } from '@/features/platform/connections/components/ConnectionConfigSelect'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RequiredMark } from '@/components/ui/required-marks'
 import {
   Card,
   CardContent,
@@ -38,10 +41,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ContentAreaLayout } from '@/components/content-area-layout'
-import { Cloud, Pencil, Plus, Server, Trash2 } from 'lucide-react'
+import { Cloud, Loader2, Pencil, Plug, Plus, Server, Trash2 } from 'lucide-react'
 import { dialogService } from '@/services/dialog-service'
 import DataTable2 from '@/components/data-table2/data-table2'
 import { SortedColumnHeader } from '@/components/data-table2/sorted-column-header'
+import { EntityStatus, TestStatus } from '@/lib/domain-constants'
 
 const DEPLOYMENT_TYPES: DeploymentType[] = ['CLOUD', 'ON_PREMISE']
 const STATUSES: ModelStatus[] = ['ACTIVE', 'INACTIVE']
@@ -50,6 +54,7 @@ export function ProvidersList() {
   const queryClient = useQueryClient()
   const [createOpen, setCreateOpen] = useState(false)
   const [editing, setEditing] = useState<ModelProviderConfig | null>(null)
+  const [testResult, setTestResult] = useState<{ status: string; message: string; latencyMs: number } | null>(null)
 
   const {
     data: providers,
@@ -59,6 +64,17 @@ export function ProvidersList() {
     queryKey: ['providers-admin'],
     queryFn: () => providersApi.listAll(),
   })
+
+  // Sort: ACTIVE first, then alphabetically by name
+  const sortedProviders = useMemo(() => {
+    if (!providers) return []
+    return [...providers].sort((a, b) => {
+      if (a.status !== b.status) {
+        return a.status === 'ACTIVE' ? -1 : 1
+      }
+      return a.name.localeCompare(b.name)
+    })
+  }, [providers])
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ['providers-admin'] })
@@ -90,6 +106,16 @@ export function ProvidersList() {
     onSuccess: invalidate,
   })
 
+  const testConnectionMutation = useMutation({
+    mutationFn: (code: string) => providersApi.test(code),
+    onSuccess: (data: TestModelResponse) => {
+      setTestResult({ status: data.status, message: data.message, latencyMs: data.latencyMs })
+    },
+    onError: (error: Error) => {
+      setTestResult({ status: TestStatus.FAILED, message: error.message, latencyMs: 0 })
+    },
+  })
+
   const columns: ColumnDef<ModelProviderConfig>[] = useMemo(() => [
     {
       accessorKey: 'code',
@@ -116,10 +142,25 @@ export function ProvidersList() {
       ),
     },
     {
+      accessorKey: 'connectionConfigId',
+      header: 'Connection Config',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const id = row.original.connectionConfigId
+        if (!id) return <span className="text-xs text-muted-foreground">—</span>
+        const name = row.original.connectionConfigName
+        return (
+          <span className="text-xs font-mono" title={id}>
+            {name ?? id}
+          </span>
+        )
+      },
+    },
+    {
       accessorKey: 'status',
       header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Status" />,
       cell: ({ row }) =>
-        row.original.status === 'ACTIVE' ? (
+        row.original.status === EntityStatus.ACTIVE ? (
           <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-700">
             active
           </span>
@@ -161,7 +202,34 @@ export function ProvidersList() {
             <Button
               variant="ghost"
               size="icon"
+              disabled={testConnectionMutation.isPending || p.status !== EntityStatus.ACTIVE || !p.connectionConfigId}
+              title={
+                p.status !== EntityStatus.ACTIVE
+                  ? 'Provider must be ACTIVE to test connection'
+                  : !p.connectionConfigId
+                    ? 'A connection config must be linked to test connection'
+                    : 'Test connection'
+              }
+              onClick={async () => {
+                setTestResult(null)
+                testConnectionMutation.mutate(p.code)
+              }}
+            >
+              {testConnectionMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Plug className="h-4 w-4" />
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
               disabled={p.isSystem}
+              title={
+                p.isSystem
+                  ? 'System providers cannot be deleted'
+                  : 'Delete'
+              }
               onClick={async () => {
                 const confirmed = await dialogService.showConfirmDialog({
                   title: 'Delete Provider',
@@ -173,11 +241,6 @@ export function ProvidersList() {
                 })
                 if (confirmed) deleteMutation.mutate(p.code)
               }}
-              title={
-                p.isSystem
-                  ? 'System providers cannot be deleted'
-                  : 'Delete'
-              }
             >
               <Trash2 className="h-4 w-4 text-destructive" />
             </Button>
@@ -244,13 +307,49 @@ export function ProvidersList() {
         <CardContent>
           <DataTable2
             columns={columns}
-            data={providers ?? []}
+            data={sortedProviders}
             pagination={true}
             loading={isLoading}
             showRowSelection={false}
           />
         </CardContent>
       </Card>
+
+      {testResult && (
+        <div
+          className={`fixed bottom-4 right-4 p-4 rounded-lg shadow-lg border ${
+            testResult.status === TestStatus.SUCCESS
+              ? 'bg-emerald-50 border-emerald-200'
+              : 'bg-destructive/5 border-destructive/20'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <span
+              className={`font-semibold ${
+                testResult.status === TestStatus.SUCCESS
+                  ? 'text-emerald-700'
+                  : 'text-destructive'
+              }`}
+            >
+              {testResult.status === TestStatus.SUCCESS ? '✓' : '✗'} Test Connection
+            </span>
+            <span className="text-sm text-muted-foreground">
+              {testResult.latencyMs}ms
+            </span>
+          </div>
+          <p className="text-sm text-muted-foreground mt-1">
+            {testResult.message}
+          </p>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="mt-2 h-6 text-xs"
+            onClick={() => setTestResult(null)}
+          >
+            Dismiss
+          </Button>
+        </div>
+      )}
 
       <Dialog
         open={!!editing}
@@ -285,16 +384,19 @@ function CreateProviderForm({ onSubmit, isLoading, error }: CreateFormProps) {
   const [baseUrl, setBaseUrl] = useState('')
   const [deploymentType, setDeploymentType] = useState<DeploymentType>('CLOUD')
   const [requiresAuth, setRequiresAuth] = useState(true)
+  const [connectionConfigId, setConnectionConfigId] = useState<string | null>(null)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onSubmit({
+    const payload: CreateModelProviderRequest = {
       code: code.trim(),
       name: name.trim(),
       baseUrl: baseUrl.trim() || null,
       deploymentType,
       requiresAuth,
-    })
+      connectionConfigId: connectionConfigId || null,
+    }
+    onSubmit(payload)
   }
 
   return (
@@ -315,7 +417,7 @@ function CreateProviderForm({ onSubmit, isLoading, error }: CreateFormProps) {
         )}
 
         <div className="space-y-2">
-          <Label htmlFor="provider-code">Code</Label>
+          <Label htmlFor="provider-code">Code<RequiredMark /></Label>
           <Input
             id="provider-code"
             value={code}
@@ -330,7 +432,7 @@ function CreateProviderForm({ onSubmit, isLoading, error }: CreateFormProps) {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="provider-name">Name</Label>
+          <Label htmlFor="provider-name">Name<RequiredMark /></Label>
           <Input
             id="provider-name"
             value={name}
@@ -347,8 +449,11 @@ function CreateProviderForm({ onSubmit, isLoading, error }: CreateFormProps) {
             type="url"
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
-            placeholder="https://api.example.invalid"
+            placeholder="https://api.example.com/v1"
           />
+          <p className="text-xs text-muted-foreground">
+            Default endpoint for models that don't specify their own. Optional for on-premise providers.
+          </p>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -383,11 +488,26 @@ function CreateProviderForm({ onSubmit, isLoading, error }: CreateFormProps) {
                 htmlFor="provider-requires-auth"
                 className="cursor-pointer"
               >
-                Yes (Bearer token by default)
+                Yes (link a connection config)
               </Label>
             </div>
           </div>
         </div>
+
+        {requiresAuth && (
+        <div className="space-y-2">
+          <Label htmlFor="provider-connection-config">Connection Config</Label>
+          <ConnectionConfigSelect
+            value={connectionConfigId}
+            onChange={(v) => setConnectionConfigId(v)}
+            filter={(c) => c.status === 'ACTIVE'}
+            placeholder="Select a connection config…"
+          />
+          <p className="text-xs text-muted-foreground">
+            Select a published connection config that holds the provider credential, or create one inline.
+          </p>
+        </div>
+        )}
       </div>
 
       <DialogFooter>
@@ -414,14 +534,24 @@ function EditProviderForm({
 }: EditFormProps) {
   const [name, setName] = useState(provider.name)
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl ?? '')
+  const [deploymentType, setDeploymentType] = useState<DeploymentType>(
+    provider.deploymentType,
+  )
+  const [requiresAuth, setRequiresAuth] = useState(provider.requiresAuth)
   const [status, setStatus] = useState<ModelStatus>(provider.status)
+  const [connectionConfigId, setConnectionConfigId] = useState<string | null>(
+    provider.connectionConfigId ?? null,
+  )
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     onSubmit({
       name,
       baseUrl: baseUrl.trim() || null,
+      deploymentType,
+      requiresAuth,
       status,
+      connectionConfigId,
     })
   }
 
@@ -461,8 +591,50 @@ function EditProviderForm({
             type="url"
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder="https://api.example.com/v1"
           />
+          <p className="text-xs text-muted-foreground">
+            Default endpoint for models that don't specify their own. Optional for on-premise providers.
+          </p>
         </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-2">
+            <Label htmlFor="edit-deployment">Deployment</Label>
+            <Select
+              value={deploymentType}
+              onValueChange={(v) => setDeploymentType(v as DeploymentType)}
+            >
+              <SelectTrigger id="edit-deployment">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {DEPLOYMENT_TYPES.map((d) => (
+                  <SelectItem key={d} value={d}>
+                    {d}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2 flex flex-col">
+            <Label>Requires authentication</Label>
+            <div className="flex items-center gap-2 mt-2">
+              <input
+                id="edit-requires-auth"
+                type="checkbox"
+                checked={requiresAuth}
+                onChange={(e) => setRequiresAuth(e.target.checked)}
+              />
+              <Label
+                htmlFor="edit-requires-auth"
+                className="cursor-pointer"
+              >
+                Yes (link a connection config)
+              </Label>
+            </div>
+          </div>
+        </div>
+
         <div className="space-y-2">
           <Label htmlFor="edit-status">Status</Label>
           <Select
@@ -481,6 +653,21 @@ function EditProviderForm({
             </SelectContent>
           </Select>
         </div>
+
+        {requiresAuth && (
+        <div className="space-y-2">
+          <Label htmlFor="edit-connection-config">Connection Config</Label>
+          <ConnectionConfigSelect
+            value={connectionConfigId}
+            onChange={(v) => setConnectionConfigId(v)}
+            filter={(c) => c.status === 'ACTIVE'}
+            placeholder="Select a connection config…"
+          />
+          <p className="text-xs text-muted-foreground">
+            Select a published connection config that holds the provider credential, or create one inline.
+          </p>
+        </div>
+        )}
       </div>
 
       <DialogFooter>

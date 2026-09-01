@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import ai.myrmec.engine.user.UserPrincipal;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -27,6 +28,7 @@ public class WorkflowRequestController {
     private final WorkflowService workflowService;
 
     @GetMapping
+    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
     public List<WorkflowRequestResponse> findByWorkflow(
             @PathVariable UUID projectId,
             @PathVariable UUID workflowId) {
@@ -39,6 +41,7 @@ public class WorkflowRequestController {
     }
 
     @GetMapping("/{requestId}")
+    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
     public WorkflowRequestResponse findById(
             @PathVariable UUID projectId,
             @PathVariable UUID workflowId,
@@ -52,6 +55,7 @@ public class WorkflowRequestController {
     }
 
     @GetMapping("/{requestId}/tasks")
+    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
     public List<WorkflowTaskResponse> findTasks(
             @PathVariable UUID projectId,
             @PathVariable UUID workflowId,
@@ -65,6 +69,7 @@ public class WorkflowRequestController {
     }
 
     @PostMapping
+    @PreAuthorize("@projectAccess.canEdit(#projectId, authentication)")
     public ResponseEntity<WorkflowRequestResponse> start(
             @PathVariable UUID projectId,
             @PathVariable UUID workflowId,

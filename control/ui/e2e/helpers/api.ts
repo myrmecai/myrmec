@@ -57,7 +57,41 @@ export class ApiClient {
       throw new Error(`${method} ${path} -> ${res.status}: ${text}`)
     }
     if (res.status === 204) return undefined as T
-    return (await res.json()) as T
+    const text = await res.text()
+    if (!text || text.trim().length === 0) return undefined as T
+    return JSON.parse(text) as T
+  }
+
+  /**
+   * Non-throwing request variant for asserting HTTP status codes.
+   * Returns the status and parsed body (or raw text if not JSON).
+   * Use this for RBAC and validation tests that need to assert 403/400/409.
+   */
+  async rawRequest(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<{ status: number; body: unknown }> {
+    const url = path.startsWith('http') ? path : `${API_BASE}${path}`
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (this.accessToken) headers.Authorization = `Bearer ${this.accessToken}`
+    const res = await fetch(url, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    const text = await res.text()
+    let parsed: unknown = text
+    if (text && text.trim().startsWith('{')) {
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        // Keep raw text if JSON parse fails
+      }
+    }
+    return { status: res.status, body: parsed }
   }
 }
 

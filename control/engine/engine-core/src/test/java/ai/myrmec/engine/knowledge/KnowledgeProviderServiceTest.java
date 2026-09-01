@@ -3,8 +3,13 @@
 package ai.myrmec.engine.knowledge;
 
 import ai.myrmec.engine.IntegrationTestBase;
+import ai.myrmec.engine.governance.GovernanceProfileService;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -17,6 +22,19 @@ class KnowledgeProviderServiceTest extends IntegrationTestBase {
 
     @Autowired
     private KnowledgeProviderService service;
+
+    @Autowired
+    private GovernanceProfileService governanceProfileService;
+
+    @BeforeEach
+    void setFlexibleProfile() {
+        governanceProfileService.setDefaultProfile("FLEXIBLE", null);
+    }
+
+    @AfterEach
+    void resetProfile() {
+        governanceProfileService.setDefaultProfile("STANDARD", null);
+    }
 
     @Test
     void create_persistsWithIncompleteStatus() {
@@ -50,9 +68,17 @@ class KnowledgeProviderServiceTest extends IntegrationTestBase {
                 "ORGANIZATION", null, "test-external-provider-" + System.nanoTime(), "Test External Provider",
                 "EXTERNAL", TEST_ADMIN_ID, "Test Admin");
 
-        var draft = service.createDraft(provider.getId(), null, null, TEST_ADMIN_ID, "Test Admin");
+        // create() auto-creates an initial draft — use it directly.
+        var draft = service.getDraftVersion(provider.getId());
         assertThat(draft.getStatus()).isEqualTo("DRAFT");
         assertThat(draft.getVersionNumber()).isEqualTo(1);
+
+        // Set required config for publish gate.
+        service.updateDraft(provider.getId(), null,
+                Map.of("responseMapping", Map.of(
+                        "hitsPath", "$.results", "passagePath", "text",
+                        "sourceNamePath", "title", "locatorPath", "url")),
+                TEST_ADMIN_ID, "Test Admin");
 
         // Publish
         var published = service.publishDraft(provider.getId(), TEST_ADMIN_ID, "Test Admin");
@@ -70,7 +96,7 @@ class KnowledgeProviderServiceTest extends IntegrationTestBase {
                 "ORGANIZATION", null, "test-discard-provider-" + System.nanoTime(), "Test Discard Provider",
                 "MANAGED", TEST_ADMIN_ID, "Test Admin");
 
-        service.createDraft(provider.getId(), null, null, TEST_ADMIN_ID, "Test Admin");
+        // create() auto-creates an initial draft — discard it directly.
         assertThat(service.getDraftVersion(provider.getId())).isNotNull();
 
         service.discardDraft(provider.getId(), TEST_ADMIN_ID, "Test Admin");

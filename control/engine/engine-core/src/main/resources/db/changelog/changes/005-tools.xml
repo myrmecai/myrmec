@@ -1,0 +1,353 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Squashed changelog: tools domain.
+        Replaces all incremental changesets for the tools table
+        (20260405-01-tools.xml, 20260413-01-file-tools.xml,
+         20260413-02-git-tool.xml, 20260419-01-workflow-request-branch.xml
+         tool inserts, 20260608-01-hitl.xml risk_class column,
+         20260608-04-tool-description-hash.xml description-hash columns)
+        with a clean createTable definition reflecting the FINAL table
+        structure, plus all system tool seed inserts.
+
+        NOTE: agent_profile_tools join table is created in 003-agents.xml.
+    -->
+
+    <!-- ================================================================
+         tools
+         ================================================================ -->
+    <changeSet id="005-tools-create-tools" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="tools"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="tools">
+            <column name="code" type="varchar(50)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="tool_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="config_schema" type="text"/>
+            <column name="docs_url" type="varchar(500)"/>
+            <column name="is_system" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="risk_class" type="varchar(20)" defaultValue="SAFE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description_hash" type="varchar(64)"/>
+            <column name="description_approved_at" type="timestamp with time zone"/>
+            <column name="description_approved_by" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <createIndex indexName="idx_tools_status" tableName="tools">
+            <column name="status"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         Seed system tools
+         ================================================================ -->
+    <changeSet id="005-tools-seed-system-tools" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM tools WHERE code = 'github'</sqlCheck>
+        </preConditions>
+
+        <!-- Integration tools -->
+        <insert tableName="tools">
+            <column name="code" value="github"/>
+            <column name="name" value="GitHub"/>
+            <column name="description" value="Interact with GitHub repositories, issues, pull requests, and more"/>
+            <column name="tool_type" value="INTEGRATION"/>
+            <column name="config_schema" value='{"type":"object","properties":{"token":{"type":"string","description":"GitHub personal access token"},"owner":{"type":"string","description":"Repository owner"},"repo":{"type":"string","description":"Repository name"}},"required":["token"]}'/>
+            <column name="docs_url" value="https://docs.github.com/rest"/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="filesystem"/>
+            <column name="name" value="Filesystem"/>
+            <column name="description" value="Read, write, and manage files on the local filesystem"/>
+            <column name="tool_type" value="SYSTEM"/>
+            <column name="config_schema" value='{"type":"object","properties":{"base_path":{"type":"string","description":"Base directory for file operations"},"allowed_extensions":{"type":"array","items":{"type":"string"},"description":"Allowed file extensions"}},"required":["base_path"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="postgres"/>
+            <column name="name" value="PostgreSQL"/>
+            <column name="description" value="Execute SQL queries against PostgreSQL databases"/>
+            <column name="tool_type" value="DATABASE"/>
+            <column name="config_schema" value='{"type":"object","properties":{"host":{"type":"string"},"port":{"type":"integer","default":5432},"database":{"type":"string"},"username":{"type":"string"},"password":{"type":"string"}},"required":["host","database","username","password"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="slack"/>
+            <column name="name" value="Slack"/>
+            <column name="description" value="Send messages and interact with Slack workspaces"/>
+            <column name="tool_type" value="INTEGRATION"/>
+            <column name="config_schema" value='{"type":"object","properties":{"bot_token":{"type":"string","description":"Slack bot OAuth token"},"default_channel":{"type":"string","description":"Default channel for messages"}},"required":["bot_token"]}'/>
+            <column name="docs_url" value="https://api.slack.com/"/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="fetch"/>
+            <column name="name" value="HTTP Fetch"/>
+            <column name="description" value="Make HTTP requests to external APIs"/>
+            <column name="tool_type" value="SYSTEM"/>
+            <column name="config_schema" value='{"type":"object","properties":{"base_url":{"type":"string","description":"Base URL for requests"},"headers":{"type":"object","description":"Default headers"},"timeout":{"type":"integer","default":30,"description":"Request timeout in seconds"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <!-- Granular file tools -->
+        <insert tableName="tools">
+            <column name="code" value="read_file"/>
+            <column name="name" value="Read File"/>
+            <column name="description" value="Read the contents of a file from the workspace"/>
+            <column name="tool_type" value="FILE"/>
+            <column name="config_schema" value='{"type":"object","properties":{"file_path":{"type":"string","description":"Path to the file (relative to workspace)"},"encoding":{"type":"string","default":"utf-8","description":"Text encoding"}},"required":["file_path"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="write_file"/>
+            <column name="name" value="Write File"/>
+            <column name="description" value="Write content to a file in the workspace"/>
+            <column name="tool_type" value="FILE"/>
+            <column name="config_schema" value='{"type":"object","properties":{"file_path":{"type":"string","description":"Path to the file (relative to workspace)"},"content":{"type":"string","description":"Content to write"},"encoding":{"type":"string","default":"utf-8","description":"Text encoding"},"create_dirs":{"type":"boolean","default":true,"description":"Create parent directories if missing"}},"required":["file_path","content"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="list_directory"/>
+            <column name="name" value="List Directory"/>
+            <column name="description" value="List contents of a directory in the workspace"/>
+            <column name="tool_type" value="FILE"/>
+            <column name="config_schema" value='{"type":"object","properties":{"dir_path":{"type":"string","default":".","description":"Directory path (relative to workspace)"},"include_hidden":{"type":"boolean","default":false,"description":"Include hidden files/directories"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="search_files"/>
+            <column name="name" value="Search Files"/>
+            <column name="description" value="Search for files matching a glob pattern"/>
+            <column name="tool_type" value="FILE"/>
+            <column name="config_schema" value='{"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern (e.g., *.py, src/**/*.java)"},"dir_path":{"type":"string","default":".","description":"Directory to search in"},"max_results":{"type":"integer","default":100,"description":"Maximum results"}},"required":["pattern"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="search_code"/>
+            <column name="name" value="Search Code"/>
+            <column name="description" value="Search for text or regex pattern in code files"/>
+            <column name="tool_type" value="FILE"/>
+            <column name="config_schema" value='{"type":"object","properties":{"query":{"type":"string","description":"Search string or regex pattern"},"file_pattern":{"type":"string","default":"*","description":"Glob pattern for files to search"},"dir_path":{"type":"string","default":".","description":"Directory to search in"},"is_regex":{"type":"boolean","default":false,"description":"Treat query as regex pattern"},"max_results":{"type":"integer","default":50,"description":"Maximum matches"},"context_lines":{"type":"integer","default":2,"description":"Lines of context before/after match"}},"required":["query"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="get_file_tree"/>
+            <column name="name" value="Get File Tree"/>
+            <column name="description" value="Get a tree view of directory structure"/>
+            <column name="tool_type" value="FILE"/>
+            <column name="config_schema" value='{"type":"object","properties":{"dir_path":{"type":"string","default":".","description":"Starting directory"},"max_depth":{"type":"integer","default":3,"description":"Maximum depth to traverse"},"include_hidden":{"type":"boolean","default":false,"description":"Include hidden files/directories"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="delete_file"/>
+            <column name="name" value="Delete File"/>
+            <column name="description" value="Delete a file from the workspace"/>
+            <column name="tool_type" value="FILE"/>
+            <column name="config_schema" value='{"type":"object","properties":{"file_path":{"type":"string","description":"Path to the file to delete"}},"required":["file_path"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="create_directory"/>
+            <column name="name" value="Create Directory"/>
+            <column name="description" value="Create a directory in the workspace"/>
+            <column name="tool_type" value="FILE"/>
+            <column name="config_schema" value='{"type":"object","properties":{"dir_path":{"type":"string","description":"Path to the directory to create"}},"required":["dir_path"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <!-- Git tools -->
+        <insert tableName="tools">
+            <column name="code" value="git"/>
+            <column name="name" value="Git"/>
+            <column name="description" value="Git repository integration for cloning and workspace setup"/>
+            <column name="tool_type" value="INTEGRATION"/>
+            <column name="config_schema" value='{"type":"object","properties":{"token":{"type":"string","description":"Personal access token or deploy key for private repos"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="maven"/>
+            <column name="name" value="Maven"/>
+            <column name="description" value="Apache Maven build tool for Java projects"/>
+            <column name="tool_type" value="SYSTEM"/>
+            <column name="config_schema" value='{"type":"object","properties":{"maven_home":{"type":"string","description":"Maven installation directory"},"java_home":{"type":"string","description":"Java installation directory"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="git_status"/>
+            <column name="name" value="Git Status"/>
+            <column name="description" value="Show the working tree status - modified, staged, and untracked files"/>
+            <column name="tool_type" value="GIT"/>
+            <column name="config_schema" value='{"type":"object","properties":{},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="git_diff"/>
+            <column name="name" value="Git Diff"/>
+            <column name="description" value="Show changes between commits, commit and working tree, etc."/>
+            <column name="tool_type" value="GIT"/>
+            <column name="config_schema" value='{"type":"object","properties":{"file_path":{"type":"string","description":"Optional file path to diff"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="git_add"/>
+            <column name="name" value="Git Add"/>
+            <column name="description" value="Add file contents to the staging area"/>
+            <column name="tool_type" value="GIT"/>
+            <column name="config_schema" value='{"type":"object","properties":{"file_paths":{"type":"string","description":"Space-separated file paths to stage, or . for all"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="git_commit"/>
+            <column name="name" value="Git Commit"/>
+            <column name="description" value="Record changes to the repository with a commit message"/>
+            <column name="tool_type" value="GIT"/>
+            <column name="config_schema" value='{"type":"object","properties":{"message":{"type":"string","description":"Commit message describing the changes"}},"required":["message"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="git_push"/>
+            <column name="name" value="Git Push"/>
+            <column name="description" value="Update remote refs along with associated objects"/>
+            <column name="tool_type" value="GIT"/>
+            <column name="config_schema" value='{"type":"object","properties":{"remote":{"type":"string","default":"origin","description":"Remote name"},"branch":{"type":"string","description":"Branch to push"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="git_log"/>
+            <column name="name" value="Git Log"/>
+            <column name="description" value="Show commit logs"/>
+            <column name="tool_type" value="GIT"/>
+            <column name="config_schema" value='{"type":"object","properties":{"count":{"type":"integer","default":10,"description":"Number of commits to show (max 50)"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="git_branch"/>
+            <column name="name" value="Git Branch"/>
+            <column name="description" value="List, create, or switch branches"/>
+            <column name="tool_type" value="GIT"/>
+            <column name="config_schema" value='{"type":"object","properties":{"branch_name":{"type":"string","description":"Branch name to create or switch to"},"create":{"type":"boolean","default":false,"description":"Create the branch if true"}},"required":[]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <insert tableName="tools">
+            <column name="code" value="git_merge"/>
+            <column name="name" value="Git Merge"/>
+            <column name="description" value="Merge a branch into the current branch"/>
+            <column name="tool_type" value="GIT"/>
+            <column name="config_schema" value='{"type":"object","properties":{"branch":{"type":"string","description":"Branch name to merge into current branch"}},"required":["branch"]}'/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+    </changeSet>
+
+    <!-- ================================================================
+         Cross-file FKs: tables created in earlier files (003-agents.xml)
+         that reference tools(code). Added here (after tools table exists)
+         so the constraint is valid at creation time.
+         ================================================================ -->
+
+    <changeSet id="005-tools-add-agent-profile-tools-tool-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_agent_profile_tools_tool"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="agent_profile_tools"
+            baseColumnNames="tool_code"
+            referencedTableName="tools"
+            referencedColumnNames="code"
+            constraintName="fk_agent_profile_tools_tool"
+            onDelete="CASCADE"/>
+    </changeSet>
+
+    <!-- ================================================================
+         Fix stale risk_class values from the pre-squash schema.
+         The old incremental changelog used 'MEDIUM' as the column
+         default, but the RiskClass enum only defines SAFE, WRITE,
+         DESTRUCTIVE, IRREVERSIBLE. Update any MEDIUM rows to SAFE
+         (the documented default for seeded tools).
+         ================================================================ -->
+    <changeSet id="005-tools-fix-risk-class-medium" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="tools"/>
+        </preConditions>
+        <update tableName="tools">
+            <column name="risk_class" value="SAFE"/>
+            <where>risk_class = 'MEDIUM'</where>
+        </update>
+    </changeSet>
+
+</databaseChangeLog>

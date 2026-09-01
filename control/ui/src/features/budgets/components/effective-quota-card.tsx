@@ -95,7 +95,7 @@ export function EffectiveQuotaCard({
 
         {canMutate && quota.id && (
           <div className="flex items-center gap-2 pt-2">
-            <Button variant="outline" size="sm" aria-label="Edit" onClick={() => onEdit?.(quota.id)}>
+            <Button variant="outline" size="sm" aria-label="Edit" onClick={() => onEdit?.(quota.id)} data-testid="edit-quota-button">
               <Pencil className="h-3.5 w-3.5 mr-1" />
               Edit
             </Button>

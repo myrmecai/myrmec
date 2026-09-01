@@ -23,6 +23,7 @@ public class EffectiveQuota {
     Long effectiveLimit;
     String quotaType;
     String enforcementMode;
+    String serviceType;
     Long consumed;
     Long remaining;
     boolean atRisk;

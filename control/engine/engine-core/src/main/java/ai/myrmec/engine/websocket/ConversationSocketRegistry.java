@@ -23,7 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>This state is deliberately node-local and never shared: a socket lives
  * only on the replica the worker dialed. Cross-node turn delivery is the
- * job of {@code AgentTransport.sendToNode} (slice 4b), which routes a turn
+ * job of {@code NodeTransport.sendToNode}, which routes a turn
  * to the owning replica; that replica then resolves the socket here.</p>
  */
 @Slf4j

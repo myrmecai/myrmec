@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   projectSecretsApi,
+  projectsApi,
   type Secret,
   type CredentialType,
   type CreateSecretRequest,
@@ -17,6 +18,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RequiredMark } from '@/components/ui/required-marks'
 import {
   Dialog,
   DialogContent,
@@ -44,9 +46,11 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Plus, Pencil, Trash2 } from 'lucide-react'
 import { dialogService } from '@/services/dialog-service'
+import { useAuth } from '@/lib/auth'
 
 export function ProjectSecrets({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient()
+  const { hasSystemRole, hasGroupRole, hasProjectRole } = useAuth()
   const [createOpen, setCreateOpen] = useState(false)
   const [editSecret, setEditSecret] = useState<Secret | null>(null)
 
@@ -54,6 +58,18 @@ export function ProjectSecrets({ projectId }: { projectId: string }) {
     queryKey: ['projects', projectId],
     queryFn: () => projectsApi.get(projectId),
   })
+
+  // Mirror of @projectAccess.canEdit: project-scoped PROJECT_OWNER/EDITOR
+  // (frontend implied-role expansion covers PROJECT_OWNER ⇒ EDITOR), a grant on
+  // the project's group, or a system-wide EDITOR. Ancestor-group grants are
+  // resolved server-side only; the backend remains the source of truth.
+  const canManage = useMemo(
+    () =>
+      hasProjectRole(projectId, 'EDITOR') ||
+      (project?.groupId ? hasGroupRole(project.groupId, 'EDITOR') : false) ||
+      hasSystemRole('EDITOR'),
+    [hasProjectRole, projectId, project?.groupId, hasGroupRole, hasSystemRole],
+  )
 
   const {
     data: secrets,
@@ -112,21 +128,23 @@ export function ProjectSecrets({ projectId }: { projectId: string }) {
               {secrets?.length || 0} secret(s) configured. Values are encrypted at rest and never returned by the API.
             </CardDescription>
           </div>
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline">
-                <Plus className="h-4 w-4 mr-2" />
-                New Secret
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-xl">
-              <CreateSecretForm
-                onSubmit={(data) => createMutation.mutate(data)}
-                isLoading={createMutation.isPending}
-                error={createMutation.error?.message}
-              />
-            </DialogContent>
-          </Dialog>
+          {canManage && (
+            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Secret
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-xl">
+                <CreateSecretForm
+                  onSubmit={(data) => createMutation.mutate(data)}
+                  isLoading={createMutation.isPending}
+                  error={createMutation.error?.message}
+                />
+              </DialogContent>
+            </Dialog>
+          )}
         </CardHeader>
         <CardContent>
           <Table>
@@ -136,7 +154,7 @@ export function ProjectSecrets({ projectId }: { projectId: string }) {
                 <TableHead>Type</TableHead>
                 <TableHead>Created By</TableHead>
                 <TableHead>Updated</TableHead>
-                <TableHead className="w-[100px]">Actions</TableHead>
+                {canManage && <TableHead className="w-[100px]">Actions</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -150,42 +168,49 @@ export function ProjectSecrets({ projectId }: { projectId: string }) {
                   <TableCell className="text-xs">
                     {new Date(secret.updatedAt).toLocaleString()}
                   </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setEditSecret(secret)}
-                        title="Rotate value"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={async () => {
-                          const confirmed = await dialogService.showConfirmDialog({
-                            title: 'Delete Secret',
-                            message: `Delete secret "${secret.name}"? This cannot be undone.`,
-                            severity: 'error',
-                            type: 'warning',
-                            confirmLabel: 'Delete',
-                            cancelLabel: 'Cancel',
-                          })
-                          if (confirmed) deleteMutation.mutate(secret.id)
-                        }}
-                        title="Delete"
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
-                  </TableCell>
+                  {canManage && (
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setEditSecret(secret)}
+                          title="Rotate value"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={async () => {
+                            const confirmed = await dialogService.showConfirmDialog({
+                              title: 'Delete Secret',
+                              message: `Delete secret "${secret.name}"? This cannot be undone.`,
+                              severity: 'error',
+                              type: 'warning',
+                              confirmLabel: 'Delete',
+                              cancelLabel: 'Cancel',
+                            })
+                            if (confirmed) deleteMutation.mutate(secret.id)
+                          }}
+                          title="Delete"
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
               {(!secrets || secrets.length === 0) && (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                    No secrets yet. Create one to grant agents access to private resources.
+                  <TableCell
+                    colSpan={canManage ? 5 : 4}
+                    className="text-center text-muted-foreground py-8"
+                  >
+                    {canManage
+                      ? 'No secrets yet. Create one to grant agents access to private resources.'
+                      : 'No secrets yet.'}
                   </TableCell>
                 </TableRow>
               )}
@@ -245,7 +270,7 @@ function CreateSecretForm({ onSubmit, isLoading, error }: CreateSecretFormProps)
           <div className="p-3 text-sm text-destructive bg-destructive/10 rounded-md">{error}</div>
         )}
         <div className="space-y-2">
-          <Label htmlFor="secret-name">Name *</Label>
+          <Label htmlFor="secret-name">Name<RequiredMark /></Label>
           <Input
             id="secret-name"
             value={name}
@@ -258,7 +283,7 @@ function CreateSecretForm({ onSubmit, isLoading, error }: CreateSecretFormProps)
           </p>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="secret-type">Type *</Label>
+          <Label htmlFor="secret-type">Type<RequiredMark /></Label>
           <Select value={type} onValueChange={(v) => handleTypeChange(v as CredentialType)}>
             <SelectTrigger id="secret-type">
               <SelectValue />

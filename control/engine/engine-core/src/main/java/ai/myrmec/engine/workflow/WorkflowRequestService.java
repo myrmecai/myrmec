@@ -9,6 +9,7 @@ import ai.myrmec.engine.spi.quota.QuotaResourceType;
 import ai.myrmec.engine.spi.quota.QuotaScope;
 import ai.myrmec.engine.user.User;
 import ai.myrmec.engine.user.UserRepository;
+import ai.myrmec.engine.websocket.AgentWebSocketHandler;
 import ai.myrmec.engine.workflow.dto.StartWorkflowRequest;
 import ai.myrmec.engine.workflow.dto.WorkflowRequestResponse;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,8 @@ public class WorkflowRequestService {
     private final AgentProfileRepository agentProfileRepository;
     private final UserRepository userRepository;
     private final QuotaPolicyEngine quotaPolicyEngine;
+    private final AgentWebSocketHandler webSocketHandler;
+    private final TaskAttemptRepository taskAttemptRepository;
 
     @Transactional(readOnly = true)
     public List<WorkflowRequestResponse> findByWorkflow(UUID workflowId) {
@@ -160,6 +163,9 @@ public class WorkflowRequestService {
         task.setKnowledgeSourceIds(parseKnowledgeSourceIds(step.get("knowledgeSourceIds")));
         task.setStatus(TaskStatus.PENDING);
         task.setAttempt(1);
+        // Copy pause mode and max retries from step definition
+        task.setPauseMode(parsePauseMode(step.get("pauseMode")));
+        task.setMaxRetries(parseMaxRetries(step.get("maxRetries")));
 
         taskRepository.save(task);
         log.info("Created task for step {} in request {}", stepId, request.getId());
@@ -179,12 +185,43 @@ public class WorkflowRequestService {
         request.setStatus(RequestStatus.CANCELLED);
         WorkflowRequest saved = requestRepository.save(request);
 
-        // Cascade: cancel any tasks that have not yet been picked up by an
-        // agent so the dispatcher doesn't send them out after cancellation.
-        // Tasks already RUNNING are left as-is; the agent will report back.
+        // Cascade: cancel all non-terminal tasks.
+        // - PENDING/READY: never dispatched, just mark CANCELLED.
+        // - RUNNING: mark CANCELLED, abandon the active attempt, and send
+        //   task.cancel to the assigned agent so it can clean up.
+        // - PAUSED: mark CANCELLED (the pause gate is moot once the request
+        //   is cancelled; WorkflowTaskPauseService.continueTask will reject
+        //   any subsequent continue because the task is no longer PAUSED).
         Instant now = Instant.now();
         for (WorkflowTask task : taskRepository.findByRequestId(saved.getId())) {
-            if (task.getStatus() == TaskStatus.PENDING || task.getStatus() == TaskStatus.READY) {
+            if (task.getStatus() == TaskStatus.PENDING
+                    || task.getStatus() == TaskStatus.READY
+                    || task.getStatus() == TaskStatus.RUNNING
+                    || task.getStatus() == TaskStatus.PAUSED) {
+
+                // For RUNNING tasks, abandon the active attempt and notify the agent.
+                if (task.getStatus() == TaskStatus.RUNNING) {
+                    taskAttemptRepository
+                            .findFirstByTaskIdOrderByAttemptNumberDesc(task.getId())
+                            .ifPresent(attempt -> {
+                                attempt.markAbandoned("Request cancelled by user");
+                                taskAttemptRepository.save(attempt);
+                            });
+
+                    // Send task.cancel to the assigned agent (if any).
+                    if (task.getAgentInstance() != null) {
+                        try {
+                            webSocketHandler.cancelTask(
+                                    task.getAgentInstance().getId(),
+                                    task.getId(),
+                                    "Request cancelled by user");
+                        } catch (Exception e) {
+                            log.warn("Failed to send task.cancel to agent {}: {}",
+                                    task.getAgentInstance().getId(), e.getMessage());
+                        }
+                    }
+                }
+
                 task.setStatus(TaskStatus.CANCELLED);
                 task.setCompletedAt(now);
                 taskRepository.save(task);
@@ -244,6 +281,32 @@ public class WorkflowRequestService {
             return List.of();
         }
         return List.of(raw.toString());
+    }
+
+    private PauseMode parsePauseMode(Object raw) {
+        if (raw == null || raw.toString().isBlank()) {
+            return PauseMode.NONE;
+        }
+        try {
+            return PauseMode.valueOf(raw.toString());
+        } catch (IllegalArgumentException e) {
+            log.warn("Unknown pauseMode '{}', defaulting to NONE", raw);
+            return PauseMode.NONE;
+        }
+    }
+
+    private Integer parseMaxRetries(Object raw) {
+        if (raw == null) {
+            return 0;
+        }
+        if (raw instanceof Number num) {
+            return num.intValue();
+        }
+        try {
+            return Integer.parseInt(raw.toString());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     private WorkflowRequestResponse toResponse(WorkflowRequest request) {

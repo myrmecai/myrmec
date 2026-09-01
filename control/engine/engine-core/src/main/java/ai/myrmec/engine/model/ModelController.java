@@ -1,6 +1,7 @@
 package ai.myrmec.engine.model;
 
 import ai.myrmec.engine.model.dto.*;
+import com.querydsl.core.Tuple;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -24,6 +25,7 @@ public class ModelController {
     private final ModelService modelService;
     private final ModelProviderConfigRepository providerRepository;
     private final ModelProviderService providerService;
+    private final ModelProviderQueryHelper providerQueryHelper;
 
     // ==================== Admin Endpoints ====================
 
@@ -108,9 +110,10 @@ public class ModelController {
     @GetMapping("/api/v1/providers")
     @Operation(summary = "List all active providers")
     public ResponseEntity<List<ModelProviderResponse>> listProviders() {
-        List<ModelProviderConfig> providers = providerRepository.findAllActive();
-        List<ModelProviderResponse> response = providers.stream()
-                .map(ModelProviderResponse::fromPublic)
+        List<Tuple> rows = providerQueryHelper.findAllActiveWithConnectionConfigName();
+        List<ModelProviderResponse> response = rows.stream()
+                .map(row -> ModelProviderResponse.fromPublic(
+                        row.get(0, ModelProviderConfig.class)))
                 .toList();
         return ResponseEntity.ok(response);
     }
@@ -127,9 +130,11 @@ public class ModelController {
     @GetMapping("/api/v1/admin/providers")
     @Operation(summary = "List all providers (admin)")
     public ResponseEntity<List<ModelProviderResponse>> listAllProviders() {
-        List<ModelProviderConfig> providers = providerRepository.findAll();
-        List<ModelProviderResponse> response = providers.stream()
-                .map(ModelProviderResponse::from)
+        List<Tuple> rows = providerQueryHelper.findAllWithConnectionConfigName();
+        List<ModelProviderResponse> response = rows.stream()
+                .map(row -> ModelProviderResponse.from(
+                        row.get(0, ModelProviderConfig.class),
+                        row.get(1, String.class)))
                 .toList();
         return ResponseEntity.ok(response);
     }
@@ -137,10 +142,13 @@ public class ModelController {
     @GetMapping("/api/v1/admin/providers/{code}")
     @Operation(summary = "Get provider details (admin)")
     public ResponseEntity<ModelProviderResponse> getProviderAdmin(@PathVariable String code) {
-        return providerRepository.findById(code)
-                .map(ModelProviderResponse::from)
-                .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
+        Tuple row = providerQueryHelper.findWithConnectionConfigNameByCode(code);
+        if (row == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(ModelProviderResponse.from(
+                row.get(0, ModelProviderConfig.class),
+                row.get(1, String.class)));
     }
 
     // Phase 10 #70 &mdash; admin CRUD on providers. Read endpoints
@@ -171,5 +179,12 @@ public class ModelController {
     public ResponseEntity<Void> deleteProvider(@PathVariable String code) {
         providerService.delete(code);
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/api/v1/admin/providers/{code}/test")
+    @Operation(summary = "Test provider connection (credential + health endpoint)")
+    public ResponseEntity<TestModelResponse> testProviderConnection(@PathVariable String code) {
+        TestModelResponse response = providerService.testConnection(code);
+        return ResponseEntity.ok(response);
     }
 }

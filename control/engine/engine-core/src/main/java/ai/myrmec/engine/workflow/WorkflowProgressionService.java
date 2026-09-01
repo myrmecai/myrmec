@@ -42,6 +42,14 @@ public class WorkflowProgressionService {
         log.info("Processing progression for completed step '{}' in request {}",
                 completedStepId, request.getId());
 
+        // J3: Pause gate AFTER — if the task has pauseMode AFTER or BOTH
+        // and hasn't been paused after yet, transition it to PAUSED and
+        // do NOT create downstream tasks until the operator continues.
+        if (shouldPauseAfter(completedTask)) {
+            pauseTaskAfter(completedTask);
+            return;
+        }
+
         List<Map<String, Object>> steps = workflow.getSteps();
         if (steps == null || steps.isEmpty()) {
             return;
@@ -89,6 +97,44 @@ public class WorkflowProgressionService {
                 failedTask.getErrorMessage());
         request.setCompletedAt(java.time.Instant.now());
         requestRepository.save(request);
+    }
+
+    /**
+     * Check if a completed task should be paused after execution.
+     * Returns false if the task has already been paused after (PAUSED_AFTER)
+     * or was already resumed from a PAUSED_AFTER state (RESUMED_AFTER), so
+     * that {@code continueTask} → {@code onTaskCompleted} doesn't re-pause.
+     * A task resumed from PAUSED_BEFORE (RESUMED_BEFORE) has NOT yet fired
+     * the AFTER gate, so the AFTER pause should still apply.
+     */
+    private boolean shouldPauseAfter(WorkflowTask task) {
+        if (task.getPauseMode() == null) return false;
+        if (task.getPauseState() == null) return true;
+        return (task.getPauseMode() == PauseMode.AFTER || task.getPauseMode() == PauseMode.BOTH)
+                && !"PAUSED_AFTER".equals(task.getPauseState())
+                && !"RESUMED_AFTER".equals(task.getPauseState());
+    }
+
+    /**
+     * Pause a task after completion — transition to PAUSED state,
+     * do NOT create downstream tasks.
+     */
+    private void pauseTaskAfter(WorkflowTask task) {
+        task.setStatus(TaskStatus.PAUSED);
+        task.setPauseState("PAUSED_AFTER");
+        task.setPausedAt(java.time.Instant.now());
+        task.setPauseReason("Waiting for manual review after execution");
+        taskRepository.save(task);
+
+        // Transition the parent request to PAUSED
+        WorkflowRequest request = task.getRequest();
+        if (request.getStatus() == RequestStatus.RUNNING) {
+            request.setStatus(RequestStatus.PAUSED);
+            requestRepository.save(request);
+        }
+
+        log.info("Task {} (step '{}') paused AFTER completion — awaiting manual review",
+                task.getId(), task.getStepId());
     }
 
     /**
@@ -281,9 +327,38 @@ public class WorkflowProgressionService {
         task.setInput(input);
         task.setStatus(TaskStatus.PENDING);
         task.setAttempt(nextAttempt);
+        // Copy pause mode and max retries from step definition
+        task.setPauseMode(parsePauseMode(stepDef.get("pauseMode")));
+        task.setMaxRetries(parseMaxRetries(stepDef.get("maxRetries")));
 
         taskRepository.save(task);
         log.info("Created task for step '{}' (attempt {}) in request {}", stepId, nextAttempt, request.getId());
+    }
+
+    private PauseMode parsePauseMode(Object raw) {
+        if (raw == null || raw.toString().isBlank()) {
+            return PauseMode.NONE;
+        }
+        try {
+            return PauseMode.valueOf(raw.toString());
+        } catch (IllegalArgumentException e) {
+            log.warn("Unknown pauseMode '{}', defaulting to NONE", raw);
+            return PauseMode.NONE;
+        }
+    }
+
+    private Integer parseMaxRetries(Object raw) {
+        if (raw == null) {
+            return 0;
+        }
+        if (raw instanceof Number num) {
+            return num.intValue();
+        }
+        try {
+            return Integer.parseInt(raw.toString());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     /**

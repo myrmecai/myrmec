@@ -12,9 +12,12 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Integration tests for GovernanceProfileService — verifies seeded
- * profiles are loaded, queryable, and the compare matrix / set-default
- * flows work correctly.
+ * Integration tests for GovernanceProfileService — verifies built-in
+ * profiles are resolvable, the compare matrix renders, and the
+ * set-default flow works with audit events.
+ *
+ * <p>Rewritten (T6.5) to assert on {@link EffectivePolicy} and
+ * {@link BuiltInGovernanceProfile} instead of raw JSONB maps.
  */
 class GovernanceProfileServiceTest extends IntegrationTestBase {
 
@@ -22,69 +25,67 @@ class GovernanceProfileServiceTest extends IntegrationTestBase {
     private GovernanceProfileService service;
 
     @Test
-    void seededProfilesArePresent() {
+    void findAllReturnsThreeBuiltIns() {
         var profiles = service.findAll();
         assertThat(profiles).hasSize(3);
-        assertThat(profiles).extracting(GovernanceProfile::getCode)
+        assertThat(profiles).extracting(GovernanceProfileDefinition::code)
                 .containsExactlyInAnyOrder("STRICT", "STANDARD", "FLEXIBLE");
     }
 
     @Test
-    void strictProfileHasCorrectPolicies() {
-        var policies = service.getEffectivePolicies("STRICT");
-        assertThat(policies).containsKey("inlineInstructions");
-        assertThat(policies.get("inlineInstructions")).isEqualTo("NOT_ALLOWED");
-        assertThat(policies.get("contextPinning")).isEqualTo("PINNED_AT_START");
+    void findByCodeResolvesBuiltIn() {
+        GovernanceProfileDefinition def = service.findByCode("STANDARD");
+        assertThat(def.code()).isEqualTo("STANDARD");
+        assertThat(def.displayName()).isEqualTo("Standard");
+        assertThat(def.builtIn()).isTrue();
     }
 
     @Test
-    void standardProfileHasCorrectPolicies() {
-        var policies = service.getEffectivePolicies("STANDARD");
-        assertThat(policies.get("inlineInstructions")).isEqualTo("PROJECT_SERVICE");
-        assertThat(policies.get("budgetEnforcement")).isEqualTo("HARD_CAP_PER_SERVICE");
+    void strictProfileHasCorrectValues() {
+        GovernanceProfileDefinition strict = service.findByCode("STRICT");
+        assertThat(strict.featureValues().get(ProductFeature.INSTRUCTION_SOURCES)).containsExactly("GIT");
+        assertThat(strict.featureValues().get(ProductFeature.INLINE_INSTRUCTIONS_SCOPE)).containsExactly("NONE");
+        assertThat(strict.featureValues().get(ProductFeature.BUDGET_OVERRIDE)).containsExactly("NONE");
+        assertThat(strict.featureValues().get(ProductFeature.CONTEXT_PINNING)).containsExactly("ON");
     }
 
     @Test
-    void flexibleProfileHasCorrectPolicies() {
-        var policies = service.getEffectivePolicies("FLEXIBLE");
-        assertThat(policies.get("inlineInstructions")).isEqualTo("ALL_SCOPES");
-        assertThat(policies.get("contextPinning")).isEqualTo("IMMEDIATE_EFFECT");
+    void standardProfileHasCorrectValues() {
+        GovernanceProfileDefinition standard = service.findByCode("STANDARD");
+        assertThat(standard.featureValues().get(ProductFeature.INSTRUCTION_SOURCES)).containsExactlyInAnyOrder("INLINE", "GIT");
+        assertThat(standard.featureValues().get(ProductFeature.BUDGET_OVERRIDE)).containsExactly("PER_SERVICE");
     }
 
     @Test
-    void findByCode_returnsProfile() {
-        var profile = service.findByCode("STANDARD");
-        assertThat(profile.getName()).isEqualTo("Standard");
-        assertThat(profile.getIsBuiltIn()).isTrue();
-        assertThat(profile.getIsSystem()).isTrue();
+    void flexibleProfileHasCorrectValues() {
+        GovernanceProfileDefinition flexible = service.findByCode("FLEXIBLE");
+        assertThat(flexible.featureValues().get(ProductFeature.INSTRUCTION_SOURCES)).containsExactlyInAnyOrder("INLINE", "GIT");
+        assertThat(flexible.featureValues().get(ProductFeature.CONTEXT_PINNING)).containsExactly("OFF");
+        assertThat(flexible.featureValues().get(ProductFeature.BUDGET_OVERRIDE)).containsExactly("CONFIGURABLE");
     }
 
     @Test
-    void getCurrentDefaultProfileCode_returnsSeededDefault() {
+    void getCurrentDefaultProfileCodeReturnsSeededDefault() {
         assertThat(service.getCurrentDefaultProfileCode()).isEqualTo("STANDARD");
     }
 
     @Test
-    void findAllWithGroups_returnsAllProfilesWithGroupsAndCurrentDefault() {
+    void findAllWithGroupsReturnsAllProfilesWithGroupsAndCurrentDefault() {
         List<GovernanceProfileResponse> responses = service.findAllWithGroups();
         assertThat(responses).hasSize(3);
 
-        // Each response should have groups populated
         for (GovernanceProfileResponse r : responses) {
             assertThat(r.groups()).isNotNull();
             assertThat(r.groups()).isNotEmpty();
-            // Should have AI_CONTEXT and BUDGET groups
             assertThat(r.groups()).extracting(g -> g.code())
                     .containsExactlyInAnyOrder("AI_CONTEXT", "BUDGET");
         }
 
-        // STANDARD should be the current default
         GovernanceProfileResponse standard = responses.stream()
                 .filter(r -> "STANDARD".equals(r.code()))
                 .findFirst().orElseThrow();
         assertThat(standard.isCurrentDefault()).isTrue();
 
-        // STRICT and FLEXIBLE should not be current default
         responses.stream()
                 .filter(r -> !"STANDARD".equals(r.code()))
                 .forEach(r -> assertThat(r.isCurrentDefault()).isFalse());
@@ -97,7 +98,6 @@ class GovernanceProfileServiceTest extends IntegrationTestBase {
                 .filter(r -> "STRICT".equals(r.code()))
                 .findFirst().orElseThrow();
 
-        // Find the INSTRUCTION_SOURCES feature in the AI_CONTEXT group
         var aiContextGroup = strict.groups().stream()
                 .filter(g -> "AI_CONTEXT".equals(g.code()))
                 .findFirst().orElseThrow();
@@ -106,13 +106,11 @@ class GovernanceProfileServiceTest extends IntegrationTestBase {
                 .findFirst().orElseThrow();
         assertThat(instructionSources.currentValues()).containsExactly("GIT");
 
-        // INLINE_INSTRUCTIONS_SCOPE should be NONE
         var inlineScope = aiContextGroup.features().stream()
                 .filter(f -> "INLINE_INSTRUCTIONS_SCOPE".equals(f.code()))
                 .findFirst().orElseThrow();
         assertThat(inlineScope.currentValues()).containsExactly("NONE");
 
-        // MANIFEST_RETENTION should be 365_DAYS
         var retention = aiContextGroup.features().stream()
                 .filter(f -> "MANIFEST_RETENTION".equals(f.code()))
                 .findFirst().orElseThrow();
@@ -137,32 +135,24 @@ class GovernanceProfileServiceTest extends IntegrationTestBase {
     }
 
     @Test
-    void setDefaultProfile_changesCurrentDefaultAndAudits() {
+    void setDefaultProfileChangesCurrentDefaultAndAudits() {
         long auditBefore = auditEventRepository.count();
 
-        // Change to STRICT
         service.setDefaultProfile("STRICT", null);
-
-        // Verify the setting was updated
         assertThat(service.getCurrentDefaultProfileCode()).isEqualTo("STRICT");
-
-        // Verify audit event was recorded
         assertThat(auditEventRepository.count()).isGreaterThan(auditBefore);
 
-        // Reset to STANDARD for other tests
+        // Reset for other tests
         service.setDefaultProfile("STANDARD", null);
         assertThat(service.getCurrentDefaultProfileCode()).isEqualTo("STANDARD");
     }
 
     @Test
-    void setDefaultProfile_sameProfileIsNoOp() {
+    void setDefaultProfileSameProfileIsNoOp() {
         long auditBefore = auditEventRepository.count();
         String current = service.getCurrentDefaultProfileCode();
 
-        // Setting to the same value should be a no-op
         service.setDefaultProfile(current, null);
-
-        // No new audit events
         assertThat(auditEventRepository.count()).isEqualTo(auditBefore);
     }
 }

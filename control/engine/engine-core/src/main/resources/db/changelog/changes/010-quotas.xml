@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!--
+      Squashed quota schema — final table structure.
+
+      Replaces:
+        20260608-05-quotas.xml
+        20260622-02-quota-per-execution-cost.xml
+        20260622-03-quota-pause-resume.xml
+        20260622-04-quota-change-history.xml
+        20260810-01-quota-service-instance-budgets.xml
+    -->
+
+    <!-- ================================================================ -->
+    <!-- quotas                                                           -->
+    <!-- ================================================================ -->
+
+    <changeSet id="010-quotas-create-quotas" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="quotas"/>
+            </not>
+        </preConditions>
+        <createTable tableName="quotas">
+            <column name="id" type="uuid" defaultValueComputed="gen_random_uuid()">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="scope_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="scope_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="resource_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="period" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="limit_amount" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="quota_type" type="varchar(20)" defaultValue="CEILING">
+                <constraints nullable="false"/>
+            </column>
+            <column name="enforcement_mode" type="varchar(20)" defaultValue="BLOCK">
+                <constraints nullable="false"/>
+            </column>
+            <column name="service_type" type="varchar(20)"/>
+            <column name="enforced" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="max_execution_amount" type="bigint"/>
+            <column name="max_execution_cost_cents" type="bigint"/>
+            <column name="paused_at" type="timestamp"/>
+            <column name="paused_by" type="uuid"/>
+            <column name="tags" type="clob"/>
+            <column name="created_by" type="uuid"/>
+            <column name="created_at" type="timestamp" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="010-quotas-idx-scope" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <indexExists indexName="idx_quotas_scope"/>
+        </preConditions>
+        <createIndex tableName="quotas" indexName="idx_quotas_scope">
+            <column name="scope_type"/>
+            <column name="scope_id"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="010-quotas-idx-project-id" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <indexExists indexName="idx_quotas_project_id"/>
+        </preConditions>
+        <createIndex tableName="quotas" indexName="idx_quotas_project_id">
+            <column name="project_id"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="010-quotas-unique-scope-project-resource-period" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <uniqueConstraintExists tableName="quotas" constraintName="uq_quotas_scope_project_resource_period"/>
+        </preConditions>
+        <addUniqueConstraint
+            tableName="quotas"
+            columnNames="scope_type, scope_id, project_id, resource_type, period"
+            constraintName="uq_quotas_scope_project_resource_period"/>
+    </changeSet>
+
+    <!-- ================================================================ -->
+    <!-- quota_consumption                                                -->
+    <!-- ================================================================ -->
+
+    <changeSet id="010-quotas-create-quota-consumption" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="quota_consumption"/>
+            </not>
+        </preConditions>
+        <createTable tableName="quota_consumption">
+            <column name="id" type="uuid" defaultValueComputed="gen_random_uuid()">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="quota_id" type="uuid">
+                <constraints nullable="false"
+                             foreignKeyName="fk_quota_consumption_quota"
+                             references="quotas(id)"/>
+            </column>
+            <column name="period_start" type="timestamp">
+                <constraints nullable="false"/>
+            </column>
+            <column name="amount_used" type="bigint" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="010-quotas-quota-consumption-uq" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <indexExists indexName="uq_quota_consumption_quota_period"/>
+        </preConditions>
+        <createIndex tableName="quota_consumption" indexName="uq_quota_consumption_quota_period" unique="true">
+            <column name="quota_id"/>
+            <column name="period_start"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================ -->
+    <!-- quota_change_history                                             -->
+    <!-- ================================================================ -->
+
+    <changeSet id="010-quotas-create-quota-change-history" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="quota_change_history"/>
+            </not>
+        </preConditions>
+        <createTable tableName="quota_change_history">
+            <column name="id" type="uuid" defaultValueComputed="gen_random_uuid()">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="quota_id" type="uuid">
+                <constraints nullable="false"
+                             foreignKeyName="fk_quota_change_history_quota"
+                             references="quotas(id)"/>
+            </column>
+            <column name="changed_by" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="old_limit_amount" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="new_limit_amount" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="changed_at" type="timestamp" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="010-quotas-quota-change-history-idx-quota" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <indexExists indexName="idx_quota_change_history_quota"/>
+        </preConditions>
+        <createIndex tableName="quota_change_history" indexName="idx_quota_change_history_quota">
+            <column name="quota_id"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="010-quotas-quota-change-history-idx-changed-at" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <indexExists indexName="idx_quota_change_history_changed_at"/>
+        </preConditions>
+        <createIndex tableName="quota_change_history" indexName="idx_quota_change_history_changed_at">
+            <column name="changed_at"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

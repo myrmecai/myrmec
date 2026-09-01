@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+
 package ai.myrmec.engine.quota.dto;
 
 import ai.myrmec.engine.quota.EnforcementMode;
@@ -18,7 +21,13 @@ import java.util.UUID;
  * different tiers attach different metadata; the engine treats it as
  * opaque JSON. The hierarchy/ceiling check happens in
  * {@code QuotaService.validateChildTightensOnly} and surfaces as
- * 400 BAD_REQUEST through the global handler.
+ * 400 BAD_REQUEST through the global handler.</p>
+ *
+ * <p>{@code scopeId} is nullable to support ORG-scope quotas (which
+ * have no entity to reference). For SERVICE scope, {@code scopeId} is
+ * the workflow / assistant instance UUID and {@code serviceType}
+ * distinguishes which table to look up. The service layer resolves
+ * the {@code projectId} from the instance.</p>
  */
 @Value
 @Builder
@@ -28,7 +37,7 @@ public class CreateQuotaRequest {
     @NotNull
     String scopeType;
 
-    @NotNull
+    /** Null for ORG scope; group/project/instance UUID otherwise. */
     UUID scopeId;
 
     @NotNull

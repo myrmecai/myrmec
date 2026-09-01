@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState, useMemo } from 'react'
+import React, { useState, useMemo } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
 import {
   agentProfilesApi,
   modelsApi,
+  toolsApi,
   type AgentProfile,
   type CreateAgentProfileRequest,
   type UpdateAgentProfileRequest,
   type Model,
+  type Tool,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RequiredMark } from '@/components/ui/required-marks'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
@@ -39,6 +42,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { MultiSelect, type MultiSelectOption } from '@/components/ui/multi-select'
 import { ContentAreaLayout } from '@/components/content-area-layout'
 import {
   Plus,
@@ -355,8 +359,8 @@ function ProfileForm({ profile, onSubmit, isLoading, error }: ProfileFormProps) 
   const [capabilities, setCapabilities] = useState<string>(
     profile?.capabilities?.join('\n') || ''
   )
-  const [toolCodes, setToolCodes] = useState<string>(
-    profile?.toolCodes?.join('\n') || ''
+  const [toolCodes, setToolCodes] = useState<string[]>(
+    profile?.toolCodes ?? []
   )
   const [systemPrompt, setSystemPrompt] = useState<string>(
     profile?.systemPrompt || ''
@@ -370,6 +374,23 @@ function ProfileForm({ profile, onSubmit, isLoading, error }: ProfileFormProps) 
     queryFn: () => modelsApi.list(),
   })
 
+  const { data: tools } = useQuery({
+    queryKey: ['tools'],
+    queryFn: () => toolsApi.list(),
+  })
+
+  const toolOptions: MultiSelectOption[] = React.useMemo(
+    () =>
+      (tools ?? [])
+        .filter((t: Tool) => t.status === 'ACTIVE')
+        .map((t: Tool) => ({
+          value: t.code,
+          label: t.name,
+          description: t.toolType,
+        })),
+    [tools],
+  )
+
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     const formData = new FormData(e.currentTarget)
@@ -381,10 +402,7 @@ function ProfileForm({ profile, onSubmit, isLoading, error }: ProfileFormProps) 
         .split('\n')
         .map((s) => s.trim())
         .filter(Boolean),
-      toolCodes: toolCodes
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean),
+      toolCodes,
       systemPrompt: systemPrompt.trim() || undefined,
       defaultModel: defaultModel || undefined,
     }
@@ -407,7 +425,7 @@ function ProfileForm({ profile, onSubmit, isLoading, error }: ProfileFormProps) 
 
       <div className="grid gap-4 py-4">
         <div className="grid gap-2">
-          <Label htmlFor="name">Name *</Label>
+          <Label htmlFor="name">Name<RequiredMark /></Label>
           <Input
             id="name"
             name="name"
@@ -494,22 +512,20 @@ function ProfileForm({ profile, onSubmit, isLoading, error }: ProfileFormProps) 
 
         <div className="grid gap-2">
           <Label htmlFor="toolCodes">
-            Tool Codes
+            Tools
             <span className="text-muted-foreground text-xs ml-2">
-              (one per line)
+              (from the tools registry)
             </span>
           </Label>
-          <Textarea
-            id="toolCodes"
-            value={toolCodes}
-            onChange={(e) => setToolCodes(e.target.value)}
-            placeholder="filesystem&#10;git&#10;maven&#10;github"
-            rows={4}
-            className="font-mono text-sm"
+          <MultiSelect
+            options={toolOptions}
+            selected={toolCodes}
+            onChange={setToolCodes}
+            placeholder="Select tools..."
+            searchPlaceholder="Search tools by name or code..."
           />
           <p className="text-xs text-muted-foreground">
-            Tool codes from the tools registry.
-            Examples: filesystem, git, maven, github, postgres
+            Tools available to agents with this profile. Only active tools are shown.
           </p>
         </div>
       </div>

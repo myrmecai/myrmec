@@ -45,10 +45,6 @@ public class Model {
     @JoinColumn(name = "provider", referencedColumnName = "code", insertable = false, updatable = false)
     private ModelProviderConfig providerConfig;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "deployment_type", nullable = false, length = 20)
-    private DeploymentType deploymentType = DeploymentType.CLOUD;
-
     /**
      * Provider-specific model identifier (e.g., gpt-4, llama3:70b)
      */
@@ -60,19 +56,6 @@ public class Model {
      */
     @Column(name = "api_endpoint", length = 500)
     private String apiEndpoint;
-
-    /**
-     * Encrypted API key (AES-256-GCM).
-     * Required for CLOUD, optional for ON_PREMISE.
-     */
-    @Column(name = "api_key_encrypted")
-    private byte[] apiKeyEncrypted;
-
-    /**
-     * Whether authentication is required.
-     */
-    @Column(name = "requires_auth", nullable = false)
-    private boolean requiresAuth = true;
 
     /**
      * Whether the model accepts image inputs (vision / multimodal). Gates
@@ -115,17 +98,17 @@ public class Model {
     private String lastTestStatus;
 
     /**
-     * Input (prompt) token price per 1,000 tokens, in {@link #currency}.
+     * Input (prompt) token price per 1M tokens, in {@link #currency}.
      * Used for cost computation on task completion. Optional.
      */
-    @Column(name = "input_price_per_1k_tokens", precision = 10, scale = 6)
-    private BigDecimal inputPricePer1kTokens;
+    @Column(name = "input_price", precision = 10, scale = 6)
+    private BigDecimal inputPrice;
 
     /**
-     * Output (completion) token price per 1,000 tokens, in {@link #currency}.
+     * Output (completion) token price per 1M tokens, in {@link #currency}.
      */
-    @Column(name = "output_price_per_1k_tokens", precision = 10, scale = 6)
-    private BigDecimal outputPricePer1kTokens;
+    @Column(name = "output_price", precision = 10, scale = 6)
+    private BigDecimal outputPrice;
 
     /**
      * ISO 4217 currency code for pricing (e.g. USD).

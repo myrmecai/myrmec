@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+
 package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine.agent.*;
@@ -9,6 +12,13 @@ import ai.myrmec.engine.websocket.AgentConnectionManager;
 import ai.myrmec.engine.websocket.AgentWebSocketHandler;
 import ai.myrmec.engine.websocket.message.payload.TaskAssignPayload;
 import ai.myrmec.engine.websocket.message.payload.TaskContext;
+import ai.myrmec.engine.websocket.message.payload.InferenceAssignPayload;
+import ai.myrmec.engine.websocket.message.payload.SessionOpenPayload;
+import ai.myrmec.engine.websocket.message.MessageType;
+import ai.myrmec.engine.websocket.message.WebSocketMessage;
+import ai.myrmec.engine.inference.InferenceRequestAssembler;
+import ai.myrmec.engine.inference.InferenceRequestSpec;
+import ai.myrmec.engine.inference.SessionContextAssembler;
 import ai.myrmec.engine.knowledge.TaskContextResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,6 +48,9 @@ public class TaskDispatcherService {
     private final ModelService modelService;
     private final TaskAttemptService taskAttemptService;
     private final TaskContextResolver contextResolver;
+    private final SessionContextAssembler sessionContextAssembler;
+    private final InferenceRequestAssembler inferenceRequestAssembler;
+    private final ai.myrmec.engine.governance.GovernancePolicyResolver governancePolicyResolver;
 
     /**
      * Dispatch pending tasks to available agents.
@@ -57,20 +70,23 @@ public class TaskDispatcherService {
         
         for (WorkflowTask task : pendingTasks) {
             try {
-                // Skip tasks belonging to a cancelled request. The task will
-                // be marked CANCELLED by the cancellation flow; this is a
-                // safety net in case ordering of saves was off.
+                // Skip tasks belonging to a cancelled/finished/paused request.
                 RequestStatus reqStatus = task.getRequest().getStatus();
                 if (reqStatus == RequestStatus.CANCELLED
                         || reqStatus == RequestStatus.COMPLETED
-                        || reqStatus == RequestStatus.FAILED) {
+                        || reqStatus == RequestStatus.FAILED
+                        || reqStatus == RequestStatus.PAUSED) {
                     continue;
                 }
-                // Phase 10 #71 — honour rate-limit backoff. The task was
-                // pushed back to PENDING by the retry path with a wall
-                // clock at which it becomes eligible again.
+                // Phase 10 #71 — honour rate-limit backoff.
                 if (task.getNextEligibleAt() != null
                         && task.getNextEligibleAt().isAfter(Instant.now())) {
+                    continue;
+                }
+                // J3: Pause gate BEFORE — if the task has pauseMode BEFORE or BOTH
+                // and hasn't been paused yet, transition it to PAUSED before dispatch.
+                if (shouldPauseBefore(task)) {
+                    pauseTaskBefore(task);
                     continue;
                 }
                 dispatchTask(task);
@@ -78,6 +94,36 @@ public class TaskDispatcherService {
                 log.error("Failed to dispatch task {}: {}", task.getId(), e.getMessage());
             }
         }
+    }
+
+    /**
+     * Check if a task should be paused before dispatch.
+     */
+    private boolean shouldPauseBefore(WorkflowTask task) {
+        if (task.getPauseMode() == null) return false;
+        return (task.getPauseMode() == PauseMode.BEFORE || task.getPauseMode() == PauseMode.BOTH)
+                && "NONE".equals(task.getPauseState() == null ? "NONE" : task.getPauseState());
+    }
+
+    /**
+     * Pause a task before dispatch — transition to PAUSED state.
+     */
+    private void pauseTaskBefore(WorkflowTask task) {
+        task.setStatus(TaskStatus.PAUSED);
+        task.setPauseState("PAUSED_BEFORE");
+        task.setPausedAt(Instant.now());
+        task.setPauseReason("Waiting for manual review before execution");
+        taskRepository.save(task);
+
+        // Transition the parent request to PAUSED
+        WorkflowRequest request = task.getRequest();
+        if (request.getStatus() == RequestStatus.PENDING || request.getStatus() == RequestStatus.RUNNING) {
+            request.setStatus(RequestStatus.PAUSED);
+            requestRepository.save(request);
+        }
+
+        log.info("Task {} (step '{}') paused BEFORE dispatch — awaiting manual review",
+                task.getId(), task.getStepId());
     }
 
     /**
@@ -104,11 +150,14 @@ public class TaskDispatcherService {
                 // Create attempt record
                 TaskAttempt attempt = taskAttemptService.createAttempt(task, instance);
                 
-                // Build task payload with attempt info
-                TaskAssignPayload payload = buildTaskPayload(task, attempt);
+                // Build session.open + inference.assign via the unified
+                // inference dispatch pipeline (§6.1 + §6.2).
+                SessionOpenPayload sessionOpen = buildSessionOpen(task, attempt);
+                InferenceAssignPayload payload = buildInferenceAssign(task, attempt, sessionOpen);
                 
-                // Try to send task to agent
-                boolean sent = webSocketHandler.assignTask(instance.getId(), payload);
+                // Send session.open first, then inference.assign
+                boolean sent = webSocketHandler.sendSessionOpen(instance.getId(), sessionOpen)
+                        && webSocketHandler.sendInferenceAssign(instance.getId(), payload);
                 
                 if (sent) {
                     // Update task status
@@ -162,96 +211,70 @@ public class TaskDispatcherService {
     /**
      * Build the task assignment payload.
      */
-    private TaskAssignPayload buildTaskPayload(WorkflowTask task, TaskAttempt attempt) {
+    /**
+     * Build the session.open payload for a workflow task (§6.1).
+     * Delegates to {@link SessionContextAssembler} which creates the
+     * Session row and resolves model/workspace/tools/KB handles.
+     */
+    private SessionOpenPayload buildSessionOpen(WorkflowTask task, TaskAttempt attempt) {
         WorkflowRequest request = task.getRequest();
         Workflow workflow = request.getWorkflow();
-        
-        // Get tools
-        List<TaskAssignPayload.ToolDefinition> tools = toolService.findActive().stream()
-                .map(this::toToolDefinition)
-                .toList();
-        
-        // Get model info with credentials
         AgentProfile profile = task.getAgentProfile();
-        TaskAssignPayload.ModelInfo modelInfo = null;
-        log.debug("Building task payload for profile '{}', defaultModel='{}'", 
-                profile.getName(), profile.getDefaultModel());
-        
-        if (profile.getDefaultModel() != null) {
-            try {
-                Model model = modelService.findByCode(profile.getDefaultModel());
-                log.debug("Found model '{}': provider={}, requiresAuth={}, hasApiKey={}", 
-                        model.getCode(), model.getProvider(), model.isRequiresAuth(), 
-                        model.getApiKeyEncrypted() != null);
-                
-                // Get decrypted API key
-                String apiKey = null;
-                if (model.isRequiresAuth() && model.getApiKeyEncrypted() != null) {
-                    apiKey = modelService.getApiKey(model.getCode());
-                    log.debug("Decrypted API key for model '{}': length={}", 
-                            model.getCode(), apiKey != null ? apiKey.length() : 0);
-                } else {
-                    log.warn("Model '{}' requires auth but has no API key configured", model.getCode());
-                }
-                
-                // Get API endpoint (use provider default if not set on model)
-                String apiEndpoint = model.getApiEndpoint();
-                if (apiEndpoint == null && model.getProviderConfig() != null) {
-                    apiEndpoint = model.getProviderConfig().getBaseUrl();
-                }
-                
-                modelInfo = TaskAssignPayload.ModelInfo.builder()
-                        .provider(model.getProvider())
-                        .modelId(model.getModelId())
-                        .apiEndpoint(apiEndpoint)
-                        .apiKey(apiKey)
-                        .parameters(model.getDefaultParams())
-                        .build();
-                log.debug("Built modelInfo: provider={}, modelId={}, endpoint={}, hasApiKey={}", 
-                        modelInfo.getProvider(), modelInfo.getModelId(), 
-                        modelInfo.getApiEndpoint(), modelInfo.getApiKey() != null);
-            } catch (Exception e) {
-                log.warn("Could not load model {}: {}", profile.getDefaultModel(), e.getMessage());
-            }
-        } else {
-            log.warn("Agent profile '{}' has no default model configured", profile.getName());
-        }
-        
-        // Get task context using the new instruction assets system.
+        return sessionContextAssembler.assemble(
+                "WORKFLOW",
+                request.getId(),          // refId = workflow_request_id
+                workflow.getProject().getId(),
+                profile.getId());
+    }
+
+    /**
+     * Build the inference.assign payload for a workflow task (§6.2).
+     * Assembles the transcript via {@link InferenceRequestAssembler}
+     * using the workflow composer.
+     */
+    private InferenceAssignPayload buildInferenceAssign(WorkflowTask task, TaskAttempt attempt,
+                                                        SessionOpenPayload sessionOpen) {
+        WorkflowRequest request = task.getRequest();
+        Workflow workflow = request.getWorkflow();
+        AgentProfile profile = task.getAgentProfile();
+
+        // Resolve task context (instruction assets + knowledge)
         TaskContext context = contextResolver.resolve(
                 workflow.getProject().getId(),
                 task.getStepId(),
-                null  // artifactsRepo is a Map, not used by the new resolver
-        );
-        
+                null);
         // Override workspace branch with execution-specific feature branch
         if (request.getBranch() != null && context.getWorkspace() != null) {
             context.getWorkspace().setBranch(request.getBranch());
         }
-        
-        // Find step info from workflow steps
-        String stepName = findStepName(workflow, task.getStepId());
-        int stepIndex = findStepIndex(workflow, task.getStepId());
+
+        // Map TaskContext.KnowledgeEntry → InferenceRequestSpec.KnowledgeEntry
+        List<InferenceRequestSpec.KnowledgeEntry> knowledge = List.of();
+        if (context.getKnowledge() != null) {
+            knowledge = context.getKnowledge().stream()
+                    .map(k -> new InferenceRequestSpec.KnowledgeEntry(
+                            k.getName(), k.getContent(), k.getCategory()))
+                    .toList();
+        }
+
         String stepPrompt = findStepPrompt(workflow, task.getStepId());
-        
-        // Get system prompt from agent profile
-        String systemPrompt = profile.getSystemPrompt();
-        
-        return TaskAssignPayload.builder()
-                .taskId(task.getId())
-                .attemptId(attempt.getId())
-                .attemptNumber(attempt.getAttemptNumber())
-                .workflowId(workflow.getId())
-                .stepIndex(stepIndex)
-                .stepName(stepName)
-                .systemPrompt(systemPrompt)
+        int stepIndex = findStepIndex(workflow, task.getStepId());
+
+        InferenceRequestSpec spec = InferenceRequestSpec.builder()
+                .serviceType("WORKFLOW")
+                .sessionId(sessionOpen.sessionId())
+                .requestId(task.getId())              // requestId = task id
+                .projectId(workflow.getProject().getId())
+                .sequenceNo(stepIndex)
+                .stepId(task.getStepId())              // step id for routing (nullable for conversation)
+                .governanceProfileCode(governancePolicyResolver.resolveOrgDefault().code())
+                .systemPrompt(profile.getSystemPrompt())
                 .stepPrompt(stepPrompt)
                 .input(task.getInput())
-                .tools(tools)
-                .timeoutSeconds(300) // 5 minute default
-                .model(modelInfo)
-                .context(context)
+                .knowledge(knowledge)
                 .build();
+
+        return inferenceRequestAssembler.assemble(spec);
     }
 
     private TaskAssignPayload.ToolDefinition toToolDefinition(ToolResponse tool) {

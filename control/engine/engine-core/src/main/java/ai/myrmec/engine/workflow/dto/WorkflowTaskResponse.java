@@ -1,5 +1,6 @@
 package ai.myrmec.engine.workflow.dto;
 
+import ai.myrmec.engine.workflow.PauseMode;
 import ai.myrmec.engine.workflow.TaskResult;
 import ai.myrmec.engine.workflow.TaskStatus;
 
@@ -29,7 +30,14 @@ public record WorkflowTaskResponse(
         UUID currentAttemptId,
         List<TaskAttemptResponse> attempts,
         // New: aggregated metrics (tokens, timing, cost)
-        Map<String, Object> metrics
+        Map<String, Object> metrics,
+        // J3: pause gate
+        PauseMode pauseMode,
+        String pauseState,
+        String pauseReason,
+        Instant pausedAt,
+        // Phase 10 #71 — rate-limit retry backoff
+        Instant nextEligibleAt
 ) {
     /**
      * Create response without attempts (for backward compatibility).
@@ -54,7 +62,8 @@ public record WorkflowTaskResponse(
     ) {
         this(id, requestId, stepId, agentProfileId, agentProfileName, agentInstanceId,
                 input, output, status, result, errorMessage, attempt,
-                                createdAt, startedAt, completedAt, knowledgeSourceIds, null, null, null);
+                                createdAt, startedAt, completedAt, knowledgeSourceIds, null, null, null,
+                                null, null, null, null, null);
     }
 
     /**
@@ -81,6 +90,7 @@ public record WorkflowTaskResponse(
     ) {
         this(id, requestId, stepId, agentProfileId, agentProfileName, agentInstanceId,
                 input, output, status, result, errorMessage, attempt,
-                                createdAt, startedAt, completedAt, knowledgeSourceIds, null, null, metrics);
+                                createdAt, startedAt, completedAt, knowledgeSourceIds, null, null, metrics,
+                                null, null, null, null, null);
     }
 }

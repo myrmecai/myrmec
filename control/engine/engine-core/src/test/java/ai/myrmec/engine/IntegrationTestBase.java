@@ -71,6 +71,9 @@ public abstract class IntegrationTestBase {
     protected ai.myrmec.engine.context.ContextManifestRepository contextManifestRepository;
 
     @Autowired
+    protected ai.myrmec.engine.inference.SessionRepository sessionRepository;
+
+    @Autowired
     protected ai.myrmec.engine.quota.QuotaConsumptionRepository quotaConsumptionRepository;
 
     @Autowired
@@ -101,6 +104,9 @@ public abstract class IntegrationTestBase {
     protected ai.myrmec.engine.knowledge.KnowledgeSourceRepository knowledgeSourceRepository;
 
     @Autowired
+    protected ai.myrmec.engine.knowledge.KnowledgeChunkRepository knowledgeChunkRepository;
+
+    @Autowired
     protected ai.myrmec.engine.knowledge.DataFeedRepository dataFeedRepository;
 
     @Autowired
@@ -115,6 +121,24 @@ public abstract class IntegrationTestBase {
     @Autowired
     protected ai.myrmec.engine.assistant.AssistantContextBindingRepository assistantContextBindingRepository;
 
+    @Autowired
+    protected ai.myrmec.engine.assistant.AssistantVersionRepository assistantVersionRepository;
+
+    @Autowired
+    protected ai.myrmec.engine.assistant.AssistantGrantRepository assistantGrantRepository;
+
+    @Autowired
+    protected ai.myrmec.engine.assistant.AssistantRepository assistantRepository;
+
+    @Autowired
+    protected ai.myrmec.engine.agent.AgentProfileRepository agentProfileRepository;
+
+    @Autowired
+    protected ai.myrmec.engine.agent.AgentHostRepository agentHostRepository;
+
+    @Autowired
+    protected ai.myrmec.engine.agent.AgentRepository agentRepository;
+
     /**
      * Test admin - retrieved or created for E2E tests.
      */
@@ -128,15 +152,6 @@ public abstract class IntegrationTestBase {
     protected static final String TEST_MODEL_CODE = "github-gpt-4o";
 
     /**
-     * GitHub Models API key for E2E tests.
-     * Read from the {@code GITHUB_MODELS_API_KEY} environment variable so no secret
-     * lives in version control. When unset the model is left with an empty API key,
-     * and any test that genuinely needs to call GitHub Models will fail with a clear
-     * authentication error rather than a misleading null.
-     */
-    private static final String TEST_GITHUB_MODELS_API_KEY =
-            System.getenv().getOrDefault("GITHUB_MODELS_API_KEY", "");
-
     /**
      * Clean up test data before each test, then create required fixtures.
      * Subclasses can override to add custom cleanup.
@@ -148,6 +163,8 @@ public abstract class IntegrationTestBase {
         executionSnapshotRepository.deleteAllInBatch();
         // context_manifests references conversations(id); clear before conversations.
         contextManifestRepository.deleteAllInBatch();
+        // sessions references projects(id); clear before projects.
+        sessionRepository.deleteAllInBatch();
         quotaConsumptionRepository.deleteAllInBatch();
         quotaRepository.deleteAllInBatch();
         conversationMessageRepository.deleteAllInBatch();
@@ -157,46 +174,40 @@ public abstract class IntegrationTestBase {
         serviceAccountRepository.deleteAllInBatch();
         // New AI context tables — clear before projects (they have FKs to projects).
         dataFeedRepository.deleteAllInBatch();
+        knowledgeChunkRepository.deleteAllInBatch();
         knowledgeSourceRepository.deleteAllInBatch();
         knowledgeProviderVersionRepository.deleteAllInBatch();
         knowledgeProviderRepository.deleteAllInBatch();
         connectionConfigVersionRepository.deleteAllInBatch();
         connectionConfigRepository.deleteAllInBatch();
+        // project_instruction_bindings reference instruction_assets(id); clear before assets.
+        projectInstructionBindingRepository.deleteAllInBatch();
         instructionAssetVersionRepository.deleteAllInBatch();
         instructionAssetRepository.deleteAllInBatch();
-        // project_settings, project_instruction_bindings, project_provider_bindings,
+        // assistant_grants and assistant_versions reference assistants(id); clear before assistants.
+        assistantGrantRepository.deleteAllInBatch();
+        assistantVersionRepository.deleteAllInBatch();
+        // assistants reference projects(id) and agent_profiles(id); clear before both.
+        assistantRepository.deleteAllInBatch();
+        // agent_hosts reference agent_profiles(id); clear before agent_profiles.
+        agentHostRepository.deleteAllInBatch();
+        // agents reference agent_hosts(id); clear before agent_hosts.
+        agentRepository.deleteAllInBatch();
+        // agent_profiles are referenced by assistants and agent_hosts; clear after both.
+        agentProfileRepository.deleteAllInBatch();
+        // project_settings, project_provider_bindings,
         // and assistant_context_bindings reference projects(id); clear before projects.
         projectSettingRepository.deleteAllInBatch();
-        projectInstructionBindingRepository.deleteAllInBatch();
         projectProviderBindingRepository.deleteAllInBatch();
         assistantContextBindingRepository.deleteAllInBatch();
-        projectRepository.deleteAll();
-        // audit_events references projects(id) and users(id); clear after projects.
+        // audit_events references projects(id) and users(id); clear before projects.
         auditEventRepository.deleteAllInBatch();
+        projectRepository.deleteAll();
 
         // Get or create the test admin user
         TEST_ADMIN_ID = userRepository.findByEmail(TEST_ADMIN_EMAIL)
                 .map(User::getId)
                 .orElseGet(this::createTestAdmin);
-
-        // Ensure test model has API key configured
-        ensureTestModelApiKey();
-    }
-
-    /**
-     * Ensure the test model (github-gpt-4o) has API key set.
-     * The model is seeded by Liquibase, but API key is set here for tests.
-     */
-    private void ensureTestModelApiKey() {
-        if (TEST_GITHUB_MODELS_API_KEY.isEmpty()) {
-            return;
-        }
-        modelRepository.findById(TEST_MODEL_CODE).ifPresent(model -> {
-            if (model.getApiKeyEncrypted() == null) {
-                model.setApiKeyEncrypted(encryptionService.encrypt(TEST_GITHUB_MODELS_API_KEY));
-                modelRepository.save(model);
-            }
-        });
     }
 
     /**

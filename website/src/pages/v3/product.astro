@@ -1,0 +1,208 @@
+---
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+// v3 Product page — deep dive from about-v2.md §1, §2, §4.5, §5, §6.
+import V3Layout from "../../layouts/V3Layout.astro";
+import ArchitectureDiagram from "../../components/v3/ArchitectureDiagram.astro";
+
+const concepts = [
+  ["Models & Providers", "Admin manages subscribed models and their providers — token limits, cost caps, and access permissions live here. Provider credentials stay encrypted in the platform vault."],
+  ["Agent Profiles", "Reusable templates binding a model, tools, capabilities, system prompt, and sandbox image — the building blocks workflows and assistants are composed from."],
+  ["Agents", "Managed instances in sandbox containers, built on the open-source Myrmec Agent SDK (TypeScript / LangChain.js). Registered, credentialed, health-monitored."],
+  ["Knowledge Providers & Sources", "Standards, policies, runbooks, and docs indexed from git, uploads, web, and connectors. Pluggable retrieval backends: bundled RAGFlow, generic HTTP BYO-RAG, or custom SPI."],
+  ["Workflows & Assistants", "Deterministic multi-step workflows and conversational assistants — same governed runtime, same audit trail, same knowledge and tools."],
+];
+
+const pillars = [
+  {
+    title: "Workflow engine",
+    items: [
+      "Visual authoring — no orchestration code required",
+      "Live execution view with streaming step status and logs",
+      "Persistent history: every step, log line, and model call",
+      "Human-in-the-loop checkpoints for high-risk steps",
+      "Resilient dispatch: retries, backoff, rate-limit awareness",
+    ],
+  },
+  {
+    title: "Interactive sessions",
+    items: [
+      "Assistant-driven chat bound to project, sandbox, and knowledge scope",
+      "Token-by-token streaming — thinking, tool calls, citations live",
+      "Inline approval cards with diff/preview, expiry, reject-with-comment",
+      "File attachments: PDF, Office, text, images — promote keepers to knowledge",
+      "Cancel mid-stream; sessions are persistent and shareable",
+    ],
+  },
+  {
+    title: "Grounded answers (RAG)",
+    items: [
+      "Multi-source ingestion: git, uploads, web crawl, Confluence, Notion, Jira",
+      "Citation chips expand to the exact passage — file:line, table:column",
+      "Scope-aligned retrieval: users only retrieve what they're authorised to read",
+      "Pluggable providers: bundled RAGFlow or your enterprise RAG over HTTP",
+      "Every retrieval logged with chunk IDs and similarity scores",
+    ],
+  },
+  {
+    title: "Governance & control",
+    items: [
+      "Sandbox isolation by default — blast radius bounded by design",
+      "Governance profiles with context preview before deployment",
+      "Hierarchical budgets: org → group → project → service; CEILING or RESERVATION",
+      "Enforcement modes telemetry → warn → block; 120% kill switch",
+      "Eight roles × three scopes with explicit inheritance",
+    ],
+  },
+  {
+    title: "Extensibility",
+    items: [
+      "Vendor-agnostic model swapping — config change, not code change",
+      "Open Agent SDK for tools that talk to your internal systems",
+      "External API: embed assistants in your products with per-user attribution",
+      "Connector, provider, secret-store, and fanout SPIs under engine-spi",
+      "Deterministic multi-step flows — reliability over improvisation",
+    ],
+  },
+];
+
+const compare = [
+  ["Enterprise search assistants (Glean)", "✓✓", "✗", "n/a", "partial", "✗"],
+  ["IDE copilots (Copilot, Cursor, Cody)", "partial", "✓ (laptop)", "✗", "✗", "✗"],
+  ["Autonomous coding agents (Devin)", "partial", "✓", "✓", "partial", "✗"],
+  ["Cloud-vendor agent runtimes (Bedrock, Vertex)", "✗", "✓", "✓", "✓", "✗ (vendor lock)"],
+  ["Low-code automation (Zapier, n8n)", "✗", "✓", "✗", "partial", "partial"],
+  ["Orchestration frameworks (LangChain, AutoGen)", "depends", "depends", "✗", "✗", "✓"],
+];
+---
+
+<V3Layout
+  title="Product | Myrmec"
+  description="The full Myrmec platform: architecture, five core concepts, feature pillars, and an honest comparison against the alternatives."
+>
+  <!-- Intro -->
+  <section class="v3-dot-grid mx-auto max-w-6xl px-6 pb-16 pt-20 md:px-10">
+    <p class="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold tracking-wide text-indigo-700">
+      Product Deep Dive
+    </p>
+    <h1 class="mt-5 max-w-3xl text-4xl font-extrabold tracking-tight text-slate-900 md:text-5xl">
+      Orchestrate, not just prompt.
+    </h1>
+    <p class="mt-5 max-w-2xl text-lg leading-relaxed text-slate-500">
+      Myrmec eliminates developer dependency from day-to-day AI-assisted work. DevOps sets it up
+      once; business users, analysts, and project teams run workflows and assistants — every step
+      grounded, sandboxed, approved, and auditable.
+    </p>
+  </section>
+
+  <!-- Architecture -->
+  <section class="mx-auto max-w-6xl px-6 py-6 md:px-10">
+    <h2 class="text-2xl font-extrabold tracking-tight text-slate-900 md:text-3xl">Architecture at a glance</h2>
+    <p class="mt-3 max-w-2xl text-sm leading-relaxed text-slate-500">
+      Three deployables: a stateless control-plane engine (PostgreSQL-backed), a web control
+      plane UI, and sandboxed agent containers built on the open Agent SDK. Single-tenant per
+      instance — one deployment serves exactly one organisation, inside its own network.
+    </p>
+    <div class="mt-8">
+      <ArchitectureDiagram />
+    </div>
+  </section>
+
+  <!-- Five concepts -->
+  <section class="border-y border-slate-100 bg-slate-50">
+    <div class="mx-auto max-w-6xl px-6 py-20 md:px-10">
+      <h2 class="text-2xl font-extrabold tracking-tight text-slate-900 md:text-3xl">Five core concepts</h2>
+      <div class="mt-10 space-y-4">
+        {concepts.map(([title, desc], i) => (
+          <div class="grid gap-3 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-[260px_1fr] md:gap-6">
+            <p class="flex items-center gap-3 text-sm font-bold text-slate-900">
+              <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 font-mono text-xs font-bold text-indigo-600">{`0${i + 1}`}</span>
+              {title}
+            </p>
+            <p class="text-sm leading-relaxed text-slate-500 md:pt-1">{desc}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- Pillars -->
+  <section class="mx-auto max-w-6xl px-6 py-20 md:px-10">
+    <h2 class="text-2xl font-extrabold tracking-tight text-slate-900 md:text-3xl">What ships in the box</h2>
+    <div class="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+      {pillars.map((p) => (
+        <article class="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
+          <h3 class="text-sm font-bold uppercase tracking-wide text-indigo-600">{p.title}</h3>
+          <ul class="mt-5 space-y-3">
+            {p.items.map((item) => (
+              <li class="flex items-start gap-2.5 text-sm leading-relaxed text-slate-500">
+                <svg class="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                {item}
+              </li>
+            ))}
+          </ul>
+        </article>
+      ))}
+    </div>
+  </section>
+
+  <!-- Comparison -->
+  <section id="compare" class="border-y border-slate-100 bg-slate-50">
+    <div class="mx-auto max-w-6xl px-6 py-20 md:px-10">
+      <h2 class="text-2xl font-extrabold tracking-tight text-slate-900 md:text-3xl">
+        How Myrmec compares
+      </h2>
+      <p class="mt-3 max-w-2xl text-sm leading-relaxed text-slate-500">
+        A category nobody else fully occupies: grounded in org knowledge <em>and</em> acts
+        <em>and</em> sandboxed <em>and</em> governed <em>and</em> multi-model/on-prem.
+      </p>
+
+      <div class="mt-10 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <table class="w-full min-w-[760px] text-left text-sm">
+          <thead>
+            <tr class="border-b border-slate-200 text-xs uppercase tracking-widest text-slate-400">
+              <th class="px-5 py-4 font-bold">Product category</th>
+              <th class="px-4 py-4 text-center font-bold">Org knowledge</th>
+              <th class="px-4 py-4 text-center font-bold">Acts</th>
+              <th class="px-4 py-4 text-center font-bold">Sandboxed</th>
+              <th class="px-4 py-4 text-center font-bold">Governed</th>
+              <th class="px-4 py-4 text-center font-bold">Multi-model / on-prem</th>
+            </tr>
+          </thead>
+          <tbody>
+            {compare.map(([name, ...cols]) => (
+              <tr class="border-b border-slate-100 last:border-0">
+                <td class="px-5 py-3.5 font-semibold text-slate-700">{name}</td>
+                {cols.map((c) => (
+                  <td class:list={["px-4 py-3.5 text-center", c.startsWith("✓") ? "text-emerald-600 font-semibold" : c === "✗" ? "text-slate-300" : "text-slate-400"]}>{c}</td>
+                ))}
+              </tr>
+            ))}
+            <tr class="bg-indigo-50/60">
+              <td class="px-5 py-3.5 font-extrabold text-indigo-700">Myrmec</td>
+              {["✓", "✓", "✓", "✓", "✓"].map((c) => (
+                <td class="px-4 py-3.5 text-center font-extrabold text-indigo-600">{c}</td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="mt-6 text-center text-sm text-slate-500">
+        The one-line version: <strong class="text-slate-700">frameworks are construction kits; Myrmec is the building.</strong>
+      </p>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="mx-auto max-w-3xl px-6 py-20 text-center md:px-10">
+    <h2 class="text-2xl font-extrabold tracking-tight text-slate-900 md:text-3xl">See it running in your org</h2>
+    <p class="mt-4 text-base leading-relaxed text-slate-500">
+      Open source and self-hosted — spin it up, or talk to us about your requirements.
+    </p>
+    <div class="mt-8 flex flex-wrap justify-center gap-4">
+      <a href="/v3/get-started" class="rounded-xl bg-indigo-600 px-7 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500">Get Started</a>
+      <a href="/v3/#contact" class="rounded-xl border border-slate-300 bg-white px-7 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-500">Contact Us</a>
+    </div>
+  </section>
+</V3Layout>

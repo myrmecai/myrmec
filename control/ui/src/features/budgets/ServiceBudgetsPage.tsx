@@ -14,6 +14,7 @@ import { useAuth } from '@/lib/auth'
 import { ContentAreaLayout } from '@/components/content-area-layout'
 import { formatAmount, formatResourceType, formatPeriod, calculatePercentage, statusFromPercentage } from './lib/format'
 import { QuotaProgressBar } from './components/quota-progress-bar'
+import { useGovernancePolicy } from '@/features/platform/ai-context/governance-profile/useGovernancePolicy'
 
 interface ServiceBudgetsPageProps {
   projectId: string
@@ -41,6 +42,14 @@ export function ServiceBudgetsPage({ projectId }: ServiceBudgetsPageProps) {
     auth.isPlatformAdmin ||
     auth.hasSystemRole('BUDGET_OWNER')
 
+  // Governance: BUDGET_OVERRIDE — if the profile doesn't permit PER_SERVICE,
+  // service-level budgets are locked (STRICT = NONE).
+  const { policy: governancePolicy } = useGovernancePolicy()
+  const governanceLocked = governancePolicy
+    ? !governancePolicy.permitsAtLeast('BUDGET_OVERRIDE', 'PER_SERVICE')
+    : false
+  const effectiveCanCreate = canCreate && !governanceLocked
+
   const pool = data?.sharedPool
 
   return (
@@ -60,13 +69,20 @@ export function ServiceBudgetsPage({ projectId }: ServiceBudgetsPageProps) {
               {formatPeriod(period)} {formatResourceType(resourceType).toLowerCase()} allocation across services.
             </p>
           </div>
-          {canCreate && (
+          {effectiveCanCreate && (
             <Button asChild>
               <Link to="/budgets/new" search={{ scopeType: 'SERVICE', scopeId: projectId }}>
                 <Plus className="h-4 w-4 mr-2" />
                 Allocate budget
               </Link>
             </Button>
+          )}
+          {governanceLocked && governancePolicy && (
+            <span className="text-sm text-muted-foreground flex items-center gap-1">
+              <span className="inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
+                Locked by {governancePolicy.profileName} profile
+              </span>
+            </span>
           )}
         </div>
 
@@ -143,7 +159,7 @@ export function ServiceBudgetsPage({ projectId }: ServiceBudgetsPageProps) {
               </div>
             )}
             {(data?.serviceBudgets ?? []).map((s) => (
-              <ServiceRow key={s.id} service={s} projectId={projectId} canCreate={canCreate} />
+              <ServiceRow key={s.id} service={s} projectId={projectId} canCreate={effectiveCanCreate} />
             ))}
           </div>
         )}

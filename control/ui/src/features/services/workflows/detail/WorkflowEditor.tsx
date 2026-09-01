@@ -314,6 +314,7 @@ export function WorkflowEditor({ workflowId }: { workflowId: string }) {
                     hasChanges ||
                     !validation.ok
                   }
+                  data-testid="workflow-publish-button"
                   title={
                     !validation.ok
                       ? 'Fix validation errors before publishing'

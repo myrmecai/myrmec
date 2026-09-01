@@ -14,20 +14,20 @@ import java.util.UUID;
 /**
  * Phase 9d — read-only agent health endpoint for the agent admin UI.
  *
- * <p>Same role requirement as {@code AgentAdminController}: platform
+ * <p>Same role requirement as {@code AgentHostAdminController}: platform
  * admins or editors. Returns aggregated health from
  * {@link AgentHealthService}.</p>
  */
 @RestController
-@RequestMapping("/api/v1/admin/agents")
+@RequestMapping("/api/v1/admin/agent-hosts")
 @RequiredArgsConstructor
 @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasRole('EDITOR')")
-@Tag(name = "Agents (Admin)", description = "Agent management operations")
+@Tag(name = "Agent Hosts (Admin)", description = "Agent host management operations")
 public class AgentHealthController {
 
     private final AgentHealthService healthService;
 
-    @Operation(summary = "Health snapshot for one agent")
+    @Operation(summary = "Health snapshot for one agent host")
     @GetMapping("/{agentId}/health")
     public AgentHealthSnapshot health(@PathVariable UUID agentId) {
         return healthService.snapshot(agentId);

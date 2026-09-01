@@ -162,6 +162,48 @@ public class WorkflowTask {
     private Instant approvalExpiresAt;
 
     // ==========================================================================
+    // Pause gate (J3): step-level manual review before/after execution
+    // ==========================================================================
+
+    /**
+     * Pause mode copied from the step definition at task creation time.
+     * Controls whether the task pauses before dispatch, after completion, or both.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "pause_mode", length = 10)
+    private PauseMode pauseMode = PauseMode.NONE;
+
+    /**
+     * Current pause state: NONE, PAUSED_BEFORE, PAUSED_AFTER, RESUMED.
+     */
+    @Column(name = "pause_state", length = 20)
+    private String pauseState = "NONE";
+
+    /**
+     * When the task entered the paused state.
+     */
+    @Column(name = "paused_at")
+    private Instant pausedAt;
+
+    /**
+     * User who paused/resumed the task (null for system-initiated pauses).
+     */
+    @Column(name = "paused_by_user_id")
+    private UUID pausedByUserId;
+
+    /**
+     * Human-readable reason for the pause (shown in UI).
+     */
+    @Column(name = "pause_reason", columnDefinition = "text")
+    private String pauseReason;
+
+    /**
+     * Denormalized max retries from the step definition (used by TaskAttemptService).
+     */
+    @Column(name = "max_retries")
+    private Integer maxRetries = 0;
+
+    // ==========================================================================
     // NEW: Attempts support
     // ==========================================================================
 

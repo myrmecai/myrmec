@@ -8,6 +8,8 @@ import jakarta.validation.constraints.Size;
 import lombok.Builder;
 import lombok.Value;
 
+import java.util.UUID;
+
 /**
  * Phase 10 #70 &mdash; request body for {@code POST /api/v1/admin/providers}.
  *
@@ -37,20 +39,14 @@ public class CreateModelProviderRequest {
 
     boolean requiresAuth;
 
-    @Size(max = 100)
-    String authHeader;
-
-    @Size(max = 50)
-    String authPrefix;
-
-    @Size(max = 200)
-    String healthEndpoint;
-
-    @Size(max = 200)
-    String modelsEndpoint;
-
     @Size(max = 500)
     String docsUrl;
 
     String description;
+
+    /**
+     * Linked ConnectionConfig holding the provider's credential in the
+     * secrets vault. Nullable — providers with requiresAuth=false need no config.
+     */
+    UUID connectionConfigId;
 }

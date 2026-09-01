@@ -4,6 +4,7 @@ import ai.myrmec.engine.workflow.dto.ExecutionEventResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -38,6 +39,7 @@ public class ExecutionEventController {
      * Get all events for a request.
      */
     @GetMapping
+    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
     public List<ExecutionEventResponse> getEvents(
             @PathVariable UUID projectId,
             @PathVariable UUID workflowId,
@@ -67,6 +69,7 @@ public class ExecutionEventController {
      * Get events for a specific task.
      */
     @GetMapping("/tasks/{taskId}")
+    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
     public List<ExecutionEventResponse> getTaskEvents(
             @PathVariable UUID projectId,
             @PathVariable UUID workflowId,
@@ -100,6 +103,7 @@ public class ExecutionEventController {
      * The connection remains open until the request completes or client disconnects.
      */
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
     public SseEmitter streamEvents(
             @PathVariable UUID projectId,
             @PathVariable UUID workflowId,

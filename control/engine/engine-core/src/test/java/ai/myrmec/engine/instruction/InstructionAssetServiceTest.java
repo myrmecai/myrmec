@@ -3,6 +3,9 @@
 package ai.myrmec.engine.instruction;
 
 import ai.myrmec.engine.IntegrationTestBase;
+import ai.myrmec.engine.governance.GovernanceProfileService;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -19,6 +22,19 @@ class InstructionAssetServiceTest extends IntegrationTestBase {
 
     @Autowired
     private InstructionAssetService service;
+
+    @Autowired
+    private GovernanceProfileService governanceProfileService;
+
+    @BeforeEach
+    void setFlexibleProfile() {
+        governanceProfileService.setDefaultProfile("FLEXIBLE", null);
+    }
+
+    @AfterEach
+    void resetProfile() {
+        governanceProfileService.setDefaultProfile("STANDARD", null);
+    }
 
     @Test
     void create_persistsWithIncompleteStatus() {

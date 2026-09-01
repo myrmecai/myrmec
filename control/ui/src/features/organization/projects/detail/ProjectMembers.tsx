@@ -43,16 +43,29 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Shield, Trash2 } from 'lucide-react'
 import { dialogService } from '@/services/dialog-service'
+
+/** Grants for one user grouped into a single row (mirrors the Users list). */
+interface GroupedMember {
+  userId: string
+  email: string
+  name: string | null
+  isActive: boolean
+  /** One entry per granted role — each is a separate user_roles row. */
+  grants: ProjectMember[]
+}
 
 export function ProjectMembers({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient()
-  const { isPlatformAdmin, isOrgAdmin, hasProjectRole } = useAuth()
+  const { isOrgAdmin, hasProjectRole } = useAuth()
 
+  // Member management is owner-level (mirrors @projectAccess.canOwn):
+  // project-scoped PROJECT_OWNER or system-wide ORG_ADMIN. PLATFORM_ADMIN has no
+  // data access (separation of duties) and an EDITOR cannot grant roles.
   const canEdit = useMemo(() => {
-    return isPlatformAdmin || isOrgAdmin || hasProjectRole(projectId, 'EDITOR')
-  }, [isPlatformAdmin, isOrgAdmin, hasProjectRole, projectId])
+    return isOrgAdmin || hasProjectRole(projectId, 'PROJECT_OWNER')
+  }, [isOrgAdmin, hasProjectRole, projectId])
 
   const [addOpen, setAddOpen] = useState(false)
 
@@ -64,6 +77,29 @@ export function ProjectMembers({ projectId }: { projectId: string }) {
     queryKey: ['project-members', projectId],
     queryFn: () => projectMembersApi.list(projectId),
   })
+
+  const projectMembers = members?.projectMembers ?? []
+
+  // The backend returns one row per role grant; group them so each member
+  // occupies a single row with all their roles as chips (same as Users list).
+  const groupedMembers = useMemo(() => {
+    const byUser = new Map<string, GroupedMember>()
+    for (const m of projectMembers) {
+      const existing = byUser.get(m.userId)
+      if (existing) {
+        existing.grants.push(m)
+      } else {
+        byUser.set(m.userId, {
+          userId: m.userId,
+          email: m.email,
+          name: m.name,
+          isActive: m.isActive,
+          grants: [m],
+        })
+      }
+    }
+    return Array.from(byUser.values())
+  }, [projectMembers])
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['project-members', projectId] })
@@ -84,8 +120,14 @@ export function ProjectMembers({ projectId }: { projectId: string }) {
   })
 
   const removeMutation = useMutation({
-    mutationFn: (m: ProjectMember) =>
-      projectMembersApi.remove(projectId, m.userId, m.projectRoleId),
+    // A grouped member owns one user_roles row per granted role — removing
+    // the member removes every grant.
+    mutationFn: (m: GroupedMember) =>
+      Promise.all(
+        m.grants.map((g) =>
+          projectMembersApi.remove(projectId, g.userId, g.projectRoleId),
+        ),
+      ),
     onSuccess: invalidate,
   })
 
@@ -97,7 +139,6 @@ export function ProjectMembers({ projectId }: { projectId: string }) {
     return <div className="text-destructive">Failed to load members</div>
   }
 
-  const projectMembers = members?.projectMembers ?? []
   const systemWideUsers = members?.systemWideUsers ?? []
 
   return (
@@ -107,7 +148,7 @@ export function ProjectMembers({ projectId }: { projectId: string }) {
           <div>
             <CardTitle>Project Members</CardTitle>
             <CardDescription>
-              {projectMembers.length} user(s) with explicit access to this project.
+              {groupedMembers.length} user(s) with explicit access to this project.
             </CardDescription>
           </div>
           {canEdit && (
@@ -143,8 +184,8 @@ export function ProjectMembers({ projectId }: { projectId: string }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {projectMembers.map((m) => (
-                <TableRow key={m.projectRoleId}>
+              {groupedMembers.map((m) => (
+                <TableRow key={m.userId}>
                   <TableCell className="font-medium">
                     {m.email}
                     {!m.isActive && (
@@ -155,13 +196,31 @@ export function ProjectMembers({ projectId }: { projectId: string }) {
                   </TableCell>
                   <TableCell>{m.name ?? '-'}</TableCell>
                   <TableCell>
-                    <Badge variant={m.role === 'EDITOR' ? 'default' : 'secondary'}>
-                      {m.role}
-                    </Badge>
+                    <div className="flex flex-wrap gap-1">
+                      {m.grants.map((g) => (
+                        <span
+                          key={g.projectRoleId}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-primary/10 text-primary"
+                        >
+                          <Shield className="h-3 w-3" />
+                          {g.role}
+                        </span>
+                      ))}
+                    </div>
                   </TableCell>
-                  <TableCell className="text-xs">{m.grantedByEmail ?? '-'}</TableCell>
                   <TableCell className="text-xs">
-                    {new Date(m.createdAt).toLocaleString()}
+                    {Array.from(
+                      new Set(
+                        m.grants.map((g) => g.grantedByEmail).filter(Boolean),
+                      ),
+                    ).join(', ') || '-'}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {new Date(
+                      m.grants
+                        .map((g) => new Date(g.createdAt).getTime())
+                        .sort((a, b) => a - b)[0],
+                    ).toLocaleString()}
                   </TableCell>
                   {canEdit && (
                     <TableCell>
@@ -169,9 +228,10 @@ export function ProjectMembers({ projectId }: { projectId: string }) {
                         variant="ghost"
                         size="icon"
                         onClick={async () => {
+                          const roleNames = m.grants.map((g) => g.role).join(', ')
                           const confirmed = await dialogService.showConfirmDialog({
                             title: 'Remove Member',
-                            message: `Remove ${m.email} from this project?`,
+                            message: `Remove ${m.email} from this project? All of their role grants (${roleNames}) will be removed.`,
                             severity: 'warning',
                             type: 'warning',
                             confirmLabel: 'Remove',
@@ -187,7 +247,7 @@ export function ProjectMembers({ projectId }: { projectId: string }) {
                   )}
                 </TableRow>
               ))}
-              {projectMembers.length === 0 && (
+              {groupedMembers.length === 0 && (
                 <TableRow>
                   <TableCell
                     colSpan={canEdit ? 6 : 5}
@@ -264,7 +324,7 @@ function AddMemberForm({
     () => new Set<ProjectMemberRole>(['VIEWER']),
   )
 
-  const { data: candidates, isLoading: candidatesLoading } = useQuery({
+  const { data: candidates, isLoading: candidatesLoading, error: candidatesError } = useQuery({
     queryKey: ['project-member-candidates', projectId],
     queryFn: () => projectMembersApi.listCandidates(projectId),
     enabled,
@@ -307,7 +367,12 @@ function AddMemberForm({
       <div className="space-y-4 py-4">
         <div className="space-y-2">
           <Label htmlFor="add-member-user">User</Label>
-          <Select value={userId} onValueChange={setUserId} disabled={candidatesLoading}>
+          {candidatesError ? (
+            <p className="text-sm text-destructive">
+              Failed to load eligible users: {candidatesError.message}
+            </p>
+          ) : (
+            <Select value={userId} onValueChange={setUserId} disabled={candidatesLoading}>
             <SelectTrigger id="add-member-user">
               <SelectValue
                 placeholder={candidatesLoading ? 'Loading users...' : 'Select a user'}
@@ -327,6 +392,7 @@ function AddMemberForm({
               )}
             </SelectContent>
           </Select>
+          )}
         </div>
 
         <div className="space-y-2">

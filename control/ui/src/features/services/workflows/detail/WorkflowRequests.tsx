@@ -195,7 +195,7 @@ function WorkflowRequestsList({ workflowId }: { workflowId: string }) {
         {canStart && (
           <Dialog open={startOpen} onOpenChange={setStartOpen}>
             <DialogTrigger asChild>
-              <Button>
+              <Button data-testid="start-execution-button">
                 <Play className="h-4 w-4 mr-2" />
                 Start Execution
               </Button>

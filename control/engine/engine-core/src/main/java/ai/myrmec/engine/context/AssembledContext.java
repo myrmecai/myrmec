@@ -10,13 +10,15 @@ import java.util.UUID;
  * Result of {@link ContextBuilder#assemble} — the fully assembled AI context
  * for a single turn, with instructions sorted by priority and capped by token budget.
  *
- * @param instructions       ordered list of instruction entries (highest priority first)
+ * @param instructions       ordered list of instruction entries (lowest priority first, highest priority closest to user message)
  * @param knowledgeSources   active knowledge source references for retrieval
  * @param governanceProfileCode the effective governance profile code
  * @param contextPinning     the pinning mode (PINNED_AT_START or IMMEDIATE_EFFECT)
  * @param totalTokens        total estimated tokens in the assembled context
  * @param budgetTokens       the token budget that was applied
  * @param truncated          whether any instructions were truncated due to budget
+ * @param contextOverflow    true if REQUIRED instruction assets alone exceed the budget
+ *                           (never silently truncated — the caller must handle this)
  * @param manifest           the context manifest audit record (null if not written)
  */
 public record AssembledContext(
@@ -27,6 +29,7 @@ public record AssembledContext(
         int totalTokens,
         int budgetTokens,
         boolean truncated,
+        boolean contextOverflow,
         ContextManifest manifest) {
 
     /**
@@ -55,7 +58,17 @@ public record AssembledContext(
             String gitCommit,
             Integer inlineVersion,
             int priority,
-            int tokenCount) {
+            int tokenCount,
+            String availability) {
+
+        /**
+         * Truncated content preview (first 200 chars) for UI display.
+         * Returns null for GIT-sourced assets or empty content.
+         */
+        public String contentPreview() {
+            if (content == null || content.isEmpty()) return null;
+            return content.length() <= 200 ? content : content.substring(0, 200);
+        }
     }
 
     /**

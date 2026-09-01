@@ -61,6 +61,10 @@ export const stepSchema = z.object({
     .min(0, 'Cannot be negative.')
     .max(10, 'Must be at most 10.')
     .optional(),
+  pauseMode: z
+    .enum(['NONE', 'BEFORE', 'AFTER', 'BOTH'])
+    .optional()
+    .default('NONE'),
 })
 
 export type StepFieldErrors = Partial<Record<keyof WorkflowStep, string>>

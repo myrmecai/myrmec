@@ -6,10 +6,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState, useEffect } from 'react'
 import {
   connectionConfigApi,
-  globalSecretsApi,
   type ConnectionConfigVersion,
   type ConnectionType,
-  type Secret,
   type TestConnectionResult,
   ApiRequestError,
 } from '@/lib/api'
@@ -27,8 +25,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Link2, Plus, Save, Send, Trash2, Power, PowerOff, Archive, PlugZap } from 'lucide-react'
+import { SecretSelect } from '@/features/platform/security/secrets/SecretSelect'
+import { globalSecretsApi } from '@/lib/api'
+import { RequiredMark } from '@/components/ui/required-marks'
 import { dialogService } from '@/services/dialog-service'
-import { TYPE_LABELS, STATUS_COLORS, ALLOWED_SECRET_TYPES, TYPE_CONFIG_FIELDS, type ConfigField } from '../shared/constants'
+import { TYPE_LABELS, STATUS_COLORS, TYPE_CONFIG_FIELDS } from '../shared/constants'
 
 export function ConnectionDetail({ configId, initialEdit = false }: { configId: string; initialEdit?: boolean }) {
   const queryClient = useQueryClient()
@@ -50,24 +51,25 @@ export function ConnectionDetail({ configId, initialEdit = false }: { configId: 
     retry: false,
   })
 
+  // Fetch secrets to resolve credential secret name from ID
+  const { data: secrets } = useQuery({
+    queryKey: ['secrets', 'global'],
+    queryFn: () => globalSecretsApi.list(),
+  })
+  const credentialSecretName = secrets?.find((s) => s.id === config?.credentialSecretId)?.name
+
   // Sync Zone 1 edit state when config loads
   const [zone1Editing, setZone1Editing] = useState(initialEdit)
   const [publishError, setPublishError] = useState<string | null>(null)
   const [zone1Name, setZone1Name] = useState('')
   const [zone1Desc, setZone1Desc] = useState('')
-  const [zone1SecretId, setZone1SecretId] = useState<string>('')
-
-  // Fetch global secrets for credential selector and display
-  const { data: secrets } = useQuery({
-    queryKey: ['global-secrets'],
-    queryFn: globalSecretsApi.list,
-  })
+  const [zone1SecretId, setZone1SecretId] = useState<string | null>(null)
 
   // Initialize zone1 fields when config data arrives
   if (config && !zone1Name && config.name) {
     setZone1Name(config.name)
     setZone1Desc(config.description ?? '')
-    setZone1SecretId(config.credentialSecretId ?? '')
+    setZone1SecretId(config.credentialSecretId ?? null)
   }
 
   const invalidate = () => {
@@ -203,24 +205,12 @@ export function ConnectionDetail({ configId, initialEdit = false }: { configId: 
               </div>
               <div className="space-y-2">
                 <Label htmlFor="zone1-secret">Credential Secret</Label>
-                <Select
-                  value={zone1SecretId || '__none__'}
-                  onValueChange={(v) => setZone1SecretId(v === '__none__' ? '' : v)}
-                >
-                  <SelectTrigger id="zone1-secret">
-                    <SelectValue placeholder="Select a credential secret" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">— None —</SelectItem>
-                    {(secrets ?? [])
-                      .filter((s) => ALLOWED_SECRET_TYPES[config.type].includes(s.type))
-                      .map((s) => (
-                        <SelectItem key={s.id} value={s.id}>
-                          {s.name} ({s.type})
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
+                <SecretSelect
+                  value={zone1SecretId}
+                  onChange={setZone1SecretId}
+                  placeholder="Select a credential secret"
+                  filterByConnectionType={config.type}
+                />
               </div>
               <div className="flex gap-2">
                 <Button
@@ -239,7 +229,7 @@ export function ConnectionDetail({ configId, initialEdit = false }: { configId: 
                 <Button size="sm" variant="outline" onClick={() => {
                   setZone1Name(config.name)
                   setZone1Desc(config.description ?? '')
-                  setZone1SecretId(config.credentialSecretId ?? '')
+                  setZone1SecretId(config.credentialSecretId ?? null)
                   setZone1Editing(false)
                 }}>Cancel</Button>
               </div>
@@ -250,7 +240,7 @@ export function ConnectionDetail({ configId, initialEdit = false }: { configId: 
               <div><dt className="text-muted-foreground">Type</dt><dd>{TYPE_LABELS[config.type] || config.type}</dd></div>
               <div><dt className="text-muted-foreground">Scope</dt><dd>{config.scope}</dd></div>
               <div><dt className="text-muted-foreground">Description</dt><dd>{config.description || '—'}</dd></div>
-              <div><dt className="text-muted-foreground">Credential Secret</dt><dd>{config.credentialSecretId ? secrets?.find((s) => s.id === config.credentialSecretId)?.name ?? config.credentialSecretId : '—'}</dd></div>
+              <div><dt className="text-muted-foreground">Credential Secret</dt><dd>{credentialSecretName ?? (config.credentialSecretId ? '—' : '—')}</dd></div>
               <div><dt className="text-muted-foreground">Created</dt><dd>{new Date(config.createdAt).toLocaleString()}</dd></div>
               {config.publishedAt && (
                 <div><dt className="text-muted-foreground">Published</dt><dd>{new Date(config.publishedAt).toLocaleString()}</dd></div>
@@ -298,7 +288,20 @@ export function ConnectionDetail({ configId, initialEdit = false }: { configId: 
           configId={configId}
           connectionType={config.type}
           version={draftVersion!}
-          onPublish={() => { setPublishError(null); publishMutation.mutate() }}
+          onPublish={async () => {
+            const confirmed = await dialogService.showConfirmDialog({
+              title: 'Publish Connection Config',
+              message: `Publish version ${draftVersion?.versionNumber ?? ''} of "${config.name}"? The published version becomes live immediately and cannot be edited — open a new draft to change it.`,
+              severity: 'warning',
+              type: 'warning',
+              confirmLabel: 'Publish',
+              cancelLabel: 'Cancel',
+            })
+            if (confirmed) {
+              setPublishError(null)
+              publishMutation.mutate()
+            }
+          }}
           onDiscard={async () => {
             const confirmed = await dialogService.showConfirmDialog({
               title: 'Discard Draft',
@@ -333,12 +336,32 @@ export function ConnectionDetail({ configId, initialEdit = false }: { configId: 
       {/* Actions */}
       <div className="flex items-center gap-2 mt-6">
         {config.status === 'ACTIVE' && (
-          <Button variant="outline" onClick={() => disableMutation.mutate()} disabled={disableMutation.isPending}>
+          <Button variant="outline" onClick={async () => {
+            const confirmed = await dialogService.showConfirmDialog({
+              title: 'Disable Connection Config',
+              message: `Disable "${config.name}"? Services using this connection will no longer be able to resolve its credentials until it is re-enabled.`,
+              severity: 'warning',
+              type: 'warning',
+              confirmLabel: 'Disable',
+              cancelLabel: 'Cancel',
+            })
+            if (confirmed) disableMutation.mutate()
+          }} disabled={disableMutation.isPending}>
             <PowerOff className="h-4 w-4 mr-2" /> Disable
           </Button>
         )}
         {config.status === 'DISABLED' && (
-          <Button variant="outline" onClick={() => reenableMutation.mutate()} disabled={reenableMutation.isPending}>
+          <Button variant="outline" onClick={async () => {
+            const confirmed = await dialogService.showConfirmDialog({
+              title: 'Re-enable Connection Config',
+              message: `Re-enable "${config.name}"? Services will immediately be able to resolve its credentials again.`,
+              severity: 'info',
+              type: 'warning',
+              confirmLabel: 'Re-enable',
+              cancelLabel: 'Cancel',
+            })
+            if (confirmed) reenableMutation.mutate()
+          }} disabled={reenableMutation.isPending}>
             <Power className="h-4 w-4 mr-2" /> Re-enable
           </Button>
         )}
@@ -515,13 +538,18 @@ function DraftSection({
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="draft-url">URL</Label>
+          <Label htmlFor="draft-url">URL<RequiredMark /></Label>
           <Input id="draft-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://api.example.com" />
+          <p className="text-xs text-muted-foreground">Required before publishing.</p>
         </div>
         {/* Type-specific config fields (UC-018 §5) */}
         {fields.map((field) => (
           <div key={field.key} className="space-y-2">
-            <Label htmlFor={`draft-config-${field.key}`}>{field.label}</Label>
+            <Label htmlFor={`draft-config-${field.key}`}>
+              {field.label}
+              {/* BR-CC-14: testEndpoint is required for HTTP connections at publish time */}
+              {connectionType === 'HTTP' && field.key === 'testEndpoint' && <RequiredMark />}
+            </Label>
             {field.type === 'select' ? (
               <Select
                 value={configValues[field.key] || '__none__'}
@@ -572,7 +600,8 @@ function DraftSection({
           <Button
             size="sm"
             onClick={onPublish}
-            disabled={publishing || !canPublish}
+            disabled={publishing || !canPublish || dirty}
+            title={dirty ? 'Save your changes before publishing.' : !canPublish ? 'URL is required before publishing.' : undefined}
           >
             <Send className="h-4 w-4 mr-2" /> {publishing ? 'Publishing…' : 'Publish'}
           </Button>

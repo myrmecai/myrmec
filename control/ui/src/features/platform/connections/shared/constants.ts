@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
 
+// NOTE: The string keys in STATUS_COLORS and TYPE_LABELS must stay in sync
+// with the values in @/lib/domain-constants (EntityStatus, ConnectionType).
+// They are kept as plain string keys here because they are used as object
+// literal keys in a Record map — computed property names would complicate
+// the type annotations without meaningful benefit.
+
 import type { ConnectionType, CredentialType } from '@/lib/api'
 
 export const TYPE_LABELS: Record<ConnectionType, string> = {

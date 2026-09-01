@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RequiredMark } from '@/components/ui/required-marks'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
@@ -402,7 +403,7 @@ function CreateAssistantForm({
 
       <div className="space-y-4 py-4">
         <div className="space-y-2">
-          <Label htmlFor="name">Name</Label>
+          <Label htmlFor="name">Name<RequiredMark /></Label>
           <Input
             id="name"
             value={name}
@@ -424,7 +425,7 @@ function CreateAssistantForm({
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="profile">Agent Profile (brain)</Label>
+          <Label htmlFor="profile">Agent Profile (brain)<RequiredMark /></Label>
           <Select value={agentProfileId} onValueChange={setAgentProfileId}>
             <SelectTrigger id="profile">
               <SelectValue placeholder="Select an agent profile" />

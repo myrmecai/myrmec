@@ -51,6 +51,8 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
 
   return (
     <div
+      data-testid={`step-node-${data.id}`}
+      data-status={status}
       className={cn(
         'rounded-lg border-2 shadow-sm min-w-[180px] max-w-[250px]',
         'transition-all duration-200',

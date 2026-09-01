@@ -26,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AgentReservationCrossNodeTest extends IntegrationTestBase {
 
     @Autowired private TestDataBuilder data;
-    @Autowired private AgentService agentService;
+    @Autowired private AgentHostService agentService;
     @Autowired private AgentRepository agentRepository;
 
     /**

@@ -1,0 +1,295 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Squashed changelog: agents domain tables.
+        Replaces all incremental changesets for agent_profiles,
+        agent_profile_tools, agents, agent_hosts, and engine_nodes with
+        clean createTable definitions reflecting the FINAL table structure.
+
+        Notes:
+        - supported_tools on agent_profiles is deprecated (kept for
+          backward compat); the canonical tool list is agent_profile_tools.
+        - system_prompt, interaction_mode, addendum_allowed were added by
+          later addColumn changesets and are included in the initial
+          createTable.
+        - agent_hosts.control_node_id and agents.home_node_id were added
+          by the node-registry slice and are included here.
+        - agents.state_changed_at was added by a later addColumn changeset
+          and is included here.
+    -->
+
+    <!-- ================================================================
+         engine_nodes
+         ================================================================ -->
+    <changeSet id="003-agents-create-engine-nodes" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="engine_nodes"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="engine_nodes">
+            <column name="node_id" type="varchar(255)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="address" type="varchar(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="UP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="started_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_heartbeat_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <createIndex indexName="idx_engine_nodes_status_heartbeat" tableName="engine_nodes">
+            <column name="status"/>
+            <column name="last_heartbeat_at"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         agent_profiles
+         ================================================================ -->
+    <changeSet id="003-agents-create-agent-profiles" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="agent_profiles"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="agent_profiles">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uk_agent_profiles_name"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="capabilities" type="text" defaultValue="[]">
+                <constraints nullable="false"/>
+            </column>
+            <column name="supported_tools" type="text" defaultValue="[]">
+                <constraints nullable="false"/>
+            </column>
+            <column name="default_model" type="varchar(50)"/>
+            <column name="system_prompt" type="text"/>
+            <column name="is_system" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="addendum_allowed" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="interaction_mode" type="varchar(20)" defaultValue="ONE_SHOT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone"/>
+        </createTable>
+
+        <createIndex tableName="agent_profiles" indexName="idx_agent_profiles_status">
+            <column name="status"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         agent_profiles
+         ================================================================ -->
+    <changeSet id="003-agents-create-agent-profile-tools" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="agent_profile_tools"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="agent_profile_tools">
+            <column name="profile_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="tool_code" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addPrimaryKey tableName="agent_profile_tools"
+                       columnNames="profile_id, tool_code"
+                       constraintName="pk_agent_profile_tools"/>
+
+        <addForeignKeyConstraint
+            baseTableName="agent_profile_tools"
+            baseColumnNames="profile_id"
+            referencedTableName="agent_profiles"
+            referencedColumnNames="id"
+            constraintName="fk_agent_profile_tools_profile"
+            onDelete="CASCADE"/>
+
+        <createIndex tableName="agent_profile_tools" indexName="idx_agent_profile_tools_tool_code">
+            <column name="tool_code"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         agent_profile_tools
+         ================================================================ -->
+    <changeSet id="003-agents-create-agent-hosts" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="agent_hosts"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="agent_hosts">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uk_agent_hosts_name"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="profile_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid"/>
+            <column name="registration_key" type="varchar(255)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uk_agent_hosts_registration_key"/>
+            </column>
+            <column name="model_override" type="varchar(50)"/>
+            <column name="config" type="text"/>
+            <column name="provisions" type="text"/>
+            <column name="max_agents" type="integer" defaultValueNumeric="1">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reported_capacity" type="text"/>
+            <column name="status" type="varchar(20)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="control_node_id" type="varchar(255)"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone"/>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="agent_hosts"
+            baseColumnNames="profile_id"
+            referencedTableName="agent_profiles"
+            referencedColumnNames="id"
+            constraintName="fk_agent_hosts_profile"
+            onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint
+            baseTableName="agent_hosts"
+            baseColumnNames="project_id"
+            referencedTableName="projects"
+            referencedColumnNames="id"
+            constraintName="fk_agent_hosts_project"
+            onDelete="SET NULL"/>
+
+        <addForeignKeyConstraint
+            baseTableName="agent_hosts"
+            baseColumnNames="control_node_id"
+            referencedTableName="engine_nodes"
+            referencedColumnNames="node_id"
+            constraintName="fk_agent_hosts_control_node"
+            onDelete="SET NULL"/>
+
+        <createIndex tableName="agent_hosts" indexName="idx_agent_hosts_profile_id">
+            <column name="profile_id"/>
+        </createIndex>
+
+        <createIndex tableName="agent_hosts" indexName="idx_agent_hosts_project">
+            <column name="project_id"/>
+        </createIndex>
+
+        <createIndex tableName="agent_hosts" indexName="idx_agent_hosts_status">
+            <column name="status"/>
+        </createIndex>
+
+        <createIndex tableName="agent_hosts" indexName="idx_agent_hosts_control_node">
+            <column name="control_node_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         agent_hosts
+         ================================================================ -->
+    <changeSet id="003-agents-create-agents" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="agents"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="agents">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="agent_host_id" type="uuid"/>
+            <column name="conversation_id" type="uuid"/>
+            <column name="profile_version_id" type="uuid"/>
+            <column name="hostname" type="varchar(255)"/>
+            <column name="ip_address" type="varchar(45)"/>
+            <column name="runtime_version" type="varchar(20)"/>
+            <column name="status" type="varchar(20)" defaultValue="OFFLINE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_heartbeat_at" type="timestamp with time zone"/>
+            <column name="registered_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="state_changed_at" type="timestamp with time zone"/>
+            <column name="home_node_id" type="varchar(255)"/>
+            <column name="metadata" type="text"/>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="agents"
+            baseColumnNames="agent_host_id"
+            referencedTableName="agent_hosts"
+            referencedColumnNames="id"
+            constraintName="fk_agents_host"
+            onDelete="CASCADE"/>
+
+        <addForeignKeyConstraint
+            baseTableName="agents"
+            baseColumnNames="home_node_id"
+            referencedTableName="engine_nodes"
+            referencedColumnNames="node_id"
+            constraintName="fk_agents_home_node"
+            onDelete="SET NULL"/>
+
+        <createIndex tableName="agents" indexName="idx_agents_status">
+            <column name="status"/>
+        </createIndex>
+
+        <createIndex tableName="agents" indexName="idx_agents_host">
+            <column name="agent_host_id"/>
+        </createIndex>
+
+        <createIndex tableName="agents" indexName="idx_agents_last_heartbeat">
+            <column name="last_heartbeat_at"/>
+        </createIndex>
+
+        <createIndex tableName="agents" indexName="idx_agents_home_node">
+            <column name="home_node_id"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

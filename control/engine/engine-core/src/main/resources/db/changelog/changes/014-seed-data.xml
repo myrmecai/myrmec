@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Squashed changelog: consolidated seed data.
+        All platform-level seed rows that are not embedded in domain-specific
+        squashed DDL files (001-013). Each changeSet is idempotent — it
+        checks the row does not already exist before inserting.
+
+        Sources consolidated:
+          - 20260530-01-groups.xml (Default group)
+          - 20260620-05-system-settings.xml (NFR timing constants + secret leak mode)
+          - 20260702-01-governance-profile-default-setting.xml (governance_profile_code)
+          - 001-core-security.xml system_settings seed section
+          - attachment_inline_ratio_max (previously code-default only, now seeded)
+
+        NOTE: The default admin user is NOT seeded here — it is created at
+        application bootstrap time via MYRMEC_ADMIN_EMAIL / MYRMEC_ADMIN_PASSWORD
+        environment variables (AdminUserBootstrap). Authentication provider
+        seeds (LOCAL, OIDC_DEFAULT, GITHUB_DEFAULT, GOOGLE_DEFAULT) remain in
+        001-core-security.xml alongside the authentication_providers DDL.
+    -->
+
+    <!-- ================================================================
+         Default group
+         ================================================================ -->
+    <changeSet id="014-seed-data-default-group" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="groups"/>
+            <sqlCheck expectedResult="0">
+                SELECT COUNT(*) FROM groups WHERE name = 'Default'
+            </sqlCheck>
+        </preConditions>
+        <comment>Seed the well-known "Default" group. Projects without an explicit group land here.</comment>
+
+        <insert tableName="groups">
+            <column name="id" value="00000000-0000-0000-0000-000000000001"/>
+            <column name="name" value="Default"/>
+            <column name="description" value="Default group for projects without explicit group assignment."/>
+        </insert>
+    </changeSet>
+
+    <!-- ================================================================
+         System settings seed (consolidated)
+         ================================================================ -->
+    <changeSet id="014-seed-data-system-settings" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="system_settings"/>
+            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM system_settings WHERE setting_key = 'governance_profile_code'</sqlCheck>
+        </preConditions>
+        <comment>
+            Supplemental platform system settings not seeded by 001-core-security.xml.
+            The bulk of NFR timing constants and host heartbeat settings are seeded
+            in 001-core-security-system-settings-seed. This changeSet adds the
+            governance profile and attachment inline-ratio settings.
+        </comment>
+
+        <!-- Governance profile selection (20260702-01). -->
+        <insert tableName="system_settings">
+            <column name="setting_key" value="governance_profile_code"/>
+            <column name="value_type" value="STRING"/>
+            <column name="setting_value" value="STANDARD"/>
+            <column name="description" value="The org-level governance profile code (STRICT, STANDARD, or FLEXIBLE)."/>
+        </insert>
+
+        <!-- Attachment inline-ratio guard (conversation-attachments.md §3.1). -->
+        <insert tableName="system_settings">
+            <column name="setting_key" value="attachment_inline_ratio_max"/>
+            <column name="value_type" value="RATIO"/>
+            <column name="setting_value" value="0.5"/>
+            <column name="description" value="Maximum fraction of the resolved per-turn context token budget that inline attachment text may occupy in aggregate."/>
+        </insert>
+    </changeSet>
+
+</databaseChangeLog>

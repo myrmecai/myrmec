@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
@@ -19,7 +19,9 @@
         persistence, and the default (Community) implementations of every SPI declared
         in engine-spi. This is the artifact that ships as the OSS distribution.
     </description>
-
+    <properties>
+        <openfeign.querydsl.version>7.6</openfeign.querydsl.version>
+    </properties>
     <dependencies>
         <!-- SPI module (compile scope so default impls can implement the interfaces) -->
         <dependency>
@@ -85,11 +87,25 @@
             <scope>runtime</scope>
         </dependency>
 
-        <!-- Lombok -->
+        <!-- Lombok (>=1.18.34 preserves the -parameters MethodParameters attribute) -->
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
+        </dependency>
+
+        <!-- QueryDSL (OpenFeign fork) — type-safe JPA queries with APT-generated Q-classes.
+             querydsl-apt with jpa classifier is the APT processor that
+             generates Q* classes from @Entity types. -->
+        <dependency>
+            <groupId>io.github.openfeign.querydsl</groupId>
+            <artifactId>querydsl-jpa</artifactId>
+            <version>${openfeign.querydsl.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.inject</groupId>
+            <artifactId>jakarta.inject-api</artifactId>
+            <scope>provided</scope>
         </dependency>
 
         <!-- API Documentation -->
@@ -144,6 +160,48 @@
     <build>
         <plugins>
             <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>add-source</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${project.build.directory}/generated-sources/java</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <proc>full</proc>
+                    <parameters>true</parameters>
+                    <compilerArgs>
+                        <arg>-parameters</arg>
+                    </compilerArgs>
+                    <generatedSourcesDirectory>${project.build.directory}/generated-sources/java</generatedSourcesDirectory>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>io.github.openfeign.querydsl</groupId>
+                            <artifactId>querydsl-apt</artifactId>
+                            <version>${openfeign.querydsl.version}</version>
+                            <classifier>jpa</classifier>
+                        </path>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
@@ -164,6 +222,40 @@
                     </excludes>
                 </configuration>
             </plugin>
+
         </plugins>
     </build>
+
+    <profiles>
+        <!--
+            E2E-Real profile: mounts the closed-source engine-enterprise jar on the
+            classpath so Tier-3 behaviour tests can exercise Enterprise licence loading.
+            This profile is active only when explicitly requested (-P e2e-real); the OSS
+            distribution build is unaffected.
+        -->
+        <profile>
+            <id>e2e-real</id>
+            <dependencies>
+                <dependency>
+                    <groupId>ai.myrmec</groupId>
+                    <artifactId>engine-enterprise</artifactId>
+                    <version>${project.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+            </dependencies>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.springframework.boot</groupId>
+                        <artifactId>spring-boot-maven-plugin</artifactId>
+                        <configuration>
+                            <!-- Only active under -P e2e-real: run with the e2e-real
+                                 Spring profile (PostgreSQL myrmec_e2e + enterprise jar). -->
+                            <jvmArguments>-Dspring.profiles.active=e2e-real</jvmArguments>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

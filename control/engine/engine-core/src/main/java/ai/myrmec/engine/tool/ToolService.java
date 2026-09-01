@@ -175,7 +175,10 @@ public class ToolService {
                 tool.getStatus(),
                 tool.getRiskClass(),
                 tool.getCreatedAt(),
-                tool.getUpdatedAt()
+                tool.getUpdatedAt(),
+                tool.getDescriptionHash(),
+                tool.getDescriptionApprovedAt(),
+                tool.getDescriptionApprovedBy()
         );
     }
 }

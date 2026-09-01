@@ -47,8 +47,9 @@ import { Badge } from '@/components/ui/badge'
 import { ContentAreaLayout } from '@/components/content-area-layout'
 import { Plus, AlertCircle, MoreVertical } from 'lucide-react'
 import { TYPE_LABELS, STATUS_COLORS } from '../shared/constants'
-import { dialogService } from '@/services/dialog-service'
 import { knowledgeSourceApi, ApiRequestError } from '@/lib/api'
+import { Scope, EntityStatus } from '@/lib/domain-constants'
+import { dialogService } from '@/services/dialog-service'
 
 export function KnowledgeProvidersList() {
   const queryClient = useQueryClient()
@@ -152,7 +153,7 @@ export function KnowledgeProvidersList() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {providers.filter((p) => p.status !== 'ARCHIVED').map((provider) => (
+                {providers.filter((p) => p.status !== EntityStatus.ARCHIVED).map((provider) => (
                   <TableRow key={provider.id}>
                     <TableCell className="font-medium">
                       <Link to="/platform/ai-context/knowledge-providers/$id" params={{ id: provider.id }} className="hover:underline">
@@ -190,20 +191,50 @@ export function KnowledgeProvidersList() {
                               View
                             </Link>
                           </DropdownMenuItem>
-                          {provider.status === 'ACTIVE' && (
+                          {provider.status === EntityStatus.ACTIVE && (
                             <DropdownMenuItem onClick={() => disableMutation.mutate(provider.id)}>
                               Disable
                             </DropdownMenuItem>
                           )}
-                          {provider.status === 'DISABLED' && (
-                            <DropdownMenuItem onClick={() => reenableMutation.mutate(provider.id)}>
+                          {provider.status === EntityStatus.DISABLED && (
+                            <DropdownMenuItem onClick={async () => {
+                              const confirmed = await dialogService.showConfirmDialog({
+                                title: 'Re-enable Knowledge Provider',
+                                message: `Re-enable "${provider.name}"? Projects will immediately start retrieving knowledge from this provider again.`,
+                                severity: 'info',
+                                type: 'warning',
+                                confirmLabel: 'Re-enable',
+                                cancelLabel: 'Cancel',
+                              })
+                              if (confirmed) reenableMutation.mutate(provider.id)
+                            }}>
                               Re-enable
                             </DropdownMenuItem>
                           )}
-                          <DropdownMenuItem onClick={() => archiveMutation.mutate(provider.id)}>
+                          <DropdownMenuItem onClick={async () => {
+                            const confirmed = await dialogService.showConfirmDialog({
+                              title: 'Archive Knowledge Provider',
+                              message: `Archive "${provider.name}"? It will be hidden from the list and projects will no longer see it.`,
+                              severity: 'warning',
+                              type: 'warning',
+                              confirmLabel: 'Archive',
+                              cancelLabel: 'Cancel',
+                            })
+                            if (confirmed) archiveMutation.mutate(provider.id)
+                          }}>
                             Archive
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => deleteMutation.mutate(provider.id)}>
+                          <DropdownMenuItem onClick={async () => {
+                            const confirmed = await dialogService.showConfirmDialog({
+                              title: 'Delete Knowledge Provider',
+                              message: `Permanently delete "${provider.name}"? This cannot be undone.`,
+                              severity: 'error',
+                              type: 'warning',
+                              confirmLabel: 'Delete',
+                              cancelLabel: 'Cancel',
+                            })
+                            if (confirmed) deleteMutation.mutate(provider.id)
+                          }}>
                             Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -273,7 +304,7 @@ function CreateKnowledgeProviderDialog({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     onCreate({
-      scope: 'ORGANIZATION',
+      scope: Scope.ORGANIZATION,
       name,
       description: description || undefined,
       type,

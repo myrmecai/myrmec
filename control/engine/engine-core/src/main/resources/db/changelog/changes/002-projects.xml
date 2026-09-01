@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Squashed changelog: project tables.
+        Replaces all incremental changesets for projects, project_settings,
+        project_instruction_bindings, and project_provider_bindings with
+        clean createTable definitions reflecting the FINAL table structure.
+
+        Notes:
+        - rag_config column is NOT included (dropped in 20260630-14).
+        - group_id, auto_hitl_on_destructive, snapshot_retention_days,
+          snapshot_sampling_rate, attachments_enabled, attachment_*,
+          allowed_service_types columns are included in the initial
+          createTable since they were added by later addColumn changesets.
+    -->
+
+    <!-- ================================================================
+         projects
+         ================================================================ -->
+    <changeSet id="002-projects-create-projects" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="projects"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="projects">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(200)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uk_projects_name"/>
+            </column>
+            <column name="group_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="allowed_service_types" type="text"
+                    defaultValue='["WORKFLOW","CONVERSATIONAL"]'>
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="workspace_repo_url" type="varchar(500)"/>
+            <column name="workspace_repo_branch" type="varchar(100)" defaultValue="main"/>
+            <column name="workspace_credential_secret_id" type="uuid"/>
+            <column name="auto_hitl_on_destructive" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="snapshot_retention_days" type="int" defaultValueNumeric="90">
+                <constraints nullable="false"/>
+            </column>
+            <column name="snapshot_sampling_rate" type="numeric(4,3)" defaultValueNumeric="1.000">
+                <constraints nullable="false"/>
+            </column>
+            <column name="attachments_enabled" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="attachment_retention_ttl_days" type="int"/>
+            <column name="attachment_max_file_size_bytes" type="bigint"/>
+            <column name="attachment_type_allowlist" type="text"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone"/>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="projects"
+            baseColumnNames="group_id"
+            constraintName="fk_projects_group"
+            referencedTableName="groups"
+            referencedColumnNames="id"
+            onDelete="RESTRICT"/>
+
+        <createIndex indexName="idx_projects_status" tableName="projects">
+            <column name="status"/>
+        </createIndex>
+
+        <createIndex indexName="idx_projects_group_id" tableName="projects">
+            <column name="group_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         project_settings
+         ================================================================ -->
+    <changeSet id="002-projects-create-project-settings" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="project_settings"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="project_settings">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_ps_project"
+                             references="projects(id)"/>
+            </column>
+            <column name="setting_key" type="varchar(120)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="value_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="setting_value" type="text"/>
+            <column name="description" type="varchar(500)"/>
+            <column name="updated_by" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="002-projects-project-settings-unique" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="uq_ps_project_key"/>
+            </not>
+        </preConditions>
+        <createIndex indexName="uq_ps_project_key"
+                     tableName="project_settings" unique="true">
+            <column name="project_id"/>
+            <column name="setting_key"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         project_instruction_bindings
+         ================================================================ -->
+    <changeSet id="002-projects-create-project-instruction-bindings" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="project_instruction_bindings"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="project_instruction_bindings">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_pib_project"
+                             references="projects(id)"/>
+            </column>
+            <column name="instruction_asset_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="enabled" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="002-projects-project-instruction-bindings-unique" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="uq_pib_project_asset"/>
+            </not>
+        </preConditions>
+        <createIndex indexName="uq_pib_project_asset"
+                     tableName="project_instruction_bindings" unique="true">
+            <column name="project_id"/>
+            <column name="instruction_asset_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         project_provider_bindings
+         ================================================================ -->
+    <changeSet id="002-projects-create-project-provider-bindings" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="project_provider_bindings"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="project_provider_bindings">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_ppb_project"
+                             references="projects(id)"/>
+            </column>
+            <column name="provider_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="INACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="002-projects-project-provider-bindings-unique" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="uq_ppb_project_provider"/>
+            </not>
+        </preConditions>
+        <createIndex indexName="uq_ppb_project_provider"
+                     tableName="project_provider_bindings" unique="true">
+            <column name="project_id"/>
+            <column name="provider_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         Cross-file FKs: tables created in earlier files that reference
+         projects(id). Added here (after projects table exists) so the
+         constraint is valid at creation time.
+         ================================================================ -->
+
+    <!-- service_accounts.project_id → projects(id) — table created in 001-core-security.xml -->
+    <changeSet id="002-projects-add-service-account-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_service_account_project"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="service_accounts"
+            baseColumnNames="project_id"
+            referencedTableName="projects"
+            referencedColumnNames="id"
+            constraintName="fk_service_account_project"/>
+    </changeSet>
+
+</databaseChangeLog>

@@ -22,6 +22,7 @@ import { FolderOpen, FolderX, ArrowLeft } from 'lucide-react'
 import { ProjectMembers } from './ProjectMembers'
 import { ProjectSecrets } from './ProjectSecrets'
 import { ProjectAIContext } from './ProjectAIContext'
+import { AuditIntegrityToggle } from './AuditIntegrityToggle'
 
 export function ProjectDetail({ projectId }: { projectId: string }) {
   const navigate = useNavigate()
@@ -99,12 +100,15 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
       {/* Tab content */}
       {activeTab === 'details' && (
-        <GeneralDetailsTab
-          project={project}
-          groupName={groupById.get(project.groupId)?.name ?? '—'}
-          onSave={(data) => updateMutation.mutate(data)}
-          isSaving={updateMutation.isPending}
-        />
+        <div className="space-y-4">
+          <GeneralDetailsTab
+            project={project}
+            groupName={groupById.get(project.groupId)?.name ?? '—'}
+            onSave={(data) => updateMutation.mutate(data)}
+            isSaving={updateMutation.isPending}
+          />
+          <AuditIntegrityToggle projectId={projectId} />
+        </div>
       )}
 
       {activeTab === 'members' && <ProjectMembers projectId={projectId} />}

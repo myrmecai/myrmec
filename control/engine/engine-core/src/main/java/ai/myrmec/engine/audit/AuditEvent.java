@@ -84,8 +84,28 @@ public class AuditEvent {
     @Column(name = "metadata", columnDefinition = "jsonb")
     private Map<String, Object> metadata;
 
+    /**
+     * Hash-chain: the previous event's {@code eventHash} in the same scope.
+     * {@code null} for unchained rows (pre-activation / chaining off) and
+     * for the genesis row (first chained event in a segment, uses the
+     * genesis constant instead).
+     */
+    @Column(name = "prev_event_hash", length = 64, updatable = false, nullable = true)
+    private String prevEventHash;
+
+    /**
+     * Hash-chain: HMAC-SHA256 of {@code canonical(prevEventHash ‖ fields)}.
+     * {@code null} for unchained rows (pre-activation / chaining off).
+     * Immutable after insert — JPA {@code updatable=false} prevents
+     * dirty-checking from overwriting it.
+     */
+    @Column(name = "event_hash", length = 64, updatable = false, nullable = true)
+    private String eventHash;
+
     @PrePersist
     void onCreate() {
-        timestamp = Instant.now();
+        if (timestamp == null) {
+            timestamp = Instant.now();
+        }
     }
 }
