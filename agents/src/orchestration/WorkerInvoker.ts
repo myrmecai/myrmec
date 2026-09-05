@@ -72,9 +72,17 @@ export function normalizeUsage(
 
 export class WorkerInvoker {
   private readonly options: WorkerInvokerOptions;
+  /** Per-run tool factory injected by the runner (Feature 4): builds the
+   * worker's declared tools scoped to the step workspace. */
+  private toolFactory?: WorkerInvokerOptions["toolFactory"];
 
   constructor(options: WorkerInvokerOptions) {
     this.options = options;
+  }
+
+  /** The runner injects the workspace-scoped tool factory per run. */
+  setToolFactory(toolFactory: WorkerInvokerOptions["toolFactory"]): void {
+    this.toolFactory = toolFactory ?? this.options.toolFactory;
   }
 
   /**
@@ -115,7 +123,7 @@ export class WorkerInvoker {
     };
     const resolved = await this.options.chatModelFactory.resolve(info, `worker-${randomUUID()}`);
 
-    const tools = (await this.options.toolFactory?.(worker)) ?? [];
+    const tools = (await this.toolFactory?.(worker)) ?? [];
 
     const task: Task = {
       taskId: `worker-${randomUUID()}`,

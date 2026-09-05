@@ -27,11 +27,20 @@ import type {
 } from "./types.js";
 import { orchestrationAssignmentSchema } from "./schema.js";
 import { normalizeUsage, WorkerInvoker } from "./WorkerInvoker.js";
+import type { StepWorkspace } from "../workspace/WorkspaceManager.js";
+import type { WorkspaceInspector } from "../workspace/WorkspaceInspector.js";
 
 export interface OrchestrationRunnerOptions {
   chatModelFactory: ChatModelFactory;
   workerInvoker: WorkerInvoker;
   turnExecutor: TurnExecutor;
+  /** Feature 4: the resolved step workspace. When absent (Feature 2 unit
+   * tests), revisions stay at 0 and workers get no tools. */
+  workspace?: StepWorkspace;
+  /** Feature 4: candidate-tree inspection after mutating calls. */
+  workspaceInspector?: WorkspaceInspector;
+  /** Trusted spec content loaded by runner code (design §5 step 4). */
+  specification?: { content: string; sha256: string; byteLength: number };
 }
 
 export interface OrchestrationRunOptions {
@@ -50,6 +59,21 @@ export class OrchestrationRunner {
 
   constructor(options: OrchestrationRunnerOptions) {
     this.options = options;
+  }
+
+  /** The current workspace revision: increments only when the candidate
+   * tree changes (design §11 rule 6). */
+  private async refreshRevision(
+    revision: { value: number },
+    lastTree: { value: string },
+  ): Promise<void> {
+    const inspector = this.options.workspaceInspector;
+    if (!inspector || !this.options.workspace) return;
+    const candidate = await inspector.inspect(this.options.workspace);
+    if (candidate.treeHash !== lastTree.value) {
+      lastTree.value = candidate.treeHash;
+      revision.value += 1;
+    }
   }
 
   /**
@@ -81,8 +105,11 @@ export class OrchestrationRunner {
     const workerCalls: WorkerCallResult[] = [];
     let totalTokens = 0;
 
-    // Workspace revisions remain 0 until Feature 4's real mutating tools.
-    const revision = { revisionBefore: 0, revisionAfter: 0 };
+    const revision = { value: 0 };
+    const lastTree = { value: "" };
+    // Baseline the candidate tree before any worker call so revisions
+    // count only actual changes.
+    await this.refreshRevision(revision, lastTree);
 
     const orchestratorModelDef = assignment.models.find((m) => m.code === o.modelCode);
     if (!orchestratorModelDef) {
@@ -105,6 +132,30 @@ export class OrchestrationRunner {
       info,
       `orchestrator-${randomUUID()}`,
     );
+
+    // Feature 4: when a step workspace is provided, workers get their
+    // declared tools through the WorkspaceToolFactory scoped to it
+    // (design §10.3). Without a workspace (Feature 2 unit tests) the
+    // invoker's toolFactory stays unset and workers have no tools.
+    const toolFactory = this.options.workspace
+      ? async (worker: import("./types.js").WorkerAuthoring): Promise<Tool[]> => {
+          const { WorkspaceToolFactory } = await import("../tools/WorkspaceToolFactory.js");
+          const factory = new WorkspaceToolFactory({
+            workspace: this.options.workspace!,
+            ...(this.options.specification
+              ? {
+                  specification: {
+                    canonicalPath: `${this.options.workspace!.workingPath}/${assignment.step.orchestration.specPath ?? ""}`,
+                    sha256: this.options.specification.sha256,
+                    byteLength: this.options.specification.byteLength,
+                  },
+                }
+              : {}),
+          });
+          return factory.resolve(worker);
+        }
+      : undefined;
+    this.options.workerInvoker.setToolFactory(toolFactory);
 
     // The single action tool: validated mechanically before invocation.
     const invokeWorkerTool: Tool = {
@@ -146,16 +197,21 @@ export class OrchestrationRunner {
           };
         }
         const startedSequence = nextSequence();
+        const revisionBefore = revision.value;
         const outcome = await this.options.workerInvoker.invoke(
           assignment,
           args.workerName,
           args.purpose,
           args.instruction,
           { startedSequence, completedSequence: startedSequence },
-          revision,
+          { revisionBefore, revisionAfter: revisionBefore },
         );
         const completedSequence = nextSequence();
-        // Stamp the runner-owned completion sequence onto the call record.
+        // After a mutating-capable call, recompute the candidate tree and
+        // stamp the post-call revision (design §5 step 7).
+        await this.refreshRevision(revision, lastTree);
+        outcome.workerCall.workspaceRevisionBefore = revisionBefore;
+        outcome.workerCall.workspaceRevisionAfter = revision.value;
         outcome.workerCall.completedSequence = completedSequence;
         workerCalls.push(outcome.workerCall);
         if (outcome.workerCall.status === "COMPLETED") {
