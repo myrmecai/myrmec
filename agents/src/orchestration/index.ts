@@ -15,3 +15,5 @@ export {
   type CompileStepAssignmentInput,
   type CredentialScope,
 } from "./schema.js";
+export { OrchestrationRunner, type OrchestrationRunnerOptions, type OrchestrationRunOptions } from "./OrchestrationRunner.js";
+export { WorkerInvoker, normalizeUsage, type WorkerInvokerOptions, type InvokeWorkerOutcome } from "./WorkerInvoker.js";

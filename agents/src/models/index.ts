@@ -145,4 +145,9 @@ export interface TaskResult {
   };
   /** Tool calls made during the turn, for audit/replay. */
   toolCalls: ToolCallRecord[];
+  /** Aggregated normalized token usage for the turn (REQ-A-071). The
+   * executor accumulates provider-reported usage across model calls;
+   * providers that report none leave it undefined — ordinary inference
+   * keeps usage optional, orchestration fails closed when absent. */
+  usage?: import("../executor/types.js").TokenUsage;
 }

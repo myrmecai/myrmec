@@ -80,6 +80,9 @@ export interface LlmStubContext {
   iteration: number;
   /** Session ID — lets handlers scope state per-session. */
   sessionId: string;
+  /** The resolved model the stub is standing in for. Orchestration
+   * handlers branch on `modelInfo.modelId`, not invocation order. */
+  modelInfo?: ModelInfoWire;
 }
 
 /**
@@ -120,6 +123,7 @@ class StubChatModel implements ChatModel {
   constructor(
     private readonly handlers: StubHandlers | undefined,
     private readonly sessionId: string,
+    private readonly modelInfo?: ModelInfoWire,
   ) {}
 
   async invoke(
@@ -132,6 +136,7 @@ class StubChatModel implements ChatModel {
       tools,
       iteration: this.iteration,
       sessionId: this.sessionId,
+      ...(this.modelInfo ? { modelInfo: this.modelInfo } : {}),
     };
     const result = this.handlers?.llm?.(ctx) ?? { content: "stub-response" };
 
@@ -156,6 +161,7 @@ class StubChatModel implements ChatModel {
       tools,
       iteration: this.iteration,
       sessionId: this.sessionId,
+      ...(this.modelInfo ? { modelInfo: this.modelInfo } : {}),
     };
     const result = this.handlers?.llm?.(ctx) ?? { content: "stub-response" };
 
@@ -203,9 +209,9 @@ export class StubChatModelFactory implements ChatModelFactory {
     return this.handlersPromise;
   }
 
-  async resolve(_modelInfo: ModelInfoWire, sessionId: string): Promise<ChatModel> {
+  async resolve(modelInfo: ModelInfoWire, sessionId: string): Promise<ChatModel> {
     const handlers = await this.loadHandlers();
-    return new StubChatModel(handlers, sessionId);
+    return new StubChatModel(handlers, sessionId, modelInfo);
   }
 }
 

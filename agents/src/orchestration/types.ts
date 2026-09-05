@@ -200,3 +200,77 @@ export interface OrchestrationAssignment {
 export type OrchestrationAssignmentRuntime = z.infer<
   typeof orchestrationAssignmentSchema
 >;
+
+// ── run result (design §7.3 subset for the minimal delegation feature) ──
+
+export type OrchestrationRunStatus = "COMPLETED" | "FAILED" | "CANCELLED" | "PAUSED";
+
+export type OrchestrationErrorCode =
+  | "ASSIGNMENT_VALIDATION_ERROR"
+  | "ORCHESTRATOR_FAILED"
+  | "ORCHESTRATOR_ITERATION_LIMIT"
+  | "WORKER_FAILED"
+  | "WORKER_ITERATION_LIMIT"
+  | "WORKER_BUDGET_EXCEEDED"
+  | "TOKEN_BUDGET_EXCEEDED"
+  | "TOKEN_USAGE_UNAVAILABLE"
+  | "REJECTION_BUDGET_EXCEEDED"
+  | "INVALID_VERIFIER_RESULT"
+  | "PATH_OUTSIDE_WORKSPACE"
+  | "COMMAND_NOT_ALLOWED"
+  | "COMMAND_SANDBOX_UNAVAILABLE"
+  | "WORKSPACE_ERROR"
+  | "SPECIFICATION_MUTATED"
+  | "WORKSPACE_LOST"
+  | "WORKSPACE_EXPIRED"
+  | "SOURCE_BASE_UNAVAILABLE"
+  | "RECOVERY_SNAPSHOT_INVALID"
+  | "CHECKPOINT_FAILED"
+  | "CHECKPOINT_NO_CHANGES"
+  | "PUSH_FAILED"
+  | "PUSH_CONFLICT"
+  | "APPROVAL_REJECTED"
+  | "APPROVAL_EXPIRED"
+  | "APPROVAL_POLICY_DENIED"
+  | "INTERNAL_ORCHESTRATION_ERROR";
+
+export type RetryDisposition = "NONE" | "RETRYABLE" | "TERMINAL";
+
+export type WorkerCallStatus = "COMPLETED" | "FAILED" | "CANCELLED";
+
+export interface WorkerCallResult {
+  callId: string;
+  workerName: string;
+  purpose: "IMPLEMENT" | "VERIFY";
+  status: WorkerCallStatus;
+  startedSequence: number;
+  completedSequence: number;
+  workspaceRevisionBefore: number;
+  workspaceRevisionAfter: number;
+  tokenCount: number;
+  errorCode?: OrchestrationErrorCode;
+}
+
+export interface OrchestrationRunResult {
+  schemaVersion: "1.0";
+  resultId: string;
+  resultDigest: string;
+  dispatch: DispatchIdentity;
+  status: OrchestrationRunStatus;
+  retryDisposition: RetryDisposition;
+  summary: string;
+  workerCalls: WorkerCallResult[];
+  verifierResults: unknown[]; // Feature 5
+  commandExecutions: unknown[]; // Feature 4
+  changedFiles: string[]; // Feature 4
+  commits: unknown[]; // Feature 6
+  cleanWorktree: boolean; // Feature 6
+  usage: {
+    workerCalls: number;
+    rejectionCount: number;
+    totalTokens: number;
+  };
+  continuation?: unknown; // Feature 7
+  suspension?: unknown; // Feature 7
+  errorCode?: OrchestrationErrorCode;
+}

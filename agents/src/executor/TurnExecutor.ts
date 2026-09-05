@@ -40,6 +40,10 @@ export interface TurnRun {
   cancellation?: CancellationSignal;
   /** Optional live observability callbacks (progress, tool frames). */
   events?: ExecutorEvents;
+  /** Per-run iteration cap override (design §7.2: orchestration turns
+   * carry explicit limits that never inherit the constructor default).
+   * Takes precedence over the constructor's maxIterations. */
+  maxIterationsOverride?: number;
 }
 
 const noopLogger: Logger = {
@@ -78,13 +82,20 @@ export class TurnExecutor {
     const toolSpecs: ToolSpec[] = (run.tools ?? []).map(
       ({ name, description, parameters }) => ({ name, description, parameters }),
     );
+    // Per-run override beats the constructor default (design §7.2).
+    const iterationCap = run.maxIterationsOverride ?? this.maxIterations;
     const messages = this.buildMessages(task);
 
+    // Aggregated provider-reported usage across model calls (REQ-A-071).
+    // Providers that report nothing leave this undefined — orchestration
+    // treats that as TOKEN_USAGE_UNAVAILABLE at its boundary.
+    let usage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined;
+
     let iteration = 0;
-    while (iteration < this.maxIterations) {
+    while (iteration < iterationCap) {
       if (run.cancellation?.cancelled) {
         this.log.info("Task cancelled; stopping execution");
-        return this.cancelled(task, toolCalls);
+        return { ...this.cancelled(task, toolCalls), usage };
       }
       iteration += 1;
       this.log.debug(`Invoking model (iteration ${iteration})`);
@@ -107,7 +118,25 @@ export class TurnExecutor {
             message,
           },
           toolCalls,
+          usage,
         };
+      }
+
+      // Accumulate authoritative usage when the provider reported it.
+      // Non-integer or negative counts are ignored (never estimated).
+      const u = response.usage;
+      if (
+        u &&
+        Number.isInteger(u.promptTokens) && u.promptTokens! >= 0 &&
+        Number.isInteger(u.completionTokens) && u.completionTokens! >= 0
+      ) {
+        const add = {
+          promptTokens: (usage?.promptTokens ?? 0) + u.promptTokens!,
+          completionTokens: (usage?.completionTokens ?? 0) + u.completionTokens!,
+          totalTokens: 0,
+        };
+        add.totalTokens = add.promptTokens + add.completionTokens;
+        usage = add;
       }
 
       const requested = response.toolCalls ?? [];
@@ -119,6 +148,7 @@ export class TurnExecutor {
           status: "COMPLETE",
           completion: response.content ?? "",
           toolCalls,
+          usage,
         };
       }
 
@@ -145,16 +175,17 @@ export class TurnExecutor {
     }
 
     // Iteration cap hit without a final answer.
-    this.log.warn(`Max iterations (${this.maxIterations}) reached`);
+    this.log.warn(`Max iterations (${iterationCap}) reached`);
     return {
       taskId: task.taskId,
       status: "FAILED",
       failure: {
         kind: "PERMANENT",
         finishReason: "MAX_ITERATIONS",
-        message: `Turn did not converge within ${this.maxIterations} iterations`,
+        message: `Turn did not converge within ${iterationCap} iterations`,
       },
       toolCalls,
+      usage,
     };
   }
 
