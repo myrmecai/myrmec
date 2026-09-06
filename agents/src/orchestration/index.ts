@@ -27,3 +27,11 @@ export type { CheckoutHandle, StepWorkspace, WorkspaceManager, WorkspaceScope } 
 export { GitWorkspaceManager, GitWorkspaceScope, WorkspaceError, confinePath } from "../workspace/GitWorkspaceManager.js";
 export type { WorkspaceInspector, CandidateTree } from "../workspace/WorkspaceInspector.js";
 export { GitWorkspaceInspector } from "../workspace/WorkspaceInspector.js";
+export {
+  GitCheckpointService,
+  RemotePublisher,
+  validateCommitMessage,
+  checkpointIdempotencyKey,
+  type CheckpointOutcome,
+  type GitCheckpointServiceOptions,
+} from "../workspace/GitCheckpointService.js";

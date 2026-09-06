@@ -279,6 +279,16 @@ export interface CommandExecutionRecord {
   outputTruncated: boolean;
 }
 
+/** The §7.3 checkpoint commit evidence returned in the run result. */
+export interface CheckpointCommit {
+  idempotencyKey: string;
+  commitHash: string;
+  treeHash: string;
+  parentHash: string;
+  message: string;
+  files: string[];
+}
+
 export interface OrchestrationRunResult {
   schemaVersion: "1.0";
   resultId: string;
@@ -291,7 +301,7 @@ export interface OrchestrationRunResult {
   verifierResults: VerifierResult[];
   commandExecutions: CommandExecutionRecord[];
   changedFiles: string[];
-  commits: unknown[]; // Feature 6
+  commits: CheckpointCommit[];
   cleanWorktree: boolean; // Feature 6
   usage: {
     workerCalls: number;

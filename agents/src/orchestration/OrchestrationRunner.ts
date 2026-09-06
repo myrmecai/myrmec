@@ -47,6 +47,20 @@ export interface OrchestrationRunnerOptions {
   workspaceInspector?: WorkspaceInspector;
   /** Trusted spec content loaded by runner code (design §5 step 4). */
   specification?: { content: string; sha256: string; byteLength: number };
+  /** Feature 6: creates the verified checkpoint commit after the
+   * completion criteria pass (design §12). Absent in unit tests without
+   * a real workspace — no commit is attempted then. */
+  checkpointService?: {
+    create(
+      approvedTreeHash: string,
+      expectedHead: string,
+    ): Promise<import("../workspace/GitCheckpointService.js").CheckpointOutcome>;
+  };
+  /** Feature 6: the head the run expects the target branch to sit at.
+   * The adapter captures it at checkout; a moved ref fails closed. */
+  expectedHead?: string;
+  /** Feature 6: gitPolicy.allowCheckpoint gate (design §7). */
+  allowCheckpoint?: boolean;
 }
 
 export interface OrchestrationRunOptions {
@@ -372,7 +386,7 @@ export class OrchestrationRunner {
     // ── Completion gate (design §10.4) ────────────────────────────
     // COMPLETED requires an authoritative APPROVED record from every
     // required verifier for the exact current candidate tree (§11 rule
-    // 11). Checkpoint/push/clean-scope criteria arrive with Feature 6.
+    // 11).
     const required = o.completionCriteria.requireVerificationBy;
     if (!ledger.satisfies(required, lastTree.value)) {
       return this.failure(
@@ -384,7 +398,41 @@ export class OrchestrationRunner {
         { ...usageOut, rejectionCount },
         workerCalls,
         verifierResults,
+        commandExecutions,
       );
+    }
+
+    // §10.4: the approved tree was committed successfully, or the
+    // unchanged tree was accepted by allowNoChanges. The runner — never
+    // a model — invokes the checkpoint service after the criteria pass.
+    const commits: import("./types.js").CheckpointCommit[] = [];
+    let cleanWorktree = true;
+    if (this.options.checkpointService && this.options.allowCheckpoint !== false) {
+      const checkpoint = await this.options.checkpointService.create(
+        lastTree.value,
+        this.options.expectedHead ?? "",
+      );
+      if (checkpoint.status === "COMMITTED") {
+        commits.push(checkpoint.commit);
+      } else if (checkpoint.status === "FAILED") {
+        return this.failure(
+          dispatch,
+          checkpoint.errorCode,
+          `checkpoint failed: ${checkpoint.errorCode}`,
+          { ...usageOut, rejectionCount },
+          workerCalls,
+          verifierResults,
+          commandExecutions,
+        );
+      }
+      // NO_CHANGES: the unchanged tree was accepted (allowNoChanges)
+      // — zero commits, and the §18 evidence is the ledger's APPROVED
+      // records bound to the unchanged tree hash.
+      // After a commit (or accepted no-op) the step scope must be clean.
+      if (this.options.workspaceInspector && this.options.workspace) {
+        const post = await this.options.workspaceInspector.inspect(this.options.workspace);
+        cleanWorktree = post.clean;
+      }
     }
 
     return {
@@ -399,8 +447,8 @@ export class OrchestrationRunner {
       verifierResults: verifierResults.map(toVerifierResult),
       commandExecutions,
       changedFiles: [],
-      commits: [],
-      cleanWorktree: true,
+      commits,
+      cleanWorktree,
       usage: { ...usageOut, rejectionCount },
     };
   }
