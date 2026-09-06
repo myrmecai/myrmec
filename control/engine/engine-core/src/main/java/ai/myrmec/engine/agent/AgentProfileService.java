@@ -1,21 +1,36 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.agent;
 
 import ai.myrmec.engine._system.exception.DuplicateResourceException;
 import ai.myrmec.engine._system.exception.ResourceInUseException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine.tool.Tool;
-import ai.myrmec.engine.tool.ToolRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.hibernate.Hibernate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
+/**
+ * Agent Profile administration (design §16.1). Zone 1 (identity/admin)
+ * is managed here; every Zone 2 behaviour edit goes through the
+ * {@link AgentProfileVersionService} Draft → Publish cycle.
+ *
+ * <p>Dev-phase API semantics: {@link #createProfile} publishes an
+ * initial version 1 with the supplied behaviour content (the plan's
+ * "seed data publishes version 1" rule generalized to runtime creation);
+ * {@link #updateProfile} updates Zone 1 directly and runs a draft →
+ * publish cycle only when the Zone 2 content actually differs from the
+ * published version — a Zone-1-only rename never creates a spurious
+ * version.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -23,14 +38,14 @@ public class AgentProfileService {
 
     private final AgentProfileRepository profileRepository;
     private final AgentHostRepository agentRepository;
-    private final ToolRepository toolRepository;
+    private final AgentProfileVersionService versionService;
 
     /**
      * Get all agent profiles.
      */
     @Transactional(readOnly = true)
     public List<AgentProfile> getAllProfiles() {
-        return profileRepository.findAllWithTools();
+        return profileRepository.findAll();
     }
 
     /**
@@ -38,7 +53,7 @@ public class AgentProfileService {
      */
     @Transactional(readOnly = true)
     public List<AgentProfile> getActiveProfiles() {
-        return profileRepository.findAllActiveWithTools();
+        return profileRepository.findByStatus(AgentProfile.Status.ACTIVE);
     }
 
     /**
@@ -46,12 +61,18 @@ public class AgentProfileService {
      */
     @Transactional(readOnly = true)
     public AgentProfile getProfile(UUID id) {
-        return profileRepository.findByIdWithTools(id)
+        return profileRepository.findById(id)
                 .orElseThrow(() -> ResourceNotFoundException.agentProfile(id));
     }
 
     /**
-     * Create a new agent profile.
+     * Create a new agent profile: Zone 1 identity row plus a published
+     * version 1 carrying the behaviour contract (dev phase — plan
+     * Feature 0: "seed data publishes version 1").
+     *
+     * @param supportedTools deprecated legacy parameter — accepted for
+     *                      API compatibility, ignored (the canonical tool
+     *                      set is the version's toolCodes)
      */
     @Transactional
     public AgentProfile createProfile(String name, String description,
@@ -64,26 +85,27 @@ public class AgentProfileService {
         AgentProfile profile = new AgentProfile();
         profile.setName(name);
         profile.setDescription(description);
-        profile.setCapabilities(capabilities);
-        profile.setSupportedTools(supportedTools);
-        profile.setSystemPrompt(systemPrompt);
-        profile.setDefaultModel(defaultModel);
         profile.setStatus(AgentProfile.Status.ACTIVE);
-
-        // Resolve and assign tools
-        if (toolCodes != null && !toolCodes.isEmpty()) {
-            Set<Tool> tools = new HashSet<>(toolRepository.findAllById(toolCodes));
-            profile.setTools(tools);
-        }
-
         profile = profileRepository.save(profile);
-        Hibernate.initialize(profile.getTools());
-        log.info("Created agent profile: {} ({})", profile.getName(), profile.getId());
+
+        versionService.publishInitial(
+                profile.getId(), capabilities, toolCodes,
+                systemPrompt, defaultModel, AgentProfileVersion.InteractionMode.ONE_SHOT);
+
+        log.info("Created agent profile: {} ({}) with published version 1",
+                profile.getName(), profile.getId());
         return profile;
     }
 
     /**
-     * Update an existing agent profile.
+     * Update an existing agent profile. Zone 1 fields (name, description)
+     * update directly. Zone 2 fields (capabilities, tools, system prompt,
+     * default model) run the draft → publish cycle — editing a published
+     * field requires a new version (design §16.1); an identical-content
+     * update publishes nothing.
+     *
+     * @param supportedTools deprecated legacy parameter — accepted for
+     *                      API compatibility, ignored
      */
     @Transactional
     public AgentProfile updateProfile(UUID id, String name, String description,
@@ -99,19 +121,32 @@ public class AgentProfileService {
 
         profile.setName(name);
         profile.setDescription(description);
-        profile.setCapabilities(capabilities);
-        profile.setSupportedTools(supportedTools);
-        profile.setSystemPrompt(systemPrompt);
-        profile.setDefaultModel(defaultModel);
+        profileRepository.save(profile);
 
-        // Resolve and assign tools
-        if (toolCodes != null) {
-            Set<Tool> tools = new HashSet<>(toolRepository.findAllById(toolCodes));
-            profile.setTools(tools);
+        // Zone 2: draft → publish only when the behaviour contract changes.
+        Optional<AgentProfileVersion> published = versionService.findPublished(id);
+        if (published.isEmpty()) {
+            // No published version yet (edge case): publish v1 with the
+            // supplied content.
+            versionService.publishInitial(
+                    id, capabilities, toolCodes, systemPrompt, defaultModel,
+                    AgentProfileVersion.InteractionMode.ONE_SHOT);
+        } else {
+            AgentProfileVersion current = published.get();
+            boolean behaviourChanged = !Objects.equals(current.getCapabilities(), capabilities)
+                    || !Objects.equals(current.getSystemPrompt(), systemPrompt)
+                    || !Objects.equals(current.getDefaultModel(), defaultModel)
+                    || (toolCodes != null && !Objects.equals(toolCodesOf(current), toolCodes));
+            if (behaviourChanged) {
+                AgentProfileVersion draft = versionService.createDraft(id);
+                versionService.updateDraft(
+                        draft.getId(), capabilities, toolCodes,
+                        systemPrompt, defaultModel,
+                        current.getInteractionMode());
+                versionService.publish(id, null);
+            }
         }
 
-        profile = profileRepository.save(profile);
-        Hibernate.initialize(profile.getTools());
         log.info("Updated agent profile: {} ({})", profile.getName(), profile.getId());
         return profile;
     }
@@ -149,7 +184,7 @@ public class AgentProfileService {
     }
 
     /**
-     * Delete an agent profile (hard delete).
+     * Delete an agent profile (hard delete). Versions cascade.
      */
     @Transactional
     public void deleteProfile(UUID id) {
@@ -172,5 +207,11 @@ public class AgentProfileService {
     @Transactional(readOnly = true)
     public List<AgentHost> getAgentsForProfile(UUID profileId) {
         return agentRepository.findByProfileId(profileId);
+    }
+
+    private Set<String> toolCodesOf(AgentProfileVersion version) {
+        return version.getTools() == null
+                ? Set.of()
+                : version.getTools().stream().map(Tool::getCode).collect(Collectors.toSet());
     }
 }

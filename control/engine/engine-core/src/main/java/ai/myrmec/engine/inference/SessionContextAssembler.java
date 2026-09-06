@@ -5,6 +5,8 @@ package ai.myrmec.engine.inference;
 import ai.myrmec.engine._system.common.DomainConstants.EntityStatus;
 import ai.myrmec.engine._system.common.DomainConstants.Scope;
 import ai.myrmec.engine.agent.AgentProfile;
+import ai.myrmec.engine.agent.AgentProfileVersion;
+import ai.myrmec.engine.agent.AgentProfileVersionService;
 import ai.myrmec.engine.agent.AgentProfileRepository;
 import ai.myrmec.engine.context.InstructionAssetVersionResolver;
 import ai.myrmec.engine.knowledge.KnowledgeSource;
@@ -45,6 +47,7 @@ public class SessionContextAssembler {
     private final ProjectRepository projectRepository;
     private final KnowledgeSourceRepository knowledgeSourceRepository;
     private final AgentProfileRepository agentProfileRepository;
+    private final AgentProfileVersionService agentProfileVersionService;
     private final SecretResolverService secretResolverService;
     private final InstructionAssetVersionResolver instructionAssetVersionResolver;
     private final SessionRepository sessionRepository;
@@ -61,19 +64,21 @@ public class SessionContextAssembler {
     @Transactional
     public SessionOpenPayload assemble(String serviceType, UUID refId, UUID projectId,
                                         UUID agentProfileId) {
-        // 1. Resolve agent profile (with tools eagerly fetched)
-        AgentProfile profile = agentProfileRepository.findByIdWithTools(agentProfileId)
+        // 1. Resolve agent profile and its PUBLISHED version (design
+        //    §16.1: the behaviour contract lives on the version row).
+        AgentProfile profile = agentProfileRepository.findById(agentProfileId)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Agent profile not found: " + agentProfileId));
+        AgentProfileVersion version = agentProfileVersionService.requirePublished(agentProfileId);
 
         // 2. Resolve model (decrypt API key once per session)
-        SessionOpenPayload.ModelConfig modelConfig = resolveModel(profile);
+        SessionOpenPayload.ModelConfig modelConfig = resolveModel(profile, version);
 
         // 3. Resolve workspace (nullable)
         SessionOpenPayload.WorkspaceConfig workspace = resolveWorkspace(projectId);
 
-        // 4. Resolve tool catalog (authorized set — filtered by profile)
-        List<SessionOpenPayload.ToolDefinition> tools = resolveTools(profile);
+        // 4. Resolve tool catalog (authorized set — filtered by the version)
+        List<SessionOpenPayload.ToolDefinition> tools = resolveTools(agentProfileId, version);
 
         // 5. Resolve knowledge-source handles (pinned KB catalog — handles only)
         List<KnowledgeSource> activeSources = resolveActiveKnowledgeSources(projectId);
@@ -112,11 +117,14 @@ public class SessionContextAssembler {
 
         log.info("Created session {} for {} refId={}", session.getId(), serviceType, refId);
 
+        // §9.5 / §16.1: the pin is the real published version row ID —
+        // a worker bound to this session replays against exactly this
+        // content even if the profile publishes a newer version later.
         return new SessionOpenPayload(
                 session.getId(),
                 serviceType,
                 projectId,
-                agentProfileId,
+                version.getId(),
                 modelConfig,
                 workspace,
                 tools,
@@ -124,18 +132,18 @@ public class SessionContextAssembler {
                 autoHitl);
     }
 
-    private SessionOpenPayload.ModelConfig resolveModel(AgentProfile profile) {
-        if (profile.getDefaultModel() == null || profile.getDefaultModel().isBlank()) {
+    private SessionOpenPayload.ModelConfig resolveModel(AgentProfile profile, AgentProfileVersion version) {
+        if (version.getDefaultModel() == null || version.getDefaultModel().isBlank()) {
             throw new IllegalStateException(
                     "Agent profile " + profile.getName() + " has no default model configured");
         }
-        Model model = modelService.findByCode(profile.getDefaultModel());
+        Model model = modelService.findByCode(version.getDefaultModel());
         if (model == null) {
             throw new IllegalStateException(
-                    "Model '" + profile.getDefaultModel() + "' not found for profile '"
+                    "Model '" + version.getDefaultModel() + "' not found for profile '"
                             + profile.getName() + "'");
         }
-        String apiKey = modelService.getApiKey(profile.getDefaultModel());
+        String apiKey = modelService.getApiKey(version.getDefaultModel());
         // Fall back to provider config's baseUrl when model has no explicit endpoint
         String apiEndpoint = model.getApiEndpoint();
         if (apiEndpoint == null && model.getProviderConfig() != null) {
@@ -175,10 +183,11 @@ public class SessionContextAssembler {
                 repoToken);
     }
 
-    private List<SessionOpenPayload.ToolDefinition> resolveTools(AgentProfile profile) {
-        var profileTools = profile.getTools();
-        log.info("Resolving tools for profile {}: {} tools from profile",
-                profile.getId(), profileTools != null ? profileTools.size() : 0);
+    private List<SessionOpenPayload.ToolDefinition> resolveTools(
+            UUID profileId, AgentProfileVersion version) {
+        var profileTools = version.getTools();
+        log.info("Resolving tools for profile {}: {} tools from published version",
+                profileId, profileTools != null ? profileTools.size() : 0);
 
         if (profileTools != null && !profileTools.isEmpty()) {
             var tools = profileTools.stream()
@@ -189,13 +198,13 @@ public class SessionContextAssembler {
                             t.getConfigSchema(),
                             t.getRiskClass() != null ? t.getRiskClass().name() : "SAFE"))
                     .toList();
-            log.info("Resolved {} tools from profile {}", tools.size(), profile.getId());
+            log.info("Resolved {} tools from profile {}", tools.size(), profileId);
             return tools;
         }
 
-        // No tools configured on the profile — return an empty list.
+        // No tools configured on the version — return an empty list.
         // A profile without tools should not inherit all system tools.
-        log.info("Profile {} has no tools configured — returning empty list", profile.getId());
+        log.info("Profile {} has no tools configured — returning empty list", profileId);
         return List.of();
     }
 

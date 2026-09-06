@@ -10,7 +10,6 @@ import ai.myrmec.engine.knowledge.KnowledgeProviderRepository;
 import ai.myrmec.engine.tool.Tool;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.hibernate.Hibernate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,6 +42,7 @@ public class AssistantVersionService {
     private final AssistantVersionRepository versionRepository;
     private final AssistantRepository assistantRepository;
     private final AgentProfileRepository agentProfileRepository;
+    private final ai.myrmec.engine.agent.AgentProfileVersionService agentProfileVersionService;
     private final KnowledgeProviderRepository knowledgeProviderRepository;
 
     // ==================== Draft creation ====================
@@ -261,15 +261,18 @@ public class AssistantVersionService {
                             + String.join(", ", unavailableKbs) + "."));
         }
 
-        // tools: every disabled tool must belong to the profile.
+        // tools: every disabled tool must belong to the profile's published
+        // version (§16.1: the tool set lives on the version row).
         // NOTE: the `assistant_disable_allowed=TRUE` half of the gate is deferred —
         // the agent_profile_tools junction attribute is not mapped yet and the
         // column defaults TRUE, so nothing is locked today (#92 follow-up).
         if (profile != null && draft.getDisabledTools() != null && !draft.getDisabledTools().isEmpty()) {
-            Hibernate.initialize(profile.getTools());
-            Set<String> profileToolCodes = profile.getTools().stream()
-                    .map(Tool::getCode)
-                    .collect(Collectors.toSet());
+            Set<String> profileToolCodes = agentProfileVersionService.findPublished(profile.getId())
+                    .map(ai.myrmec.engine.agent.AgentProfileVersion::getTools)
+                    .map(tools -> tools.stream()
+                            .map(Tool::getCode)
+                            .collect(Collectors.toSet()))
+                    .orElse(Set.of());
             for (String code : draft.getDisabledTools()) {
                 if (!profileToolCodes.contains(code)) {
                     failures.add(ValidationDetail.of("disabledTools", "INVALID_VALUE",

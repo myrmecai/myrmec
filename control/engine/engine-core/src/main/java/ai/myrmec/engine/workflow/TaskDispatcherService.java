@@ -49,6 +49,7 @@ public class TaskDispatcherService {
     private final TaskAttemptService taskAttemptService;
     private final TaskContextResolver contextResolver;
     private final SessionContextAssembler sessionContextAssembler;
+    private final ai.myrmec.engine.agent.AgentProfileVersionService agentProfileVersionService;
     private final InferenceRequestAssembler inferenceRequestAssembler;
     private final ai.myrmec.engine.governance.GovernancePolicyResolver governancePolicyResolver;
 
@@ -237,6 +238,10 @@ public class TaskDispatcherService {
         WorkflowRequest request = task.getRequest();
         Workflow workflow = request.getWorkflow();
         AgentProfile profile = task.getAgentProfile();
+        // §16.1: the behaviour contract (system prompt) lives on the
+        // published version row, not on the profile.
+        ai.myrmec.engine.agent.AgentProfileVersion publishedVersion = agentProfileVersionService
+                .findPublished(profile.getId()).orElse(null);
 
         // Resolve task context (instruction assets + knowledge)
         TaskContext context = contextResolver.resolve(
@@ -268,7 +273,7 @@ public class TaskDispatcherService {
                 .sequenceNo(stepIndex)
                 .stepId(task.getStepId())              // step id for routing (nullable for conversation)
                 .governanceProfileCode(governancePolicyResolver.resolveOrgDefault().code())
-                .systemPrompt(profile.getSystemPrompt())
+                .systemPrompt(publishedVersion != null ? publishedVersion.getSystemPrompt() : null)
                 .stepPrompt(stepPrompt)
                 .input(task.getInput())
                 .knowledge(knowledge)

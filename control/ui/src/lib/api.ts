@@ -685,16 +685,23 @@ export const modelsApi = {
 // Agent Profiles API
 export type AgentProfileStatus = 'ACTIVE' | 'INACTIVE'
 
+/**
+ * Agent profile (§16.1). Zone 1 (identity/admin) lives on the parent row;
+ * the behaviour contract (Zone 2) is resolved from the currently published
+ * version. `publishedVersionId` is the runtime pin target.
+ */
 export interface AgentProfile {
   id: string
   name: string
   description: string | null
   capabilities: string[]
-  supportedTools: string[]
   toolCodes: string[]
   systemPrompt: string | null
   defaultModel: string | null
+  interactionMode: 'ONE_SHOT' | 'CONVERSATIONAL' | null
   status: AgentProfileStatus
+  publishedVersionId: string | null
+  publishedVersionNumber: number | null
   createdAt: string
   updatedAt: string | null
 }

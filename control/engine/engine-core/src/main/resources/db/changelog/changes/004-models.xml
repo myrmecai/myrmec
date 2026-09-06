@@ -372,6 +372,10 @@
          so the constraint is valid at creation time.
          ================================================================ -->
 
+    <!-- §16.1: default_model now lives on agent_profile_versions (the
+         immutable behaviour contract), not on agent_profiles. The
+         profile_versions table is created in 003-agents.xml, so the
+         cross-file FK is valid here. -->
     <changeSet id="004-models-add-agent-profiles-model-fk" author="myrmec">
         <preConditions onFail="MARK_RAN">
             <not>
@@ -379,7 +383,7 @@
             </not>
         </preConditions>
         <addForeignKeyConstraint
-            baseTableName="agent_profiles"
+            baseTableName="agent_profile_versions"
             baseColumnNames="default_model"
             referencedTableName="models"
             referencedColumnNames="code"

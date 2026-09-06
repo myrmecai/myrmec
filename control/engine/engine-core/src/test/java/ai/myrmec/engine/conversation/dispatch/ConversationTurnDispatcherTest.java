@@ -5,6 +5,8 @@ import ai.myrmec.engine.agent.Agent;
 import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileRepository;
+import ai.myrmec.engine.agent.AgentProfileVersion;
+import ai.myrmec.engine.agent.AgentProfileVersionService;
 import ai.myrmec.engine.agent.AgentHostRepository;
 import ai.myrmec.engine.agent.AgentHostService;
 import ai.myrmec.engine.attachment.ConversationMessageAttachment;
@@ -54,6 +56,7 @@ class ConversationTurnDispatcherTest {
     private ConversationService conversationService;
     private AgentHostRepository agentRepository;
     private AgentProfileRepository agentProfileRepository;
+    private AgentProfileVersionService agentProfileVersionService;
     private AgentRepository agentInstanceRepository;
     private AgentConnectionManager connectionManager;
     private AgentWebSocketHandler webSocketHandler;
@@ -78,6 +81,7 @@ class ConversationTurnDispatcherTest {
         conversationService = mock(ConversationService.class);
         agentRepository = mock(AgentHostRepository.class);
         agentProfileRepository = mock(AgentProfileRepository.class);
+        agentProfileVersionService = mock(AgentProfileVersionService.class);
         agentInstanceRepository = mock(AgentRepository.class);
         connectionManager = mock(AgentConnectionManager.class);
         webSocketHandler = mock(AgentWebSocketHandler.class);
@@ -117,6 +121,7 @@ class ConversationTurnDispatcherTest {
                 conversationService,
                 agentRepository,
                 agentProfileRepository,
+                agentProfileVersionService,
                 agentInstanceRepository,
                 connectionManager,
                 webSocketHandler,
@@ -156,8 +161,11 @@ class ConversationTurnDispatcherTest {
         agent.setProfileId(profileId);
 
         AgentProfile profile = new AgentProfile();
-        profile.setSystemPrompt("Profile default prompt.");
-        // No defaultModel \u2014 dispatcher skips model resolution and ships null modelInfo.
+        profile.setId(profileId);
+        // §16.1: behaviour contract lives on the published version row.
+        AgentProfileVersion published = publishedVersion("Profile default prompt.", null);
+        published.setProfileId(profileId);
+        // No defaultModel — dispatcher skips model resolution and ships null modelInfo.
 
         Agent instance = new Agent();
         instance.setId(instanceId);
@@ -170,7 +178,8 @@ class ConversationTurnDispatcherTest {
 
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
         when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findByIdWithTools(profileId)).thenReturn(Optional.of(profile));
+        when(agentProfileRepository.findById(profileId)).thenReturn(Optional.of(profile));
+        when(agentProfileVersionService.findPublished(profileId)).thenReturn(Optional.of(published));
         when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
                 .thenReturn(List.of(instance));
         when(connectionManager.isAgentIdle(instanceId)).thenReturn(true);
@@ -220,7 +229,9 @@ class ConversationTurnDispatcherTest {
         agent.setProfileId(profileId);
 
         AgentProfile profile = new AgentProfile();
-        profile.setSystemPrompt("Profile default prompt.");
+        profile.setId(profileId);
+        AgentProfileVersion published = publishedVersion("Profile default prompt.", null);
+        published.setProfileId(profileId);
 
         Agent instance = new Agent();
         instance.setId(instanceId);
@@ -229,7 +240,8 @@ class ConversationTurnDispatcherTest {
 
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
         when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findByIdWithTools(profileId)).thenReturn(Optional.of(profile));
+        when(agentProfileRepository.findById(profileId)).thenReturn(Optional.of(profile));
+        when(agentProfileVersionService.findPublished(profileId)).thenReturn(Optional.of(published));
         when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
                 .thenReturn(List.of(instance));
         when(connectionManager.isAgentIdle(instanceId)).thenReturn(true);
@@ -267,7 +279,9 @@ class ConversationTurnDispatcherTest {
         agent.setProfileId(profileId);
 
         AgentProfile profile = new AgentProfile();
-        profile.setSystemPrompt("Profile default prompt.");
+        profile.setId(profileId);
+        AgentProfileVersion published = publishedVersion("Profile default prompt.", null);
+        published.setProfileId(profileId);
 
         Agent instance = new Agent();
         instance.setId(instanceId);
@@ -288,7 +302,8 @@ class ConversationTurnDispatcherTest {
 
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
         when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findByIdWithTools(profileId)).thenReturn(Optional.of(profile));
+        when(agentProfileRepository.findById(profileId)).thenReturn(Optional.of(profile));
+        when(agentProfileVersionService.findPublished(profileId)).thenReturn(Optional.of(published));
         when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
                 .thenReturn(List.of(instance));
         when(connectionManager.isAgentIdle(instanceId)).thenReturn(true);
@@ -339,7 +354,7 @@ class ConversationTurnDispatcherTest {
 
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
         when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findByIdWithTools(profileId)).thenReturn(Optional.of(new AgentProfile()));
+        when(agentProfileRepository.findById(profileId)).thenReturn(Optional.of(new AgentProfile()));
         when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
                 .thenReturn(List.of(instance));
         when(connectionManager.isAgentIdle(instanceId)).thenReturn(false);
@@ -387,7 +402,9 @@ class ConversationTurnDispatcherTest {
         agent.setProfileId(profileId);
 
         AgentProfile profile = new AgentProfile();
-        profile.setSystemPrompt("Profile default prompt.");
+        profile.setId(profileId);
+        AgentProfileVersion published = publishedVersion("Profile default prompt.", null);
+        published.setProfileId(profileId);
 
         Agent instance = new Agent();
         instance.setId(instanceId);
@@ -407,7 +424,8 @@ class ConversationTurnDispatcherTest {
 
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
         when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findByIdWithTools(profileId)).thenReturn(Optional.of(profile));
+        when(agentProfileRepository.findById(profileId)).thenReturn(Optional.of(profile));
+        when(agentProfileVersionService.findPublished(profileId)).thenReturn(Optional.of(published));
         when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
                 .thenReturn(List.of(instance));
         when(connectionManager.isAgentIdle(instanceId)).thenReturn(true);
@@ -450,8 +468,9 @@ class ConversationTurnDispatcherTest {
         Conversation conv = newConversation(conversationId, agentId);
         AgentHost agent = newAgentHost(agentId, profileId);
         AgentProfile profile = new AgentProfile();
-        profile.setSystemPrompt("Profile default prompt.");
-        profile.setDefaultModel("gpt-4o");
+        profile.setId(profileId);
+        AgentProfileVersion published = publishedVersion("Profile default prompt.", "gpt-4o");
+        published.setProfileId(profileId);
         Agent instance = newIdleInstance(instanceId, agentId);
 
         // The resolved model supports vision \u2192 the engine flags the image part.
@@ -464,8 +483,7 @@ class ConversationTurnDispatcherTest {
         ConversationMessageAttachment image =
                 newAttachment(conversationId, userMessageId, attachmentId, "shot.png", "image/png");
 
-        wireReady(conv, agent, profile, instance, instanceId, agentId, conversationId);
-        when(conversationService.listMessages(conversationId)).thenReturn(List.of(user));
+        wireReady(conv, agent, profile, instance, instanceId, agentId, conversationId);        when(agentProfileVersionService.findPublished(profileId)).thenReturn(Optional.of(published));        when(conversationService.listMessages(conversationId)).thenReturn(List.of(user));
         when(attachmentService.listForMessage(userMessageId)).thenReturn(List.of(image));
 
         assertThat(dispatcher.dispatch(conversationId)).isTrue();
@@ -490,8 +508,9 @@ class ConversationTurnDispatcherTest {
         Conversation conv = newConversation(conversationId, agentId);
         AgentHost agent = newAgentHost(agentId, profileId);
         AgentProfile profile = new AgentProfile();
-        profile.setSystemPrompt("Profile default prompt.");
-        profile.setDefaultModel("text-only");
+        profile.setId(profileId);
+        AgentProfileVersion published = publishedVersion("Profile default prompt.", "text-only");
+        published.setProfileId(profileId);
         Agent instance = newIdleInstance(instanceId, agentId);
 
         // Non-vision model \u2192 image is conveyed as metadata only, never flagged.
@@ -504,8 +523,7 @@ class ConversationTurnDispatcherTest {
         ConversationMessageAttachment image =
                 newAttachment(conversationId, userMessageId, attachmentId, "shot.png", "image/png");
 
-        wireReady(conv, agent, profile, instance, instanceId, agentId, conversationId);
-        when(conversationService.listMessages(conversationId)).thenReturn(List.of(user));
+        wireReady(conv, agent, profile, instance, instanceId, agentId, conversationId);        when(agentProfileVersionService.findPublished(profileId)).thenReturn(Optional.of(published));        when(conversationService.listMessages(conversationId)).thenReturn(List.of(user));
         when(attachmentService.listForMessage(userMessageId)).thenReturn(List.of(image));
 
         assertThat(dispatcher.dispatch(conversationId)).isTrue();
@@ -530,7 +548,9 @@ class ConversationTurnDispatcherTest {
         Conversation conv = newConversation(conversationId, agentId);
         AgentHost agent = newAgentHost(agentId, profileId);
         AgentProfile profile = new AgentProfile();
-        profile.setSystemPrompt("Profile default prompt.");
+        profile.setId(profileId);
+        AgentProfileVersion published = publishedVersion("Profile default prompt.", null);
+        published.setProfileId(profileId);
         Agent instance = newIdleInstance(instanceId, agentId);
 
         ConversationMessage user = newMessage(conversationId, 0L, ConversationMessage.Role.USER, "use files");
@@ -541,6 +561,7 @@ class ConversationTurnDispatcherTest {
                 newAttachment(conversationId, userMessageId, att2, "b.txt", "text/plain");
 
         wireReady(conv, agent, profile, instance, instanceId, agentId, conversationId);
+        when(agentProfileVersionService.findPublished(profileId)).thenReturn(Optional.of(published));
         when(conversationService.listMessages(conversationId)).thenReturn(List.of(user));
         when(attachmentService.listForMessage(userMessageId)).thenReturn(List.of(file1, file2));
 
@@ -579,7 +600,9 @@ class ConversationTurnDispatcherTest {
         Conversation conv = newConversation(conversationId, agentId);
         AgentHost agent = newAgentHost(agentId, profileId);
         AgentProfile profile = new AgentProfile();
-        profile.setSystemPrompt("Profile default prompt.");
+        profile.setId(profileId);
+        AgentProfileVersion published = publishedVersion("Profile default prompt.", null);
+        published.setProfileId(profileId);
         Agent instance = newIdleInstance(instanceId, agentId);
 
         ConversationMessage user = newMessage(conversationId, 0L, ConversationMessage.Role.USER, "use files");
@@ -590,6 +613,7 @@ class ConversationTurnDispatcherTest {
                 newAttachment(conversationId, userMessageId, att2, "b.txt", "text/plain");
 
         wireReady(conv, agent, profile, instance, instanceId, agentId, conversationId);
+        when(agentProfileVersionService.findPublished(profileId)).thenReturn(Optional.of(published));
         when(conversationService.listMessages(conversationId)).thenReturn(List.of(user));
         when(attachmentService.listForMessage(userMessageId)).thenReturn(List.of(file1, file2));
 
@@ -623,7 +647,9 @@ class ConversationTurnDispatcherTest {
         Conversation conv = newConversation(conversationId, agentId);
         AgentHost agent = newAgentHost(agentId, profileId);
         AgentProfile profile = new AgentProfile();
-        profile.setSystemPrompt("Profile default prompt.");
+        profile.setId(profileId);
+        AgentProfileVersion published = publishedVersion("Profile default prompt.", null);
+        published.setProfileId(profileId);
         Agent instance = newIdleInstance(instanceId, agentId);
 
         ConversationMessage user = newMessage(conversationId, 0L, ConversationMessage.Role.USER, "use file");
@@ -632,6 +658,7 @@ class ConversationTurnDispatcherTest {
                 newAttachment(conversationId, userMessageId, attachmentId, "big.txt", "text/plain");
 
         wireReady(conv, agent, profile, instance, instanceId, agentId, conversationId);
+        when(agentProfileVersionService.findPublished(profileId)).thenReturn(Optional.of(published));
         when(conversationService.listMessages(conversationId)).thenReturn(List.of(user));
         when(attachmentService.listForMessage(userMessageId)).thenReturn(List.of(file));
 
@@ -648,6 +675,19 @@ class ConversationTurnDispatcherTest {
     }
 
     // ----- shared fixtures for the #103 attachment tests -----
+
+    /**
+     * §16.1: the behaviour contract (system prompt, default model) lives on
+     * the published version row. Builds an in-memory version the mock
+     * version service hands back for the profile under test.
+     */
+    private static AgentProfileVersion publishedVersion(String systemPrompt, String defaultModel) {
+        AgentProfileVersion version = new AgentProfileVersion();
+        version.setSystemPrompt(systemPrompt);
+        version.setDefaultModel(defaultModel);
+        version.setStatus(AgentProfileVersion.Status.PUBLISHED);
+        return version;
+    }
 
     private static Conversation newConversation(UUID conversationId, UUID agentId) {
         Conversation conv = new Conversation();
@@ -695,7 +735,7 @@ class ConversationTurnDispatcherTest {
                            UUID instanceId, UUID agentId, UUID conversationId) {
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
         when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findByIdWithTools(agent.getProfileId())).thenReturn(Optional.of(profile));
+        when(agentProfileRepository.findById(agent.getProfileId())).thenReturn(Optional.of(profile));
         when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
                 .thenReturn(List.of(instance));
         when(connectionManager.isAgentIdle(instanceId)).thenReturn(true);

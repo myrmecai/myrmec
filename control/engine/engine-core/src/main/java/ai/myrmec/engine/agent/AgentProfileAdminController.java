@@ -32,6 +32,7 @@ import java.util.stream.Collectors;
 public class AgentProfileAdminController {
 
     private final AgentProfileService profileService;
+    private final AgentProfileVersionService versionService;
 
     @Operation(summary = "List all agent profiles")
     @ApiResponses({
@@ -46,7 +47,8 @@ public class AgentProfileAdminController {
                 ? profileService.getActiveProfiles()
                 : profileService.getAllProfiles();
         return ResponseEntity.ok(profiles.stream()
-                .map(AgentProfileResponse::from)
+                .map(p -> AgentProfileResponse.from(
+                        p, versionService.findPublished(p.getId()).orElse(null)))
                 .collect(Collectors.toList()));
     }
 
@@ -59,7 +61,8 @@ public class AgentProfileAdminController {
     @GetMapping("/{id}")
     public ResponseEntity<AgentProfileResponse> getProfile(@PathVariable UUID id) {
         AgentProfile profile = profileService.getProfile(id);
-        return ResponseEntity.ok(AgentProfileResponse.from(profile));
+        return ResponseEntity.ok(AgentProfileResponse.from(
+                profile, versionService.findPublished(id).orElse(null)));
     }
 
     @Operation(summary = "Create a new agent profile")
@@ -83,7 +86,8 @@ public class AgentProfileAdminController {
                 request.getDefaultModel()
         );
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(AgentProfileResponse.from(profile));
+                .body(AgentProfileResponse.from(
+                        profile, versionService.findPublished(profile.getId()).orElse(null)));
     }
 
     @Operation(summary = "Update an agent profile")
@@ -108,7 +112,8 @@ public class AgentProfileAdminController {
                 request.getSystemPrompt(),
                 request.getDefaultModel()
         );
-        return ResponseEntity.ok(AgentProfileResponse.from(profile));
+        return ResponseEntity.ok(AgentProfileResponse.from(
+                profile, versionService.findPublished(id).orElse(null)));
     }
 
     @Operation(summary = "Delete an agent profile")
