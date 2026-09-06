@@ -205,7 +205,10 @@ describe("OrchestrationRunner minimal delegation", () => {
     expect(call.callId).toBeTruthy();
     expect(call.workspaceRevisionBefore).toBeDefined();
     expect(call.workspaceRevisionAfter).toBeDefined();
+    // §13: the usage mirrors the budget counters — every orchestrator
+    // AND worker model response's tokens.
     expect(result.usage.totalTokens).toBe(15 + 28 + 40);
+    expect(result.usage.workerCalls).toBe(1);
     expect(result.errorCode).toBeUndefined();
   });
 
@@ -319,7 +322,11 @@ describe("OrchestrationRunner minimal delegation", () => {
   });
 
   it("enforces maxOrchestratorIterations independent of model output", async () => {
-    // Orchestrator loops requesting the worker forever.
+    // Orchestrator loops requesting the worker forever. The budget
+    // limits are raised so ONLY the iteration cap terminates the loop.
+    const a = assignment();
+    a.step.orchestration.budget.maxWorkerCalls = 100;
+    a.step.orchestration.budget.maxTokens = 100000;
     const loop: ModelResponse[] = Array.from({ length: 30 }, () => invokeCall("coder"));
     const orch = new ScriptedModel(loop);
     const worker = new ScriptedModel(
@@ -329,7 +336,7 @@ describe("OrchestrationRunner minimal delegation", () => {
       })),
     );
 
-    const result = await makeRunner(orch, worker).run(assignment(), {
+    const result = await makeRunner(orch, worker).run(a, {
       runId: "run-uuid",
     });
 
@@ -676,5 +683,182 @@ describe("OrchestrationRunner verification", () => {
 
     expect(result.status).toBe("FAILED");
     expect(result.errorCode).toBe("INVALID_VERIFIER_RESULT");
+  });
+});
+
+// ── budgets (Feature 7, design §13) ──────────────────────────────────
+
+describe("OrchestrationRunner budget enforcement", () => {
+  it("stops at maxWorkerCalls with WORKER_BUDGET_EXCEEDED (FAIL)", async () => {
+    const a = assignment();
+    a.step.orchestration.budget.maxWorkerCalls = 1;
+    a.step.orchestration.budget.onBudgetExceeded = "FAIL";
+    // Orchestrator delegates twice; the second must be rejected.
+    const orch = new ScriptedModel([
+      invokeCall("coder"),
+      invokeCall("coder"),
+      {
+        content: "done",
+        usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 },
+      },
+    ]);
+    const worker = new ScriptedModel([
+      { content: "ok", usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 } },
+    ]);
+    const result = await makeRunner(orch, worker).run(a, { runId: "run-uuid" });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.errorCode).toBe("WORKER_BUDGET_EXCEEDED");
+    expect(result.retryDisposition).toBe("TERMINAL");
+    // Exactly one worker call executed; the second was rejected before
+    // any worker execution.
+    expect(result.workerCalls).toHaveLength(1);
+    expect(result.usage.workerCalls).toBe(1);
+  });
+
+  it("stops at maxTokens with TOKEN_BUDGET_EXCEEDED when onBudgetExceeded=FAIL", async () => {
+    const a = assignment();
+    a.step.orchestration.budget.maxTokens = 20;
+    a.step.orchestration.budget.onBudgetExceeded = "FAIL";
+    // The orchestrator's first response alone (15) is under the limit;
+    // its tool result feeding the second call breaches before the next
+    // model invocation.
+    const orch = new ScriptedModel([
+      invokeCall("coder"),
+      {
+        content: "final",
+        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      },
+    ]);
+    const worker = new ScriptedModel([
+      { content: "ok", usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 } },
+    ]);
+    const result = await makeRunner(orch, worker).run(a, { runId: "run-uuid" });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.errorCode).toBe("TOKEN_BUDGET_EXCEEDED");
+    expect(result.retryDisposition).toBe("TERMINAL");
+  });
+
+  it("returns PAUSED with a BUDGET_REVIEW suspension when onBudgetExceeded=PAUSE_FOR_HUMAN_REVIEW", async () => {
+    const a = assignment();
+    a.step.orchestration.budget.maxWorkerCalls = 1;
+    a.step.orchestration.budget.onBudgetExceeded = "PAUSE_FOR_HUMAN_REVIEW";
+    const orch = new ScriptedModel([
+      invokeCall("coder"),
+      invokeCall("coder"),
+    ]);
+    const worker = new ScriptedModel([
+      { content: "ok", usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 } },
+    ]);
+    const result = await makeRunner(orch, worker).run(a, { runId: "run-uuid" });
+
+    expect(result.status).toBe("PAUSED");
+    expect(result.retryDisposition).toBe("NONE");
+    expect(result.errorCode).toBe("WORKER_BUDGET_EXCEEDED");
+    expect(result.suspension).toBeDefined();
+    expect(result.suspension!.reason).toBe("BUDGET_REVIEW");
+    expect(result.suspension!.continuationId).toBeTruthy();
+  });
+
+  it("stops immediately when the rejection budget is exceeded", async () => {
+    const a = verifierAssignment();
+    a.step.orchestration.budget.maxVerifierRejectionsPerAttempt = 1;
+    a.step.orchestration.budget.onBudgetExceeded = "FAIL";
+    a.step.orchestration.budget.maxWorkerCalls = 5;
+    // Orchestrator: verify (rejected #1 — allowed), verify again
+    // (rejected #2 — exceeds). The runner must stop immediately after
+    // the second rejection: no further orchestrator turn.
+    const orch = new ScriptedModel([
+      verifyCall("verifier"),
+      verifyCall("verifier"),
+      {
+        content: "never reached",
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      },
+    ]);
+    // A fresh rejecting verifier per invocation: every invocation
+    // reports REJECTED and finishes.
+    const makeRejectingVerifier = () =>
+      new ScriptedModel([
+        {
+          content: "",
+          toolCalls: [
+            {
+              id: "vr",
+              name: "report_verdict",
+              args: { verdict: "REJECTED", summary: "bad", issues: ["x"] },
+            },
+          ],
+          usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+        },
+        { content: "done", usage: { promptTokens: 4, completionTokens: 2, totalTokens: 6 } },
+      ]);
+    const runner = new OrchestrationRunner({
+      chatModelFactory: {
+        resolve: async (info) => (info.modelId === "orch-model" ? orch : makeRejectingVerifier()),
+      },
+      workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 1,
+        chatModelFactory: { resolve: async () => makeRejectingVerifier() },
+        turnExecutor: new TurnExecutor({}),
+      }),
+      turnExecutor: new TurnExecutor({}),
+    });
+    const result = await runner.run(a, { runId: "run-uuid" });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.errorCode).toBe("REJECTION_BUDGET_EXCEEDED");
+    expect(result.retryDisposition).toBe("TERMINAL");
+    // Both verifier invocations recorded; the second rejection
+    // terminated the run before the orchestrator's next model call.
+    expect(result.verifierResults).toHaveLength(2);
+    expect(result.usage.rejectionCount).toBe(2);
+  });
+
+  it("returns CANCELLED and never checkpoints after cancellation", async () => {
+    // Cancel BEFORE the run: the orchestrator turn returns CANCELLED at
+    // its first loop check and no checkpoint is attempted.
+    const orch = new ScriptedModel([
+      invokeCall("coder"),
+      {
+        content: "never reached",
+        usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 },
+      },
+    ]);
+    const worker = new ScriptedModel([
+      { content: "ok", usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 } },
+    ]);
+    let checkpointCalls = 0;
+    const runner = new OrchestrationRunner({
+      chatModelFactory: {
+        resolve: async (info) => {
+          if (info.modelId === "orch-model") return orch;
+          return worker;
+        },
+      },
+      workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 1,
+        chatModelFactory: { resolve: async () => worker },
+        turnExecutor: new TurnExecutor({}),
+      }),
+      turnExecutor: new TurnExecutor({}),
+      cancellation: { cancelled: true },
+      checkpointService: {
+        create: async () => {
+          checkpointCalls++;
+          return { status: "NO_CHANGES" };
+        },
+      },
+      allowCheckpoint: true,
+    });
+    const result = await runner.run(assignment(), { runId: "run-uuid" });
+
+    expect(result.status).toBe("CANCELLED");
+    expect(result.retryDisposition).toBe("NONE");
+    // §13: cancellation never commits — the checkpoint service was
+    // never even called.
+    expect(checkpointCalls).toBe(0);
+    expect(result.commits).toHaveLength(0);
   });
 });

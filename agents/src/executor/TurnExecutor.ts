@@ -21,6 +21,7 @@ import type {
   Tool,
   ToolSpec,
 } from "./types.js";
+import type { BudgetController } from "../orchestration/BudgetController.js";
 
 /** Policy options for the executor (constructor-level). */
 export interface TurnExecutorOptions {
@@ -44,6 +45,13 @@ export interface TurnRun {
    * carry explicit limits that never inherit the constructor default).
    * Takes precedence over the constructor's maxIterations. */
   maxIterationsOverride?: number;
+  /** Design §13: the shared per-attempt BudgetController. When present
+   * every model response's tokens are recorded and the token budget is
+   * consulted inside the model-tool loop — a response that crosses the
+   * limit has its tool calls skipped, and the executor returns the
+   * breach as a budget failure (kind PERMANENT, finishReason
+   * TOKEN_BUDGET_EXCEEDED). */
+  budget?: BudgetController;
 }
 
 const noopLogger: Logger = {
@@ -97,6 +105,25 @@ export class TurnExecutor {
         this.log.info("Task cancelled; stopping execution");
         return { ...this.cancelled(task, toolCalls), usage };
       }
+      // Design §13: check before the next model call too — once the
+      // recorded usage crossed the limit, no further model invocation.
+      if (run.budget) {
+        const breach = run.budget.check("before-model-call");
+        if (breach) {
+          this.log.warn(`Budget exceeded at ${breach.checkpoint}: ${breach.message}`);
+          return {
+            taskId: task.taskId,
+            status: "FAILED",
+            failure: {
+              kind: "PERMANENT",
+              finishReason: breach.errorCode,
+              message: breach.message,
+            },
+            toolCalls,
+            usage,
+          };
+        }
+      }
       iteration += 1;
       this.log.debug(`Invoking model (iteration ${iteration})`);
       // Coarse progress, mirroring the Python loop (capped at 90 until done).
@@ -125,6 +152,7 @@ export class TurnExecutor {
       // Accumulate authoritative usage when the provider reported it.
       // Non-integer or negative counts are ignored (never estimated).
       const u = response.usage;
+      let responseDelta: number | null = null;
       if (
         u &&
         Number.isInteger(u.promptTokens) && u.promptTokens! >= 0 &&
@@ -136,7 +164,32 @@ export class TurnExecutor {
           totalTokens: 0,
         };
         add.totalTokens = add.promptTokens + add.completionTokens;
+        // §13: record the RESPONSE's tokens — the delta this response
+        // added to the turn's running usage, not the cumulative total.
+        responseDelta = add.totalTokens - (usage?.totalTokens ?? 0);
         usage = add;
+      }
+
+      // Design §13: record the response's tokens in the shared budget
+      // the moment they are known, then consult the controller INSIDE
+      // the loop — an over-budget response's tool calls are skipped.
+      if (run.budget && responseDelta !== null) {
+        run.budget.recordTokens(responseDelta);
+        const breach = run.budget.check("before-tool-execution");
+        if (breach) {
+          this.log.warn(`Budget exceeded at ${breach.checkpoint}: ${breach.message}`);
+          return {
+            taskId: task.taskId,
+            status: "FAILED",
+            failure: {
+              kind: "PERMANENT",
+              finishReason: breach.errorCode,
+              message: breach.message,
+            },
+            toolCalls,
+            usage,
+          };
+        }
       }
 
       const requested = response.toolCalls ?? [];

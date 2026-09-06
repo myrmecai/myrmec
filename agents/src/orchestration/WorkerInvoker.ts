@@ -20,6 +20,7 @@ import type {
   OrchestrationErrorCode,
   VerifierResult,
 } from "./types.js";
+import type { BudgetController } from "./BudgetController.js";
 /** The tools a worker invocation gets: the workspace-scoped file/command
  * tools via the injected toolFactory (Feature 4), plus the runner-owned
  * `report_verdict` tool when purpose is VERIFY (Feature 5, design §11). */
@@ -36,6 +37,10 @@ export interface WorkerInvokerOptions {
   ) => VerifierResult;
   /** Feature 5: the dispatch's immutable attempt order (§11 rule 4). */
   attemptOrdinal: number;
+  /** Feature 7 (design §13): the shared per-attempt budget — a worker
+   * response that crosses the token limit has its tool calls skipped
+   * and the invocation is classified as a budget failure. */
+  budget?: BudgetController;
 }
 
 /** One worker invocation outcome with runner-owned identity. */
@@ -110,6 +115,19 @@ export class WorkerInvoker {
   setVerdictRecorder(recorder: WorkerInvokerOptions["verdictRecorder"]): void {
     this.options.verdictRecorder = recorder;
   }
+
+  /** Feature 7 (§13): the runner injects the shared per-attempt budget. */
+  setBudget(budget: BudgetController): void {
+    this.options.budget = budget;
+  }
+
+  /** Feature 7 (§13): the runner injects the dispatch cancellation. */
+  setCancellation(cancellation: { readonly cancelled: boolean }): void {
+    this.cancellation = cancellation;
+  }
+
+  /** The dispatch's cooperative cancellation signal (§13). */
+  private cancellation?: { readonly cancelled: boolean };
 
   /**
    * Invoke one declared worker. Validates the declaration and the model
@@ -262,6 +280,10 @@ export class WorkerInvoker {
       // Design §7.2: the worker's explicit iteration limit — never the
       // executor's default.
       maxIterationsOverride: assignment.step.orchestration.budget.maxWorkerIterations,
+      // §13: the worker turn shares the per-attempt budget.
+      ...(this.options.budget ? { budget: this.options.budget } : {}),
+      // §13: the dispatch's cancellation propagates into the worker loop.
+      ...(this.cancellation ? { cancellation: this.cancellation } : {}),
     });
 
     const callId = randomUUID();
@@ -325,8 +347,20 @@ export class WorkerInvoker {
       };
     }
 
-    // FAILED: classify iteration cap vs provider failure.
+    // FAILED: classify iteration cap vs provider failure vs budget
+    // exhaustion (§13 — the in-loop token check).
     const finishReason = result.failure?.finishReason ?? "";
+    if (
+      finishReason === "WORKER_BUDGET_EXCEEDED" ||
+      finishReason === "TOKEN_BUDGET_EXCEEDED" ||
+      finishReason === "REJECTION_BUDGET_EXCEEDED"
+    ) {
+      return this.failedOutcome(workerName, purpose, sequence, workspace, {
+        code: finishReason,
+        message: result.failure?.message ?? "budget exceeded",
+        tokenCount: usage?.totalTokens,
+      });
+    }
     const code: OrchestrationErrorCode =
       finishReason === "MAX_ITERATIONS" ? "WORKER_ITERATION_LIMIT" : "WORKER_FAILED";
     return this.failedOutcome(workerName, purpose, sequence, workspace, {

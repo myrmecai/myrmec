@@ -27,6 +27,7 @@ import type {
 } from "./types.js";
 import { orchestrationAssignmentSchema } from "./schema.js";
 import { normalizeUsage, WorkerInvoker } from "./WorkerInvoker.js";
+import { InMemoryBudgetController, type BudgetBreach, type BudgetController } from "./BudgetController.js";
 import {
   InMemoryVerificationLedger,
   toVerifierResult,
@@ -61,6 +62,12 @@ export interface OrchestrationRunnerOptions {
   expectedHead?: string;
   /** Feature 6: gitPolicy.allowCheckpoint gate (design §7). */
   allowCheckpoint?: boolean;
+  /** Feature 7 (design §13): cooperative cancellation for the whole
+   * dispatch. Checked before every side-effect boundary; once
+   * cancelled no new model or tool call starts and no checkpoint
+   * occurs. Cancellation never pretends to roll back a completed
+   * external side effect — evidence is reported as-is. */
+  cancellation?: { readonly cancelled: boolean };
 }
 
 export interface OrchestrationRunOptions {
@@ -123,7 +130,6 @@ export class OrchestrationRunner {
     let sequence = 0;
     const nextSequence = () => ++sequence;
     const workerCalls: WorkerCallResult[] = [];
-    let totalTokens = 0;
 
     const revision = { value: 0 };
     const lastTree = { value: "" };
@@ -138,6 +144,12 @@ export class OrchestrationRunner {
     const ledger: VerificationLedger = new InMemoryVerificationLedger();
     let rejectionCount = 0;
     const verifierResults: VerdictRecord[] = [];
+    // Feature 7 (design §13): the per-attempt budget controller shared by
+    // the orchestrator and every worker TurnExecutor. Counter restoration
+    // for a same-dispatch restart is the continuation store's job; a new
+    // attempt gets fresh counters.
+    const budget: BudgetController = new InMemoryBudgetController(o.budget);
+    let budgetBreach: BudgetBreach | null = null;
     const recordVerdict = (
       input: Omit<VerdictRecord, "sequence" | "attemptOrdinal">,
     ): VerdictRecord => {
@@ -151,10 +163,24 @@ export class OrchestrationRunner {
       verifierResults.push(record);
       if (record.verdict === "REJECTED") {
         rejectionCount += 1;
+        // §13: stop immediately after exceeding the rejection budget —
+        // the controller flags the breach and every later boundary
+        // reports it.
+        const breach = budget.recordRejection();
+        if (breach) {
+          budgetBreach = breach;
+        }
       }
       return record;
     };
     this.options.workerInvoker.setVerdictRecorder(recordVerdict);
+    // Feature 7 (§13): the worker turns share the per-attempt budget.
+    this.options.workerInvoker.setBudget(budget);
+    // Feature 7 (§13): the dispatch cancellation propagates into worker
+    // turns (the orchestrator turn receives it via TurnRun).
+    if (this.options.cancellation) {
+      this.options.workerInvoker.setCancellation(this.options.cancellation);
+    }
 
     const orchestratorModelDef = assignment.models.find((m) => m.code === o.modelCode);
     if (!orchestratorModelDef) {
@@ -253,6 +279,23 @@ export class OrchestrationRunner {
         }
         const startedSequence = nextSequence();
         const revisionBefore = revision.value;
+        // §13 cancellation linearization point: once cancelled, no new
+        // worker call starts.
+        if (this.options.cancellation?.cancelled) {
+          return { status: "CANCELLED", summary: "cancelled before worker invocation" };
+        }
+        // §13: count every accepted invoke_worker execution toward
+        // maxWorkerCalls — a delegation rejected by the budget never
+        // becomes an execution.
+        const callBreach = budget.tryReserveWorkerCall();
+        if (callBreach) {
+          budgetBreach = callBreach;
+          return {
+            status: "FAILED",
+            errorCode: callBreach.errorCode,
+            summary: callBreach.message,
+          };
+        }
         const outcome = await this.options.workerInvoker.invoke(
           assignment,
           args.workerName,
@@ -269,9 +312,6 @@ export class OrchestrationRunner {
         outcome.workerCall.workspaceRevisionAfter = revision.value;
         outcome.workerCall.completedSequence = completedSequence;
         workerCalls.push(outcome.workerCall);
-        if (outcome.workerCall.status === "COMPLETED") {
-          totalTokens += outcome.tokenCount;
-        }
         // The bounded, redacted InvokeWorkerResult (design §10.1): never
         // transcripts, prompts, file contents, diffs, or command output.
         const result: Record<string, unknown> = {
@@ -340,16 +380,93 @@ export class OrchestrationRunner {
       model: orchestratorModel,
       tools: [invokeWorkerTool],
       maxIterationsOverride: o.budget.maxOrchestratorIterations,
+      // §13: the orchestrator turn shares the per-attempt budget — its
+      // responses are recorded and checked inside the model-tool loop.
+      budget,
+      // §13: the dispatch's cooperative cancellation propagates into
+      // the orchestrator turn loop.
+      ...(this.options.cancellation ? { cancellation: this.options.cancellation } : {}),
     });
 
     const usage = normalizeUsage(result.usage);
-    totalTokens += usage?.totalTokens ?? 0;
 
-    const usageOut = { ...resultUsage(totalTokens, workerCalls), rejectionCount };
+    // §13/§21: the result's usage mirrors the BudgetController's
+    // authoritative counters — every orchestrator AND worker model
+    // response counts toward maxTokens, so the evidence matches the
+    // enforcement, not just the completed-call subset.
+    const budgetCounters = budget.counters();
+    const usageOut = {
+      workerCalls: budgetCounters.workerCalls,
+      rejectionCount,
+      totalTokens: budgetCounters.totalTokens,
+    };
+
+    // §13: map a budget breach to the configured onBudgetExceeded action.
+    const mapBreach = (breach: BudgetBreach): OrchestrationRunResult => {
+      if (o.budget.onBudgetExceeded === "PAUSE_FOR_HUMAN_REVIEW") {
+        // §7.3/§17.2: PAUSED requires retryDisposition NONE and a
+        // suspension with a durable continuation reference. The local
+        // continuation store persists the state; here the record binds
+        // the continuation id and current candidate-tree state.
+        const continuationId = `cont-${dispatch.dispatchId}-${attemptOrdinal}`;
+        return {
+          schemaVersion: "1.0",
+          resultId: this.resultId(dispatch),
+          resultDigest: this.resultDigest(dispatch),
+          dispatch,
+          status: "PAUSED",
+          retryDisposition: "NONE",
+          summary: breach.message.slice(0, 4000),
+          workerCalls,
+          verifierResults: verifierResults.map(toVerifierResult),
+          commandExecutions,
+          changedFiles: [],
+          commits: [],
+          cleanWorktree: false,
+          usage: { ...usageOut, rejectionCount },
+          errorCode: breach.errorCode,
+          suspension: {
+            // §7.3 ContinuationRecord subset the local store binds.
+            continuationId,
+            continuationRef: `local:${continuationId}`,
+            snapshotTreeHash: lastTree.value,
+            workspaceRevision: revision.value,
+            stateDigest: createHash("sha256")
+              .update(`${continuationId}:${lastTree.value}:${revision.value}`)
+              .digest("hex"),
+            reason: "BUDGET_REVIEW",
+          },
+        };
+      }
+      return this.failure(
+        dispatch,
+        breach.errorCode,
+        breach.message,
+        { ...usageOut, rejectionCount },
+        workerCalls,
+        verifierResults,
+        commandExecutions,
+      );
+    };
+    if (budgetBreach) {
+      return mapBreach(budgetBreach);
+    }
 
     if (result.status === "FAILED") {
-      // Orchestrator turn failed: classify iteration cap vs provider error.
+      // Orchestrator turn failed: classify iteration cap vs provider
+      // error vs budget exhaustion (the in-loop token check).
       const finishReason = result.failure?.finishReason ?? "";
+      if (
+        finishReason === "WORKER_BUDGET_EXCEEDED" ||
+        finishReason === "TOKEN_BUDGET_EXCEEDED" ||
+        finishReason === "REJECTION_BUDGET_EXCEEDED"
+      ) {
+        return mapBreach({
+          checkpoint: "before-tool-execution",
+          errorCode: finishReason,
+          message: result.failure?.message ?? "budget exceeded",
+        });
+      }
       const code: OrchestrationErrorCode =
         finishReason === "MAX_ITERATIONS"
           ? "ORCHESTRATOR_ITERATION_LIMIT"
@@ -400,6 +517,26 @@ export class OrchestrationRunner {
         verifierResults,
         commandExecutions,
       );
+    }
+
+    // §13: before the checkpoint side effect — cancellation wins.
+    if (this.options.cancellation?.cancelled) {
+      return {
+        schemaVersion: "1.0",
+        resultId: this.resultId(dispatch),
+        resultDigest: this.resultDigest(dispatch),
+        dispatch,
+        status: "CANCELLED",
+        retryDisposition: "NONE",
+        summary: "cancelled before checkpoint",
+        workerCalls,
+        verifierResults: verifierResults.map(toVerifierResult),
+        commandExecutions,
+        changedFiles: [],
+        commits: [],
+        cleanWorktree: false,
+        usage: { ...usageOut, rejectionCount },
+      };
     }
 
     // §10.4: the approved tree was committed successfully, or the

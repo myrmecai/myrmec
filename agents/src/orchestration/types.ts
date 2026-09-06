@@ -289,6 +289,31 @@ export interface CheckpointCommit {
   files: string[];
 }
 
+/** §7.3 ContinuationRecord — restored state for a retryable dispatch. */
+export interface ContinuationRecord {
+  continuationId: string;
+  continuationRef: string;
+  snapshotRef?: string;
+  snapshotDigest?: string;
+  snapshotTreeHash: string;
+  workspaceRevision: number;
+  stateDigest: string;
+}
+
+/** §7.3 SuspensionRecord — a paused dispatch's durable reason. */
+export interface SuspensionRecord extends ContinuationRecord {
+  reason: "HITL_APPROVAL" | "BUDGET_REVIEW";
+  approvalRequestId?: string;
+  pendingAction?: {
+    actionId: string;
+    type: string;
+    riskClass: "SAFE" | "DESTRUCTIVE" | "IRREVERSIBLE";
+    summary: string;
+    digest: string;
+  };
+  expiresAt?: string;
+}
+
 export interface OrchestrationRunResult {
   schemaVersion: "1.0";
   resultId: string;
@@ -308,7 +333,7 @@ export interface OrchestrationRunResult {
     rejectionCount: number;
     totalTokens: number;
   };
-  continuation?: unknown; // Feature 7
-  suspension?: unknown; // Feature 7
+  continuation?: ContinuationRecord;
+  suspension?: SuspensionRecord;
   errorCode?: OrchestrationErrorCode;
 }
