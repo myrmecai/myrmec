@@ -44,6 +44,16 @@ export class MyrmecSecureEnvelope {
     this.key = Buffer.from(options.sessionKey);
   }
 
+  /** Build directly from an already-derived 32-byte session key. */
+  static forSessionKey(
+    keyId: string,
+    sessionKey: Uint8Array,
+    purpose: EnvelopePurpose,
+    audience?: EnvelopeAudience,
+  ): MyrmecSecureEnvelope {
+    return new MyrmecSecureEnvelope({ keyId, sessionKey, purpose, audience });
+  }
+
   /**
    * Derive sessionKey = HKDF-SHA256(PSK, sessionId) (§16.1) and build the
    * envelope. Both sides derive the same key independently; no key material

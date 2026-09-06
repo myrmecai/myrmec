@@ -64,6 +64,15 @@ export const MessageType = {
   INFERENCE_ASSIGN: "inference.assign",
   INFERENCE_CANCEL: "inference.cancel",
 
+  // Orchestration — Engine → Agent (design §16.3, Feature 10)
+  ORCHESTRATION_RELEASE: "orchestration.release",
+  ORCHESTRATION_BUDGET_UPDATED: "orchestration.budget_updated",
+
+  // Orchestration — Agent → Engine (design §16.3, Feature 10)
+  ORCHESTRATION_EVENT: "orchestration.event",
+  ORCHESTRATION_APPROVAL_REQUESTED: "orchestration.approval_requested",
+  ORCHESTRATION_RESULT: "orchestration.result",
+
   // Unified Inference Dispatch — Agent → Engine
   INFERENCE_ACCEPT: "inference.accept",
   INFERENCE_DELTA: "inference.delta",
