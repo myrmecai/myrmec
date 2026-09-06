@@ -48,6 +48,7 @@ public class AgentHostService {
     private final ConversationRepository conversationRepository;
     private final ConversationEventService conversationEventService;
     private final NodeRegistryService nodeRegistryService;
+    private final ai.myrmec.engine.spi.crypto.EncryptionService encryptionService;
 
     // ========== Admin Operations ==========
 
@@ -79,6 +80,13 @@ public class AgentHostService {
         // Generate registration key
         String registrationKey = generateRegistrationKey();
 
+        // Feature 10 (§16.1/§17.2): generate the session-credential PSK,
+        // return it ONCE, persist only the at-rest-encrypted copy.
+        String pskKeyId = "psk-" + java.util.UUID.randomUUID()
+                .toString().substring(0, 12);
+        byte[] psk = new byte[32];
+        RANDOM.nextBytes(psk);
+        String pskBase64 = java.util.Base64.getEncoder().encodeToString(psk);
         AgentHost agent = new AgentHost();
         agent.setName(name);
         agent.setDescription(description);
@@ -89,11 +97,13 @@ public class AgentHostService {
         agent.setConfig(config);
         agent.setMaxAgents(maxAgents != null ? maxAgents : 1);
         agent.setStatus(AgentHost.Status.ACTIVE);
+        agent.setPskKeyId(pskKeyId);
+        agent.setPskEncrypted(encryptionService.encrypt(pskBase64));
 
         agent = agentHostRepository.save(agent);
         log.info("Created agent: {} ({})", agent.getName(), agent.getId());
 
-        return new AgentHostCreationResult(agent, registrationKey);
+        return new AgentHostCreationResult(agent, registrationKey, pskKeyId, pskBase64);
     }
 
     /**
