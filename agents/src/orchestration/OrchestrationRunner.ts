@@ -27,6 +27,12 @@ import type {
 } from "./types.js";
 import { orchestrationAssignmentSchema } from "./schema.js";
 import { normalizeUsage, WorkerInvoker } from "./WorkerInvoker.js";
+import {
+  InMemoryVerificationLedger,
+  toVerifierResult,
+  type VerificationLedger,
+  type VerdictRecord,
+} from "./VerificationLedger.js";
 import type { StepWorkspace } from "../workspace/WorkspaceManager.js";
 import type { WorkspaceInspector } from "../workspace/WorkspaceInspector.js";
 
@@ -111,6 +117,31 @@ export class OrchestrationRunner {
     // count only actual changes.
     await this.refreshRevision(revision, lastTree);
 
+    // Feature 5: the per-attempt verification ledger (design §8.8). The
+    // attempt ordinal comes from the validated dispatch (§11 rule 4) —
+    // the model can never provide or influence it.
+    const attemptOrdinal = dispatch.attemptOrdinal;
+    const ledger: VerificationLedger = new InMemoryVerificationLedger();
+    let rejectionCount = 0;
+    const verifierResults: VerdictRecord[] = [];
+    const recordVerdict = (
+      input: Omit<VerdictRecord, "sequence" | "attemptOrdinal">,
+    ): VerdictRecord => {
+      const record = ledger.record({
+        ...input,
+        attemptOrdinal,
+        // Design §11 rule 3: the runner computes the candidate-tree hash
+        // when accepting the verdict; the model cannot choose it.
+        candidateTreeHash: lastTree.value,
+      });
+      verifierResults.push(record);
+      if (record.verdict === "REJECTED") {
+        rejectionCount += 1;
+      }
+      return record;
+    };
+    this.options.workerInvoker.setVerdictRecorder(recordVerdict);
+
     const orchestratorModelDef = assignment.models.find((m) => m.code === o.modelCode);
     if (!orchestratorModelDef) {
       return this.failure(
@@ -133,10 +164,11 @@ export class OrchestrationRunner {
       `orchestrator-${randomUUID()}`,
     );
 
-    // Feature 4: when a step workspace is provided, workers get their
+    // Feature 4/5: when a step workspace is provided, workers get their
     // declared tools through the WorkspaceToolFactory scoped to it
-    // (design §10.3). Without a workspace (Feature 2 unit tests) the
-    // invoker's toolFactory stays unset and workers have no tools.
+    // (design §10.3). Without a workspace (unit tests) the invoker's
+    // toolFactory stays unset and workers have no tools.
+    const commandExecutions: import("./types.js").CommandExecutionRecord[] = [];
     const toolFactory = this.options.workspace
       ? async (worker: import("./types.js").WorkerAuthoring): Promise<Tool[]> => {
           const { WorkspaceToolFactory } = await import("../tools/WorkspaceToolFactory.js");
@@ -151,6 +183,11 @@ export class OrchestrationRunner {
                   },
                 }
               : {}),
+            // Feature 5: the assignment's command templates (already
+            // the referenced-subset) + per-run evidence collection.
+            commandTemplates: assignment.policy.commandTemplates,
+            recordExecution: (record) => commandExecutions.push(record),
+            workerCallId: "",
           });
           return factory.resolve(worker);
         }
@@ -188,13 +225,17 @@ export class OrchestrationRunner {
           };
         }
         if (args.purpose === "VERIFY") {
-          // Feature 5 adds verifier verdict handling; until then VERIFY
-          // through invoke_worker is not yet a supported completion path.
-          return {
-            status: "FAILED",
-            errorCode: "INVALID_VERIFIER_RESULT",
-            summary: "VERIFY purpose arrives with the verification feature.",
-          };
+          // Feature 5 (design §10.1): VERIFY delegates to a required
+          // verifier; the verdict is recorded through the runner-owned
+          // report_verdict tool inside the worker turn.
+          const required = o.completionCriteria.requireVerificationBy;
+          if (!required.includes(args.workerName)) {
+            return {
+              status: "FAILED",
+              errorCode: "ASSIGNMENT_VALIDATION_ERROR",
+              summary: `VERIFY is allowed only for required verifiers: ${args.workerName}`,
+            };
+          }
         }
         const startedSequence = nextSequence();
         const revisionBefore = revision.value;
@@ -232,6 +273,11 @@ export class OrchestrationRunner {
         if (outcome.workerCall.errorCode) {
           result.errorCode = outcome.workerCall.errorCode;
         }
+        // Feature 5 (design §10.1): a successful VERIFY call carries
+        // exactly one verifierResult; other purposes prohibit it.
+        if (outcome.verifierResult) {
+          result.verifierResult = toVerifierResult(outcome.verifierResult);
+        }
         return result;
       },
     };
@@ -249,9 +295,17 @@ export class OrchestrationRunner {
           "Worker catalog (delegate with invoke_worker):",
           ...o.workers.map(
             (w) =>
-              `- ${w.name} (${w.modelCode}): ${w.capability}; tools: ${w.allowedTools.join(", ") || "none"}; commands: ${w.allowedCommands.join(", ") || "none"}`,
+              `- ${w.name} (${w.modelCode}): ${w.capability}; tools: ${w.allowedTools.join(", ") || "none"}; commands: ${w.allowedCommands.join(", ") || "none"}` +
+              (o.completionCriteria.requireVerificationBy.includes(w.name)
+                ? " [required verifier]"
+                : ""),
           ),
           "",
+          o.completionCriteria.requireVerificationBy.length > 0
+            ? `Required verifiers: ${o.completionCriteria.requireVerificationBy.join(", ")}. ` +
+              "Every required verifier must approve the CURRENT candidate tree " +
+              "before completion. A rejection must be repaired and reverified."
+            : "",
           "Only delegated workers can inspect or change repository files. " +
             "You have no direct repository access. Delegate focused units " +
             "of work, review worker results, and finish with a summary of " +
@@ -277,7 +331,7 @@ export class OrchestrationRunner {
     const usage = normalizeUsage(result.usage);
     totalTokens += usage?.totalTokens ?? 0;
 
-    const usageOut = resultUsage(totalTokens, workerCalls);
+    const usageOut = { ...resultUsage(totalTokens, workerCalls), rejectionCount };
 
     if (result.status === "FAILED") {
       // Orchestrator turn failed: classify iteration cap vs provider error.
@@ -288,9 +342,9 @@ export class OrchestrationRunner {
           : "ORCHESTRATOR_FAILED";
       // A missing authoritative usage on a failed turn fails closed.
       if (code === "ORCHESTRATOR_ITERATION_LIMIT" && usage === null) {
-        return this.failure(dispatch, "TOKEN_USAGE_UNAVAILABLE", "orchestration turn lacked authoritative token usage", usageOut, workerCalls);
+        return this.failure(dispatch, "TOKEN_USAGE_UNAVAILABLE", "orchestration turn lacked authoritative token usage", usageOut, workerCalls, verifierResults);
       }
-      return this.failure(dispatch, code, result.failure?.message ?? "orchestrator turn failed", usageOut, workerCalls);
+      return this.failure(dispatch, code, result.failure?.message ?? "orchestrator turn failed", usageOut, workerCalls, verifierResults);
     }
     if (result.status === "CANCELLED") {
       return {
@@ -302,17 +356,35 @@ export class OrchestrationRunner {
         retryDisposition: "NONE",
         summary: "",
         workerCalls,
-        verifierResults: [],
-        commandExecutions: [],
+        verifierResults: verifierResults.map(toVerifierResult),
+        commandExecutions,
         changedFiles: [],
         commits: [],
         cleanWorktree: false,
-        usage: usageOut,
+        usage: { ...usageOut, rejectionCount },
       };
     }
     if (usage === null) {
       // A completed turn must still report authoritative usage.
       return this.failure(dispatch, "TOKEN_USAGE_UNAVAILABLE", "orchestration turn lacked authoritative token usage", usageOut, workerCalls);
+    }
+
+    // ── Completion gate (design §10.4) ────────────────────────────
+    // COMPLETED requires an authoritative APPROVED record from every
+    // required verifier for the exact current candidate tree (§11 rule
+    // 11). Checkpoint/push/clean-scope criteria arrive with Feature 6.
+    const required = o.completionCriteria.requireVerificationBy;
+    if (!ledger.satisfies(required, lastTree.value)) {
+      return this.failure(
+        dispatch,
+        "INVALID_VERIFIER_RESULT",
+        required.length === 0
+          ? "no required verifiers"
+          : `completion requires APPROVED verdicts from every required verifier for the current tree: ${required.join(", ")}`,
+        { ...usageOut, rejectionCount },
+        workerCalls,
+        verifierResults,
+      );
     }
 
     return {
@@ -324,12 +396,12 @@ export class OrchestrationRunner {
       retryDisposition: "NONE",
       summary: (result.completion ?? "").slice(0, 4000),
       workerCalls,
-      verifierResults: [],
-      commandExecutions: [],
+      verifierResults: verifierResults.map(toVerifierResult),
+      commandExecutions,
       changedFiles: [],
       commits: [],
       cleanWorktree: true,
-      usage: usageOut,
+      usage: { ...usageOut, rejectionCount },
     };
   }
 
@@ -357,6 +429,8 @@ export class OrchestrationRunner {
     message: string,
     usage: { workerCalls: number; rejectionCount: number; totalTokens: number },
     workerCalls: WorkerCallResult[] = [],
+    verifierRecords: VerdictRecord[] = [],
+    commandExecutions: import("./types.js").CommandExecutionRecord[] = [],
   ): OrchestrationRunResult {
     return {
       schemaVersion: "1.0",
@@ -367,8 +441,8 @@ export class OrchestrationRunner {
       retryDisposition: errorCode === "WORKER_FAILED" ? "RETRYABLE" : "TERMINAL",
       summary: message.slice(0, 4000),
       workerCalls,
-      verifierResults: [],
-      commandExecutions: [],
+      verifierResults: verifierRecords.map(toVerifierResult),
+      commandExecutions,
       changedFiles: [],
       commits: [],
       cleanWorktree: false,

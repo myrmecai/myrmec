@@ -133,6 +133,7 @@ function makeRunner(
   workerModel: ChatModel,
 ): OrchestrationRunner {
   const invoker = new WorkerInvoker({
+    attemptOrdinal: 1,
     chatModelFactory: {
       resolve: async (info) => {
         if (info.modelId === "worker-model") return workerModel;
@@ -237,6 +238,7 @@ describe("OrchestrationRunner minimal delegation", () => {
         },
       },
       workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 1,
         chatModelFactory: {
           resolve: async () => {
             throw new Error("must not be called");
@@ -299,6 +301,7 @@ describe("OrchestrationRunner minimal delegation", () => {
         },
       },
       workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 1,
         chatModelFactory: {
           resolve: async () => new FailingModel(),
         },
@@ -361,5 +364,317 @@ describe("OrchestrationRunner minimal delegation", () => {
 
     expect(result.status).toBe("FAILED");
     expect(result.errorCode).toBe("ORCHESTRATOR_FAILED");
+  });
+});
+
+// ── verification (Feature 5, design §11) ──────────────────────────────
+
+/** An assignment whose completion requires a named verifier. */
+function verifierAssignment(): OrchestrationAssignment {
+  const a = assignment();
+  a.step.orchestration.workers.push({
+    name: "verifier",
+    modelCode: "worker-model",
+    capability: "Reviews code",
+    allowedTools: ["read_file"],
+    allowedCommands: [],
+  });
+  a.step.orchestration.completionCriteria.requireVerificationBy = ["verifier"];
+  return a;
+}
+
+/** A VERIFY delegation the orchestrator makes. */
+function verifyCall(workerName: string): ModelResponse {
+  return {
+    content: "",
+    toolCalls: [
+      {
+        id: "call-v",
+        name: "invoke_worker",
+        args: { workerName, purpose: "VERIFY", instruction: "Verify the work." },
+      },
+    ],
+    usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+  };
+}
+
+describe("OrchestrationRunner verification", () => {
+  it("completes when the required verifier approves through report_verdict", async () => {
+    // Orchestrator: delegate coder, verify, finish.
+    const orch = new ScriptedModel([
+      invokeCall("coder"),
+      verifyCall("verifier"),
+      {
+        content: "Implemented and verified.",
+        usage: { promptTokens: 20, completionTokens: 8, totalTokens: 28 },
+      },
+    ]);
+    // Coder worker: no-op final answer.
+    const coder = new ScriptedModel([
+      { content: "did it", usage: { promptTokens: 30, completionTokens: 10, totalTokens: 40 } },
+    ]);
+    // Verifier worker: call report_verdict once, then finish.
+    const verifier = new ScriptedModel([
+      {
+        content: "",
+        toolCalls: [
+          {
+            id: "call-v1",
+            name: "report_verdict",
+            args: { verdict: "APPROVED", summary: "Looks good", issues: [] },
+          },
+        ],
+        usage: { promptTokens: 12, completionTokens: 6, totalTokens: 18 },
+      },
+      { content: "verified", usage: { promptTokens: 4, completionTokens: 2, totalTokens: 6 } },
+    ]);
+
+    // Both workers resolve through "worker-model": the coder is invoked
+    // first, the verifier second — serve from a queue.
+    const workerQueue: ChatModel[] = [coder, verifier];
+    const runner = new OrchestrationRunner({
+      chatModelFactory: {
+        resolve: async (info) => {
+          if (info.modelId === "orch-model") return orch;
+          const next = workerQueue.shift();
+          if (!next) throw new Error("worker queue exhausted");
+          return next;
+        },
+      },
+      workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 1,
+        chatModelFactory: {
+          resolve: async () => {
+            const next = workerQueue.shift();
+            if (!next) throw new Error("worker queue exhausted");
+            return next;
+          },
+        },
+        turnExecutor: new TurnExecutor({}),
+      }),
+      turnExecutor: new TurnExecutor({}),
+    });
+    const result = await runner.run(verifierAssignment(), { runId: "run-uuid" });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.verifierResults).toHaveLength(1);
+    expect(result.verifierResults[0].verdict).toBe("APPROVED");
+    expect(result.verifierResults[0].workerName).toBe("verifier");
+    expect(result.verifierResults[0].attemptOrdinal).toBe(1);
+    expect(result.usage.rejectionCount).toBe(0);
+  });
+
+  it("rejects completion when the orchestrator never delegates verification", async () => {
+    // The orchestrator claims completion without invoking the verifier.
+    const orch = new ScriptedModel([
+      invokeCall("coder"),
+      {
+        content: "Done, skipping verification.",
+        usage: { promptTokens: 20, completionTokens: 8, totalTokens: 28 },
+      },
+    ]);
+    const coder = new ScriptedModel([
+      { content: "did it", usage: { promptTokens: 30, completionTokens: 10, totalTokens: 40 } },
+    ]);
+
+    const runner = new OrchestrationRunner({
+      chatModelFactory: {
+        resolve: async (info) =>
+          info.modelId === "orch-model" ? orch : coder,
+      },
+      workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 1,
+        chatModelFactory: { resolve: async () => coder },
+        turnExecutor: new TurnExecutor({}),
+      }),
+      turnExecutor: new TurnExecutor({}),
+    });
+    const result = await runner.run(verifierAssignment(), { runId: "run-uuid" });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.errorCode).toBe("INVALID_VERIFIER_RESULT");
+  });
+
+  it("records a rejection and blocks completion until a fresh APPROVED verdict", async () => {
+    // Orchestrator: verify (rejected), then verify again (approved).
+    const orch = new ScriptedModel([
+      verifyCall("verifier"),
+      verifyCall("verifier"),
+      {
+        content: "Repaired and reverified.",
+        usage: { promptTokens: 20, completionTokens: 8, totalTokens: 28 },
+      },
+    ]);
+    const rejectThenApprove = new ScriptedModel([
+      {
+        content: "",
+        toolCalls: [
+          {
+            id: "vr1",
+            name: "report_verdict",
+            args: { verdict: "REJECTED", summary: "missing tests", issues: ["no tests"] },
+          },
+        ],
+        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      },
+      { content: "rejected", usage: { promptTokens: 4, completionTokens: 2, totalTokens: 6 } },
+      {
+        content: "",
+        toolCalls: [
+          {
+            id: "vr2",
+            name: "report_verdict",
+            args: { verdict: "APPROVED", summary: "fixed", issues: [] },
+          },
+        ],
+        usage: { promptTokens: 12, completionTokens: 6, totalTokens: 18 },
+      },
+      { content: "approved", usage: { promptTokens: 5, completionTokens: 3, totalTokens: 8 } },
+    ]);
+
+    const runner = new OrchestrationRunner({
+      chatModelFactory: {
+        resolve: async (info) => (info.modelId === "orch-model" ? orch : rejectThenApprove),
+      },
+      workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 1,
+        chatModelFactory: { resolve: async () => rejectThenApprove },
+        turnExecutor: new TurnExecutor({}),
+      }),
+      turnExecutor: new TurnExecutor({}),
+    });
+    const result = await runner.run(verifierAssignment(), { runId: "run-uuid" });
+
+    expect(result.status).toBe("COMPLETED");
+    // Rule 7: both records remain in the audit history.
+    expect(result.verifierResults).toHaveLength(2);
+    expect(result.verifierResults[0].verdict).toBe("REJECTED");
+    expect(result.verifierResults[1].verdict).toBe("APPROVED");
+    expect(result.usage.rejectionCount).toBe(1);
+  });
+
+  it("fails a verifier that completes without calling report_verdict", async () => {
+    // The verifier model never calls report_verdict.
+    const orch = new ScriptedModel([
+      verifyCall("verifier"),
+      {
+        content: "Verified.",
+        usage: { promptTokens: 20, completionTokens: 8, totalTokens: 28 },
+      },
+    ]);
+    const lazyVerifier = new ScriptedModel([
+      { content: "seems fine", usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 } },
+    ]);
+
+    const runner = new OrchestrationRunner({
+      chatModelFactory: {
+        resolve: async (info) => (info.modelId === "orch-model" ? orch : lazyVerifier),
+      },
+      workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 1,
+        chatModelFactory: { resolve: async () => lazyVerifier },
+        turnExecutor: new TurnExecutor({}),
+      }),
+      turnExecutor: new TurnExecutor({}),
+    });
+    const result = await runner.run(verifierAssignment(), { runId: "run-uuid" });
+
+    // The worker call FAILED with INVALID_VERIFIER_RESULT and was fed
+    // back; the orchestrator finished anyway, so the completion gate
+    // fails with INVALID_VERIFIER_RESULT (no APPROVED record exists).
+    expect(result.status).toBe("FAILED");
+    expect(result.errorCode).toBe("INVALID_VERIFIER_RESULT");
+    expect(result.workerCalls[0].status).toBe("FAILED");
+    expect(result.workerCalls[0].errorCode).toBe("INVALID_VERIFIER_RESULT");
+  });
+
+  it("fails a verifier that calls report_verdict twice (first record stands)", async () => {
+    const orch = new ScriptedModel([
+      verifyCall("verifier"),
+      {
+        content: "Verified.",
+        usage: { promptTokens: 20, completionTokens: 8, totalTokens: 28 },
+      },
+    ]);
+    const doubleVerifier = new ScriptedModel([
+      {
+        content: "",
+        toolCalls: [
+          {
+            id: "vd1",
+            name: "report_verdict",
+            args: { verdict: "REJECTED", summary: "bad", issues: ["x"] },
+          },
+          {
+            id: "vd2",
+            name: "report_verdict",
+            args: { verdict: "APPROVED", summary: "changed my mind", issues: [] },
+          },
+        ],
+        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      },
+      { content: "done", usage: { promptTokens: 4, completionTokens: 2, totalTokens: 6 } },
+    ]);
+
+    const runner = new OrchestrationRunner({
+      chatModelFactory: {
+        resolve: async (info) => (info.modelId === "orch-model" ? orch : doubleVerifier),
+      },
+      workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 1,
+        chatModelFactory: { resolve: async () => doubleVerifier },
+        turnExecutor: new TurnExecutor({}),
+      }),
+      turnExecutor: new TurnExecutor({}),
+    });
+    const result = await runner.run(verifierAssignment(), { runId: "run-uuid" });
+
+    // Rule 2: the second call cannot alter the first record — the
+    // rejection stands, so completion is blocked.
+    expect(result.status).toBe("FAILED");
+    expect(result.errorCode).toBe("INVALID_VERIFIER_RESULT");
+    // Exactly one record was accepted.
+    expect(result.verifierResults).toHaveLength(1);
+    expect(result.verifierResults[0].verdict).toBe("REJECTED");
+  });
+
+  it("rejects a VERIFY delegation to a worker not in requireVerificationBy", async () => {
+    const orch = new ScriptedModel([
+      // coder is a declared worker but NOT a required verifier.
+      {
+        content: "",
+        toolCalls: [
+          {
+            id: "call-bad",
+            name: "invoke_worker",
+            args: { workerName: "coder", purpose: "VERIFY", instruction: "verify" },
+          },
+        ],
+        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      },
+      {
+        content: "Done.",
+        usage: { promptTokens: 20, completionTokens: 8, totalTokens: 28 },
+      },
+    ]);
+    const coder = new ScriptedModel([
+      { content: "did it", usage: { promptTokens: 30, completionTokens: 10, totalTokens: 40 } },
+    ]);
+
+    const runner = new OrchestrationRunner({
+      chatModelFactory: {
+        resolve: async (info) => (info.modelId === "orch-model" ? orch : coder),
+      },
+      workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 1,
+        chatModelFactory: { resolve: async () => coder },
+        turnExecutor: new TurnExecutor({}),
+      }),
+      turnExecutor: new TurnExecutor({}),
+    });
+    const result = await runner.run(verifierAssignment(), { runId: "run-uuid" });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.errorCode).toBe("INVALID_VERIFIER_RESULT");
   });
 });

@@ -64,6 +64,7 @@ function baseAssignment(): OrchestrationAssignment {
 
 function invokerWith(model: ChatModel): WorkerInvoker {
   return new WorkerInvoker({
+    attemptOrdinal: 1,
     chatModelFactory: { resolve: async () => model },
     turnExecutor: new TurnExecutor({}),
   });
@@ -124,6 +125,7 @@ describe("WorkerInvoker", () => {
   it("rejects an undeclared worker before any model execution", async () => {
     let resolveCalls = 0;
     const invoker = new WorkerInvoker({
+      attemptOrdinal: 1,
       chatModelFactory: {
         resolve: async () => {
           resolveCalls++;

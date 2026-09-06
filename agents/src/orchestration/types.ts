@@ -251,6 +251,34 @@ export interface WorkerCallResult {
   errorCode?: OrchestrationErrorCode;
 }
 
+/** A structured verifier verdict bound to its exact candidate tree
+ * (design §7.3). Every identity field is runner-owned. */
+export interface VerifierResult {
+  callId: string;
+  workerName: string;
+  verdict: "APPROVED" | "REJECTED";
+  summary: string;
+  issues: string[];
+  workspaceRevision: number;
+  candidateTreeHash: string;
+  attemptOrdinal: number;
+  sequence: number;
+}
+
+/** One bounded command execution, evidence only (design §7.3). */
+export interface CommandExecutionRecord {
+  commandId: string;
+  workerCallId: string;
+  templateName: string;
+  executable: string;
+  argsDigest: string;
+  workspaceRelativeCwd: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  cancelled: boolean;
+  outputTruncated: boolean;
+}
+
 export interface OrchestrationRunResult {
   schemaVersion: "1.0";
   resultId: string;
@@ -260,9 +288,9 @@ export interface OrchestrationRunResult {
   retryDisposition: RetryDisposition;
   summary: string;
   workerCalls: WorkerCallResult[];
-  verifierResults: unknown[]; // Feature 5
-  commandExecutions: unknown[]; // Feature 4
-  changedFiles: string[]; // Feature 4
+  verifierResults: VerifierResult[];
+  commandExecutions: CommandExecutionRecord[];
+  changedFiles: string[];
   commits: unknown[]; // Feature 6
   cleanWorktree: boolean; // Feature 6
   usage: {

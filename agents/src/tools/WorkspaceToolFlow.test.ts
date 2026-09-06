@@ -116,6 +116,7 @@ describe("workspace tool flow", () => {
 
     const chatModelFactory = scriptedFactory({ "orch-model": orch, "worker-model": worker });
     const invoker = new WorkerInvoker({
+      attemptOrdinal: 1,
       chatModelFactory,
       turnExecutor: new TurnExecutor({}),
       toolFactory: async (w) => factory.resolve(w),
@@ -224,6 +225,7 @@ describe("workspace tool flow", () => {
     const runner = new OrchestrationRunner({
       chatModelFactory,
       workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 1,
         chatModelFactory,
         turnExecutor: new TurnExecutor({}),
       }),

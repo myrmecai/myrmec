@@ -17,6 +17,12 @@ export {
 } from "./schema.js";
 export { OrchestrationRunner, type OrchestrationRunnerOptions, type OrchestrationRunOptions } from "./OrchestrationRunner.js";
 export { WorkerInvoker, normalizeUsage, type WorkerInvokerOptions, type InvokeWorkerOutcome } from "./WorkerInvoker.js";
+export {
+  InMemoryVerificationLedger,
+  toVerifierResult,
+  type VerificationLedger,
+  type VerdictRecord,
+} from "./VerificationLedger.js";
 export type { CheckoutHandle, StepWorkspace, WorkspaceManager, WorkspaceScope } from "../workspace/WorkspaceManager.js";
 export { GitWorkspaceManager, GitWorkspaceScope, WorkspaceError, confinePath } from "../workspace/GitWorkspaceManager.js";
 export type { WorkspaceInspector, CandidateTree } from "../workspace/WorkspaceInspector.js";
