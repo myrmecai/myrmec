@@ -154,6 +154,10 @@ public abstract class IntegrationTestBase {
     protected ai.myrmec.engine.workflow.WorkflowRequestRepository workflowRequestRepository;
     @Autowired
     protected ai.myrmec.engine.workflow.WorkflowRepository workflowRepository;
+    @Autowired
+    protected ai.myrmec.engine.workflow.OrchestrationRunRepository orchestrationRunRepository;
+    @Autowired
+    protected ai.myrmec.engine.workflow.OrchestrationDispatchRepository orchestrationDispatchRepository;
 
     /**
      * Test admin - retrieved or created for E2E tests.
@@ -235,10 +239,14 @@ public abstract class IntegrationTestBase {
     }
 
     /**
-     * Clear the workflow graph before profiles/projects: attempts →
-     * events → tasks → requests → workflows (FK dependency order).
+     * Clear the workflow graph before profiles/projects: dispatches →
+     * runs → attempts → events → tasks → requests → workflows (FK
+     * dependency order — orchestration tables own requests, so they go
+     * first).
      */
     private void executionEventCleanup() {
+        orchestrationDispatchRepository.deleteAllInBatch();
+        orchestrationRunRepository.deleteAllInBatch();
         taskAttemptRepository.deleteAllInBatch();
         executionEventRepository.deleteAllInBatch();
         workflowTaskRepository.deleteAllInBatch();

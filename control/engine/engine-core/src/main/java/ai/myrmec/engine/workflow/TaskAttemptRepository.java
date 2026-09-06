@@ -24,6 +24,14 @@ public interface TaskAttemptRepository extends JpaRepository<TaskAttempt, UUID> 
     Optional<TaskAttempt> findFirstByTaskIdOrderByAttemptNumberDesc(UUID taskId);
 
     /**
+     * Pessimistic row lock for orchestration outcome application (§16.6):
+     * the result-identity stamp and state tuple land under this lock.
+     */
+    @org.springframework.data.jpa.repository.Lock(
+            jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    Optional<TaskAttempt> findWithLockById(UUID id);
+
+    /**
      * Find a specific attempt by task and attempt number.
      */
     Optional<TaskAttempt> findByTaskIdAndAttemptNumber(UUID taskId, Integer attemptNumber);

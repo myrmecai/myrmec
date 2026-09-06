@@ -104,16 +104,17 @@ public class TaskAttempt {
 
     /**
      * Terminal orchestration result ID (design §16.6/§16.7) — duplicate
-     * delivery suppression. Unique; one stored digest per attempt.
+     * delivery suppression. Unique; one stored digest per attempt. Stamped
+     * on an existing row when the result arrives, so it must be updatable.
      */
-    @Column(name = "orchestration_result_id", updatable = false)
+    @Column(name = "orchestration_result_id")
     private UUID orchestrationResultId;
 
     /**
      * SHA-256 over the canonical orchestration result body. A different
      * result for the same dispatch fails closed.
      */
-    @Column(name = "orchestration_result_digest", length = 64, updatable = false)
+    @Column(name = "orchestration_result_digest", length = 64)
     private String orchestrationResultDigest;
 
     @PrePersist
