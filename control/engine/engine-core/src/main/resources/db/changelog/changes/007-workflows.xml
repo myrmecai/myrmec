@@ -727,9 +727,22 @@
         </createIndex>
     </changeSet>
 
-    <!-- ================================================================== -->
-    <!-- ORCHESTRATION (design §16.7 — Feature 10)                          -->
-    <!-- ================================================================== -->
+    <!-- ================================================================
+         ORCHESTRATION (design §16.7 — Feature 10)                          -->
+    <!-- ================================================================ -->
+
+    <!-- workflows: orchestration Profile alias bindings (design §16.1).
+         Publication requires an explicit map from the workflow-local
+         agentProfileCode alias to an existing Agent Profile UUID. -->
+    <changeSet id="007-workflows-orchestration-bindings" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="workflows"/>
+            <not><columnExists tableName="workflows" columnName="orchestration_bindings"/></not>
+        </preConditions>
+        <addColumn tableName="workflows">
+            <column name="orchestration_bindings" type="text"/>
+        </addColumn>
+    </changeSet>
 
     <!--
       orchestration_runs: one durable owner row per orchestration workflow

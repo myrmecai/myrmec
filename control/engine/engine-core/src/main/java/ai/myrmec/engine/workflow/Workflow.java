@@ -54,6 +54,16 @@ public class Workflow {
     private Map<String, Object> inputSchema;
 
     /**
+     * Feature 10 (design §16.1): orchestration Profile bindings — a map from
+     * the workflow-local {@code agentProfileCode} alias to an Agent Profile
+     * UUID, supplied at publication. Never resolved by mutable display name.
+     * JSON: { "primary": "<profile-uuid>" }
+     */
+    @Convert(converter = JsonMapConverter.class)
+    @Column(name = "orchestration_bindings")
+    private Map<String, Object> orchestrationBindings;
+
+    /**
      * Git repository configuration for code generation artifacts.
      * JSON: {url, baseBranch, credentialSecretId}
      */

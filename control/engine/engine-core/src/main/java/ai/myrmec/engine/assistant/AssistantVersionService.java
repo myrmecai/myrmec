@@ -158,6 +158,12 @@ public class AssistantVersionService {
             throw new BadRequestException("This assistant cannot be published yet.", failures);
         }
 
+        // §4.2/§5.6 (archived assistant-entity.md): stamp the bound Profile's
+        // currently published version — "Required Published version at publish
+        // time". The gate below guarantees it exists.
+        draft.setAgentProfileVersionId(
+                agentProfileVersionService.requirePublished(draft.getAgentProfileId()).getId());
+
         // No-op re-publish (§5.2) — only meaningful once a baseline exists.
         if (previous != null && !versionRowDiffers(draft, previous)) {
             throw new BadRequestException("No changes to publish.");
@@ -210,8 +216,9 @@ public class AssistantVersionService {
                             "Name is required and must be unique in this project.")));
         }
 
-        // brain: profile set, exists, ACTIVE (≈ published). Profile versioning is a
-        // forward seam today (AgentProfile is flat) — see agent-profile-model.md.
+        // brain: profile set, exists, ACTIVE, and has a published version
+        // (§4.2 — agent_profile_version_id is "Required Published version at
+        // publish time"; AgentProfile is versioned since F0).
         AgentProfile profile = null;
         if (draft.getAgentProfileId() == null) {
             failures.add(ValidationDetail.of("agentProfileId", "REQUIRED", "Pick a published agent profile."));
@@ -220,6 +227,9 @@ public class AssistantVersionService {
             if (profile == null || profile.getStatus() != AgentProfile.Status.ACTIVE) {
                 failures.add(ValidationDetail.of("agentProfileId", "INVALID_VALUE",
                         "Pick a published agent profile."));
+            } else if (agentProfileVersionService.findPublished(profile.getId()).isEmpty()) {
+                failures.add(ValidationDetail.of("agentProfileId", "INVALID_VALUE",
+                        "This agent profile has no published version yet. Publish the profile first."));
             }
         }
 

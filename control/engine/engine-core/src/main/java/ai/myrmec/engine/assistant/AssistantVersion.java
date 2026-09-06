@@ -77,7 +77,11 @@ public class AssistantVersion {
     @Column(name = "agent_profile_id")
     private UUID agentProfileId;
 
-    /** Forward seam: pinned profile version once AgentProfile versioning lands. */
+    /**
+     * Pinned published {@code agent_profile_versions} row stamped at publish
+     * time (assistant-entity.md §4.2: "Required Published version at publish
+     * time"). Immutable once PUBLISHED.
+     */
     @Column(name = "agent_profile_version_id")
     private UUID agentProfileVersionId;
 

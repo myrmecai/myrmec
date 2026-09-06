@@ -90,8 +90,9 @@ public class Conversation {
     private UUID assistantVersionId;
 
     /**
-     * Pinned profile version. Forward seam until AgentProfile versioning
-     * lands; null today.
+     * Pinned profile version copied from the pinned Assistant version at
+     * session start (assistant-entity.md §5.6); immutable for the life of
+     * the session. Null for legacy chats without an assistant.
      */
     @Column(name = "agent_profile_version_id")
     private UUID agentProfileVersionId;

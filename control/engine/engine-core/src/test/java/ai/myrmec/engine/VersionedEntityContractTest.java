@@ -85,11 +85,11 @@ class VersionedEntityContractTest extends IntegrationTestBase {
 
         @BeforeEach
         void createParent() {
-            AgentProfile profile = new AgentProfile();
-            profile.setName("vct-ap-" + UUID.randomUUID().toString().substring(0, 8));
-            profile.setDescription("Created by VersionedEntityContractTest");
-            profile.setStatus(AgentProfile.Status.ACTIVE);
-            profile = agentProfileRepository.save(profile);
+            // §4.2: the publish gate requires the bound profile to have a
+            // published version — create through the service (publishes v1).
+            AgentProfile profile = data.agentProfile()
+                    .uniquelyNamed("vct-ap-" + UUID.randomUUID().toString().substring(0, 8))
+                    .create();
             agentProfileId = profile.getId();
 
             // Use TestDataBuilder to create a project (handles group_id requirement).

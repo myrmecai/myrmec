@@ -89,7 +89,7 @@ public class ConversationService {
      *
      * <p>The parent assistant row is taken under a pessimistic write lock so
      * that a concurrent publish cannot race the version we pin: we read
-     * {@code current_version_id} and copy it (plus the forward-seam
+     * {@code current_version_id} and copy it (plus its stamped
      * {@code agent_profile_version_id}) onto the conversation in the same
      * transaction. Any publish that commits after us bumps a new version but
      * leaves this conversation pinned to the snapshot it started with.</p>
