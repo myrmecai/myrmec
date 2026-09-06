@@ -329,7 +329,7 @@ public class WorkflowProgressionService {
         task.setAttempt(nextAttempt);
         // Copy pause mode and max retries from step definition
         task.setPauseMode(parsePauseMode(stepDef.get("pauseMode")));
-        task.setMaxRetries(parseMaxRetries(stepDef.get("maxRetries")));
+        task.setMaxRetries(RetryPolicyParser.maxRetries(stepDef));
 
         taskRepository.save(task);
         log.info("Created task for step '{}' (attempt {}) in request {}", stepId, nextAttempt, request.getId());
@@ -344,20 +344,6 @@ public class WorkflowProgressionService {
         } catch (IllegalArgumentException e) {
             log.warn("Unknown pauseMode '{}', defaulting to NONE", raw);
             return PauseMode.NONE;
-        }
-    }
-
-    private Integer parseMaxRetries(Object raw) {
-        if (raw == null) {
-            return 0;
-        }
-        if (raw instanceof Number num) {
-            return num.intValue();
-        }
-        try {
-            return Integer.parseInt(raw.toString());
-        } catch (NumberFormatException e) {
-            return 0;
         }
     }
 

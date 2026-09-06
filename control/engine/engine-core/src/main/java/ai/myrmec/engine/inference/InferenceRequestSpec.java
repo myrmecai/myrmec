@@ -45,6 +45,12 @@ public class InferenceRequestSpec {
     private final List<AttachmentDescriptor> attachments;
     private final List<String> activeToolNames;     // tool codes active for this turn (conversation)
 
+    // ── Orchestration (Feature 10, §16.2) ──
+    /** The complete self-contained OrchestrationAssignment; null for ordinary inference. */
+    private final Map<String, Object> orchestrationAssignment;
+    /** SHA-256 over the canonical assignment bytes; null for ordinary inference. */
+    private final String orchestrationAssignmentDigest;
+
     // ── Knowledge entry (workflow path) ──
     public record KnowledgeEntry(
             String name,

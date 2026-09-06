@@ -353,4 +353,24 @@
         </createIndex>
     </changeSet>
 
+    <!-- ================================================================
+         Host session-credential PSK (design §16.1/§17.2 — Feature 10).
+
+         At Host registration the engine generates a 32-byte pre-shared
+         key + keyId, returns it ONCE in the registration response over
+         TLS, and stores only this EncryptionService-encrypted copy.
+         sessionKey = HKDF-SHA256(PSK, sessionId) on both sides; no key
+         material crosses the wire after registration.
+         ================================================================ -->
+    <changeSet id="003-agents-hosts-psk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="agent_hosts"/>
+            <not><columnExists tableName="agent_hosts" columnName="psk_key_id"/></not>
+        </preConditions>
+        <addColumn tableName="agent_hosts">
+            <column name="psk_key_id" type="varchar(64)"/>
+            <column name="psk_encrypted" type="bytea"/>
+        </addColumn>
+    </changeSet>
+
 </databaseChangeLog>

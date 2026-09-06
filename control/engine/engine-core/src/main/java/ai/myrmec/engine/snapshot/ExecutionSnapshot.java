@@ -58,6 +58,14 @@ public class ExecutionSnapshot {
     @Column(name = "step_run_id")
     private UUID stepRunId;
 
+    /**
+     * Source orchestration event ID for mirrored orchestration audit
+     * snapshots (design §16.7) — idempotency key; null for all other
+     * snapshots.
+     */
+    @Column(name = "source_event_id", updatable = false)
+    private UUID sourceEventId;
+
     @Column(name = "event_type", nullable = false, length = 50)
     private String eventType;
 

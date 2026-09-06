@@ -24,6 +24,10 @@
           - 20260621-10-execution-snapshot-attribution.xml
           - 20260623-02-workflow-tasks-execution-approvals.xml
           - 20260811-01-workflow-task-pause.xml
+          - F10 orchestration persistence (design §16.7):
+            orchestration_runs, orchestration_dispatches, task-attempt
+            result id/digest, execution-events source id/sequence,
+            execution-snapshots source id, agent_hosts PSK columns
     -->
 
     <!-- ================================================================== -->
@@ -720,6 +724,265 @@
         <createIndex indexName="idx_exec_snap_event_type"
                      tableName="execution_snapshots">
             <column name="event_type"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================== -->
+    <!-- ORCHESTRATION (design §16.7 — Feature 10)                          -->
+    <!-- ================================================================== -->
+
+    <!--
+      orchestration_runs: one durable owner row per orchestration workflow
+      request. id == the workflow request UUID (the run). Carries the pinned
+      Agent Profile version (FK + content digest) — later Profile publishes
+      never affect an in-flight run — plus coordinator affinity, opaque
+      workspace identity, lease state, durable availability throttling, and
+      the pinned opaque recovery identity. No Host paths, no artifact bytes.
+    -->
+    <changeSet id="007-workflows-create-orchestration-runs" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not><tableExists tableName="orchestration_runs"/></not>
+        </preConditions>
+        <createTable tableName="orchestration_runs">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="workflow_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="project_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <!-- §16.1 pin: the published version at request creation -->
+            <column name="profile_version_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="profile_version_digest" type="varchar(64)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- coordinator affinity (§16.4) -->
+            <column name="coordinator_agent_id" type="uuid"/>
+            <column name="coordinator_host_id" type="uuid"/>
+            <!-- opaque Host workspace identity (§17.1) -->
+            <column name="workspace_id" type="varchar(100)"/>
+            <column name="workspace_generation" type="integer"/>
+            <column name="lease_state" type="varchar(20)"/>
+            <column name="lease_deadline" type="timestamp with time zone"/>
+            <!-- affinity recovery (§16.4: 15-min default, never extended) -->
+            <column name="affinity_recovery_deadline" type="timestamp with time zone"/>
+            <!-- durable availability throttling (§16.4) -->
+            <column name="availability_state" type="varchar(20)" defaultValue="AVAILABLE"/>
+            <column name="availability_episode" type="integer" defaultValue="0"/>
+            <column name="availability_occurrence" type="integer" defaultValue="0"/>
+            <!-- pinned opaque recovery identity (§17.2) -->
+            <column name="recovery_provider_id" type="varchar(100)"/>
+            <column name="recovery_provider_version" type="varchar(50)"/>
+            <column name="recovery_config_digest" type="varchar(64)"/>
+            <column name="current_continuation_id" type="varchar(100)"/>
+            <column name="current_snapshot_id" type="varchar(100)"/>
+            <column name="current_snapshot_digest" type="varchar(64)"/>
+            <column name="snapshot_expires_at" type="timestamp with time zone"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="007-workflows-runs-fk-request" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="orchestration_runs"/>
+            <not><foreignKeyConstraintExists foreignKeyName="fk_orchestration_runs_request"/></not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="orchestration_runs"
+            baseColumnNames="id"
+            referencedTableName="workflow_requests"
+            referencedColumnNames="id"
+            constraintName="fk_orchestration_runs_request"/>
+    </changeSet>
+
+    <changeSet id="007-workflows-runs-fk-workflow" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="orchestration_runs"/>
+            <not><foreignKeyConstraintExists foreignKeyName="fk_orchestration_runs_workflow"/></not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="orchestration_runs"
+            baseColumnNames="workflow_id"
+            referencedTableName="workflows"
+            referencedColumnNames="id"
+            constraintName="fk_orchestration_runs_workflow"/>
+    </changeSet>
+
+    <changeSet id="007-workflows-runs-fk-profile-version" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="orchestration_runs"/>
+            <tableExists tableName="agent_profile_versions"/>
+            <not><foreignKeyConstraintExists foreignKeyName="fk_orchestration_runs_profile_version"/></not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="orchestration_runs"
+            baseColumnNames="profile_version_id"
+            referencedTableName="agent_profile_versions"
+            referencedColumnNames="id"
+            constraintName="fk_orchestration_runs_profile_version"/>
+    </changeSet>
+
+    <changeSet id="007-workflows-runs-idx-workflow" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="orchestration_runs"/>
+            <not><indexExists indexName="idx_orchestration_runs_workflow"/></not>
+        </preConditions>
+        <createIndex tableName="orchestration_runs" indexName="idx_orchestration_runs_workflow">
+            <column name="workflow_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!--
+      orchestration_dispatches: canonical assignment bytes committed before
+      any WebSocket send; the relay retransmits these exact bytes until
+      inference.accept (§16.3). dispatch_id == the task attempt UUID in V1.
+    -->
+    <changeSet id="007-workflows-create-orchestration-dispatches" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not><tableExists tableName="orchestration_dispatches"/></not>
+        </preConditions>
+        <createTable tableName="orchestration_dispatches">
+            <column name="dispatch_id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="run_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="task_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="assignment" type="text">
+                <constraints nullable="false"/>
+            </column>
+            <column name="assignment_digest" type="varchar(64)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="delivery_state" type="varchar(20)" defaultValue="PENDING">
+                <constraints nullable="false"/>
+            </column>
+            <column name="send_count" type="integer" defaultValue="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="sent_at" type="timestamp with time zone"/>
+            <column name="accepted_at" type="timestamp with time zone"/>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="007-workflows-dispatches-fk-run" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="orchestration_dispatches"/>
+            <not><foreignKeyConstraintExists foreignKeyName="fk_orchestration_dispatches_run"/></not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="orchestration_dispatches"
+            baseColumnNames="run_id"
+            referencedTableName="orchestration_runs"
+            referencedColumnNames="id"
+            constraintName="fk_orchestration_dispatches_run"/>
+    </changeSet>
+
+    <changeSet id="007-workflows-dispatches-fk-task" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="orchestration_dispatches"/>
+            <not><foreignKeyConstraintExists foreignKeyName="fk_orchestration_dispatches_task"/></not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="orchestration_dispatches"
+            baseColumnNames="task_id"
+            referencedTableName="workflow_tasks"
+            referencedColumnNames="id"
+            constraintName="fk_orchestration_dispatches_task"/>
+    </changeSet>
+
+    <!-- task_attempts: duplicate terminal-result suppression (§16.3/§16.6) -->
+    <changeSet id="007-workflows-attempts-orchestration-result" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="task_attempts"/>
+            <not><columnExists tableName="task_attempts" columnName="orchestration_result_id"/></not>
+        </preConditions>
+        <addColumn tableName="task_attempts">
+            <column name="orchestration_result_id" type="uuid"/>
+            <column name="orchestration_result_digest" type="varchar(64)"/>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="007-workflows-attempts-uk-orchestration-result" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="task_attempts"/>
+            <columnExists tableName="task_attempts" columnName="orchestration_result_id"/>
+            <not><indexExists indexName="uk_task_attempts_orchestration_result"/></not>
+        </preConditions>
+        <createIndex tableName="task_attempts" indexName="uk_task_attempts_orchestration_result" unique="true">
+            <column name="orchestration_result_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- execution_events: idempotent ordered Agent event ingestion (§16.3) -->
+    <changeSet id="007-workflows-events-source-sequence" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="execution_events"/>
+            <not><columnExists tableName="execution_events" columnName="source_event_id"/></not>
+        </preConditions>
+        <addColumn tableName="execution_events">
+            <column name="source_event_id" type="uuid"/>
+            <column name="sequence_number" type="bigint"/>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="007-workflows-events-uk-source-event" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="execution_events"/>
+            <columnExists tableName="execution_events" columnName="source_event_id"/>
+            <not><indexExists indexName="uk_execution_events_source_event"/></not>
+        </preConditions>
+        <createIndex tableName="execution_events" indexName="uk_execution_events_source_event" unique="true">
+            <column name="source_event_id"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="007-workflows-events-uk-attempt-sequence" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="execution_events"/>
+            <columnExists tableName="execution_events" columnName="sequence_number"/>
+            <not><indexExists indexName="uk_execution_events_attempt_sequence"/></not>
+        </preConditions>
+        <createIndex tableName="execution_events" indexName="uk_execution_events_attempt_sequence" unique="true">
+            <column name="attempt_id"/>
+            <column name="sequence_number"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- execution_snapshots: idempotent orchestration audit mirroring (§16.7) -->
+    <changeSet id="007-workflows-snap-source-event" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="execution_snapshots"/>
+            <not><columnExists tableName="execution_snapshots" columnName="source_event_id"/></not>
+        </preConditions>
+        <addColumn tableName="execution_snapshots">
+            <column name="source_event_id" type="uuid"/>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="007-workflows-snap-uk-source-event" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="execution_snapshots"/>
+            <columnExists tableName="execution_snapshots" columnName="source_event_id"/>
+            <not><indexExists indexName="uk_execution_snapshots_source_event"/></not>
+        </preConditions>
+        <createIndex tableName="execution_snapshots" indexName="uk_execution_snapshots_source_event" unique="true">
+            <column name="source_event_id"/>
         </createIndex>
     </changeSet>
 

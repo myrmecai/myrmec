@@ -83,7 +83,9 @@ public class InferenceRequestAssembler {
                 generation,
                 300,  // timeoutSeconds — default
                 stream,
-                new InferenceAssignPayload.ResponseRouting(sequenceNo, stepId));
+                new InferenceAssignPayload.ResponseRouting(sequenceNo, stepId),
+                spec.getOrchestrationAssignment(),
+                spec.getOrchestrationAssignmentDigest());
     }
 
     /**
