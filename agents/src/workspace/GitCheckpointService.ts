@@ -290,6 +290,9 @@ export class GitCheckpointService {
  * RemotePublisher (§12): pushes the target branch only after checkpoint
  * success, host policy permitting. Expected-old-object lease: fetch the
  * remote ref first; any other value is PUSH_CONFLICT — never a force push.
+ * Credentials, when present, pass only through a per-invocation `-c
+ * credential.helper` process pipe — never persisted in the remote URL,
+ * arguments written to logs, or result objects.
  */
 export class RemotePublisher {
   constructor(
@@ -297,26 +300,34 @@ export class RemotePublisher {
       checkoutPath: string;
       repoUrl: string;
       targetBranch: string;
+      /** Optional bearer/token credential for remote operations. */
+      accessToken?: string;
     },
   ) {}
 
   async publish(expectedCommit: string): Promise<
     { status: "PUSHED" } | { status: "CONFLICT" } | { status: "FAILED" }
   > {
-    // Fetch the remote ref and lease it against the expected commit.
+    // §12: credentials ride a per-invocation helper — never the URL.
+    const credArgs = this.options.accessToken
+      ? [
+          "-c",
+          `credential.helper=!f() { echo "username=x-access-token"; echo "password=${this.options.accessToken}"; }; f`,
+        ]
+      : [];
     try {
-      const remoteRef = await exec("git", [
-        "ls-remote",
-        this.options.repoUrl,
-        `refs/heads/${this.options.targetBranch}`,
-      ], { windowsHide: true });
+      const remoteRef = await exec(
+        "git",
+        [...credArgs, "ls-remote", this.options.repoUrl, `refs/heads/${this.options.targetBranch}`],
+        { cwd: this.options.checkoutPath, windowsHide: true },
+      );
       const remote = remoteRef.stdout.trim().split("\t")[0] || "";
       if (remote && remote !== expectedCommit) {
         return { status: "CONFLICT" };
       }
       await exec(
         "git",
-        ["push", this.options.repoUrl, `HEAD:refs/heads/${this.options.targetBranch}`],
+        [...credArgs, "push", this.options.repoUrl, `HEAD:refs/heads/${this.options.targetBranch}`],
         { cwd: this.options.checkoutPath, windowsHide: true },
       );
       return { status: "PUSHED" };
