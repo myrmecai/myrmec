@@ -48,6 +48,9 @@ export interface AgentWorkerOptions {
   workspaceRoot?: string;
   /** Feature 10 (§16.3): durable outbox root. */
   outboxRoot?: string;
+  /** HITL (§17.4): the orchestration project's autoHitlOnDestructive
+   * matrix input (from session.open; conservative default true). */
+  autoHitlOnDestructive?: boolean;
 }
 
 export class AgentWorker {
@@ -73,12 +76,16 @@ export class AgentWorker {
     // Feature 10 (§16.3/§17.1): the orchestration dispatch handler — only
     // constructed when the Host configured a workspace root. Without one,
     // an orchestration assign fails closed (the runner never executes).
+    // HITL (§17.4): the orchestration session's autoHitlOnDestructive
+    // flows from session.open — captured here so the evaluator's matrix
+    // input matches the project (conservative default: suspend).
     this.orchestration = options.workspaceRoot
       ? new AgentOrchestrationExecutor({
           workspaceRoot: options.workspaceRoot,
           outboxRoot: options.outboxRoot ?? `${options.workspaceRoot}/outbox`,
           chatModelFactory: options.chatModelFactory,
           send: (frame) => void send(frame),
+          autoHitlOnDestructive: options.autoHitlOnDestructive ?? true,
           logger: this.log,
         })
       : null;

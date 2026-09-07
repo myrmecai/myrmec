@@ -42,6 +42,10 @@ public class ApprovalController {
     private final ExecutionApprovalDecisionDispatcher executionApprovalDecisionDispatcher;
     private final ConversationMessageRepository conversationMessageRepository;
     private final WorkflowTaskRepository workflowTaskRepository;
+    /** HITL (§17.4): the orchestration-aware decide path. */
+    private final ai.myrmec.engine.workflow.OrchestrationApprovalService orchestrationApprovalService;
+    /** Conversation approvals: the decider's project view access. */
+    private final ai.myrmec.engine._system.security.ProjectAccessEvaluator projectAccess;
 
     /**
      * Submit a human decision (APPROVED / REJECTED) for an APPROVAL_REQUEST.
@@ -57,7 +61,12 @@ public class ApprovalController {
      */
     @PostMapping("/{approvalId}/decide")
     @Operation(summary = "Submit a human decision for an approval request (conversation or execution)")
-    @PreAuthorize("hasAnyRole('APPROVER', 'PROJECT_OWNER', 'ORG_ADMIN')")
+    // §17.4: the orchestration decide path carries its OWN authorization —
+    // the triggering-user gate inside OrchestrationApprovalService (a
+    // project-scoped PROJECT_OWNER/EDITOR who created the request). The
+    // conversation path keeps the interactive-session model; a system
+    // APPROVER/PROJECT_OWNER/ORG_ADMIN also satisfies the static check.
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApprovalDecisionResponse> submitDecision(
             @PathVariable UUID approvalId,
             @Valid @RequestBody ApprovalDecisionRequest body,
@@ -82,7 +91,19 @@ public class ApprovalController {
                     .decision(decision)
                     .build());
         } else if (workflowTask != null && workflowTask.getApprovalStatus() != null) {
-            // Execution-source approval
+            // §17.4 (HITL): an orchestration-review task decides through
+            // the orchestration-aware path — the §16.6 tuples + the
+            // triggering-user gate + the continuation resume.
+            if ("ORCH_REVIEW".equals(workflowTask.getPauseState())) {
+                log.info("Processing orchestration approval {} for user {}", approvalId, userId);
+                var outcome = orchestrationApprovalService.decide(approvalId, decision, userId);
+                return ResponseEntity.ok(ApprovalDecisionResponse.builder()
+                        .source("EXECUTION")
+                        .approvalId(approvalId.toString())
+                        .decision(outcome.name())
+                        .build());
+            }
+            // Legacy execution-source approval (Phase 3 destructive tools)
             log.info("Processing execution approval {} for user {}", approvalId, userId);
             executionApprovalDecisionDispatcher.dispatch(approvalId, decision);
             
@@ -105,12 +126,25 @@ public class ApprovalController {
             String decision,
             String comment) {
         UUID conversationId = message.getConversationId();
-        
+
+        // Conversation approvals keep the interactive-session model: the
+        // decider must hold at least VIEW access on the conversation's
+        // project (the original method-level role gate did not cover
+        // project-scoped roles).
+        UUID projectId = conversationService
+                .findById(conversationId).getProjectId();
+        var auth = org.springframework.security.core.context.SecurityContextHolder
+                .getContext().getAuthentication();
+        if (!projectAccess.canView(projectId, auth)) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "No view access on the approval's project");
+        }
+
         ConversationService.ApprovalDecisionResult result =
                 conversationService.submitApprovalDecision(
                         conversationId, message.getId(), userId,
                         ConversationMessage.ApprovalStatus.valueOf(decision), comment);
-        
+
         // Best-effort push to agent WebSocket
         try {
             approvalDecisionDispatcher.dispatch(conversationId, result);

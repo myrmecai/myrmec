@@ -47,4 +47,20 @@ public class AgentProfileCreateRequest {
      * Default model code for agents using this profile.
      */
     private String defaultModel;
+
+    /**
+     * Orchestration (design §7/§17.4): command templates as a nested map —
+     * template name → { executable, args, parameters, cwdPattern,
+     * environmentAllowlist, timeoutSeconds, maxOutputBytes, network,
+     * maxCpuSeconds, maxMemoryBytes, riskClass }. Optional; NULL = none.
+     */
+    private java.util.Map<String, Object> commandTemplates;
+
+    /**
+     * Orchestration (design §17.4): approval policy keyed by
+     * {@code tool:<name>}, {@code template:<name>}, and
+     * {@code action:<CHECKPOINT|PUSH>} with values
+     * ALLOW/DENY/REQUIRE_APPROVAL. Optional; NULL = defaults.
+     */
+    private java.util.Map<String, Object> approvalPolicy;
 }

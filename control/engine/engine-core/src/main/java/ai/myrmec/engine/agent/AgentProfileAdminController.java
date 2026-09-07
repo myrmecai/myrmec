@@ -76,15 +76,29 @@ public class AgentProfileAdminController {
     @PostMapping
     public ResponseEntity<AgentProfileResponse> createProfile(
             @Valid @RequestBody AgentProfileCreateRequest request) {
-        AgentProfile profile = profileService.createProfile(
-                request.getName(),
-                request.getDescription(),
-                request.getCapabilities(),
-                request.getSupportedTools(),
-                request.getToolCodes(),
-                request.getSystemPrompt(),
-                request.getDefaultModel()
-        );
+        // §7/§17.4: the orchestration policy content (command templates +
+        // approval policy) rides the published version 1 when supplied —
+        // the dedicated overload publishes ONE version carrying it.
+        AgentProfile profile = (request.getCommandTemplates() != null
+                || request.getApprovalPolicy() != null)
+                ? profileService.createProfile(
+                        request.getName(),
+                        request.getDescription(),
+                        request.getCapabilities(),
+                        request.getToolCodes(),
+                        request.getSystemPrompt(),
+                        request.getDefaultModel(),
+                        request.getCommandTemplates(),
+                        request.getApprovalPolicy())
+                : profileService.createProfile(
+                        request.getName(),
+                        request.getDescription(),
+                        request.getCapabilities(),
+                        request.getSupportedTools(),
+                        request.getToolCodes(),
+                        request.getSystemPrompt(),
+                        request.getDefaultModel()
+                );
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(AgentProfileResponse.from(
                         profile, versionService.findPublishedWithTools(profile.getId()).orElse(null)));

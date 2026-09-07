@@ -36,8 +36,18 @@ export interface ContinuationManifest {
   workspaceRevision: number;
   /** Verifier history ordered by (attemptOrdinal, sequence). */
   verifierHistory: VerdictRecord[];
-  /** Optional pending action reference (HITL resume, Feature 10+). */
-  pendingAction?: { actionId: string; type: string; digest: string };
+  /** §17.4 HITL: the full pending governed action + the approval
+   * request identity + expiry — the resume validation binds the typed
+   * decision against exactly these. */
+  pendingAction?: {
+    actionId: string;
+    type: string;
+    riskClass: "SAFE" | "DESTRUCTIVE" | "IRREVERSIBLE";
+    summary: string;
+    digest: string;
+  };
+  approvalRequestId?: string;
+  suspensionExpiresAt?: string;
   /** Creation timestamp (ISO). */
   createdAt: string;
   /** SHA-256 over the canonical manifest content, set on write. */
@@ -65,6 +75,8 @@ function manifestDigest(m: Omit<ContinuationManifest, "stateDigest">): string {
     workspaceRevision: m.workspaceRevision,
     verifierHistory: m.verifierHistory,
     ...(m.pendingAction ? { pendingAction: m.pendingAction } : {}),
+    ...(m.approvalRequestId ? { approvalRequestId: m.approvalRequestId } : {}),
+    ...(m.suspensionExpiresAt ? { suspensionExpiresAt: m.suspensionExpiresAt } : {}),
     createdAt: m.createdAt,
   });
   return createHash("sha256").update(canonical).digest("hex");

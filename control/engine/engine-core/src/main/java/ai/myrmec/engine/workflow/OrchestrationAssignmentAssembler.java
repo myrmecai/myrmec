@@ -148,6 +148,14 @@ public class OrchestrationAssignmentAssembler {
                 Map<String, Object> cont = new LinkedHashMap<>();
                 cont.put("continuationId", continuation.continuationId());
                 cont.put("previousDispatchId", continuation.previousDispatchId());
+                // §7/§17.4: a continuation created by durable human
+                // review carries the typed ApprovalDecision — the
+                // runner validates every field against the restored
+                // suspension before resuming the exact pending action.
+                Map<String, Object> decision = decisionEnvelopeOf(task);
+                if (decision != null) {
+                    cont.put("decision", decision);
+                }
                 assignment.put("continuation", cont);
             }
 
@@ -159,6 +167,39 @@ public class OrchestrationAssignmentAssembler {
                 throw runtime;
             }
             throw new IllegalStateException("Assignment assembly failed", e);
+        }
+    }
+
+    /**
+     * The §7 {@code ApprovalDecision} envelope for an HITL-resume
+     * attempt — built from the approval payload the decide path
+     * enriched under the task lock. Null for retry continuations (no
+     * human decision) and fresh attempts.
+     */
+    private Map<String, Object> decisionEnvelopeOf(WorkflowTask task) {
+        Map<String, Object> payload = task.getApprovalPayload();
+        if (payload == null || !"APPROVED".equals(payload.get("decisionStatus"))) {
+            return null; // retry continuation or fresh attempt
+        }
+        Map<String, Object> decision = new LinkedHashMap<>();
+        decision.put("schemaVersion", "1.0");
+        putIfPresent(decision, "decisionId", payload.get("decisionId"));
+        putIfPresent(decision, "approvalRequestId", payload.get("approvalRequestId"));
+        putIfPresent(decision, "continuationId", payload.get("suspensionContinuationId"));
+        putIfPresent(decision, "previousDispatchId", payload.get("previousDispatchId"));
+        decision.put("status", "APPROVED");
+        putIfPresent(decision, "actionDigest", payload.get("actionDigest"));
+        putIfPresent(decision, "stateDigest", payload.get("stateDigest"));
+        putIfPresent(decision, "snapshotTreeHash", payload.get("snapshotTreeHash"));
+        putIfPresent(decision, "workspaceGeneration", payload.get("workspaceGeneration"));
+        putIfPresent(decision, "decidedAt", payload.get("decidedAt"));
+        putIfPresent(decision, "expiresAt", payload.get("expiresAt"));
+        return decision;
+    }
+
+    private void putIfPresent(Map<String, Object> target, String key, Object value) {
+        if (value != null) {
+            target.put(key, value);
         }
     }
 

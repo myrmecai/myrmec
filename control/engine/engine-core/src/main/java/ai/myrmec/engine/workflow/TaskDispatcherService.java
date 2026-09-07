@@ -245,6 +245,29 @@ public class TaskDispatcherService {
     }
 
     /**
+     * The §16.2/§17.4 continuation for a resume attempt — present when
+     * the task's approval payload carries a suspended continuation
+     * (HITL approve). The directive binds the continuation id from the
+     * suspension record and the prior dispatch id; the assembler embeds
+     * the typed decision envelope alongside it.
+     */
+    private OrchestrationAssignmentAssembler.ContinuationDirective continuationOf(WorkflowTask task) {
+        Map<String, Object> payload = task.getApprovalPayload();
+        if (payload == null) {
+            return null;
+        }
+        Object continuationId = payload.get("suspensionContinuationId");
+        Object previousDispatchId = payload.get("previousDispatchId");
+        Object decisionStatus = payload.get("decisionStatus");
+        if (continuationId == null || previousDispatchId == null
+                || !"APPROVED".equals(decisionStatus)) {
+            return null;
+        }
+        return new OrchestrationAssignmentAssembler.ContinuationDirective(
+                String.valueOf(continuationId), String.valueOf(previousDispatchId));
+    }
+
+    /**
      * Dispatch one orchestration task (§16.3 Engine→Agent delivery):
      *
      * <ol>
@@ -293,7 +316,12 @@ public class TaskDispatcherService {
 
             try {
                 var pinnedVersion = orchestrationRunService.pinnedVersionOf(requestId);
-                var assembled = assignmentAssembler.assemble(task, attempt, pinnedVersion, null);
+                // §16.2/§17.4: a resume attempt carries the typed
+                // continuation from the stored approval payload — the
+                // suspended continuation + prior dispatch. Fresh
+                // attempts omit it.
+                var continuation = continuationOf(task);
+                var assembled = assignmentAssembler.assemble(task, attempt, pinnedVersion, continuation);
                 // §16.2: dispatchId == the attempt UUID in V1.
                 var dispatch = dispatchRelay.recordDispatch(
                         attempt.getId(),

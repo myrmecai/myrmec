@@ -284,6 +284,17 @@ export class TurnExecutor {
     try {
       record.result = await tool.invoke(call.args);
     } catch (err) {
+      // §17.4 HITL: a governed-action suspension or policy denial is a
+      // RUNNER-level control-flow event, not a tool error — the turn
+      // must tear down immediately so the runner can return PAUSED or
+      // the terminal denial. Re-raise the typed signals; every other
+      // error is recorded (the loop continues).
+      if (
+        err instanceof Error &&
+        (err.name === "ApprovalRequiredSignal" || err.name === "PolicyDeniedSignal")
+      ) {
+        throw err;
+      }
       record.error = err instanceof Error ? err.message : String(err);
       this.log.error(`Tool ${call.name} failed:`, record.error);
     }

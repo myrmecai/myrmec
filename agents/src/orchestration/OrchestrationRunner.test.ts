@@ -862,3 +862,426 @@ describe("OrchestrationRunner budget enforcement", () => {
     expect(result.commits).toHaveLength(0);
   });
 });
+
+// ── HITL suspension (design §17.4) ───────────────────────────────────
+
+describe("OrchestrationRunner HITL suspension", () => {
+  it("suspends BEFORE the worker starts and returns PAUSED with the suspension record", async () => {
+    const worker = new ScriptedModel([
+      { content: "never reached", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
+    ]);
+    // The orchestrator delegates once; the turn then ends (the
+    // suspension signal tears the loop down).
+    const orchestrator = new ScriptedModel([invokeCall("coder")]);
+
+    const requests: unknown[] = [];
+    let workerInvocations = 0;
+    const invoker = new WorkerInvoker({
+      attemptOrdinal: 1,
+      chatModelFactory: {
+        resolve: async (info) => {
+          if (info.modelId === "worker-model") {
+            workerInvocations += 1;
+            return worker;
+          }
+          throw new Error(`unexpected model: ${info.modelId}`);
+        },
+      },
+      turnExecutor: new TurnExecutor({}),
+    });
+
+    const runner = new OrchestrationRunner({
+      chatModelFactory: {
+        resolve: async (info) => {
+          if (info.modelId === "orch-model") return orchestrator;
+          throw new Error(`unexpected model: ${info.modelId}`);
+        },
+      },
+      workerInvoker: invoker,
+      turnExecutor: new TurnExecutor({}),
+      approvalEvaluator: {
+        // Every worker invocation requires approval.
+        evaluate: () => ({
+          outcome: "REQUIRE_APPROVAL",
+          expiresAt: "2026-09-07T12:00:00.000Z",
+        }),
+        effectiveWorkerRisk: () => "SAFE",
+      },
+      approvalSink: { request: async (r) => void requests.push(r) },
+    });
+
+    const result = await runner.run(assignment(), { runId: "run-uuid" });
+
+    expect(result.status).toBe("PAUSED");
+    expect(result.retryDisposition).toBe("NONE");
+    // §17.4: the worker NEVER started — suspension happens once, before
+    // the worker runs.
+    expect(workerInvocations).toBe(0);
+    // The suspension record carries the durable continuation + pending
+    // action + expiry.
+    expect(result.suspension).toMatchObject({
+      reason: "HITL_APPROVAL",
+      expiresAt: "2026-09-07T12:00:00.000Z",
+      pendingAction: { type: "WORKER_TOOL", summary: "worker:coder:IMPLEMENT" },
+    });
+    expect(result.suspension?.approvalRequestId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    // The sink received exactly ONE idempotent request, §16.3-shaped.
+    expect(requests).toHaveLength(1);
+    const request = requests[0] as {
+      approvalRequestId: string;
+      action: { digest: string };
+      expiresAt: string;
+    };
+    expect(request.approvalRequestId).toBe(result.suspension?.approvalRequestId);
+    expect(request.action.digest).toMatch(/^[0-9a-f]{64}$/);
+    expect(request.expiresAt).toBe("2026-09-07T12:00:00.000Z");
+  });
+
+  it("a profile DENY returns the terminal APPROVAL_POLICY_DENIED — no request created", async () => {
+    const orchestrator = new ScriptedModel([invokeCall("coder")]);
+    const requests: unknown[] = [];
+
+    const runner = new OrchestrationRunner({
+      chatModelFactory: {
+        resolve: async (info) => {
+          if (info.modelId === "orch-model") return orchestrator;
+          throw new Error(`unexpected: ${info.modelId}`);
+        },
+      },
+      workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 1,
+        chatModelFactory: {
+          resolve: async () => {
+            throw new Error("worker must not resolve on DENY");
+          },
+        },
+        turnExecutor: new TurnExecutor({}),
+      }),
+      turnExecutor: new TurnExecutor({}),
+      approvalEvaluator: {
+        evaluate: () => ({
+          outcome: "DENY",
+          reasonCode: "APPROVAL_POLICY_DENIED",
+          reason: "profile approvalPolicy denies tool:write_file",
+        }),
+        effectiveWorkerRisk: () => "SAFE",
+      },
+      approvalSink: { request: async (r) => void requests.push(r) },
+    });
+
+    const result = await runner.run(assignment(), { runId: "run-uuid" });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.errorCode).toBe("APPROVAL_POLICY_DENIED");
+    expect(result.retryDisposition).toBe("TERMINAL");
+    // §17.4: DENY creates no approval request.
+    expect(requests).toHaveLength(0);
+  });
+
+  it("an absent approval sink fails closed when approval is required", async () => {
+    const orchestrator = new ScriptedModel([invokeCall("coder")]);
+
+    const runner = new OrchestrationRunner({
+      chatModelFactory: {
+        resolve: async (info) => {
+          if (info.modelId === "orch-model") return orchestrator;
+          throw new Error(`unexpected: ${info.modelId}`);
+        },
+      },
+      workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 1,
+        chatModelFactory: {
+          resolve: async () => {
+            throw new Error("worker must not start");
+          },
+        },
+        turnExecutor: new TurnExecutor({}),
+      }),
+      turnExecutor: new TurnExecutor({}),
+      approvalEvaluator: {
+        evaluate: () => ({
+          outcome: "REQUIRE_APPROVAL",
+          expiresAt: "2026-09-07T12:00:00.000Z",
+        }),
+        effectiveWorkerRisk: () => "SAFE",
+      },
+      // No approvalSink wired.
+    });
+
+    const result = await runner.run(assignment(), { runId: "run-uuid" });
+
+    // §17.4: "the runner must have an OrchestrationApprovalSink; its
+    // absence fails closed."
+    expect(result.status).toBe("FAILED");
+    expect(result.errorCode).toBe("APPROVAL_POLICY_DENIED");
+    expect(result.summary).toContain("failing closed");
+  });
+
+  it("SAFE worker invocations execute without approval when no policy rule applies", async () => {
+    const worker = new ScriptedModel([
+      { content: "done", usage: { promptTokens: 8, completionTokens: 3, totalTokens: 11 } },
+    ]);
+    const orchestrator = new ScriptedModel([
+      invokeCall("coder"),
+      { content: "All done.", usage: { promptTokens: 20, completionTokens: 6, totalTokens: 26 } },
+    ]);
+
+    const runner = new OrchestrationRunner({
+      chatModelFactory: {
+        resolve: async (info) => {
+          if (info.modelId === "orch-model") return orchestrator;
+          if (info.modelId === "worker-model") return worker;
+          throw new Error(`unexpected: ${info.modelId}`);
+        },
+      },
+      workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 1,
+        chatModelFactory: {
+          resolve: async (info) => {
+            if (info.modelId === "worker-model") return worker;
+            throw new Error(`unexpected: ${info.modelId}`);
+          },
+        },
+        turnExecutor: new TurnExecutor({}),
+      }),
+      turnExecutor: new TurnExecutor({}),
+      approvalEvaluator: {
+        evaluate: () => ({ outcome: "ALLOW" }),
+        effectiveWorkerRisk: () => "SAFE",
+      },
+      approvalSink: { request: async () => undefined },
+    });
+
+    const result = await runner.run(assignment(), { runId: "run-uuid" });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.workerCalls).toHaveLength(1);
+  });
+});
+
+// ── HITL resume (design §7/§17.4, slice C) ───────────────────────────
+
+describe("OrchestrationRunner HITL resume", () => {
+  /** A decision-bearing continuation assignment. */
+  function resumeAssignment(): OrchestrationAssignment {
+    const a = assignment();
+    a.dispatch.continuationId = "cont-1";
+    a.dispatch.attemptOrdinal = 2;
+    a.continuation = {
+      continuationId: "cont-1",
+      previousDispatchId: "attempt-uuid",
+      decision: {
+        schemaVersion: "1.0",
+        decisionId: "decision-1",
+        approvalRequestId: "11111111-1111-4111-8111-111111111111",
+        continuationId: "cont-1",
+        previousDispatchId: "attempt-uuid",
+        status: "APPROVED",
+        actionDigest: "a".repeat(64),
+        stateDigest: "b".repeat(64),
+        snapshotTreeHash: "c".repeat(40),
+        workspaceGeneration: 2,
+        decidedAt: "2026-01-01T00:00:00Z",
+        expiresAt: "2999-01-01T00:00:00Z",
+      },
+    };
+    return a;
+  }
+
+  /** The matching restored suspension. */
+  const restoredSuspension = {
+    continuationId: "cont-1",
+    previousDispatchId: "attempt-uuid",
+    suspension: {
+      continuationId: "cont-1",
+      continuationRef: "local:cont-1",
+      snapshotTreeHash: "c".repeat(40),
+      workspaceRevision: 2,
+      stateDigest: "b".repeat(64),
+      reason: "HITL_APPROVAL" as const,
+      approvalRequestId: "11111111-1111-4111-8111-111111111111",
+      pendingAction: {
+        actionId: "action-1",
+        type: "WORKER_TOOL",
+        riskClass: "DESTRUCTIVE" as const,
+        summary: "worker:coder:IMPLEMENT",
+        digest: "a".repeat(64),
+      },
+      expiresAt: "2999-01-01T00:00:00Z",
+    },
+  };
+
+  function makeResumeRunner(
+    orchestrator: ScriptedModel,
+    worker: ScriptedModel,
+    loader?: {
+      load: (
+        id: string,
+      ) => import("./ApprovalResumeValidator.js").RestoredSuspension | null;
+    },
+  ): OrchestrationRunner {
+    return new OrchestrationRunner({
+      chatModelFactory: {
+        resolve: async (info) => {
+          if (info.modelId === "orch-model") return orchestrator;
+          if (info.modelId === "worker-model") return worker;
+          throw new Error(`unexpected: ${info.modelId}`);
+        },
+      },
+      workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 2,
+        chatModelFactory: {
+          resolve: async (info) => {
+            if (info.modelId === "worker-model") return worker;
+            throw new Error(`unexpected: ${info.modelId}`);
+          },
+        },
+        turnExecutor: new TurnExecutor({}),
+      }),
+      turnExecutor: new TurnExecutor({}),
+      suspensionLoader: loader ?? {
+        load: (id) => (id === "cont-1" ? restoredSuspension : null),
+      },
+    });
+  }
+
+  it("a valid decision resumes the step and runs to completion", async () => {
+    const orchestrator = new ScriptedModel([
+      invokeCall("coder"),
+      { content: "Resumed and done.", usage: { promptTokens: 20, completionTokens: 6, totalTokens: 26 } },
+    ]);
+    const worker = new ScriptedModel([
+      { content: "ok", usage: { promptTokens: 8, completionTokens: 3, totalTokens: 11 } },
+    ]);
+    const result = await makeResumeRunner(orchestrator, worker).run(resumeAssignment(), {
+      runId: "run-uuid",
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.workerCalls).toHaveLength(1);
+  });
+
+  it("a decision-bearing continuation without a suspension loader fails closed", async () => {
+    const orchestrator = new ScriptedModel([invokeCall("coder")]);
+    const worker = new ScriptedModel([
+      { content: "never", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
+    ]);
+    // No suspensionLoader wired.
+    const bare = new OrchestrationRunner({
+      chatModelFactory: {
+        resolve: async (info) => {
+          if (info.modelId === "orch-model") return orchestrator;
+          if (info.modelId === "worker-model") return worker;
+          throw new Error(`unexpected: ${info.modelId}`);
+        },
+      },
+      workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 2,
+        chatModelFactory: { resolve: async () => worker },
+        turnExecutor: new TurnExecutor({}),
+      }),
+      turnExecutor: new TurnExecutor({}),
+    });
+    const outcome = await bare.run(resumeAssignment(), { runId: "run-uuid" });
+
+    expect(outcome.status).toBe("FAILED");
+    expect(outcome.errorCode).toBe("APPROVAL_POLICY_DENIED");
+    expect(outcome.summary).toContain("failing closed");
+    expect(outcome.workerCalls).toHaveLength(0);
+  });
+
+  it("an unrestorable suspension (loader returns null) fails closed", async () => {
+    const orchestrator = new ScriptedModel([invokeCall("coder")]);
+    const worker = new ScriptedModel([
+      { content: "never", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
+    ]);
+    const runner = makeResumeRunner(orchestrator, worker, {
+      load: () => null,
+    });
+    const result = await runner.run(resumeAssignment(), { runId: "run-uuid" });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.errorCode).toBe("APPROVAL_POLICY_DENIED");
+    expect(result.summary).toContain("unrestorable");
+    expect(result.workerCalls).toHaveLength(0);
+  });
+
+  it("a decision whose digests do not bind the suspension fails closed", async () => {
+    const orchestrator = new ScriptedModel([invokeCall("coder")]);
+    const worker = new ScriptedModel([
+      { content: "never", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
+    ]);
+    const runner = makeResumeRunner(orchestrator, worker, {
+      // The stored suspension drifted (state digest differs).
+      load: (id) =>
+        id === "cont-1"
+          ? {
+              ...restoredSuspension,
+              suspension: {
+                ...restoredSuspension.suspension,
+                stateDigest: "d".repeat(64),
+              },
+            }
+          : null,
+    });
+    const result = await runner.run(resumeAssignment(), { runId: "run-uuid" });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.errorCode).toBe("APPROVAL_POLICY_DENIED");
+    expect(result.summary).toContain("stateDigest");
+    expect(result.workerCalls).toHaveLength(0);
+  });
+
+  it("an expired decision fails closed with APPROVAL_EXPIRED", async () => {
+    const a = resumeAssignment();
+    a.continuation!.decision!.expiresAt = "2020-01-01T00:00:00Z";
+    const orchestrator = new ScriptedModel([invokeCall("coder")]);
+    const worker = new ScriptedModel([
+      { content: "never", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
+    ]);
+    const runner = makeResumeRunner(orchestrator, worker);
+    const result = await runner.run(a, { runId: "run-uuid" });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.errorCode).toBe("APPROVAL_EXPIRED");
+    expect(result.workerCalls).toHaveLength(0);
+  });
+
+  it("a non-decision continuation (retry) runs without a loader", async () => {
+    // A retryable continuation carries no decision — the resume gate
+    // must not fire and no loader is required.
+    const a = assignment();
+    a.dispatch.continuationId = "cont-retry";
+    a.continuation = {
+      continuationId: "cont-retry",
+      previousDispatchId: "attempt-uuid",
+    };
+    const orchestrator = new ScriptedModel([
+      invokeCall("coder"),
+      { content: "Retried and done.", usage: { promptTokens: 20, completionTokens: 6, totalTokens: 26 } },
+    ]);
+    const worker = new ScriptedModel([
+      { content: "ok", usage: { promptTokens: 8, completionTokens: 3, totalTokens: 11 } },
+    ]);
+    const runner = new OrchestrationRunner({
+      chatModelFactory: {
+        resolve: async (info) => {
+          if (info.modelId === "orch-model") return orchestrator;
+          if (info.modelId === "worker-model") return worker;
+          throw new Error(`unexpected: ${info.modelId}`);
+        },
+      },
+      workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 2,
+        chatModelFactory: { resolve: async () => worker },
+        turnExecutor: new TurnExecutor({}),
+      }),
+      turnExecutor: new TurnExecutor({}),
+    });
+    const result = await runner.run(a, { runId: "run-uuid" });
+
+    expect(result.status).toBe("COMPLETED");
+  });
+});

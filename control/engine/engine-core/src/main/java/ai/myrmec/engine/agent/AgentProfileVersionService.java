@@ -61,6 +61,25 @@ public class AgentProfileVersionService {
             String systemPrompt,
             String defaultModel,
             AgentProfileVersion.InteractionMode interactionMode) {
+        return publishInitial(profileId, capabilities, toolCodes, systemPrompt,
+                defaultModel, interactionMode, null, null);
+    }
+
+    /**
+     * The first publish with orchestration policy content (§7/§17.4): the
+     * version's command templates + approval policy ride the same
+     * immutable published version; serialized as canonical JSON maps.
+     */
+    @Transactional
+    public AgentProfileVersion publishInitial(
+            UUID profileId,
+            List<String> capabilities,
+            Set<String> toolCodes,
+            String systemPrompt,
+            String defaultModel,
+            AgentProfileVersion.InteractionMode interactionMode,
+            java.util.Map<String, Object> commandTemplates,
+            java.util.Map<String, Object> approvalPolicy) {
         profileRepository.findById(profileId)
                 .orElseThrow(() -> ResourceNotFoundException.agentProfile(profileId));
 
@@ -72,12 +91,25 @@ public class AgentProfileVersionService {
         version.setDefaultModel(defaultModel);
         version.setInteractionMode(
                 interactionMode == null ? AgentProfileVersion.InteractionMode.ONE_SHOT : interactionMode);
+        version.setCommandTemplates(writeJsonMap(commandTemplates));
+        version.setApprovalPolicy(writeJsonMap(approvalPolicy));
         version.setStatus(AgentProfileVersion.Status.PUBLISHED);
         version.setPublishedAt(Instant.now());
         version = versionRepository.save(version);
         assignTools(version, toolCodes);
         log.info("Published initial agent-profile version v1 for profile {}", profileId);
         return version;
+    }
+
+    private String writeJsonMap(java.util.Map<String, Object> map) {
+        if (map == null || map.isEmpty()) {
+            return null;
+        }
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(map);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid orchestration policy map", e);
+        }
     }
 
     /**

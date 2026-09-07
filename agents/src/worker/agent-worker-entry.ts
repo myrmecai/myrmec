@@ -67,6 +67,9 @@ const worker = new AgentWorker({
   ...(config.outboxRoot !== undefined
     ? { outboxRoot: config.outboxRoot }
     : {}),
+  ...(config.autoHitlOnDestructive !== undefined
+    ? { autoHitlOnDestructive: config.autoHitlOnDestructive }
+    : {}),
 });
 
 port.on("message", async (message: WorkerInbound) => {

@@ -35,6 +35,11 @@ class ApprovalExpirySweeperTest extends IntegrationTestBase {
     @Autowired private ApprovalExpirySweeper sweeper;
     @Autowired private ConversationStreamBroker broker;
     @Autowired private ObjectMapper objectMapper;
+    // HITL slice B: the ORCH_REVIEW task sweep.
+    @Autowired private ai.myrmec.engine.workflow.WorkflowTaskRepository workflowTaskRepository;
+    @Autowired private ai.myrmec.engine.workflow.WorkflowRequestRepository requestRepository;
+    @Autowired private ai.myrmec.engine.workflow.WorkflowRepository workflowRepository;
+    @Autowired private ai.myrmec.engine.workflow.TaskAttemptRepository attemptRepository;
 
     @Test
     void sweepFlipsExpiredRowsToExpiredAndBroadcastsDecisionFrame() throws Exception {
@@ -111,6 +116,114 @@ class ApprovalExpirySweeperTest extends IntegrationTestBase {
                 .as("future-expiry rows must remain PENDING")
                 .isEqualTo(ConversationMessage.ApprovalStatus.PENDING);
     }
+
+    // ── HITL slice B (§17.4/§16.6): the ORCH_REVIEW task sweep ──
+
+    @Test
+    void sweepExpiresOrchestrationReviewTasksPastTheirDeadline() {
+        // Arrange: an ORCH_REVIEW task whose approval deadline passed.
+        var seeded = seedOrchestrationReviewTask(Instant.now().minusSeconds(60));
+
+        sweeper.sweep();
+
+        var stored = workflowTaskRepository.findById(seeded.taskId()).orElseThrow();
+        assertThat(stored.getApprovalStatus())
+                .as("§16.6: the sweeper applies the terminal APPROVAL_EXPIRED tuple")
+                .isEqualTo("EXPIRED");
+        assertThat(stored.getStatus())
+                .isEqualTo(ai.myrmec.engine.workflow.TaskStatus.COMPLETED);
+        assertThat(stored.getErrorMessage()).isEqualTo("APPROVAL_EXPIRED");
+        var storedRequest = requestRepository.findById(stored.getRequest().getId()).orElseThrow();
+        assertThat(storedRequest.getStatus())
+                .isEqualTo(ai.myrmec.engine.workflow.RequestStatus.FAILED);
+
+        // Idempotent: a second sweep does not re-apply (already decided).
+        sweeper.sweep();
+        var again = workflowTaskRepository.findById(seeded.taskId()).orElseThrow();
+        assertThat(again.getApprovalStatus()).isEqualTo("EXPIRED");
+    }
+
+    @Test
+    void sweepIgnoresOrchestrationReviewsStillWithinDeadline() {
+        var seeded = seedOrchestrationReviewTask(Instant.now().plusSeconds(3600));
+
+        sweeper.sweep();
+
+        var stored = workflowTaskRepository.findById(seeded.taskId()).orElseThrow();
+        assertThat(stored.getApprovalStatus())
+                .as("future-deadline ORCH_REVIEW tasks must remain PENDING")
+                .isEqualTo("PENDING");
+        assertThat(stored.getStatus())
+                .isEqualTo(ai.myrmec.engine.workflow.TaskStatus.PAUSED);
+    }
+
+    /** Seed one ORCH_REVIEW workflow task at the given expiry. */
+    private SeededTask seedOrchestrationReviewTask(Instant approvalExpiresAt) {
+        ai.myrmec.engine.project.Project project =
+                data.project().named("orch-sweep-" + System.nanoTime()).withRepo("https://x.git", "main").create();
+        ai.myrmec.engine.agent.AgentProfile profile =
+                data.agentProfile().named("orch-sweep-profile").create();
+        var user = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
+
+        var wf = new ai.myrmec.engine.workflow.Workflow();
+        wf.setProject(project);
+        wf.setName("orch-sweep-wf-" + System.nanoTime());
+        wf.setSteps(java.util.List.<java.util.Map<String, Object>>of());
+        wf.setVersion(1);
+        wf.setStatus(ai.myrmec.engine.workflow.WorkflowStatus.PUBLISHED);
+        wf.setCreatedBy(user);
+        wf = workflowRepository.save(wf);
+
+        var req = new ai.myrmec.engine.workflow.WorkflowRequest();
+        req.setWorkflow(wf);
+        req.setWorkflowVersion(1);
+        req.setInput(java.util.Map.of());
+        req.setStatus(ai.myrmec.engine.workflow.RequestStatus.PAUSED);
+        req.setBranch("myrmec/orch-sweep");
+        req.setCreatedBy(user);
+        req.setCreatedAt(Instant.now());
+        req = requestRepository.save(req);
+
+        var task = new ai.myrmec.engine.workflow.WorkflowTask();
+        task.setRequest(req);
+        task.setStepId("build");
+        task.setAgentProfile(profile);
+        task.setInput(java.util.Map.of());
+        task.setStatus(ai.myrmec.engine.workflow.TaskStatus.PAUSED);
+        task.setAttempt(1);
+        task.setMaxRetries(1);
+        task.setPauseState("ORCH_REVIEW");
+        task.setPausedAt(Instant.now());
+        task.setApprovalStatus("PENDING");
+        task.setApprovalRequestedAt(Instant.now());
+        task.setApprovalExpiresAt(approvalExpiresAt);
+        task.setApprovalPayload(java.util.Map.of(
+                "approvalRequestId", UUID.randomUUID().toString(),
+                "stateDigest", "b".repeat(64),
+                "action", java.util.Map.of(
+                        "actionId", "action-1", "type", "WORKER_TOOL",
+                        "riskClass", "DESTRUCTIVE", "summary", "worker:impl:edit",
+                        "digest", "a".repeat(64))));
+        var output = new java.util.HashMap<String, Object>();
+        output.put("summary", "suspended");
+        output.put("suspension", java.util.Map.of(
+                "continuationId", "cont-sweep",
+                "continuationRef", "local:cont-sweep",
+                "snapshotTreeHash", "c".repeat(40),
+                "workspaceRevision", 2,
+                "stateDigest", "b".repeat(64),
+                "reason", "HITL_APPROVAL"));
+        task.setOutput(output);
+        task = workflowTaskRepository.save(task);
+
+        var attempt = task.createAttempt(null);
+        attempt.setStatus(ai.myrmec.engine.workflow.AttemptStatus.PAUSED);
+        attemptRepository.save(attempt);
+
+        return new SeededTask(task.getId());
+    }
+
+    record SeededTask(UUID taskId) {}
 
     private ConversationSubscriber stubSubscriber(BlockingQueue<String> outbound) {
         return new ConversationSubscriber() {
