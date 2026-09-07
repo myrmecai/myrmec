@@ -2491,7 +2491,8 @@ export type MyApprovalSource = 'EXECUTION' | 'CONVERSATION'
 /** One pending decision in the My Work Approvals tab. */
 export interface MyApprovalRow {
   messageId: string
-  conversationId: string
+  /** Null for EXECUTION-source approvals (no conversation context). */
+  conversationId: string | null
   projectId: string
   projectName: string | null
   source: MyApprovalSource
@@ -2558,4 +2559,29 @@ export const myWorkApi = {
     api.get<MyApprovalRow[]>(`/my-work/approvals${myWorkQueryString(opts)}`),
   archived: (opts?: Pick<MyWorkQuery, 'projectIds' | 'type' | 'q'>) =>
     api.get<MyArchivedRow[]>(`/my-work/archived${myWorkQueryString(opts)}`),
+}
+
+/** Response of POST /approvals/{id}/decide — the applied decision. */
+export interface ApprovalDecisionResponse {
+  source: 'CONVERSATION' | 'EXECUTION'
+  approvalId: string
+  decision: string
+}
+
+export const approvalsApi = {
+  /**
+   * §17.4/§16.6: submit a human decision (APPROVED/REJECTED) through the
+   * unified approvals endpoint. An EXECUTION-source approval (workflow
+   * orchestration / ORCH_REVIEW task) is decided by exactly the
+   * triggering user — the engine's decide path enforces that gate.
+   */
+  decide: (
+    approvalId: string,
+    decision: 'APPROVED' | 'REJECTED',
+    comment?: string,
+  ) =>
+    api.post<ApprovalDecisionResponse>(`/approvals/${approvalId}/decide`, {
+      decision,
+      comment: comment ?? null,
+    }),
 }

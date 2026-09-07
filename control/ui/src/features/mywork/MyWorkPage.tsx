@@ -7,6 +7,7 @@ import {
   myWorkApi,
   projectsApi,
   conversationsApi,
+  approvalsApi,
   type MyApprovalRow,
   type MyArchivedRow,
   type MyAssistantRow,
@@ -366,7 +367,13 @@ function ApprovalsTab({ scope }: { scope: string[] | undefined }) {
   })
 
   const decide = useMutation({
-    mutationFn: ({
+    // §17.4: route by source — a CONVERSATION approval posts to the
+    // conversation's decision endpoint; an EXECUTION approval (workflow
+    // orchestration / ORCH_REVIEW task) posts to the unified approvals
+    // endpoint, where the engine's decide path applies the §16.6 tuple
+    // under the triggering-user gate. The endpoints return different
+    // bodies — only the invalidated queries matter afterwards.
+    mutationFn: async ({
       row,
       decision,
       comment,
@@ -374,13 +381,18 @@ function ApprovalsTab({ scope }: { scope: string[] | undefined }) {
       row: MyApprovalRow
       decision: 'APPROVED' | 'REJECTED'
       comment?: string
-    }) =>
-      conversationsApi.submitApprovalDecision(
-        row.conversationId,
+    }): Promise<void> => {
+      if (row.source === 'EXECUTION') {
+        await approvalsApi.decide(row.messageId, decision, comment)
+        return
+      }
+      await conversationsApi.submitApprovalDecision(
+        row.conversationId!,
         row.messageId,
         decision,
         comment,
-      ),
+      )
+    },
     onSuccess: () => {
       setRejectWithCommentRow(null)
       setRejectComment('')
@@ -461,10 +473,20 @@ function ApprovalsTab({ scope }: { scope: string[] | undefined }) {
                       size="sm"
                       variant="ghost"
                       onClick={() =>
-                        navigate({
-                          to: '/projects/$projectId/chat',
-                          params: { projectId: r.projectId },
-                        })
+                        r.source === 'CONVERSATION'
+                          ? navigate({
+                              to: '/projects/$projectId/chat',
+                              params: { projectId: r.projectId },
+                            })
+                          : navigate({
+                              to: '/workflows',
+                              search: { projectId: [r.projectId] },
+                            })
+                      }
+                      title={
+                        r.source === 'CONVERSATION'
+                          ? 'Open conversation'
+                          : 'Open the project workflows'
                       }
                     >
                       <ExternalLink className="h-4 w-4" />

@@ -5,6 +5,7 @@ import ai.myrmec.engine.conversation.ConversationMessage;
 import ai.myrmec.engine.workflow.WorkflowTask;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -58,6 +59,23 @@ public record MyApprovalRow(
 
     /** Build an execution-sourced approval row from a DESTRUCTIVE tool call awaiting approval. */
     public static MyApprovalRow fromExecution(WorkflowTask task, String projectName) {
+        // §17.4: the governed pending action's summary reads best — the
+        // worker:purpose identity of the suspended invocation; fall back
+        // to the request-id label the ingestion path stamped, then the
+        // step id.
+        Object actionSummary = null;
+        if (task.getApprovalPayload() != null
+                && task.getApprovalPayload().get("action") instanceof Map<?, ?> action) {
+            actionSummary = action.get("summary");
+        }
+        String summary = actionSummary != null
+                ? String.valueOf(actionSummary)
+                : (task.getApprovalPayload() != null
+                        ? (String) task.getApprovalPayload().get("summary")
+                        : null);
+        if (summary == null) {
+            summary = task.getStepId();
+        }
         return new MyApprovalRow(
                 task.getId(),
                 null, // no conversation context for execution approvals
@@ -65,7 +83,7 @@ public record MyApprovalRow(
                 projectName,
                 Source.EXECUTION,
                 null, // no assistant context
-                (String) (task.getApprovalPayload() != null ? task.getApprovalPayload().get("summary") : task.getStepId()),
+                summary,
                 null, // payloadJson not used for execution; approval_payload is JSONB
                 // §17.4: the triggering user (request createdBy) — the one
                 // human who may decide this approval.
