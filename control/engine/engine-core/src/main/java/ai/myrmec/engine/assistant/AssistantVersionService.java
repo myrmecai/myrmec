@@ -10,7 +10,6 @@ import ai.myrmec.engine.knowledge.KnowledgeProviderRepository;
 import ai.myrmec.engine.tool.Tool;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.hibernate.Hibernate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,6 +42,7 @@ public class AssistantVersionService {
     private final AssistantVersionRepository versionRepository;
     private final AssistantRepository assistantRepository;
     private final AgentProfileRepository agentProfileRepository;
+    private final ai.myrmec.engine.agent.AgentProfileVersionService agentProfileVersionService;
     private final KnowledgeProviderRepository knowledgeProviderRepository;
 
     // ==================== Draft creation ====================
@@ -158,6 +158,12 @@ public class AssistantVersionService {
             throw new BadRequestException("This assistant cannot be published yet.", failures);
         }
 
+        // §4.2/§5.6 (archived assistant-entity.md): stamp the bound Profile's
+        // currently published version — "Required Published version at publish
+        // time". The gate below guarantees it exists.
+        draft.setAgentProfileVersionId(
+                agentProfileVersionService.requirePublished(draft.getAgentProfileId()).getId());
+
         // No-op re-publish (§5.2) — only meaningful once a baseline exists.
         if (previous != null && !versionRowDiffers(draft, previous)) {
             throw new BadRequestException("No changes to publish.");
@@ -210,8 +216,9 @@ public class AssistantVersionService {
                             "Name is required and must be unique in this project.")));
         }
 
-        // brain: profile set, exists, ACTIVE (≈ published). Profile versioning is a
-        // forward seam today (AgentProfile is flat) — see agent-profile-model.md.
+        // brain: profile set, exists, ACTIVE, and has a published version
+        // (§4.2 — agent_profile_version_id is "Required Published version at
+        // publish time"; AgentProfile is versioned since F0).
         AgentProfile profile = null;
         if (draft.getAgentProfileId() == null) {
             failures.add(ValidationDetail.of("agentProfileId", "REQUIRED", "Pick a published agent profile."));
@@ -220,6 +227,9 @@ public class AssistantVersionService {
             if (profile == null || profile.getStatus() != AgentProfile.Status.ACTIVE) {
                 failures.add(ValidationDetail.of("agentProfileId", "INVALID_VALUE",
                         "Pick a published agent profile."));
+            } else if (agentProfileVersionService.findPublished(profile.getId()).isEmpty()) {
+                failures.add(ValidationDetail.of("agentProfileId", "INVALID_VALUE",
+                        "This agent profile has no published version yet. Publish the profile first."));
             }
         }
 
@@ -261,15 +271,18 @@ public class AssistantVersionService {
                             + String.join(", ", unavailableKbs) + "."));
         }
 
-        // tools: every disabled tool must belong to the profile.
+        // tools: every disabled tool must belong to the profile's published
+        // version (§16.1: the tool set lives on the version row).
         // NOTE: the `assistant_disable_allowed=TRUE` half of the gate is deferred —
         // the agent_profile_tools junction attribute is not mapped yet and the
         // column defaults TRUE, so nothing is locked today (#92 follow-up).
         if (profile != null && draft.getDisabledTools() != null && !draft.getDisabledTools().isEmpty()) {
-            Hibernate.initialize(profile.getTools());
-            Set<String> profileToolCodes = profile.getTools().stream()
-                    .map(Tool::getCode)
-                    .collect(Collectors.toSet());
+            Set<String> profileToolCodes = agentProfileVersionService.findPublished(profile.getId())
+                    .map(ai.myrmec.engine.agent.AgentProfileVersion::getTools)
+                    .map(tools -> tools.stream()
+                            .map(Tool::getCode)
+                            .collect(Collectors.toSet()))
+                    .orElse(Set.of());
             for (String code : draft.getDisabledTools()) {
                 if (!profileToolCodes.contains(code)) {
                     failures.add(ValidationDetail.of("disabledTools", "INVALID_VALUE",

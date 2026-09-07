@@ -14,11 +14,12 @@
         clean createTable definitions reflecting the FINAL table structure.
 
         Notes:
-        - supported_tools on agent_profiles is deprecated (kept for
-          backward compat); the canonical tool list is agent_profile_tools.
-        - system_prompt, interaction_mode, addendum_allowed were added by
-          later addColumn changesets and are included in the initial
-          createTable.
+        - Agent Profile is a versioned resource (design §16.1): Zone 1
+          identity/admin fields live on agent_profiles; the complete
+          Zone 2 behaviour contract (system prompt, capabilities, tools,
+          default model, interaction mode, orchestration policy) lives
+          on immutable agent_profile_versions rows via Draft→Publish.
+        - agent_profile_tools is keyed to the VERSION, not the parent.
         - agent_hosts.control_node_id and agents.home_node_id were added
           by the node-registry slice and are included here.
         - agents.state_changed_at was added by a later addColumn changeset
@@ -60,7 +61,8 @@
     </changeSet>
 
     <!-- ================================================================
-         agent_profiles
+         agent_profiles (Zone 1: identity + administrative fields —
+         design §16.1; the behaviour contract lives on versions)
          ================================================================ -->
     <changeSet id="003-agents-create-agent-profiles" author="myrmec">
         <preConditions onFail="MARK_RAN">
@@ -77,14 +79,6 @@
                 <constraints nullable="false" unique="true" uniqueConstraintName="uk_agent_profiles_name"/>
             </column>
             <column name="description" type="text"/>
-            <column name="capabilities" type="text" defaultValue="[]">
-                <constraints nullable="false"/>
-            </column>
-            <column name="supported_tools" type="text" defaultValue="[]">
-                <constraints nullable="false"/>
-            </column>
-            <column name="default_model" type="varchar(50)"/>
-            <column name="system_prompt" type="text"/>
             <column name="is_system" type="boolean" defaultValueBoolean="false">
                 <constraints nullable="false"/>
             </column>
@@ -92,9 +86,6 @@
                 <constraints nullable="false"/>
             </column>
             <column name="status" type="varchar(20)" defaultValue="ACTIVE">
-                <constraints nullable="false"/>
-            </column>
-            <column name="interaction_mode" type="varchar(20)" defaultValue="ONE_SHOT">
                 <constraints nullable="false"/>
             </column>
             <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
@@ -109,7 +100,77 @@
     </changeSet>
 
     <!-- ================================================================
-         agent_profiles
+         agent_profile_versions (Zone 2: the immutable behaviour contract —
+         DRAFT → PUBLISHED → ARCHIVED lifecycle; orchestration policy
+         fields are nullable/inert for conversation profiles until
+         orchestration consumes them; budget ceilings are deliberately
+         absent — spend governance is the engine quota system's job)
+         ================================================================ -->
+    <changeSet id="003-agents-create-agent-profile-versions" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="agent_profile_versions"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="agent_profile_versions">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="profile_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="version_number" type="integer">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="DRAFT">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Zone 2 behaviour contract -->
+            <column name="capabilities" type="text" defaultValue="[]">
+                <constraints nullable="false"/>
+            </column>
+            <column name="default_model" type="varchar(50)"/>
+            <column name="system_prompt" type="text"/>
+            <column name="interaction_mode" type="varchar(20)" defaultValue="ONE_SHOT">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Orchestration policy (§7 ExecutionPolicy source of truth) -->
+            <column name="command_templates" type="text"/>
+            <column name="approval_policy" type="text"/>
+            <column name="required_isolation" type="varchar(30)"/>
+            <column name="git_policy" type="text"/>
+            <column name="workspace_retention_seconds" type="integer"/>
+            <column name="published_at" type="timestamp with time zone"/>
+            <column name="published_by" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="agent_profile_versions"
+            baseColumnNames="profile_id"
+            referencedTableName="agent_profiles"
+            referencedColumnNames="id"
+            constraintName="fk_agent_profile_versions_profile"
+            onDelete="CASCADE"/>
+
+        <addUniqueConstraint
+            tableName="agent_profile_versions"
+            columnNames="profile_id, version_number"
+            constraintName="uk_agent_profile_versions_profile_number"/>
+
+        <createIndex tableName="agent_profile_versions"
+                     indexName="idx_agent_profile_versions_profile">
+            <column name="profile_id"/>
+            <column name="version_number"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         agent_profile_tools (keyed to the VERSION — design §16.1:
+         the tool set is part of the behaviour contract)
          ================================================================ -->
     <changeSet id="003-agents-create-agent-profile-tools" author="myrmec">
         <preConditions onFail="MARK_RAN">
@@ -119,7 +180,7 @@
         </preConditions>
 
         <createTable tableName="agent_profile_tools">
-            <column name="profile_id" type="uuid">
+            <column name="profile_version_id" type="uuid">
                 <constraints nullable="false"/>
             </column>
             <column name="tool_code" type="varchar(50)">
@@ -128,15 +189,15 @@
         </createTable>
 
         <addPrimaryKey tableName="agent_profile_tools"
-                       columnNames="profile_id, tool_code"
+                       columnNames="profile_version_id, tool_code"
                        constraintName="pk_agent_profile_tools"/>
 
         <addForeignKeyConstraint
             baseTableName="agent_profile_tools"
-            baseColumnNames="profile_id"
-            referencedTableName="agent_profiles"
+            baseColumnNames="profile_version_id"
+            referencedTableName="agent_profile_versions"
             referencedColumnNames="id"
-            constraintName="fk_agent_profile_tools_profile"
+            constraintName="fk_agent_profile_tools_version"
             onDelete="CASCADE"/>
 
         <createIndex tableName="agent_profile_tools" indexName="idx_agent_profile_tools_tool_code">
@@ -290,6 +351,26 @@
         <createIndex tableName="agents" indexName="idx_agents_home_node">
             <column name="home_node_id"/>
         </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         Host session-credential PSK (design §16.1/§17.2 — Feature 10).
+
+         At Host registration the engine generates a 32-byte pre-shared
+         key + keyId, returns it ONCE in the registration response over
+         TLS, and stores only this EncryptionService-encrypted copy.
+         sessionKey = HKDF-SHA256(PSK, sessionId) on both sides; no key
+         material crosses the wire after registration.
+         ================================================================ -->
+    <changeSet id="003-agents-hosts-psk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="agent_hosts"/>
+            <not><columnExists tableName="agent_hosts" columnName="psk_key_id"/></not>
+        </preConditions>
+        <addColumn tableName="agent_hosts">
+            <column name="psk_key_id" type="varchar(64)"/>
+            <column name="psk_encrypted" type="bytea"/>
+        </addColumn>
     </changeSet>
 
 </databaseChangeLog>

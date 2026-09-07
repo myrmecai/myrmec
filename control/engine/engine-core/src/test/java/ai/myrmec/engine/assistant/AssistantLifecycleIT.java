@@ -42,6 +42,9 @@ class AssistantLifecycleIT extends IntegrationTestBase {
     private AssistantVersionRepository versionRepository;
 
     @Autowired
+    private ai.myrmec.engine.agent.AgentProfileVersionService agentProfileVersionService;
+
+    @Autowired
     private AssistantGrantRepository grantRepository;
 
     @Test
@@ -77,6 +80,20 @@ class AssistantLifecycleIT extends IntegrationTestBase {
 
         Assistant assistant = assistantRepository.findById(fx.assistantId).orElseThrow();
         assertThat(assistant.getCurrentVersionId()).isEqualTo(published.getId());
+    }
+
+    @Test
+    void publishStampsPinnedProfileVersion() {
+        // §4.2 (archived assistant-entity.md): agent_profile_version_id is a
+        // "Required Published version at publish time" — publish stamps the
+        // bound Profile's currently published version row.
+        Fixture fx = newAssistant();
+
+        AssistantVersion published = versionService.publish(fx.assistantId, TEST_ADMIN_ID);
+
+        assertThat(published.getAgentProfileVersionId()).isNotNull();
+        assertThat(published.getAgentProfileVersionId()).isEqualTo(
+                agentProfileVersionService.requirePublished(fx.profileId).getId());
     }
 
     @Test

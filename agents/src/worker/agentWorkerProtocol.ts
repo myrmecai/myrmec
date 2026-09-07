@@ -59,4 +59,9 @@ export interface AgentWorkerConfig {
   /** Path to a handler module (only used when mode='stub'). The worker
    * dynamically imports this file to load test-specific LLM/tool handlers. */
   stubModulePath?: string;
+  /** Feature 10 (§17.1): workspace root for orchestration runs. Runs live
+   * at <root>/runs/<runId>/<generation>/checkout. */
+  workspaceRoot?: string;
+  /** Feature 10 (§16.3): durable outbox root (agent-local). */
+  outboxRoot?: string;
 }

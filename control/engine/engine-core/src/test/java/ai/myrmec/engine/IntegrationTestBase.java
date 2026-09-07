@@ -134,10 +134,30 @@ public abstract class IntegrationTestBase {
     protected ai.myrmec.engine.agent.AgentProfileRepository agentProfileRepository;
 
     @Autowired
+    protected ai.myrmec.engine.agent.AgentProfileVersionRepository agentProfileVersionRepository;
+
+    @Autowired
     protected ai.myrmec.engine.agent.AgentHostRepository agentHostRepository;
 
     @Autowired
     protected ai.myrmec.engine.agent.AgentRepository agentRepository;
+
+    // Workflow graph repositories (cleanup FK order: attempts → events →
+    // tasks → requests → workflows).
+    @Autowired
+    protected ai.myrmec.engine.workflow.TaskAttemptRepository taskAttemptRepository;
+    @Autowired
+    protected ai.myrmec.engine.workflow.ExecutionEventRepository executionEventRepository;
+    @Autowired
+    protected ai.myrmec.engine.workflow.WorkflowTaskRepository workflowTaskRepository;
+    @Autowired
+    protected ai.myrmec.engine.workflow.WorkflowRequestRepository workflowRequestRepository;
+    @Autowired
+    protected ai.myrmec.engine.workflow.WorkflowRepository workflowRepository;
+    @Autowired
+    protected ai.myrmec.engine.workflow.OrchestrationRunRepository orchestrationRunRepository;
+    @Autowired
+    protected ai.myrmec.engine.workflow.OrchestrationDispatchRepository orchestrationDispatchRepository;
 
     /**
      * Test admin - retrieved or created for E2E tests.
@@ -193,6 +213,14 @@ public abstract class IntegrationTestBase {
         agentHostRepository.deleteAllInBatch();
         // agents reference agent_hosts(id); clear before agent_hosts.
         agentRepository.deleteAllInBatch();
+        // Workflow tables reference agent_profiles(id) via workflow_tasks;
+        // clear the whole workflow graph before profiles.
+        executionEventCleanup();
+        // agent_profile_versions reference agent_profiles(id) and own the
+        // re-keyed agent_profile_tools junction (both CASCADE); clear
+        // versions before profiles so the raw batch deletes never trip
+        // the NOT NULL child FK.
+        agentProfileVersionRepository.deleteAllInBatch();
         // agent_profiles are referenced by assistants and agent_hosts; clear after both.
         agentProfileRepository.deleteAllInBatch();
         // project_settings, project_provider_bindings,
@@ -208,6 +236,22 @@ public abstract class IntegrationTestBase {
         TEST_ADMIN_ID = userRepository.findByEmail(TEST_ADMIN_EMAIL)
                 .map(User::getId)
                 .orElseGet(this::createTestAdmin);
+    }
+
+    /**
+     * Clear the workflow graph before profiles/projects: dispatches →
+     * runs → attempts → events → tasks → requests → workflows (FK
+     * dependency order — orchestration tables own requests, so they go
+     * first).
+     */
+    private void executionEventCleanup() {
+        orchestrationDispatchRepository.deleteAllInBatch();
+        orchestrationRunRepository.deleteAllInBatch();
+        taskAttemptRepository.deleteAllInBatch();
+        executionEventRepository.deleteAllInBatch();
+        workflowTaskRepository.deleteAllInBatch();
+        workflowRequestRepository.deleteAllInBatch();
+        workflowRepository.deleteAllInBatch();
     }
 
     /**

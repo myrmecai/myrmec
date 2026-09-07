@@ -117,7 +117,19 @@ export function AgentProfilesList() {
       header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Name" />,
       cell: ({ row }) => (
         <div>
-          <div className="font-medium">{row.original.name}</div>
+          <div className="font-medium">
+            {row.original.name}
+            {/* §16.1 version banner — the published version is what runs */}
+            {row.original.publishedVersionNumber != null ? (
+              <Badge variant="outline" className="ml-2 text-xs font-mono">
+                v{row.original.publishedVersionNumber}
+              </Badge>
+            ) : (
+              <Badge variant="destructive" className="ml-2 text-xs">
+                unpublished
+              </Badge>
+            )}
+          </div>
           {row.original.description && (
             <div className="text-xs text-muted-foreground truncate max-w-[200px]">
               {row.original.description}

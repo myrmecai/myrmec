@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -34,21 +35,29 @@ class CapabilityMatchContractTest extends IntegrationTestBase {
     private AgentHostRepository agentHostRepository;
 
     @Autowired
+    private AgentProfileService agentProfileService;
+
+    @Autowired
     private AgentProfileRepository agentProfileRepository;
 
-    @Test
-    @DisplayName("AgentProfile.capabilities field is stored and readable")
-    void profileCapabilitiesStored() {
-        // Create a profile with capabilities
-        AgentProfile profile = new AgentProfile();
-        profile.setName("recon05-profile-" + System.nanoTime());
-        profile.setCapabilities(List.of("python:>=3.11", "docker"));
-        profile.setStatus(AgentProfile.Status.ACTIVE);
-        agentProfileRepository.save(profile);
+    @Autowired
+    private AgentProfileVersionService agentProfileVersionService;
 
-        var found = agentProfileRepository.findById(profile.getId());
-        assertThat(found).isPresent();
-        assertThat(found.get().getCapabilities())
+    @Test
+    @DisplayName("AgentProfile capabilities are stored on the published version (§16.1)")
+    void profileCapabilitiesStored() {
+        // Create a profile — createProfile publishes version 1 with the
+        // declared capabilities (Zone 2 behaviour contract lives on the
+        // immutable version row).
+        AgentProfile profile = agentProfileService.createProfile(
+                "recon05-profile-" + System.nanoTime(),
+                "RECON-05 capability contract profile",
+                List.of("python:>=3.11", "docker"),
+                null, null, null, null);
+
+        var published = agentProfileVersionService.findPublished(profile.getId());
+        assertThat(published).isPresent();
+        assertThat(published.get().getCapabilities())
                 .containsExactly("python:>=3.11", "docker");
     }
 

@@ -26,6 +26,7 @@ import type { SessionOpenPayload, InferenceAssignPayload, InferenceCancelPayload
 import type { ChatModelFactory, SessionToolFactory } from "../executor/providers.js";
 import type { EngineHttpClient } from "../transport/httpClient.js";
 import type { WorkerInbound, WorkerOutbound } from "./agentWorkerProtocol.js";
+import { AgentOrchestrationExecutor } from "./AgentOrchestrationExecutor.js";
 
 export interface AgentWorkerOptions {
   /** Emit a frame back to the Supervisor for routing (the worker's only sink). */
@@ -41,11 +42,18 @@ export interface AgentWorkerOptions {
   /** Current agent access token for auth on RPC calls. Optional. */
   agentAccessToken?: string;
   logger?: Logger;
+  /** Feature 10 (§17.1): workspace root for orchestration runs. Required
+   * for orchestration dispatches; absent → orchestration assigns fail
+   * closed with ASSIGNMENT_VALIDATION_ERROR. */
+  workspaceRoot?: string;
+  /** Feature 10 (§16.3): durable outbox root. */
+  outboxRoot?: string;
 }
 
 export class AgentWorker {
   private readonly sessions: SessionRegistry;
   private readonly inference: InferenceExecutor;
+  private readonly orchestration: AgentOrchestrationExecutor | null;
   private readonly log: Logger;
 
   constructor(options: AgentWorkerOptions) {
@@ -61,6 +69,19 @@ export class AgentWorker {
       sessionToolFactory: options.sessionToolFactory,
       logger: this.log,
     });
+
+    // Feature 10 (§16.3/§17.1): the orchestration dispatch handler — only
+    // constructed when the Host configured a workspace root. Without one,
+    // an orchestration assign fails closed (the runner never executes).
+    this.orchestration = options.workspaceRoot
+      ? new AgentOrchestrationExecutor({
+          workspaceRoot: options.workspaceRoot,
+          outboxRoot: options.outboxRoot ?? `${options.workspaceRoot}/outbox`,
+          chatModelFactory: options.chatModelFactory,
+          send: (frame) => void send(frame),
+          logger: this.log,
+        })
+      : null;
 
     // HITL approval coordinator — emits approval.request frames over the
     // worker's send sink and blocks until the matching approval.decision
@@ -104,10 +125,10 @@ export class AgentWorker {
         this.handleSessionClose(frame.payload);
         return;
       case MessageType.INFERENCE_ASSIGN:
-        this.inference.handleAssign(frame.payload as InferenceAssignPayload);
+        await this.handleInferenceAssign(frame.payload as InferenceAssignPayload);
         return;
       case MessageType.INFERENCE_CANCEL:
-        this.inference.handleCancel(frame.payload as InferenceCancelPayload);
+        this.handleInferenceCancel(frame.payload as InferenceCancelPayload);
         return;
       case MessageType.APPROVAL_DECISION:
         // Approval decisions are routed to the InferenceExecutor's
@@ -120,9 +141,58 @@ export class AgentWorker {
       case MessageType.AGENT_RELEASE:
         this.handleRelease(frame.payload);
         return;
+      // ── Feature 10: orchestration (§16.3) ──
+      case MessageType.ORCHESTRATION_RELEASE:
+        await this.orchestration?.handleRelease(frame.payload as {
+          releaseId: string;
+          runId: string;
+          workspaceGeneration: number;
+          reason?: string;
+        });
+        return;
+      case MessageType.ORCHESTRATION_BUDGET_UPDATED:
+        // §16.3 tighten-only: V1 records the frame; enforcement lands with
+        // the quota loop's dispatch-allowance wiring.
+        this.log.debug("orchestration.budget_updated received");
+        return;
       default:
         this.log.warn("AgentWorker: unhandled frame type", frame.type);
     }
+  }
+
+  /**
+   * `inference.assign` — one dispatch. An orchestration payload routes to
+   * the orchestration executor (§16.3); ordinary inference keeps the
+   * existing executor path unchanged.
+   */
+  private async handleInferenceAssign(payload: InferenceAssignPayload): Promise<void> {
+    const orchestration = (
+      payload as unknown as { orchestration?: unknown; assignmentDigest?: string }
+    ).orchestration;
+    if (orchestration !== undefined && orchestration !== null) {
+      if (!this.orchestration) {
+        this.log.warn(
+          "orchestration assign received without a workspace root — failing closed",
+        );
+        return;
+      }
+      await this.orchestration.handleAssign({
+        requestId: payload.requestId,
+        sessionId: payload.sessionId,
+        orchestration,
+        assignmentDigest: (
+          payload as unknown as { assignmentDigest?: string }
+        ).assignmentDigest,
+      });
+      return;
+    }
+    this.inference.handleAssign(payload);
+  }
+
+  /** `inference.cancel` — routes to whichever executor owns the dispatch. */
+  private handleInferenceCancel(payload: InferenceCancelPayload): void {
+    this.orchestration?.handleCancel(payload as { attemptId?: string; requestId?: string });
+    this.inference.handleCancel(payload as InferenceCancelPayload);
   }
 
   /**

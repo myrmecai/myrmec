@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * Conversation rewire tests for the Assistant entity (#92,
  * {@code docs/design/assistant-entity.md} §5.6): starting a conversation with
  * an {@code assistantId} pins the assistant's currently published version (and
- * the forward-seam profile version) onto the conversation under a row lock.
+ * its stamped profile version) onto the conversation under a row lock.
  */
 @Transactional
 class ConversationAssistantPinningIT extends IntegrationTestBase {
@@ -39,6 +39,12 @@ class ConversationAssistantPinningIT extends IntegrationTestBase {
     @Autowired
     private AssistantVersionService versionService;
 
+    @Autowired
+    private ai.myrmec.engine.agent.AgentProfileService agentProfileService;
+
+    @Autowired
+    private ai.myrmec.engine.agent.AgentProfileVersionService agentProfileVersionService;
+
     @Test
     void createConversationPinsPublishedAssistantVersion() {
         Project project = data.project().named("conv-pin").create();
@@ -52,8 +58,44 @@ class ConversationAssistantPinningIT extends IntegrationTestBase {
 
         assertThat(conversation.getAssistantId()).isEqualTo(assistant.getId());
         assertThat(conversation.getAssistantVersionId()).isEqualTo(published.getId());
-        // Forward seam — AgentProfile versioning not yet implemented.
-        assertThat(conversation.getAgentProfileVersionId()).isNull();
+        // §4.2/§5.6: publish stamps the bound Profile's published version and
+        // the conversation pins it — the real version row ID, immutable for
+        // the life of the session.
+        assertThat(published.getAgentProfileVersionId()).isNotNull();
+        assertThat(conversation.getAgentProfileVersionId())
+                .isEqualTo(published.getAgentProfileVersionId());
+    }
+
+    @Test
+    void profileRepublishDoesNotAffectPinnedSession() {
+        Project project = data.project().named("conv-repub").create();
+        AgentProfile profile = data.agentProfile().named("conv-repub-profile")
+                .withSystemPrompt("v1 prompt").create();
+        Assistant assistant = assistantService.createAssistant(
+                project.getId(), "Republish Assistant", "desc", profile.getId(), TEST_ADMIN_ID);
+        AssistantVersion published = versionService.publish(assistant.getId(), TEST_ADMIN_ID);
+
+        Conversation conversation = conversationService.createConversation(
+                project.getId(), TEST_ADMIN_ID, "chat", null, null, assistant.getId());
+        UUID pinnedProfileVersionId = conversation.getAgentProfileVersionId();
+
+        // The Profile republishes a new version AFTER the session pinned v1.
+        // (defaultModel lives on the version row — resolve the pinned one.)
+        String defaultModel = agentProfileVersionService
+                .requirePublished(profile.getId()).getDefaultModel();
+        agentProfileService.updateProfile(profile.getId(), profile.getName(),
+                profile.getDescription(), java.util.List.of("docker"), null, null,
+                "v2 prompt", defaultModel);
+
+        // The live session keeps its pinned version content (§16.1: later
+        // publishes never affect an in-flight session).
+        assertThat(conversation.getAgentProfileVersionId()).isEqualTo(pinnedProfileVersionId);
+        assertThat(published.getAgentProfileVersionId()).isEqualTo(pinnedProfileVersionId);
+        // and the profile's NEW published version is a different row
+        var currentPublished = agentProfileVersionService.findPublished(profile.getId());
+        assertThat(currentPublished).isPresent();
+        assertThat(currentPublished.get().getId()).isNotEqualTo(pinnedProfileVersionId);
+        assertThat(currentPublished.get().getSystemPrompt()).isEqualTo("v2 prompt");
     }
 
     @Test

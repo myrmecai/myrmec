@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+
+/**
+ * Orchestration package entry point. The runner, tools, and workspace
+ * components land in later features; this first slice freezes the DSL
+ * schema and the compiled assignment contract.
+ */
+export * from "./types.js";
+export {
+  ORCHESTRATION_RESULT_NS,
+  ORCHESTRATION_EVENT_NS,
+  ORCHESTRATION_SCHEDULING_NS,
+  WORKSPACE_ACK_NS,
+  uuidV5,
+} from "./constants.js";
+export {
+  workflowDefinitionSchema,
+  orchestrationAssignmentSchema,
+  compileStepAssignment,
+  createCredentialScope,
+  type CompileStepAssignmentInput,
+  type CredentialScope,
+} from "./schema.js";
+export { OrchestrationRunner, type OrchestrationRunnerOptions, type OrchestrationRunOptions } from "./OrchestrationRunner.js";
+export { WorkerInvoker, normalizeUsage, type WorkerInvokerOptions, type InvokeWorkerOutcome } from "./WorkerInvoker.js";
+export {
+  InMemoryVerificationLedger,
+  toVerifierResult,
+  type VerificationLedger,
+  type VerdictRecord,
+} from "./VerificationLedger.js";
+export type { CheckoutHandle, StepWorkspace, WorkspaceManager, WorkspaceScope } from "../workspace/WorkspaceManager.js";
+export { GitWorkspaceManager, GitWorkspaceScope, WorkspaceError, confinePath } from "../workspace/GitWorkspaceManager.js";
+export type { WorkspaceInspector, CandidateTree } from "../workspace/WorkspaceInspector.js";
+export { GitWorkspaceInspector } from "../workspace/WorkspaceInspector.js";
+export {
+  GitCheckpointService,
+  RemotePublisher,
+  validateCommitMessage,
+  checkpointIdempotencyKey,
+  type CheckpointOutcome,
+  type GitCheckpointServiceOptions,
+} from "../workspace/GitCheckpointService.js";

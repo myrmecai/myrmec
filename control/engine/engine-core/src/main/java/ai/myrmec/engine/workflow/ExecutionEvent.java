@@ -113,6 +113,21 @@ public class ExecutionEvent {
     private LogSource source = LogSource.TASK;
 
     /**
+     * Agent-supplied deterministic orchestration event ID (design §16.3) —
+     * idempotent ingestion key for {@code EventType.ORCHESTRATION} rows;
+     * null for engine-local events.
+     */
+    @Column(name = "source_event_id", updatable = false)
+    private UUID sourceEventId;
+
+    /**
+     * Dispatch-local strictly-monotonic event sequence (design §16.3) —
+     * ordered ingestion within one attempt; null for engine-local events.
+     */
+    @Column(name = "sequence_number")
+    private Long sequenceNumber;
+
+    /**
      * When this event occurred.
      */
     @Column(name = "created_at", nullable = false, updatable = false)

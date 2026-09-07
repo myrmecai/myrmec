@@ -107,6 +107,19 @@ public class AgentHost {
     @Column(name = "control_node_id", length = 255)
     private String controlNodeId;
 
+    /**
+     * Session-credential PSK identity (design §16.1/§17.2 — Feature 10).
+     * The engine generates a 32-byte PSK with this keyId at Host
+     * registration and returns it ONCE in the creation response over TLS;
+     * only the EncryptionService-encrypted copy persists.
+     */
+    @Column(name = "psk_key_id", length = 64)
+    private String pskKeyId;
+
+    /** At-rest-encrypted PSK (never the raw key after creation). */
+    @Column(name = "psk_encrypted", columnDefinition = "bytea")
+    private byte[] pskEncrypted;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

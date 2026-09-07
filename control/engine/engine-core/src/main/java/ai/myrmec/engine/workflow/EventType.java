@@ -51,5 +51,15 @@ public enum EventType {
      * Data: { knowledgeSourceId, query, topK, hitCount, chunkIds[],
      *         sourceIds[], scores[] }
      */
-    RETRIEVAL
+    RETRIEVAL,
+
+    /**
+     * Ordered orchestration progress metadata from the Agent (design
+     * §16.3/§21). Idempotently ingested by
+     * {@code OrchestrationEventIngestionService} keyed by the Agent-supplied
+     * deterministic eventId, with a dispatch-local strictly-monotonic
+     * sequence. Data: the redacted §21 event envelope (workerName, callId,
+     * usage, candidateTreeHash, …).
+     */
+    ORCHESTRATION
 }

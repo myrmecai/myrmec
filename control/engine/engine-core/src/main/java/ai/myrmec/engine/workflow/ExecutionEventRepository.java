@@ -19,6 +19,18 @@ public interface ExecutionEventRepository extends JpaRepository<ExecutionEvent, 
     List<ExecutionEvent> findByTaskIdOrderByCreatedAtAsc(UUID taskId);
 
     /**
+     * Idempotent orchestration ingestion (design §16.3): look up an event by
+     * the Agent's deterministic source event ID.
+     */
+    java.util.Optional<ExecutionEvent> findBySourceEventId(UUID sourceEventId);
+
+    /**
+     * Dispatch-local ordering: the event currently holding an
+     * (attempt, sequence) slot, if any.
+     */
+    java.util.Optional<ExecutionEvent> findByAttemptIdAndSequenceNumber(UUID attemptId, Long sequenceNumber);
+
+    /**
      * Find events for a task after a given timestamp (for incremental fetching).
      */
     List<ExecutionEvent> findByTaskIdAndCreatedAtAfterOrderByCreatedAtAsc(UUID taskId, Instant after);

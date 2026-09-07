@@ -130,6 +130,17 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
         ...(process.env.MYRMEC_LLM_EXECUTION ? { chatModelMode: process.env.MYRMEC_LLM_EXECUTION as "stub" | "real" } : {}),
         ...(process.env.MYRMEC_TOOL_EXECUTION ? { sessionToolMode: process.env.MYRMEC_TOOL_EXECUTION as "stub" | "real" } : {}),
         ...(process.env.MYRMEC_STUB_MODULE ? { stubModulePath: process.env.MYRMEC_STUB_MODULE } : {}),
+        // Feature 10 (§17.1/§16.3): orchestration workspace + outbox
+        // roots. Defaults per design §17.1: /tmp/myrmec on POSIX,
+        // %TEMP%\myrmec on Windows.
+        workspaceRoot:
+          process.env.MYRMEC_WORKSPACE_ROOT ??
+          (process.platform === "win32"
+            ? `${process.env.TEMP ?? "C:\\Windows\\Temp"}\\myrmec`
+            : "/tmp/myrmec"),
+        outboxRoot:
+          process.env.MYRMEC_OUTBOX_ROOT ??
+          `${process.env.MYRMEC_WORKSPACE_ROOT ?? (process.platform === "win32" ? `${process.env.TEMP ?? "C:\\Windows\\Temp"}\\myrmec` : "/tmp/myrmec")}/outbox`,
       },
       onExit: (code) =>
         this.log.warn(`Agent worker exited (code=${code}); restart deferred`),

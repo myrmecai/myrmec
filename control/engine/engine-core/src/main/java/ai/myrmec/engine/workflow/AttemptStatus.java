@@ -13,5 +13,7 @@ public enum AttemptStatus {
     /** Attempt was abandoned (connection lost, heartbeat timeout) */
     ABANDONED,
     /** Attempt was skipped by the agent (preconditions not met) */
-    SKIPPED
+    SKIPPED,
+    /** Orchestration suspension awaiting HITL review (design §16.6 — the attempt keeps its signed output immutable) */
+    PAUSED
 }

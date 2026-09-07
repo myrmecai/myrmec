@@ -1,5 +1,6 @@
 package ai.myrmec.engine.workflow;
 
+import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.DuplicateResourceException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine.project.Project;
@@ -13,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -25,6 +27,7 @@ public class WorkflowService {
     private final ProjectRepository projectRepository;
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
+    private final OrchestrationDefinitionValidator orchestrationDefinitionValidator;
 
     @Transactional(readOnly = true)
     public List<WorkflowResponse> findByProject(UUID projectId) {
@@ -109,8 +112,46 @@ public class WorkflowService {
             throw new IllegalStateException("Cannot publish an archived workflow");
         }
 
+        // Feature 10 (§16.1): validate orchestration steps against the
+        // explicit alias bindings + the bound Profile's published version.
+        orchestrationDefinitionValidator.validate(workflow.getSteps(),
+                bindingsToUuidMap(workflow.getOrchestrationBindings()));
+
         workflow.setStatus(WorkflowStatus.PUBLISHED);
         return toResponse(workflowRepository.save(workflow));
+    }
+
+    /**
+     * Set the orchestration Profile bindings (§16.1) — the explicit map from
+     * the workflow-local agentProfileCode alias to an Agent Profile UUID.
+     */
+    @Transactional
+    public WorkflowResponse setOrchestrationBindings(UUID id, Map<String, UUID> bindings) {
+        Workflow workflow = workflowRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Workflow", id.toString()));
+        Map<String, Object> asObjectMap = new HashMap<>();
+        bindings.forEach((alias, profileId) -> asObjectMap.put(alias, profileId.toString()));
+        workflow.setOrchestrationBindings(asObjectMap);
+        return toResponse(workflowRepository.save(workflow));
+    }
+
+    /** Stored JSON map (string values) → typed UUID map for the validator. */
+    private Map<String, UUID> bindingsToUuidMap(Map<String, Object> raw) {
+        if (raw == null || raw.isEmpty()) {
+            return null;
+        }
+        Map<String, UUID> typed = new HashMap<>();
+        raw.forEach((alias, value) -> {
+            if (value != null) {
+                try {
+                    typed.put(alias, UUID.fromString(value.toString()));
+                } catch (IllegalArgumentException e) {
+                    throw new BadRequestException(
+                            "Orchestration binding for '" + alias + "' is not a valid UUID.");
+                }
+            }
+        });
+        return typed;
     }
 
     @Transactional

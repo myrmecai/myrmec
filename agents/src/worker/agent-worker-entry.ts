@@ -61,6 +61,12 @@ const worker = new AgentWorker({
   ...(config.maxImageBytes !== undefined
     ? { maxImageBytes: config.maxImageBytes }
     : {}),
+  ...(config.workspaceRoot !== undefined
+    ? { workspaceRoot: config.workspaceRoot }
+    : {}),
+  ...(config.outboxRoot !== undefined
+    ? { outboxRoot: config.outboxRoot }
+    : {}),
 });
 
 port.on("message", async (message: WorkerInbound) => {

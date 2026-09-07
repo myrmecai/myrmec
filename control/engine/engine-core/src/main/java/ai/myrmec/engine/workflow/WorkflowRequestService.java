@@ -33,6 +33,8 @@ public class WorkflowRequestService {
     private final QuotaPolicyEngine quotaPolicyEngine;
     private final AgentWebSocketHandler webSocketHandler;
     private final TaskAttemptRepository taskAttemptRepository;
+    /** Feature 10 (§16.1): run pinning at request creation. */
+    private final OrchestrationRunService orchestrationRunService;
 
     @Transactional(readOnly = true)
     public List<WorkflowRequestResponse> findByWorkflow(UUID workflowId) {
@@ -103,12 +105,55 @@ public class WorkflowRequestService {
         savedRequest.setBranch(branchName);
         savedRequest = requestRepository.save(savedRequest);
 
+        // Feature 10 (§16.1): an orchestrated workflow pins its run at
+        // request creation — the bound Profile's currently published
+        // version + content digest land on orchestration_runs (id ==
+        // request id). Later Profile publishes never affect the run.
+        // Pure-inference workflows skip this entirely.
+        if (orchestrationRunService != null
+                && OrchestrationRunService.hasOrchestratorStep(workflow.getSteps())) {
+            UUID boundProfileId = resolveBoundProfileId(workflow);
+            orchestrationRunService.pinRun(
+                    savedRequest.getId(),
+                    workflow.getId(),
+                    projectId,
+                    boundProfileId);
+        }
+
         // Create tasks for initial steps (no dependencies)
         createInitialTasks(savedRequest, workflow, request.input());
 
         log.info("Started workflow {} with request {}", workflow.getName(), savedRequest.getId());
 
         return toResponse(savedRequest);
+    }
+
+    /**
+     * The workflow's orchestration binding target: the single workflow-local
+     * agentProfileCode alias bound at publication (§16.1). Falls back to the
+     * first step's agentProfileId when bindings are absent (legacy seeds).
+     */
+    private UUID resolveBoundProfileId(Workflow workflow) {
+        Map<String, Object> bindings = workflow.getOrchestrationBindings();
+        if (bindings != null && !bindings.isEmpty()) {
+            Object any = bindings.values().iterator().next();
+            try {
+                return UUID.fromString(String.valueOf(any));
+            } catch (IllegalArgumentException ignored) {
+                // fall through to the step profile
+            }
+        }
+        List<Map<String, Object>> steps = workflow.getSteps();
+        if (steps != null) {
+            for (Map<String, Object> step : steps) {
+                Object profileId = step.get("agentProfileId");
+                if (profileId != null && !profileId.toString().isBlank()) {
+                    return UUID.fromString(profileId.toString());
+                }
+            }
+        }
+        throw new IllegalStateException(
+                "Orchestrated workflow " + workflow.getId() + " has no bound agent profile.");
     }
 
     /**
@@ -165,7 +210,7 @@ public class WorkflowRequestService {
         task.setAttempt(1);
         // Copy pause mode and max retries from step definition
         task.setPauseMode(parsePauseMode(step.get("pauseMode")));
-        task.setMaxRetries(parseMaxRetries(step.get("maxRetries")));
+        task.setMaxRetries(RetryPolicyParser.maxRetries(step));
 
         taskRepository.save(task);
         log.info("Created task for step {} in request {}", stepId, request.getId());
@@ -201,23 +246,50 @@ public class WorkflowRequestService {
 
                 // For RUNNING tasks, abandon the active attempt and notify the agent.
                 if (task.getStatus() == TaskStatus.RUNNING) {
-                    taskAttemptRepository
-                            .findFirstByTaskIdOrderByAttemptNumberDesc(task.getId())
-                            .ifPresent(attempt -> {
-                                attempt.markAbandoned("Request cancelled by user");
-                                taskAttemptRepository.save(attempt);
-                            });
+                    // Feature 10 (§16.3/§16.6): an orchestration task's
+                    // dispatch cancels through the correlated
+                    // inference.cancel frame (attemptId == dispatchId);
+                    // ordinary inference keeps task.cancel.
+                    boolean orchestrationTask = isOrchestratorStep(
+                            task.getRequest().getWorkflow(), task.getStepId());
+                    if (orchestrationTask) {
+                        taskAttemptRepository
+                                .findFirstByTaskIdOrderByAttemptNumberDesc(task.getId())
+                                .ifPresent(attempt -> {
+                                    attempt.markAbandoned("Request cancelled by user");
+                                    taskAttemptRepository.save(attempt);
+                                    if (task.getAgentInstance() != null) {
+                                        try {
+                                            webSocketHandler.sendInferenceCancel(
+                                                    task.getAgentInstance().getId(),
+                                                    null,
+                                                    task.getId(),
+                                                    attempt.getId());
+                                        } catch (Exception e) {
+                                            log.warn("Failed to send inference.cancel to agent {}: {}",
+                                                    task.getAgentInstance().getId(), e.getMessage());
+                                        }
+                                    }
+                                });
+                    } else {
+                        taskAttemptRepository
+                                .findFirstByTaskIdOrderByAttemptNumberDesc(task.getId())
+                                .ifPresent(attempt -> {
+                                    attempt.markAbandoned("Request cancelled by user");
+                                    taskAttemptRepository.save(attempt);
+                                });
 
-                    // Send task.cancel to the assigned agent (if any).
-                    if (task.getAgentInstance() != null) {
-                        try {
-                            webSocketHandler.cancelTask(
-                                    task.getAgentInstance().getId(),
-                                    task.getId(),
-                                    "Request cancelled by user");
-                        } catch (Exception e) {
-                            log.warn("Failed to send task.cancel to agent {}: {}",
-                                    task.getAgentInstance().getId(), e.getMessage());
+                        // Send task.cancel to the assigned agent (if any).
+                        if (task.getAgentInstance() != null) {
+                            try {
+                                webSocketHandler.cancelTask(
+                                        task.getAgentInstance().getId(),
+                                        task.getId(),
+                                        "Request cancelled by user");
+                            } catch (Exception e) {
+                                log.warn("Failed to send task.cancel to agent {}: {}",
+                                        task.getAgentInstance().getId(), e.getMessage());
+                            }
                         }
                     }
                 }
@@ -229,6 +301,20 @@ public class WorkflowRequestService {
         }
 
         return toResponse(saved);
+    }
+
+    /** Whether the workflow's stored step is an ORCHESTRATOR step (§16.1). */
+    @SuppressWarnings("unchecked")
+    private boolean isOrchestratorStep(Workflow workflow, String stepId) {
+        if (workflow.getSteps() == null) {
+            return false;
+        }
+        for (Map<String, Object> step : workflow.getSteps()) {
+            if (stepId.equals(step.get("id"))) {
+                return "ORCHESTRATOR".equals(step.get("taskType"));
+            }
+        }
+        return false;
     }
 
     /**
@@ -292,20 +378,6 @@ public class WorkflowRequestService {
         } catch (IllegalArgumentException e) {
             log.warn("Unknown pauseMode '{}', defaulting to NONE", raw);
             return PauseMode.NONE;
-        }
-    }
-
-    private Integer parseMaxRetries(Object raw) {
-        if (raw == null) {
-            return 0;
-        }
-        if (raw instanceof Number num) {
-            return num.intValue();
-        }
-        try {
-            return Integer.parseInt(raw.toString());
-        } catch (NumberFormatException e) {
-            return 0;
         }
     }
 

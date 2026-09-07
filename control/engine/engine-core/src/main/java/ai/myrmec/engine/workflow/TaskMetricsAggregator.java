@@ -36,6 +36,7 @@ public class TaskMetricsAggregator {
     private final ExecutionEventRepository eventRepository;
     private final WorkflowTaskRepository workflowTaskRepository;
     private final ModelRepository modelRepository;
+    private final ai.myrmec.engine.agent.AgentProfileVersionService agentProfileVersionService;
 
     /**
      * Build and persist the metrics map for the given attempt.
@@ -173,7 +174,10 @@ public class TaskMetricsAggregator {
         AgentProfile profile = task.getAgentProfile();
         if (profile == null) return null;
         try {
-            String code = profile.getDefaultModel();
+            // §16.1: the default model lives on the published version row.
+            String code = agentProfileVersionService.findPublished(profile.getId())
+                    .map(ai.myrmec.engine.agent.AgentProfileVersion::getDefaultModel)
+                    .orElse(null);
             if (code == null || code.isBlank()) return null;
             return modelRepository.findById(code).map(Model::getModelId).orElse(null);
         } catch (Exception e) {

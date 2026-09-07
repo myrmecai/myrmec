@@ -8,6 +8,8 @@ import ai.myrmec.engine.agent.Agent;
 import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileRepository;
+import ai.myrmec.engine.agent.AgentProfileVersion;
+import ai.myrmec.engine.agent.AgentProfileVersionService;
 import ai.myrmec.engine.agent.AgentHostRepository;
 import ai.myrmec.engine.agent.AgentHostService;
 import ai.myrmec.engine.conversation.Conversation;
@@ -94,6 +96,7 @@ public class ConversationTurnDispatcher {
     private final ConversationService conversationService;
     private final AgentHostRepository agentRepository;
     private final AgentProfileRepository agentProfileRepository;
+    private final AgentProfileVersionService agentProfileVersionService;
     private final AgentRepository agentInstanceRepository;
     private final AgentConnectionManager connectionManager;
     private final AgentWebSocketHandler webSocketHandler;
@@ -213,13 +216,17 @@ public class ConversationTurnDispatcher {
         }
         AgentHost agent = agentOpt.get();
 
-        Optional<AgentProfile> profileOpt = agentProfileRepository.findByIdWithTools(agent.getProfileId());
+        Optional<AgentProfile> profileOpt = agentProfileRepository.findById(agent.getProfileId());
         if (profileOpt.isEmpty()) {
-            log.warn("Cannot dispatch turn \u2014 profile {} not found for conv {}",
+            log.warn("Cannot dispatch turn — profile {} not found for conv {}",
                     agent.getProfileId(), conversationId);
             return false;
         }
         AgentProfile profile = profileOpt.get();
+        // §16.1: the behaviour contract (system prompt, tools, default
+        // model) lives on the published version row.
+        AgentProfileVersion profileVersion = agentProfileVersionService
+                .findPublished(agent.getProfileId()).orElse(null);
 
         // §9.5 sticky binding — if a worker is already BOUND to this
         // conversation (the previous turn kept it alive), skip the
@@ -249,7 +256,9 @@ public class ConversationTurnDispatcher {
         // (agent-concurrency §9.5). The compare-and-set inside
         // reserveIdleInstance prevents two turns from double-booking the
         // same worker; a lost race is indistinguishable from "no capacity".
-        UUID profileVersionId = profile.getId();
+        // §16.1: the pin is the real published version row ID.
+        UUID profileVersionId = profileVersion != null
+                ? profileVersion.getId() : profile.getId();
         Agent idleInstance = reserveIdleInstance(agent.getId(), conversationId, profileVersionId)
                 .orElse(null);
         if (idleInstance == null) {
@@ -295,7 +304,7 @@ public class ConversationTurnDispatcher {
 
         String systemPrompt = conversation.getSystemPromptOverride() != null
                 ? conversation.getSystemPromptOverride()
-                : profile.getSystemPrompt();
+                : (profileVersion != null ? profileVersion.getSystemPrompt() : null);
 
         // Assemble session.open (sent once when worker binds)
         SessionOpenPayload sessionOpen = sessionContextAssembler.assemble(
@@ -307,7 +316,7 @@ public class ConversationTurnDispatcher {
                 .map(h -> new InferenceRequestSpec.HistoryEntry(h.getRole(), h.getContent()))
                 .toList();
         List<InferenceRequestSpec.AttachmentDescriptor> attachments =
-                buildAttachments(conversationId, active, profile).stream()
+                buildAttachments(conversationId, active, profileVersion).stream()
                         .map(a -> new InferenceRequestSpec.AttachmentDescriptor(
                                 a.getId().toString(), a.getFilename(), a.getMediaType(), a.getSizeBytes(),
                                 a.getInlineText(), a.isImage(), a.getReadContentPath()))
@@ -399,6 +408,10 @@ public class ConversationTurnDispatcher {
     private boolean dispatchOverBoundSocket(Conversation conversation, AgentHost agent,
                                              AgentProfile profile, Agent boundInstance,
                                              UUID conversationId) {
+        // §16.1: the behaviour contract (system prompt, tools, default
+        // model) lives on the published version row.
+        AgentProfileVersion profileVersion = agentProfileVersionService
+                .findPublished(agent.getProfileId()).orElse(null);
         List<ConversationMessage> all = conversationService.listMessages(conversationId);
         List<ConversationMessage> active = all.stream()
                 .filter(m -> !m.isSuperseded())
@@ -409,21 +422,21 @@ public class ConversationTurnDispatcher {
         long assistantSequenceNo = all.isEmpty() ? 0L : all.get(all.size() - 1).getSequenceNo() + 1;
         String systemPrompt = conversation.getSystemPromptOverride() != null
                 ? conversation.getSystemPromptOverride()
-                : profile.getSystemPrompt();
+                : (profileVersion != null ? profileVersion.getSystemPrompt() : null);
 
         // Find existing session for this conversation (sticky path — session already open)
         Session session = sessionContextAssembler.findActiveSession(conversationId, "CONVERSATION");
         UUID sessionId = session != null ? session.getId() : conversationId;
 
-        // Resolve tool names from the agent profile (sticky path — no session.open)
-        List<String> activeToolNames = resolveToolNames(profile);
+        // Resolve tool names from the published version (sticky path — no session.open)
+        List<String> activeToolNames = resolveToolNames(profileVersion);
 
         // Build the inference request spec
         List<InferenceRequestSpec.HistoryEntry> history = historyEntries.stream()
                 .map(h -> new InferenceRequestSpec.HistoryEntry(h.getRole(), h.getContent()))
                 .toList();
         List<InferenceRequestSpec.AttachmentDescriptor> attachments =
-                buildAttachments(conversationId, active, profile).stream()
+                buildAttachments(conversationId, active, profileVersion).stream()
                         .map(a -> new InferenceRequestSpec.AttachmentDescriptor(
                                 a.getId().toString(), a.getFilename(), a.getMediaType(), a.getSizeBytes(),
                                 a.getInlineText(), a.isImage(), a.getReadContentPath()))
@@ -529,15 +542,19 @@ public class ConversationTurnDispatcher {
         }
         AgentHost agent = agentOpt.get();
 
-        Optional<AgentProfile> profileOpt = agentProfileRepository.findByIdWithTools(agent.getProfileId());
+        Optional<AgentProfile> profileOpt = agentProfileRepository.findById(agent.getProfileId());
         if (profileOpt.isEmpty()) {
-            log.warn("Cannot dispatch summary \u2014 profile {} not found for conv {}",
+            log.warn("Cannot dispatch summary — profile {} not found for conv {}",
                     agent.getProfileId(), conversationId);
             return false;
         }
         AgentProfile profile = profileOpt.get();
+        // §16.1: the behaviour contract lives on the published version.
+        AgentProfileVersion profileVersion = agentProfileVersionService
+                .findPublished(agent.getProfileId()).orElse(null);
 
-        UUID profileVersionId = profile.getId();
+        UUID profileVersionId = profileVersion != null
+                ? profileVersion.getId() : profile.getId();
         Agent idleInstance = reserveIdleInstance(agent.getId(), conversationId, profileVersionId)
                 .orElse(null);
         if (idleInstance == null) {
@@ -631,6 +648,24 @@ public class ConversationTurnDispatcher {
     }
 
     /**
+     * Resolve tool names from the profile's published version (§16.1).
+     * Returns the tool codes of all ACTIVE tools assigned to the version.
+     */
+    private List<String> resolveToolNames(AgentProfileVersion version) {
+        if (version == null) {
+            return List.of();
+        }
+        var profileTools = version.getTools();
+        if (profileTools == null || profileTools.isEmpty()) {
+            return List.of();
+        }
+        return profileTools.stream()
+                .filter(t -> t.getStatus() == ai.myrmec.engine.tool.ToolStatus.ACTIVE)
+                .map(ai.myrmec.engine.tool.Tool::getCode)
+                .toList();
+    }
+
+    /**
      * Returns the most-recent {@link #HISTORY_LIMIT} messages, oldest
      * first. Always copies into an {@code ArrayList} so callers (and
      * Jackson) can iterate without surprises.
@@ -645,21 +680,6 @@ public class ConversationTurnDispatcher {
      * context; the persisted row keeps its {@code CONTEXT_SUMMARY} role for
      * the transcript's transparency marker (#8a).</p>
      */
-    /**
-     * Resolve tool names from the agent profile for conversation turns.
-     * Returns the tool codes of all ACTIVE tools assigned to the profile.
-     */
-    private List<String> resolveToolNames(AgentProfile profile) {
-        var profileTools = profile.getTools();
-        if (profileTools == null || profileTools.isEmpty()) {
-            return List.of();
-        }
-        return profileTools.stream()
-                .filter(t -> t.getStatus() == ai.myrmec.engine.tool.ToolStatus.ACTIVE)
-                .map(ai.myrmec.engine.tool.Tool::getCode)
-                .toList();
-    }
-
     private List<ConversationTurnAssignPayload.HistoryEntry> buildSlidingWindow(
             List<ConversationMessage> all) {
         if (all == null || all.isEmpty()) {
@@ -796,7 +816,7 @@ public class ConversationTurnDispatcher {
      * single bad file never blocks the turn.
      */
     private List<ConversationTurnAssignPayload.AttachmentDescriptor> buildAttachments(
-            UUID conversationId, List<ConversationMessage> active, AgentProfile profile) {
+            UUID conversationId, List<ConversationMessage> active, AgentProfileVersion version) {
         UUID userMessageId = null;
         for (int i = active.size() - 1; i >= 0; i--) {
             ConversationMessage m = active.get(i);
@@ -813,7 +833,7 @@ public class ConversationTurnDispatcher {
         if (rows.isEmpty()) {
             return Collections.emptyList();
         }
-        boolean supportsVision = resolveSupportsVision(profile);
+        boolean supportsVision = resolveSupportsVision(version);
         long inlineTokenLimit = systemSettingService.getInt(
                 INLINE_TOKEN_LIMIT_KEY, INLINE_TOKEN_LIMIT_DEFAULT);
         // Slice B — aggregate inline-budget guard. The per-attachment size cap
@@ -877,13 +897,13 @@ public class ConversationTurnDispatcher {
                 + "/attachments/" + attachmentId + "/content";
     }
 
-    /** Whether the profile's default model is flagged vision-capable. */
-    private boolean resolveSupportsVision(AgentProfile profile) {
-        if (profile.getDefaultModel() == null) {
+    /** Whether the version's default model is flagged vision-capable. */
+    private boolean resolveSupportsVision(AgentProfileVersion version) {
+        if (version == null || version.getDefaultModel() == null) {
             return false;
         }
         try {
-            return modelService.findByCode(profile.getDefaultModel()).isSupportsVision();
+            return modelService.findByCode(version.getDefaultModel()).isSupportsVision();
         } catch (Exception e) {
             return false;
         }
@@ -942,17 +962,17 @@ public class ConversationTurnDispatcher {
     }
 
     /**
-     * Look up the model assigned to the profile and decrypt its API key.
-     * Mirrors {@code TaskDispatcherService.buildTaskPayload} so behaviour
-     * stays consistent between workflow tasks and conversational turns.
+     * Look up the model assigned to the published version and decrypt its
+     * API key. Mirrors {@code TaskDispatcherService.buildTaskPayload} so
+     * behaviour stays consistent between workflow tasks and conversational
+     * turns.
      */
-    private TaskAssignPayload.ModelInfo resolveModel(AgentProfile profile) {
-        if (profile.getDefaultModel() == null) {
-            log.warn("Agent profile '{}' has no default model configured \u2014 dispatch without modelInfo",
-                    profile.getName());
+    private TaskAssignPayload.ModelInfo resolveModel(AgentProfileVersion version) {
+        if (version == null || version.getDefaultModel() == null) {
+            log.warn("Agent profile version has no default model configured \u2014 dispatch without modelInfo");
             return null;
         }
-        return resolveModelByCode(profile.getDefaultModel());
+        return resolveModelByCode(version.getDefaultModel());
     }
 
     /**
