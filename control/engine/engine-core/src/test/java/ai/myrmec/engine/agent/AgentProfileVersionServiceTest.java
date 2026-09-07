@@ -158,6 +158,50 @@ class AgentProfileVersionServiceTest extends IntegrationTestBase {
         assertThat(second.getId()).isEqualTo(first.getId());
     }
 
+    // ── Draft/Publish lifecycle surface (§16.1 UI actions) ────
+
+    @Test
+    @DisplayName("getOpenDraft returns the open draft; findOpenDraft tolerates absence")
+    void openDraftLookupSemantics() {
+        AgentProfile profile = newProfile("v1 prompt", null);
+
+        // No draft yet: the optional form is empty; the throwing form fails.
+        assertThat(versionService.findOpenDraft(profile.getId())).isEmpty();
+        assertThatThrownBy(() -> versionService.getOpenDraft(profile.getId()))
+                .isInstanceOf(ai.myrmec.engine._system.exception.ResourceNotFoundException.class);
+
+        AgentProfileVersion draft = versionService.createDraft(profile.getId());
+        assertThat(versionService.findOpenDraft(profile.getId()))
+                .map(AgentProfileVersion::getId)
+                .contains(draft.getId());
+        assertThat(versionService.getOpenDraft(profile.getId()).getId()).isEqualTo(draft.getId());
+    }
+
+    @Test
+    @DisplayName("discardDraft frees the single-draft slot; the published version stays")
+    void discardDraftFreesTheSlot() {
+        AgentProfile profile = newProfile("v1 prompt", null);
+        AgentProfileVersion publishedBefore = versionService.requirePublished(profile.getId());
+
+        versionService.createDraft(profile.getId());
+        versionService.discardDraft(profile.getId());
+
+        // The slot is free: a NEW draft can be opened.
+        assertThat(versionService.findOpenDraft(profile.getId())).isEmpty();
+        AgentProfileVersion reopened = versionService.createDraft(profile.getId());
+        assertThat(reopened.getStatus()).isEqualTo(AgentProfileVersion.Status.DRAFT);
+
+        // The published version is untouched by the discard.
+        AgentProfileVersion publishedAfter = versionService.requirePublished(profile.getId());
+        assertThat(publishedAfter.getId()).isEqualTo(publishedBefore.getId());
+        assertThat(publishedAfter.getSystemPrompt()).isEqualTo("v1 prompt");
+
+        // Discarding with no open draft fails (404-mapped).
+        versionService.discardDraft(profile.getId());
+        assertThatThrownBy(() -> versionService.discardDraft(profile.getId()))
+                .isInstanceOf(ai.myrmec.engine._system.exception.ResourceNotFoundException.class);
+    }
+
     // ── no-op publish rejected ────────────────────────────────
 
     @Test

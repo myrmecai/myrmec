@@ -54,6 +54,9 @@ import {
   PowerOff,
   Cpu,
   Wrench,
+  FilePlus,
+  FileX,
+  Upload,
 } from 'lucide-react'
 import { dialogService } from '@/services/dialog-service'
 import DataTable2 from '@/components/data-table2/data-table2'
@@ -82,8 +85,27 @@ export function AgentProfilesList() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: UpdateAgentProfileRequest }) =>
-      agentProfilesApi.update(id, data),
+    // §16.1 explicit lifecycle: with an open draft, behaviour edits PATCH
+    // the DRAFT (never the immutable published version); without one, the
+    // legacy PUT path runs the internal draft→publish cycle (compat).
+    mutationFn: async ({
+      profile,
+      data,
+    }: {
+      profile: AgentProfile
+      data: UpdateAgentProfileRequest
+    }) => {
+      if (profile.draftVersionId) {
+        await agentProfilesApi.updateDraft(profile.id, {
+          capabilities: data.capabilities,
+          toolCodes: data.toolCodes,
+          systemPrompt: data.systemPrompt,
+          defaultModel: data.defaultModel,
+        })
+        return agentProfilesApi.get(profile.id)
+      }
+      return agentProfilesApi.update(profile.id, data)
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agent-profiles'] })
       setEditProfile(null)
@@ -111,6 +133,28 @@ export function AgentProfilesList() {
     },
   })
 
+  // ── §16.1 Draft/Publish lifecycle actions ──
+  const openDraftMutation = useMutation({
+    mutationFn: agentProfilesApi.openDraft,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agent-profiles'] })
+    },
+  })
+
+  const publishMutation = useMutation({
+    mutationFn: agentProfilesApi.publish,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agent-profiles'] })
+    },
+  })
+
+  const discardDraftMutation = useMutation({
+    mutationFn: agentProfilesApi.discardDraft,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agent-profiles'] })
+    },
+  })
+
   const columns: ColumnDef<AgentProfile>[] = useMemo(() => [
     {
       accessorKey: 'name',
@@ -127,6 +171,15 @@ export function AgentProfilesList() {
             ) : (
               <Badge variant="destructive" className="ml-2 text-xs">
                 unpublished
+              </Badge>
+            )}
+            {/* §16.1 draft banner — an open draft awaits Publish/Discard */}
+            {row.original.draftVersionId && (
+              <Badge
+                className="ml-2 text-xs font-mono bg-amber-100 text-amber-900 hover:bg-amber-100"
+                title={`Draft v${row.original.draftVersionNumber} is open — publish to make it live, or discard it`}
+              >
+                draft v{row.original.draftVersionNumber}
               </Badge>
             )}
           </div>
@@ -207,6 +260,7 @@ export function AgentProfilesList() {
       enableSorting: false,
       cell: ({ row }) => {
         const profile = row.original
+        const hasDraft = !!profile.draftVersionId
         return (
           <div className="flex items-center gap-1">
             {profile.status === 'ACTIVE' ? (
@@ -228,11 +282,67 @@ export function AgentProfilesList() {
                 <Power className="h-4 w-4" />
               </Button>
             )}
+            {/* §16.1 explicit Draft/Publish lifecycle actions */}
+            {!hasDraft && profile.publishedVersionId && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => openDraftMutation.mutate(profile.id)}
+                title="Open Draft — clone the published version for editing"
+                disabled={openDraftMutation.isPending}
+              >
+                <FilePlus className="h-4 w-4" />
+              </Button>
+            )}
+            {hasDraft && (
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-green-600 hover:text-green-700"
+                  onClick={async () => {
+                    const confirmed = await dialogService.showConfirmDialog({
+                      title: 'Publish Agent Profile',
+                      message: `Publish draft v${profile.draftVersionNumber} of "${profile.name}"? The draft becomes the live published version immediately; the previous published version is archived.`,
+                      severity: 'info',
+                      type: 'info',
+                      confirmLabel: 'Publish',
+                      cancelLabel: 'Cancel',
+                    })
+                    if (confirmed) publishMutation.mutate(profile.id)
+                  }}
+                  title="Publish the open draft"
+                  disabled={publishMutation.isPending}
+                >
+                  <Upload className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-destructive hover:text-destructive"
+                  onClick={async () => {
+                    const confirmed = await dialogService.showConfirmDialog({
+                      title: 'Discard Draft',
+                      message: `Discard draft v${profile.draftVersionNumber} of "${profile.name}"? Unsaved changes are lost; the published version stays untouched.`,
+                      severity: 'error',
+                      type: 'warning',
+                      confirmLabel: 'Discard',
+                      cancelLabel: 'Cancel',
+                    })
+                    if (confirmed) discardDraftMutation.mutate(profile.id)
+                  }}
+                  title="Discard the open draft"
+                  disabled={discardDraftMutation.isPending}
+                >
+                  <FileX className="h-4 w-4" />
+                </Button>
+              </>
+            )}
             <Button
               variant="ghost"
               size="icon"
               onClick={() => setEditProfile(profile)}
-              title="Edit"
+              title={hasDraft ? 'Edit Draft' : 'Edit'}
             >
               <Pencil className="h-4 w-4" />
             </Button>
@@ -258,7 +368,7 @@ export function AgentProfilesList() {
         )
       },
     },
-  ], [activateMutation, deactivateMutation, deleteMutation])
+  ], [activateMutation, deactivateMutation, deleteMutation, openDraftMutation, publishMutation, discardDraftMutation])
 
   if (isLoading) {
     return (
@@ -331,7 +441,7 @@ export function AgentProfilesList() {
             <ProfileForm
               profile={editProfile}
               onSubmit={(data) =>
-                updateMutation.mutate({ id: editProfile.id, data })
+                updateMutation.mutate({ profile: editProfile, data })
               }
               isLoading={updateMutation.isPending}
               error={updateMutation.error?.message}
@@ -426,11 +536,17 @@ function ProfileForm({ profile, onSubmit, isLoading, error }: ProfileFormProps) 
     <form onSubmit={handleSubmit}>
       <DialogHeader>
         <DialogTitle>
-          {profile ? 'Edit Agent Profile' : 'Create Agent Profile'}
+          {profile
+            ? profile.draftVersionId
+              ? 'Edit Agent Profile Draft'
+              : 'Edit Agent Profile'
+            : 'Create Agent Profile'}
         </DialogTitle>
         <DialogDescription>
           {profile
-            ? 'Update the agent profile configuration'
+            ? profile.draftVersionId
+              ? `Changes apply to draft v${profile.draftVersionNumber} — publish the draft to make them live (§16.1 Draft → Publish).`
+              : 'Update the agent profile configuration'
             : 'Define a new agent profile with capabilities and tools'}
         </DialogDescription>
       </DialogHeader>

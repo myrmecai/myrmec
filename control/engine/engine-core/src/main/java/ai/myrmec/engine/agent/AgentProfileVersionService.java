@@ -245,6 +245,37 @@ public class AgentProfileVersionService {
         return versionRepository.findByProfileIdOrderByVersionNumberDesc(profileId);
     }
 
+    // ── Draft/Publish lifecycle surface (§16.1, the UI Draft/Publish
+    //    actions' engine API — mirrors the AssistantVersion pattern) ──
+
+    /** The single open DRAFT — throws when none exists (404-mapped). */
+    @Transactional(readOnly = true)
+    public AgentProfileVersion getOpenDraft(UUID profileId) {
+        return versionRepository
+                .findByProfileIdAndStatus(profileId, AgentProfileVersion.Status.DRAFT)
+                .orElseThrow(() -> ResourceNotFoundException.of(
+                        "AgentProfileVersion", "open draft for profile " + profileId));
+    }
+
+    /** Optional form for the UI's draft banner (no throw when absent). */
+    @Transactional(readOnly = true)
+    public Optional<AgentProfileVersion> findOpenDraft(UUID profileId) {
+        return versionRepository.findByProfileIdAndStatus(profileId, AgentProfileVersion.Status.DRAFT);
+    }
+
+    /** Discard the open draft — frees the single-draft slot; the
+     * published version (if any) stays untouched. */
+    @Transactional
+    public void discardDraft(UUID profileId) {
+        AgentProfileVersion draft = versionRepository
+                .findByProfileIdAndStatus(profileId, AgentProfileVersion.Status.DRAFT)
+                .orElseThrow(() -> ResourceNotFoundException.of(
+                        "AgentProfileVersion", "open draft for profile " + profileId));
+        versionRepository.delete(draft);
+        log.info("Discarded open draft v{} for agent profile {}",
+                draft.getVersionNumber(), profileId);
+    }
+
     // ── internals ──────────────────────────────────────────────
 
     private int nextVersionNumber(UUID profileId) {
