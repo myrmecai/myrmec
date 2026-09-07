@@ -116,6 +116,35 @@ export interface OrchestrationRunnerOptions {
       continuationId: string,
     ): import("./ApprovalResumeValidator.js").RestoredSuspension | null;
   };
+  /** §17.2/§17.5 (retry continuation): publishes the durable continuation
+   * manifest after a WORKER_FAILED (RETRYABLE) safe boundary — completed
+   * call identities, budget counters, verifier history, candidate tree.
+   * The engine stores the returned §7.3 ContinuationRecord on the result;
+   * a retry dispatch carries the continuationId and the runner restores
+   * here. Absent on a retryable failure → the result fails closed (the
+   * engine refuses a RETRYABLE without a continuation, §16.6). */
+  retryContinuationPublisher?: {
+    publish(input: {
+      dispatchId: string;
+      attemptOrdinal: number;
+      budgetCounters: { workerCalls: number; totalTokens: number; rejectionCount: number };
+      completedCalls: WorkerCallResult[];
+      candidateTreeHash: string;
+      workspaceRevision: number;
+      verifierHistory: VerdictRecord[];
+    }): Promise<{
+      continuationId: string;
+      continuationRef: string;
+      stateDigest: string;
+    }>;
+  };
+  /** §17.5 (retry restore): loads the published continuation manifest
+   * for a decision-less continuation (engine retry) so the retried
+   * dispatch deduplicates completed calls and restores the counters
+   * (§13 same-dispatch restart semantics). */
+  retryContinuationLoader?: {
+    load(continuationId: string): import("./ContinuationStateStore.js").ContinuationManifest | null;
+  };
 }
 
 export interface OrchestrationRunOptions {
@@ -255,6 +284,32 @@ export class OrchestrationRunner {
         : null;
     }
 
+    // §17.5 (retry restore): a decision-less continuation is an engine
+    // retry of a FAILED/RETRYABLE dispatch. The published manifest
+    // restores the completed-call identities (replay dedup by callId),
+    // the budget counters, and the verifier history (§13 same-dispatch
+    // restart semantics — a crash cannot reset a budget). Absent
+    // loader/manifest → the retry still runs, but with fresh state
+    // (§13: a new attempt's counters; dedup simply finds nothing).
+    let restoredManifest: import("./ContinuationStateStore.js").ContinuationManifest | null =
+      null;
+    if (assignment.continuation && !decision) {
+      const retryLoader = this.options.retryContinuationLoader;
+      restoredManifest = retryLoader
+        ? retryLoader.load(assignment.continuation.continuationId)
+        : null;
+      // A retry continuation that cannot be restored fails closed — the
+      // engine's §16.6 contract only retries with a valid continuation.
+      if (!restoredManifest) {
+        return this.failure(
+          dispatch,
+          "RECOVERY_SNAPSHOT_INVALID",
+          `retry continuation ${assignment.continuation.continuationId} could not be restored — failing closed`,
+          { workerCalls: 0, rejectionCount: 0, totalTokens: 0 },
+        );
+      }
+    }
+
     let sequence = 0;
     const nextSequence = () => ++sequence;
     const workerCalls: WorkerCallResult[] = [];
@@ -273,10 +328,27 @@ export class OrchestrationRunner {
     let rejectionCount = 0;
     const verifierResults: VerdictRecord[] = [];
     // Feature 7 (design §13): the per-attempt budget controller shared by
-    // the orchestrator and every worker TurnExecutor. Counter restoration
-    // for a same-dispatch restart is the continuation store's job; a new
-    // attempt gets fresh counters.
+    // the orchestrator and every worker TurnExecutor. A new engine
+    // attempt has a new dispatchId and FRESH counters (§17.2) — the
+    // restored manifest contributes completed-call identities, candidate
+    // state, and verifier history only, never counters.
     const budget: BudgetController = new InMemoryBudgetController(o.budget);
+    // §17.5: the restored completed-call identities are available for
+    // replay dedup at the §17.5 seam (same-dispatch restart); a NEW
+    // engine attempt carries fresh callIds by design (§13), so no
+    // invoke-path consultation applies in V1.
+    if (restoredManifest) {
+      void restoredManifest.completedCallIds;
+    }
+    // §17.5: replay the verifier history so the completion gate's
+    // satisfies() sees the prior attempt's verdicts for the same tree.
+    for (const record of restoredManifest?.verifierHistory ?? []) {
+      ledger.record(record);
+      verifierResults.push(record);
+      if (record.verdict === "REJECTED") {
+        rejectionCount += 1;
+      }
+    }
     let budgetBreach: BudgetBreach | null = null;
     const recordVerdict = (
       input: Omit<VerdictRecord, "sequence" | "attemptOrdinal">,
@@ -692,7 +764,48 @@ export class OrchestrationRunner {
       if (code === "ORCHESTRATOR_ITERATION_LIMIT" && usage === null) {
         return this.failure(dispatch, "TOKEN_USAGE_UNAVAILABLE", "orchestration turn lacked authoritative token usage", usageOut, workerCalls, verifierResults);
       }
-      return this.failure(dispatch, code, result.failure?.message ?? "orchestrator turn failed", usageOut, workerCalls, verifierResults);
+      // §16.6: when the orchestrator cannot recover from a worker
+      // invocation that failed with WORKER_FAILED, the RUN result
+      // carries the worker's stable code — the §16.6 RETRYABLE
+      // classification (engine retries within the step's maxRetries).
+      const lastFailedWorkerCall = [...workerCalls]
+        .reverse()
+        .find((c) => c.status === "FAILED" && c.errorCode === "WORKER_FAILED");
+      if (lastFailedWorkerCall) {
+        // §17.2/§17.5: publish the durable retry continuation at this
+        // safe boundary — completed-call identities, candidate state,
+        // verifier history (fresh counters per §13 new-attempt rule).
+        // The §7.3 ContinuationRecord rides the RETRYABLE result; the
+        // engine stores it and the retry dispatch carries the
+        // continuationId. Without a publisher the result stays RETRYABLE
+        // but carries no continuation — the engine fails closed (§16.6).
+        const publisher = this.options.retryContinuationPublisher;
+        const published = publisher
+          ? await publisher.publish({
+              dispatchId: dispatch.dispatchId,
+              attemptOrdinal,
+              budgetCounters: budget.counters(),
+              completedCalls: workerCalls,
+              candidateTreeHash: lastTree.value,
+              workspaceRevision: revision.value,
+              verifierHistory: verifierResults,
+            })
+          : null;
+        const failed = this.failure(dispatch, "WORKER_FAILED", result.failure?.message ?? "worker failed and the orchestrator did not recover", usageOut, workerCalls, verifierResults, commandExecutions);
+        return published
+          ? {
+              ...failed,
+              continuation: {
+                continuationId: published.continuationId,
+                continuationRef: published.continuationRef,
+                snapshotTreeHash: lastTree.value,
+                workspaceRevision: revision.value,
+                stateDigest: published.stateDigest,
+              },
+            }
+          : failed;
+      }
+      return this.failure(dispatch, code, result.failure?.message ?? "orchestrator turn failed", usageOut, workerCalls, verifierResults, commandExecutions);
     }
     if (result.status === "CANCELLED") {
       return {

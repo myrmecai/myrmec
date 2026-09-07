@@ -321,6 +321,66 @@ describe("OrchestrationRunner minimal delegation", () => {
     expect(result.workerCalls[0].errorCode).toBe("WORKER_FAILED");
   });
 
+  it("an unrecovered WORKER_FAILED is RETRYABLE and publishes the retry continuation (§16.6/§17.5)", async () => {
+    // The orchestrator delegates once; the worker provider fails; the
+    // orchestrator's own turn then fails — the run result carries the
+    // worker's stable code with RETRYABLE + the §7.3 continuation.
+    const orch = new ScriptedModel([
+      invokeCall("coder"),
+      invokeCall("coder"),
+    ]);
+    class FailingModel implements ChatModel {
+      async invoke(): Promise<ModelResponse> {
+        throw new Error("provider exploded");
+      }
+    }
+    const published: Array<{ dispatchId: string; attemptOrdinal: number }> = [];
+    const runner = new OrchestrationRunner({
+      chatModelFactory: {
+        resolve: async (info) => {
+          if (info.modelId === "orch-model") return orch;
+          throw new Error(`unexpected model: ${info.modelId}`);
+        },
+      },
+      workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 1,
+        chatModelFactory: {
+          resolve: async () => new FailingModel(),
+        },
+        turnExecutor: new TurnExecutor({}),
+      }),
+      turnExecutor: new TurnExecutor({}),
+      retryContinuationPublisher: {
+        publish: async (input) => {
+          published.push({
+            dispatchId: input.dispatchId,
+            attemptOrdinal: input.attemptOrdinal,
+          });
+          return {
+            continuationId: `cont-${input.dispatchId}-retry`,
+            continuationRef: `local:cont-${input.dispatchId}-retry`,
+            stateDigest: "d".repeat(64),
+          };
+        },
+      },
+    });
+
+    const result = await runner.run(assignment(), { runId: "run-uuid" });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.errorCode).toBe("WORKER_FAILED");
+    expect(result.retryDisposition).toBe("RETRYABLE");
+    // §7.3 ContinuationRecord on the RETRYABLE result.
+    expect(result.continuation).toMatchObject({
+      continuationId: "cont-attempt-uuid-retry",
+    });
+    expect(result.continuation?.stateDigest).toMatch(/^[0-9a-f]{64}$/);
+    // The publication happened exactly once at the safe boundary.
+    expect(published).toEqual([
+      { dispatchId: "attempt-uuid", attemptOrdinal: 1 },
+    ]);
+  });
+
   it("enforces maxOrchestratorIterations independent of model output", async () => {
     // Orchestrator loops requesting the worker forever. The budget
     // limits are raised so ONLY the iteration cap terminates the loop.
@@ -1249,14 +1309,80 @@ describe("OrchestrationRunner HITL resume", () => {
     expect(result.workerCalls).toHaveLength(0);
   });
 
-  it("a non-decision continuation (retry) runs without a loader", async () => {
-    // A retryable continuation carries no decision — the resume gate
-    // must not fire and no loader is required.
+  it("a non-decision continuation (engine retry) fails closed without a restorable manifest", async () => {
+    // §16.6/§17.5: the engine retries ONLY with a valid continuation —
+    // a retry dispatch whose manifest cannot be restored fails closed
+    // (RECOVERY_SNAPSHOT_INVALID) and no worker call executes.
     const a = assignment();
     a.dispatch.continuationId = "cont-retry";
     a.continuation = {
       continuationId: "cont-retry",
       previousDispatchId: "attempt-uuid",
+    };
+    const orchestrator = new ScriptedModel([
+      invokeCall("coder"),
+      { content: "never reached", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
+    ]);
+    const worker = new ScriptedModel([
+      { content: "never", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
+    ]);
+    const runner = new OrchestrationRunner({
+      chatModelFactory: {
+        resolve: async (info) => {
+          if (info.modelId === "orch-model") return orchestrator;
+          if (info.modelId === "worker-model") return worker;
+          throw new Error(`unexpected: ${info.modelId}`);
+        },
+      },
+      workerInvoker: new WorkerInvoker({
+        attemptOrdinal: 2,
+        chatModelFactory: { resolve: async () => worker },
+        turnExecutor: new TurnExecutor({}),
+      }),
+      turnExecutor: new TurnExecutor({}),
+    });
+    const result = await runner.run(a, { runId: "run-uuid" });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.errorCode).toBe("RECOVERY_SNAPSHOT_INVALID");
+    expect(result.summary).toContain("could not be restored");
+    expect(result.workerCalls).toHaveLength(0);
+  });
+
+  it("a retry continuation restores the verifier history and budget-free state", async () => {
+    // §17.5: the restored manifest contributes completed-call
+    // identities + verifier history (fresh counters per §13). The retry
+    // run replays the verifier verdicts into the ledger so the
+    // completion gate's satisfies() sees them for the same tree.
+    const a = assignment();
+    a.dispatch.continuationId = "cont-retry";
+    a.continuation = {
+      continuationId: "cont-retry",
+      previousDispatchId: "attempt-uuid",
+    };
+    const manifest: import("./ContinuationStateStore.js").ContinuationManifest = {
+      continuationId: "cont-retry",
+      dispatchId: "attempt-uuid",
+      attemptOrdinal: 1,
+      budgetCounters: { workerCalls: 5, totalTokens: 999, rejectionCount: 0 },
+      completedCallIds: [],
+      candidateTreeHash: "",
+      workspaceRevision: 0,
+      verifierHistory: [
+        {
+          callId: "11111111-1111-4111-8111-111111111111",
+          workerName: "verifier",
+          verdict: "APPROVED",
+          summary: "ok",
+          issues: [],
+          workspaceRevision: 0,
+          candidateTreeHash: "",
+          attemptOrdinal: 1,
+          sequence: 1,
+        },
+      ],
+      createdAt: "2026-01-01T00:00:00Z",
+      stateDigest: "b".repeat(64),
     };
     const orchestrator = new ScriptedModel([
       invokeCall("coder"),
@@ -1279,9 +1405,14 @@ describe("OrchestrationRunner HITL resume", () => {
         turnExecutor: new TurnExecutor({}),
       }),
       turnExecutor: new TurnExecutor({}),
+      retryContinuationLoader: { load: () => manifest },
     });
     const result = await runner.run(a, { runId: "run-uuid" });
 
     expect(result.status).toBe("COMPLETED");
+    // §17.5: the restored verifier history rides the evidence.
+    expect(
+      result.verifierResults.map((v) => ({ workerName: v.workerName, verdict: v.verdict })),
+    ).toContainEqual({ workerName: "verifier", verdict: "APPROVED" });
   });
 });

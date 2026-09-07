@@ -47,6 +47,7 @@ public class TaskDispatcherService {
     private final ToolService toolService;
     private final ModelService modelService;
     private final TaskAttemptService taskAttemptService;
+    private final TaskAttemptRepository attemptRepository;
     private final TaskContextResolver contextResolver;
     private final SessionContextAssembler sessionContextAssembler;
     private final ai.myrmec.engine.agent.AgentProfileVersionService agentProfileVersionService;
@@ -245,26 +246,54 @@ public class TaskDispatcherService {
     }
 
     /**
-     * The §16.2/§17.4 continuation for a resume attempt — present when
-     * the task's approval payload carries a suspended continuation
-     * (HITL approve). The directive binds the continuation id from the
-     * suspension record and the prior dispatch id; the assembler embeds
-     * the typed decision envelope alongside it.
+     * The §16.2/§17.4 continuation for a resume attempt. Two origins:
+     *
+     * <ul>
+     *   <li>§17.4 HITL approve — the decide path enriched the approval
+     *       payload with {@code decisionStatus=APPROVED}; the assembler
+     *       embeds the typed decision envelope alongside the directive.</li>
+     *   <li>§16.6 FAILED/RETRYABLE reset — the retryable result's stored
+     *       structured output carries the §7.3 ContinuationRecord; the
+     *       retry dispatch (no decision) restores it agent-side.</li>
+     * </ul>
+     * Fresh attempts omit it.
      */
     private OrchestrationAssignmentAssembler.ContinuationDirective continuationOf(WorkflowTask task) {
         Map<String, Object> payload = task.getApprovalPayload();
-        if (payload == null) {
-            return null;
+        if (payload != null) {
+            Object continuationId = payload.get("suspensionContinuationId");
+            Object previousDispatchId = payload.get("previousDispatchId");
+            Object decisionStatus = payload.get("decisionStatus");
+            if (continuationId != null && previousDispatchId != null
+                    && "APPROVED".equals(decisionStatus)) {
+                return new OrchestrationAssignmentAssembler.ContinuationDirective(
+                        String.valueOf(continuationId), String.valueOf(previousDispatchId));
+            }
         }
-        Object continuationId = payload.get("suspensionContinuationId");
-        Object previousDispatchId = payload.get("previousDispatchId");
-        Object decisionStatus = payload.get("decisionStatus");
-        if (continuationId == null || previousDispatchId == null
-                || !"APPROVED".equals(decisionStatus)) {
-            return null;
+        // §16.6 retryable reset: the stored structured result's own
+        // continuation record (decision-less — an engine retry).
+        Map<String, Object> output = task.getOutput();
+        if (output != null && output.get("continuation") instanceof Map<?, ?> continuation) {
+            Object id = continuation.get("continuationId");
+            if (id != null) {
+                return new OrchestrationAssignmentAssembler.ContinuationDirective(
+                        String.valueOf(id), currentAttemptIdOf(task));
+            }
         }
-        return new OrchestrationAssignmentAssembler.ContinuationDirective(
-                String.valueOf(continuationId), String.valueOf(previousDispatchId));
+        return null;
+    }
+
+    /** The prior attempt id — §16.2 dispatchId (V1) for a retry's
+     * previousDispatchId binding. */
+    private String currentAttemptIdOf(WorkflowTask task) {
+        TaskAttempt prior = task.getCurrentAttempt();
+        if (prior != null && prior.getId() != null) {
+            return prior.getId().toString();
+        }
+        return attemptRepository.findFirstByTaskIdOrderByAttemptNumberDesc(task.getId())
+                .map(a -> a.getId().toString())
+                .orElseThrow(() -> new IllegalStateException(
+                        "Task " + task.getId() + " has no prior attempt to continue"));
     }
 
     /**

@@ -527,6 +527,43 @@ export class AgentOrchestrationExecutor {
             };
           },
         },
+        // §17.2/§17.5: the retry-continuation publication + restore —
+        // WORKER_FAILED (RETRYABLE) safe boundaries persist the manifest;
+        // the engine's retry dispatch (decision-less continuation)
+        // restores completed-call identities + verifier history here.
+        retryContinuationPublisher: {
+          publish: async (input) => {
+            const store = new LocalContinuationStateStore(
+              path.join(this.options.outboxRoot, "continuations"),
+            );
+            const full = store.put({
+              continuationId: `cont-${input.dispatchId}-retry`,
+              dispatchId: input.dispatchId,
+              attemptOrdinal: input.attemptOrdinal,
+              budgetCounters: input.budgetCounters,
+              completedCallIds: input.completedCalls
+                .filter((c) => c.status === "COMPLETED")
+                .map((c) => c.callId),
+              candidateTreeHash: input.candidateTreeHash,
+              workspaceRevision: input.workspaceRevision,
+              verifierHistory: input.verifierHistory,
+              createdAt: new Date().toISOString(),
+            });
+            return {
+              continuationId: full.continuationId,
+              continuationRef: `local:${full.continuationId}`,
+              stateDigest: full.stateDigest,
+            };
+          },
+        },
+        retryContinuationLoader: {
+          load: (continuationId) => {
+            const store = new LocalContinuationStateStore(
+              path.join(this.options.outboxRoot, "continuations"),
+            );
+            return store.get(continuationId);
+          },
+        },
       });
 
       const result = await runner.run(assignment, { runId });
