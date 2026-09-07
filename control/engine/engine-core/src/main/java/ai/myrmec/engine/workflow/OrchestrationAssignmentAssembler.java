@@ -280,6 +280,11 @@ public class OrchestrationAssignmentAssembler {
         policy.put("workspaceRetentionSeconds",
                 version.getWorkspaceRetentionSeconds() == null
                         ? 86400 : version.getWorkspaceRetentionSeconds());
+        // §17.4: the pinned Profile's approval-request TTL bounds the
+        // decision window (absent = the runner's platform default).
+        if (version.getApprovalRequestTtlSeconds() != null) {
+            policy.put("approvalRequestTtlSeconds", version.getApprovalRequestTtlSeconds());
+        }
         return policy;
     }
 

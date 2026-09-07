@@ -80,7 +80,8 @@ public class AgentProfileAdminController {
         // approval policy) rides the published version 1 when supplied —
         // the dedicated overload publishes ONE version carrying it.
         AgentProfile profile = (request.getCommandTemplates() != null
-                || request.getApprovalPolicy() != null)
+                || request.getApprovalPolicy() != null
+                || request.getApprovalRequestTtlSeconds() != null)
                 ? profileService.createProfile(
                         request.getName(),
                         request.getDescription(),
@@ -89,7 +90,8 @@ public class AgentProfileAdminController {
                         request.getSystemPrompt(),
                         request.getDefaultModel(),
                         request.getCommandTemplates(),
-                        request.getApprovalPolicy())
+                        request.getApprovalPolicy(),
+                        request.getApprovalRequestTtlSeconds())
                 : profileService.createProfile(
                         request.getName(),
                         request.getDescription(),

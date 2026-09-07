@@ -63,6 +63,12 @@ myrmec:
     # reason as the reaper — a test re-homes BOUND/CONNECTING workers by hand.
     failover:
       enabled: false
+  # HITL (§17.4): the approval-expiry sweep runs every 2s under e2e so the
+  # hitl-expire scenario observes the terminal APPROVAL_EXPIRED tuple
+  # within the test timeout (production default: 60s).
+  hitl:
+    expiry-sweeper:
+      interval-ms: 2000
 
 # API Documentation
 springdoc:

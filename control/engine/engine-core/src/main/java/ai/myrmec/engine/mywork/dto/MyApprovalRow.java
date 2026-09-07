@@ -67,7 +67,10 @@ public record MyApprovalRow(
                 null, // no assistant context
                 (String) (task.getApprovalPayload() != null ? task.getApprovalPayload().get("summary") : task.getStepId()),
                 null, // payloadJson not used for execution; approval_payload is JSONB
-                null, // execution approvals not tied to a user; task.request resolves to workflow request
+                // §17.4: the triggering user (request createdBy) — the one
+                // human who may decide this approval.
+                task.getRequest().getCreatedBy() != null
+                        ? task.getRequest().getCreatedBy().getId() : null,
                 null, // no external user ref
                 task.getApprovalRequestedAt(),
                 task.getApprovalExpiresAt());

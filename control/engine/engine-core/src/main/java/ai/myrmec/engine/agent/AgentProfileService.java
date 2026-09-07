@@ -100,14 +100,16 @@ public class AgentProfileService {
     /**
      * Create with orchestration policy content (§7/§17.4): the published
      * version 1 carries the command templates + approval policy the
-     * assignment assembler projects into the ExecutionPolicy block.
+     * assignment assembler projects into the ExecutionPolicy block, plus
+     * the §17.4 approval-request TTL that bounds the decision window.
      */
     @Transactional
     public AgentProfile createProfile(String name, String description,
                                        List<String> capabilities, Set<String> toolCodes,
                                        String systemPrompt, String defaultModel,
                                        java.util.Map<String, Object> commandTemplates,
-                                       java.util.Map<String, Object> approvalPolicy) {
+                                       java.util.Map<String, Object> approvalPolicy,
+                                       Integer approvalRequestTtlSeconds) {
         if (profileRepository.existsByName(name)) {
             throw new DuplicateResourceException("AgentProfile", "name", name);
         }
@@ -120,7 +122,7 @@ public class AgentProfileService {
         versionService.publishInitial(profile.getId(), capabilities, toolCodes,
                 systemPrompt, defaultModel,
                 AgentProfileVersion.InteractionMode.ONE_SHOT,
-                commandTemplates, approvalPolicy);
+                commandTemplates, approvalPolicy, approvalRequestTtlSeconds);
         log.info("Created agent profile: {} ({}) with published version 1 "
                         + "(orchestration policy attached)",
                 profile.getName(), profile.getId());

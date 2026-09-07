@@ -63,4 +63,11 @@ public class AgentProfileCreateRequest {
      * ALLOW/DENY/REQUIRE_APPROVAL. Optional; NULL = defaults.
      */
     private java.util.Map<String, Object> approvalPolicy;
+
+    /**
+     * Orchestration (design §17.4): the approval-request TTL seconds on
+     * the pinned Profile version — bounds how long an approval stays
+     * decidable before the terminal APPROVAL_EXPIRED tuple. Optional.
+     */
+    private Integer approvalRequestTtlSeconds;
 }

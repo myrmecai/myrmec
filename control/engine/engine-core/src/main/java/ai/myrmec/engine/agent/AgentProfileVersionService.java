@@ -62,7 +62,7 @@ public class AgentProfileVersionService {
             String defaultModel,
             AgentProfileVersion.InteractionMode interactionMode) {
         return publishInitial(profileId, capabilities, toolCodes, systemPrompt,
-                defaultModel, interactionMode, null, null);
+                defaultModel, interactionMode, null, null, null);
     }
 
     /**
@@ -79,7 +79,8 @@ public class AgentProfileVersionService {
             String defaultModel,
             AgentProfileVersion.InteractionMode interactionMode,
             java.util.Map<String, Object> commandTemplates,
-            java.util.Map<String, Object> approvalPolicy) {
+            java.util.Map<String, Object> approvalPolicy,
+            Integer approvalRequestTtlSeconds) {
         profileRepository.findById(profileId)
                 .orElseThrow(() -> ResourceNotFoundException.agentProfile(profileId));
 
@@ -93,6 +94,7 @@ public class AgentProfileVersionService {
                 interactionMode == null ? AgentProfileVersion.InteractionMode.ONE_SHOT : interactionMode);
         version.setCommandTemplates(writeJsonMap(commandTemplates));
         version.setApprovalPolicy(writeJsonMap(approvalPolicy));
+        version.setApprovalRequestTtlSeconds(approvalRequestTtlSeconds);
         version.setStatus(AgentProfileVersion.Status.PUBLISHED);
         version.setPublishedAt(Instant.now());
         version = versionRepository.save(version);
