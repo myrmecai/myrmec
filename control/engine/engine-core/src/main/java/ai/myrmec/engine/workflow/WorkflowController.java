@@ -83,6 +83,23 @@ public class WorkflowController {
         return workflowService.publish(id);
     }
 
+    /**
+     * Feature 10 (§16.1): the explicit publication binding from the
+     * workflow-local agentProfileCode alias to an Agent Profile UUID.
+     * Required before publishing a workflow with ORCHESTRATOR steps.
+     */
+    @PostMapping("/{id}/orchestration-bindings")
+    public WorkflowResponse setOrchestrationBindings(
+            @PathVariable UUID projectId,
+            @PathVariable UUID id,
+            @RequestBody java.util.Map<String, UUID> bindings) {
+        WorkflowResponse existing = workflowService.findById(id);
+        if (!existing.projectId().equals(projectId)) {
+            throw new IllegalArgumentException("Workflow does not belong to this project");
+        }
+        return workflowService.setOrchestrationBindings(id, bindings);
+    }
+
     @PostMapping("/{id}/archive")
     public WorkflowResponse archive(@PathVariable UUID projectId, @PathVariable UUID id) {
         WorkflowResponse existing = workflowService.findById(id);

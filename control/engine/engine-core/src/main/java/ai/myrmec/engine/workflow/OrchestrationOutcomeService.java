@@ -38,13 +38,30 @@ import java.util.UUID;
  * and mirrored to task output for every outcome.</p>
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class OrchestrationOutcomeService {
 
     private final TaskAttemptRepository attemptRepository;
     private final WorkflowTaskRepository taskRepository;
     private final WorkflowRequestRepository requestRepository;
+    /** Feature 10 (§16.5): the release-frame owner for terminal states. */
+    private final WorkspaceReleaseOrchestrator releaseOrchestrator;
+    /** Feature 10: the §16.6 progression — completed tasks unblock
+     * dependants and complete the request; terminal failure fails it. */
+    private final WorkflowProgressionService progressionService;
+
+    public OrchestrationOutcomeService(
+            TaskAttemptRepository attemptRepository,
+            WorkflowTaskRepository taskRepository,
+            WorkflowRequestRepository requestRepository,
+            WorkspaceReleaseOrchestrator releaseOrchestrator,
+            WorkflowProgressionService progressionService) {
+        this.attemptRepository = attemptRepository;
+        this.taskRepository = taskRepository;
+        this.requestRepository = requestRepository;
+        this.releaseOrchestrator = releaseOrchestrator;
+        this.progressionService = progressionService;
+    }
 
     /** The §7.3 status union mirrored from the runner result. */
     public enum OutcomeStatus { COMPLETED, FAILED, CANCELLED, PAUSED }
@@ -117,12 +134,59 @@ public class OrchestrationOutcomeService {
             case PAUSED -> applyPaused(attempt, task, request, structuredResult);
         }
 
+        // §16.6: COMPLETED progresses dependants (and completes the
+        // request when nothing remains); terminal FAILED fails it.
+        // RETRYABLE-failure resets keep the request RUNNING — no
+        // progression pass. The progression runs on the just-saved rows
+        // inside this transaction so the state is consistent.
+        if (status == OutcomeStatus.COMPLETED) {
+            taskRepository.save(task);
+            progressionService.onTaskCompleted(task);
+        } else if (status == OutcomeStatus.FAILED
+                && task.getStatus() == TaskStatus.COMPLETED
+                && task.getResult() == TaskResult.FAILURE) {
+            taskRepository.save(task);
+            progressionService.onTaskFailed(task);
+        }
+
+        boolean releaseSent = sendReleaseIfNeeded(attempt, task, request, status);
+
         attemptRepository.save(attempt);
         taskRepository.save(task);
         requestRepository.save(request);
-        log.info("Applied orchestration outcome {} (dispatch {}, task {}, request {})",
-                status, dispatchId, task.getId(), request.getId());
+        log.info("Applied orchestration outcome {} (dispatch {}, task {}, request {}) — "
+                + "workspaceRelease={}",
+                status, dispatchId, task.getId(), request.getId(), releaseSent);
         return AppliedOutcome.applied(status);
+    }
+
+    /**
+     * §16.5: after a terminal request state the engine sends
+     * {@code orchestration.release} with a deterministic releaseId to the
+     * coordinator; the Supervisor's acknowledgement (idempotent) flips the
+     * run's lease state. PAUSED retains the lease — no release. COMPLETED
+     * of a multi-step run releases only when progression completes the
+     * REQUEST (the orchestrator runs there); a single-step COMPLETED has
+     * no remaining task, so the outcome path releases it here.
+     */
+    private boolean sendReleaseIfNeeded(TaskAttempt attempt, WorkflowTask task,
+                                        WorkflowRequest request, OutcomeStatus status) {
+        if (status == OutcomeStatus.PAUSED) {
+            return false; // retain checkout and continuation (§16.6)
+        }
+        boolean requestTerminal = status == OutcomeStatus.FAILED
+                || status == OutcomeStatus.CANCELLED;
+        if (!requestTerminal) {
+            return false; // completion release runs in the progression path
+        }
+        try {
+            return releaseOrchestrator.release(request.getId());
+        } catch (Exception e) {
+            // Release is best-effort at this seam: the expiry sweep and
+            // idempotent acknowledgement reconcile the lease later.
+            log.warn("Release send for run {} failed: {}", request.getId(), e.getMessage());
+        }
+        return false;
     }
 
     private void applyCompleted(TaskAttempt attempt, WorkflowTask task,

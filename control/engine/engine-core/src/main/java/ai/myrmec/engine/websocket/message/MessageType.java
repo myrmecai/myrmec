@@ -225,4 +225,24 @@ public final class MessageType {
 
     /** Agent → Engine. Ack of cancellation (+ partial content). */
     public static final String INFERENCE_CANCELLED = "inference.cancelled";
+
+    // ==================== Feature 10 — Orchestration (§16.3) ====================
+
+    /** Agent → Engine. Durable admission of one orchestration dispatch
+     * (dispatchId + assignmentDigest; replay returns the same ack). */
+    public static final String ORCHESTRATION_EVENT = "orchestration.event";
+
+    /** Agent → Engine. Durable HITL proposal (§17.4). */
+    public static final String ORCHESTRATION_APPROVAL_REQUESTED = "orchestration.approval_requested";
+
+    /** Agent → Engine. Exactly one logical terminal result per dispatch
+     * (§16.6); duplicate delivery allowed and deduplicated. */
+    public static final String ORCHESTRATION_RESULT = "orchestration.result";
+
+    /** Engine → Agent. Release one run's workspace lease after terminal
+     * state or operator stop (§16.5). */
+    public static final String ORCHESTRATION_RELEASE = "orchestration.release";
+
+    /** Engine → Agent. Tighten-only spend-allowance update (§16.3). */
+    public static final String ORCHESTRATION_BUDGET_UPDATED = "orchestration.budget_updated";
 }

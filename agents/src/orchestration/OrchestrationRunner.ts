@@ -491,7 +491,9 @@ export class OrchestrationRunner {
         commandExecutions,
         changedFiles: [],
         commits: [],
-        cleanWorktree: false,
+        // §13/§18: evidence reports the real worktree state — a cancel
+        // before any mutation leaves the committed baseline clean.
+        cleanWorktree: await this.worktreeClean(),
         usage: { ...usageOut, rejectionCount },
       };
     }
@@ -534,7 +536,8 @@ export class OrchestrationRunner {
         commandExecutions,
         changedFiles: [],
         commits: [],
-        cleanWorktree: false,
+        // §13/§18: evidence reports the real worktree state.
+        cleanWorktree: await this.worktreeClean(),
         usage: { ...usageOut, rejectionCount },
       };
     }
@@ -591,6 +594,24 @@ export class OrchestrationRunner {
   }
 
   // ── result identity (§7.3: deterministic per dispatch+digest) ──────
+
+  /**
+   * The real worktree cleanliness (§13/§18): via the inspector when a
+   * workspace is configured; true when no workspace exists (unit runs).
+   */
+  private async worktreeClean(): Promise<boolean> {
+    if (!this.options.workspaceInspector || !this.options.workspace) {
+      return true;
+    }
+    try {
+      const candidate = await this.options.workspaceInspector.inspect(this.options.workspace);
+      return candidate.clean;
+    } catch {
+      // An un-inspectable workspace reports not-clean — never a false
+      // "clean" claim for evidence.
+      return false;
+    }
+  }
 
   private resultId(dispatch: OrchestrationAssignment["dispatch"]): string {
     // Placeholder deterministic id: full UUIDv5 namespace pinning lands

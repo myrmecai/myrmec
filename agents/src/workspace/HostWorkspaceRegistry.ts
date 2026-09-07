@@ -153,10 +153,47 @@ export class HostWorkspaceRegistry {
     return this.handleFor(input.runId);
   }
 
-  /** ACQUIRING → ACTIVE: the checkout is cloned, verified, and usable. */
+  /**
+   * §8.3/§17.1: ONE checkout serves the complete workflow run. The FIRST
+   * dispatch of a run clones; every later dispatch of the SAME generation
+   * reuses the live lease (the checkout already carries earlier steps'
+   * commits). A fresh clone happens only after an explicit release
+   * advanced the generation.
+   */
+  reuseOrAcquire(input: AcquireLeaseInput): LeaseHandle {
+    const existing = this.leases.get(input.runId);
+    if (
+      existing &&
+      existing.generation === input.generation &&
+      (existing.leaseState === "ACTIVE" || existing.leaseState === "ACQUIRING")
+    ) {
+      // Reuse: same workspace, same checkout. The persisted manifest and
+      // in-memory state already match; return the live handle.
+      return this.handleFor(input.runId);
+    }
+    return this.acquire(input);
+  }
+
+  /** The live checkout path for a run (or null when none is registered). */
+  checkoutPathOf(runId: string): string | null {
+    const path = this.checkoutPaths.get(runId);
+    if (!path) return null;
+    try {
+      return existsSync(path) ? path : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** ACQUIRING → ACTIVE: the checkout is cloned, verified, and usable.
+   * Idempotent: an already-ACTIVE lease is live — the same handle returns
+   * (a reused run checkout never fails activation). */
   activate(runId: string, generation: number): LeaseHandle {
     const manifest = this.requireManifest(runId);
     this.requireGeneration(manifest, generation);
+    if (manifest.leaseState === "ACTIVE") {
+      return this.handleFor(runId);
+    }
     if (manifest.leaseState !== "ACQUIRING" && manifest.leaseState !== "SUSPENDED") {
       throw new Error(`cannot activate run ${runId} from state ${manifest.leaseState}`);
     }
@@ -215,14 +252,34 @@ export class HostWorkspaceRegistry {
    * active cleanup (the mutation lock), removes the checkout and hidden
    * refs, records RELEASED, and returns the acknowledgement. Repeated
    * release returns the SAME stored acknowledgement keyed by
-   * runId+generation+status.
+   * runId+generation+status. A release for a run with no registered lease
+   * (the dispatch failed before any checkout) acknowledges RELEASED —
+   * there was nothing to clean.
    */
   async release(
     runId: string,
     generation: number,
     _reason: string,
   ): Promise<ReleaseAcknowledgement> {
-    const manifest = this.requireManifest(runId);
+    // §16.5 idempotency: a release for a run with NO registered lease
+    // (e.g., the dispatch failed validation before any checkout) has
+    // nothing to clean — acknowledge RELEASED rather than erroring so
+    // the engine's terminal release never deadlocks on a missing lease.
+    const manifest = this.leases.get(runId);
+    if (!manifest) {
+      const synthetic: LeaseManifest = {
+        schemaVersion: "1.0",
+        workspaceId: "ws-unmaterialized",
+        runId,
+        generation,
+        pinnedAgentId: null,
+        leaseState: "ACQUIRING",
+        leaseDeadline: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      return this.recordAcknowledgement(synthetic, "RELEASED");
+    }
     this.requireGeneration(manifest, generation);
 
     const cacheKey = `${runId}:${generation}:RELEASED`;

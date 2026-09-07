@@ -10,6 +10,14 @@
  *   MYRMEC_ENGINE_URL        base Engine URL (default http://localhost:8080)
  *   MYRMEC_REGISTRATION_KEY  agent registration key (myr_agent_…)  [required]
  *   MYRMEC_ATTACHMENT_MAX_IMAGE_BYTES  max bytes to inline an image (default 5 MiB)
+ *   MYRMEC_WORKSPACE_ROOT    orchestration workspace root (design §17.1;
+ *                            default /tmp/myrmec on POSIX, %TEMP%\myrmec
+ *                            on Windows)
+ *   MYRMEC_OUTBOX_ROOT       orchestration durable outbox root (default
+ *                            \u003cworkspaceRoot\u003e/outbox)
+ *   MYRMEC_LLM_EXECUTION      'stub' for deterministic E2E, 'real' otherwise
+ *   MYRMEC_TOOL_EXECUTION     'stub' for deterministic E2E, 'real' otherwise
+ *   MYRMEC_STUB_MODULE       stub handler module path (stub mode only)
  *
  * Dev:   npx tsx src/bin/headless.ts
  * Prod:  node dist/bin/headless.js

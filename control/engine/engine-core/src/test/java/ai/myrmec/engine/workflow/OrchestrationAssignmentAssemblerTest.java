@@ -11,6 +11,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +27,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * with credential references, resolved source, the ExecutionPolicy block
  * from the pinned Profile version with referenced-subset templates, and
  * exactly one selected step. Secrets never appear in the serialized bytes.
+ *
+ * <p>The source resolver performs a REAL {@code git ls-remote} (§16.2
+ * step 4: the branch head resolves to the immutable full SHA), so these
+ * tests seed a real local bare origin with a {@code main} branch.</p>
  */
 @DisplayName("F10: OrchestrationAssignmentAssembler (§16.2)")
 class OrchestrationAssignmentAssemblerTest extends IntegrationTestBase {
@@ -41,11 +47,39 @@ class OrchestrationAssignmentAssemblerTest extends IntegrationTestBase {
     private UUID profileId;
     private UUID projectId;
 
+    /** A real local bare origin with a main branch (git ls-remote target). */
+    private String originUrl;
+
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
+        // Seed a real local origin: the resolver ls-remotes this URL.
+        Path origin = Files.createTempDirectory("asm-origin-");
+        runGit(origin, "init", "--bare", "-b", "main");
+        Path seed = Files.createTempDirectory("asm-seed-");
+        runGit(seed, "init", "-b", "main");
+        runGit(seed, "-c", "user.email=t@t", "-c", "user.name=t",
+                "commit", "--allow-empty", "-m", "seed");
+        runGit(seed, "push",
+                originUrl = origin.toAbsolutePath().toString().replace('\\', '/'), "main");
+        seed.toFile().deleteOnExit();
+
         projectId = data.project().named("orch-asm")
-                .withRepo("https://example.com/repo.git", "main").create().getId();
+                .withRepo(originUrl, "main").create().getId();
         profileId = data.agentProfile().named("orch-asm-profile").create().getId();
+    }
+
+    private static void runGit(Path cwd, String... args) throws Exception {
+        java.util.List<String> command = new java.util.ArrayList<>();
+        command.add("git");
+        command.addAll(java.util.Arrays.asList(args));
+        Process p = new ProcessBuilder(command)
+                .directory(cwd.toFile())
+                .redirectErrorStream(true)
+                .start();
+        if (p.waitFor() != 0) {
+            throw new IllegalStateException("git " + args[0] + " failed: "
+                    + new String(p.getInputStream().readAllBytes()));
+        }
     }
 
     private Map<String, Object> orchestrationMap() {

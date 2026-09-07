@@ -70,6 +70,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     private final ExecutionApprovalService executionApprovalService;
     private final ConversationInboundService conversationInboundService;
     private final InboundInferenceHandler inboundInferenceHandler;
+    private final InboundOrchestrationHandler inboundOrchestrationHandler;
 
     private static final String ATTR_AGENT_INSTANCE_ID = "agentInstanceId";
     private static final String ATTR_AGENT_NAME = "agentName";
@@ -91,7 +92,8 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
             ProjectRepository projectRepository,
             ExecutionApprovalService executionApprovalService,
             @org.springframework.context.annotation.Lazy ConversationInboundService conversationInboundService,
-            InboundInferenceHandler inboundInferenceHandler) {
+            InboundInferenceHandler inboundInferenceHandler,
+            InboundOrchestrationHandler inboundOrchestrationHandler) {
         this.jwtTokenProvider = jwtTokenProvider;
         this.agentInstanceRepository = agentInstanceRepository;
         this.agentService = agentService;
@@ -109,6 +111,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         this.executionApprovalService = executionApprovalService;
         this.conversationInboundService = conversationInboundService;
         this.inboundInferenceHandler = inboundInferenceHandler;
+        this.inboundOrchestrationHandler = inboundOrchestrationHandler;
     }
 
     @Override
@@ -272,6 +275,29 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                 case MessageType.INFERENCE_CANCELLED -> {
                     UUID iid = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
                     inboundInferenceHandler.onInferenceCancelled(iid, payloadNode, payload);
+                }
+                // ── Feature 10 — orchestration frames (§16.3) ──
+                case MessageType.INFERENCE_ACCEPT -> {
+                    UUID iid = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+                    // Orchestration admission carries dispatchId + digest;
+                    // ordinary inference acceptance does not.
+                    if (payloadNode.hasNonNull("dispatchId")) {
+                        inboundOrchestrationHandler.onInferenceAccept(iid, payloadNode);
+                    } else {
+                        log.debug("inference.accept from agent {} (ordinary turn)", iid);
+                    }
+                }
+                case MessageType.ORCHESTRATION_EVENT -> {
+                    UUID iid = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+                    inboundOrchestrationHandler.onOrchestrationEvent(iid, payloadNode);
+                }
+                case MessageType.ORCHESTRATION_APPROVAL_REQUESTED -> {
+                    UUID iid = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+                    inboundOrchestrationHandler.onOrchestrationApprovalRequested(iid, payloadNode);
+                }
+                case MessageType.ORCHESTRATION_RESULT -> {
+                    UUID iid = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+                    inboundOrchestrationHandler.onOrchestrationResult(iid, payloadNode);
                 }
                 case MessageType.PONG -> handlePong(session);
                 case MessageType.DISCONNECT -> handleDisconnect(session, payloadNode);
@@ -743,6 +769,15 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
      */
     private void handleHostAnnounce(WebSocketSession session, JsonNode payload) {
         UUID agentInstanceId = (UUID) session.getAttributes().get(ATTR_AGENT_INSTANCE_ID);
+
+        // Feature 10 (§16.5): a workspace release acknowledgement rides
+        // host.announce — discriminated by its releaseId field. It is
+        // never a provision announcement.
+        if (payload.hasNonNull("releaseId")) {
+            inboundOrchestrationHandler.onReleaseAcknowledgement(agentInstanceId, payload);
+            return;
+        }
+
         HostAnnouncePayload announce = objectMapper.convertValue(payload, HostAnnouncePayload.class);
 
         agentInstanceRepository.findById(agentInstanceId).ifPresentOrElse(
@@ -833,6 +868,35 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     public boolean sendInferenceAssign(UUID agentInstanceId, InferenceAssignPayload payload) {
         WebSocketMessage<InferenceAssignPayload> message =
                 WebSocketMessage.of(MessageType.INFERENCE_ASSIGN, payload);
+        return connectionManager.sendMessage(agentInstanceId, message);
+    }
+
+    /**
+     * Feature 10 (§16.5): send an {@code orchestration.release} frame to
+     * the run's coordinator. Deterministic releaseId; the Supervisor's
+     * acknowledgement (over host.announce) flips the run's lease state.
+     */
+    public boolean sendOrchestrationRelease(UUID agentInstanceId, Map<String, Object> releaseFrame) {
+        WebSocketMessage<Map<String, Object>> message =
+                WebSocketMessage.of(MessageType.ORCHESTRATION_RELEASE, releaseFrame);
+        return connectionManager.sendMessage(agentInstanceId, message);
+    }
+
+    /**
+     * Feature 10 (§16.3/§16.6): cancel one orchestration dispatch with the
+     * full correlation tuple — sessionId, taskId, attemptId, dispatchId
+     * (dispatchId == attemptId in V1). The executor's cooperative
+     * cancellation flips before the next governed side effect.
+     */
+    public boolean sendInferenceCancel(UUID agentInstanceId, UUID sessionId,
+                                       UUID taskId, UUID attemptId) {
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        if (sessionId != null) payload.put("sessionId", sessionId.toString());
+        payload.put("taskId", taskId.toString());
+        payload.put("attemptId", attemptId.toString());
+        payload.put("dispatchId", attemptId.toString());
+        WebSocketMessage<Map<String, Object>> message =
+                WebSocketMessage.of(MessageType.INFERENCE_CANCEL, payload);
         return connectionManager.sendMessage(agentInstanceId, message);
     }
 

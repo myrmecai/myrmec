@@ -48,7 +48,7 @@ public class AgentProfileAdminController {
                 : profileService.getAllProfiles();
         return ResponseEntity.ok(profiles.stream()
                 .map(p -> AgentProfileResponse.from(
-                        p, versionService.findPublished(p.getId()).orElse(null)))
+                        p, versionService.findPublishedWithTools(p.getId()).orElse(null)))
                 .collect(Collectors.toList()));
     }
 
@@ -62,7 +62,7 @@ public class AgentProfileAdminController {
     public ResponseEntity<AgentProfileResponse> getProfile(@PathVariable UUID id) {
         AgentProfile profile = profileService.getProfile(id);
         return ResponseEntity.ok(AgentProfileResponse.from(
-                profile, versionService.findPublished(id).orElse(null)));
+                profile, versionService.findPublishedWithTools(id).orElse(null)));
     }
 
     @Operation(summary = "Create a new agent profile")
@@ -87,7 +87,7 @@ public class AgentProfileAdminController {
         );
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(AgentProfileResponse.from(
-                        profile, versionService.findPublished(profile.getId()).orElse(null)));
+                        profile, versionService.findPublishedWithTools(profile.getId()).orElse(null)));
     }
 
     @Operation(summary = "Update an agent profile")
@@ -113,7 +113,7 @@ public class AgentProfileAdminController {
                 request.getDefaultModel()
         );
         return ResponseEntity.ok(AgentProfileResponse.from(
-                profile, versionService.findPublished(id).orElse(null)));
+                profile, versionService.findPublishedWithTools(id).orElse(null)));
     }
 
     @Operation(summary = "Delete an agent profile")

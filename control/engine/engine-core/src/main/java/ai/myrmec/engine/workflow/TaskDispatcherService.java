@@ -52,6 +52,11 @@ public class TaskDispatcherService {
     private final ai.myrmec.engine.agent.AgentProfileVersionService agentProfileVersionService;
     private final InferenceRequestAssembler inferenceRequestAssembler;
     private final ai.myrmec.engine.governance.GovernancePolicyResolver governancePolicyResolver;
+    // Feature 10 (§16.2/§16.3/§16.4): the orchestration dispatch pipeline.
+    private final OrchestrationAffinityResolver affinityResolver;
+    private final OrchestrationRunService orchestrationRunService;
+    private final OrchestrationAssignmentAssembler assignmentAssembler;
+    private final OrchestrationDispatchRelay dispatchRelay;
 
     /**
      * Dispatch pending tasks to available agents.
@@ -129,8 +134,22 @@ public class TaskDispatcherService {
 
     /**
      * Dispatch a single task to an available agent.
+     *
+     * Feature 10: an ORCHESTRATOR step dispatches through the durable
+     * orchestration pipeline (§16.2/§16.3) — assemble the complete
+     * self-contained assignment, record it in {@code orchestration_dispatches}
+     * inside the attempt-creating transaction, then send the exact stored
+     * bytes through the resend-until-accept relay. Ordinary inference steps
+     * keep the existing session.open + inference.assign path unchanged.
      */
     private void dispatchTask(WorkflowTask task) {
+        Workflow workflow = task.getRequest().getWorkflow();
+        boolean orchestrator = isOrchestratorStep(workflow, task.getStepId());
+        if (orchestrator) {
+            dispatchOrchestrationTask(task);
+            return;
+        }
+
         UUID profileId = task.getAgentProfile().getId();
         
         // Find agents with matching profile
@@ -207,6 +226,135 @@ public class TaskDispatcherService {
         }
         
         return Optional.empty();
+    }
+
+    /**
+     * Whether the stored step is an ORCHESTRATOR step (§16.1).
+     */
+    @SuppressWarnings("unchecked")
+    private boolean isOrchestratorStep(Workflow workflow, String stepId) {
+        if (workflow.getSteps() == null) {
+            return false;
+        }
+        for (Map<String, Object> step : workflow.getSteps()) {
+            if (stepId.equals(step.get("id"))) {
+                return "ORCHESTRATOR".equals(step.get("taskType"));
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Dispatch one orchestration task (§16.3 Engine→Agent delivery):
+     *
+     * <ol>
+     *   <li>Affinity (§16.4): prefer the run's pinned coordinator instance;
+     *       the first dispatch selects it.</li>
+     *   <li>Create the attempt (dispatchId = attempt UUID in V1).</li>
+     *   <li>Assemble the complete self-contained assignment from the run's
+     *       pinned Profile version (§16.2).</li>
+     *   <li>Record the dispatch durably — canonical bytes + digest +
+     *       PENDING — inside this transaction, BEFORE any send.</li>
+     *   <li>Send the exact stored bytes through the resend-until-accept
+     *       relay; a send failure leaves the row PENDING for the relay.</li>
+     * </ol>
+     */
+    private void dispatchOrchestrationTask(WorkflowTask task) {
+        UUID requestId = task.getRequest().getId();
+
+        // Affinity (§16.4): the coordinator instance if already selected.
+        java.util.Optional<UUID> coordinator = affinityResolver.coordinatorOf(requestId);
+
+        UUID profileId = task.getAgentProfile().getId();
+        List<AgentHost> matchingAgents = agentRepository.findActiveByProfileId(profileId);
+        if (matchingAgents.isEmpty()) {
+            log.debug("No active agents found for profile {}", profileId);
+            return;
+        }
+
+        for (AgentHost agent : matchingAgents) {
+            java.util.Optional<Agent> instance = coordinator
+                    .flatMap(id -> findByIdIfAlive(agent, id))
+                    .or(() -> coordinator.isPresent()
+                            ? java.util.Optional.empty() // coordinator pinned: no substitute (§16.4)
+                            : findAvailableInstance(agent.getId()));
+            if (instance.isEmpty()) {
+                continue;
+            }
+            Agent selected = instance.get();
+
+            // The attempt-creating transaction commits the dispatch row
+            // before any send (§16.3 durable delivery).
+            TaskAttempt attempt = taskAttemptService.createAttempt(task, selected);
+
+            // §16.4 (2): the first dispatch pins the coordinator.
+            affinityResolver.recordCoordinator(
+                    requestId, selected.getId(), selected.getAgentHostId());
+
+            try {
+                var pinnedVersion = orchestrationRunService.pinnedVersionOf(requestId);
+                var assembled = assignmentAssembler.assemble(task, attempt, pinnedVersion, null);
+                // §16.2: dispatchId == the attempt UUID in V1.
+                var dispatch = dispatchRelay.recordDispatch(
+                        attempt.getId(),
+                        requestId,
+                        task.getId(),
+                        assembled.canonicalJson(),
+                        assembled.assignmentDigest());
+
+                boolean sent = dispatchRelay.sendOnce(dispatch, selected.getId());
+                if (!sent) {
+                    // Row stays PENDING — the relay retransmits on the
+                    // next dispatch pass (or after reconnect).
+                    log.info("Orchestration dispatch {} for task {} not sent yet; relay pending",
+                            attempt.getId(), task.getId());
+                }
+
+                Instant now = Instant.now();
+                task.setStatus(TaskStatus.RUNNING);
+                task.setAgentInstance(selected);
+                task.setStartedAt(now);
+                taskRepository.save(task);
+
+                WorkflowRequest request = task.getRequest();
+                if (request.getStatus() == RequestStatus.PENDING) {
+                    request.setStatus(RequestStatus.RUNNING);
+                    if (request.getStartedAt() == null) {
+                        request.setStartedAt(now);
+                    }
+                    requestRepository.save(request);
+                }
+
+                log.info("Dispatched orchestration task {} (attempt {}, dispatch {}) to agent {}",
+                        task.getId(), attempt.getAttemptNumber(), attempt.getId(), selected.getId());
+                return;
+            } catch (Exception e) {
+                log.error("Orchestration dispatch for task {} failed: {}",
+                        task.getId(), e.getMessage(), e);
+                taskAttemptService.markAbandoned(attempt.getId(),
+                        "Orchestration assembly/dispatch failed: " + e.getMessage());
+                return;
+            }
+        }
+
+        log.debug("No available agent instances for orchestration task {}", task.getId());
+    }
+
+    /** The coordinator instance when it belongs to this host and is idle. */
+    private java.util.Optional<Agent> findByIdIfAlive(AgentHost agent, UUID instanceId) {
+        try {
+            List<Agent> instances = agentInstanceRepository
+                    .findByAgentHostIdAndStatus(agent.getId(), Agent.Status.IDLE);
+            for (Agent instance : instances) {
+                if (instance.getId().equals(instanceId)
+                        && connectionManager.isAgentIdle(instance.getId())) {
+                    return java.util.Optional.of(instance);
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Coordinator lookup failed: {}", e.getMessage());
+        }
+        return java.util.Optional.empty();
     }
 
     /**

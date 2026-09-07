@@ -128,8 +128,14 @@ public class OrchestrationAssignmentAssembler {
             // version — referenced command templates only.
             Map<String, Object> policy = buildPolicy(profileVersion, orchestration);
 
-            // Exactly one selected step — the stored authoring step object.
-            Map<String, Object> selectedStep = new LinkedHashMap<>(stepDef);
+            // §16.2 (7): exactly one selected step — PROJECTED to the §7
+            // authoring shape. The stored step map (WorkflowStepDto via
+            // Jackson) carries engine-only fields (agentProfileId, prompt,
+            // transitions, timeoutSeconds, maxRetries, pauseMode) that the
+            // Agent's strict runtime schema rejects; the workflow-local
+            // agentProfileCode alias lives INSIDE the stored orchestration
+            // map (authoring convention) but §7 expects it at step level.
+            Map<String, Object> selectedStep = projectStep(stepDef);
 
             Map<String, Object> assignment = new LinkedHashMap<>();
             assignment.put("schemaVersion", "1.0");
@@ -243,6 +249,70 @@ public class OrchestrationAssignmentAssembler {
             }
         }
         return null;
+    }
+
+    /**
+     * Project one stored step map to the §7 {@code OrchestrationStepAuthoring}
+     * shape the Agent's strict runtime schema accepts: id, name, taskType,
+     * agentProfileCode, dependsOn, retryPolicy, orchestration — and the
+     * orchestration sub-map WITHOUT the engine-local agentProfileCode alias.
+     * Engine-only fields (agentProfileId, prompt, transitions,
+     * timeoutSeconds, maxRetries, pauseMode) never cross the wire.
+     */
+    private Map<String, Object> projectStep(Map<String, Object> stepDef) {
+        Map<String, Object> projected = new LinkedHashMap<>();
+        projected.put("id", stepDef.get("id"));
+        projected.put("name", stepDef.get("name"));
+        projected.put("taskType", "ORCHESTRATOR");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> orch = (Map<String, Object>) stepDef.get("orchestration");
+        Map<String, Object> orchOut = new LinkedHashMap<>(orch);
+        // §7 shape: the alias sits at step level, not inside orchestration;
+        // an orchestration-nested dependsOn (engine authoring convention)
+        // moves to the step level where the runtime schema expects it.
+        Object alias = orchOut.remove("agentProfileCode");
+        projected.put("agentProfileCode", alias != null ? alias : "");
+
+        Object deps = stepDef.get("dependsOn");
+        if (deps == null) {
+            Object nestedDeps = orchOut.remove("dependsOn");
+            if (nestedDeps instanceof List<?> list) {
+                deps = list;
+            }
+        }
+        projected.put("dependsOn", deps instanceof List<?> list ? new ArrayList<>(list) : List.of());
+
+        // retryPolicy: step-level map (§6) projected to the three schema
+        // fields; a missing map defaults to the terminal-free policy.
+        Map<String, Object> retryPolicy = new LinkedHashMap<>();
+        Object rawPolicy = stepDef.get("retryPolicy");
+        if (rawPolicy instanceof Map<?, ?> policyMap) {
+            if (policyMap.get("maxRetries") instanceof Number n) {
+                retryPolicy.put("maxRetries", n.intValue());
+            }
+            if (policyMap.get("initialBackoffSeconds") instanceof Number n) {
+                retryPolicy.put("initialBackoffSeconds", n.intValue());
+            }
+            if (policyMap.get("maxBackoffSeconds") instanceof Number n) {
+                retryPolicy.put("maxBackoffSeconds", n.intValue());
+            }
+        }
+        if (!retryPolicy.containsKey("maxRetries")) {
+            retryPolicy.put("maxRetries", 0);
+        }
+        if (!retryPolicy.containsKey("initialBackoffSeconds")) {
+            retryPolicy.put("initialBackoffSeconds", 1);
+        }
+        if (!retryPolicy.containsKey("maxBackoffSeconds")
+                || ((Number) retryPolicy.get("maxBackoffSeconds")).intValue()
+                        < ((Number) retryPolicy.get("initialBackoffSeconds")).intValue()) {
+            retryPolicy.put("maxBackoffSeconds", retryPolicy.get("initialBackoffSeconds"));
+        }
+        projected.put("retryPolicy", retryPolicy);
+
+        projected.put("orchestration", orchOut);
+        return projected;
     }
 
     private Map<String, Object> parseJsonMap(String json) {

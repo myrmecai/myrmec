@@ -27,6 +27,12 @@ public class WorkflowProgressionService {
     private final WorkflowTaskRepository taskRepository;
     private final WorkflowRequestRepository requestRepository;
     private final AgentProfileRepository agentProfileRepository;
+    // Feature 10 (§16.5): terminal request completion releases the run's
+    // workspace lease through the coordinator. Lazy: the outcome service
+    // depends on this service (progression), and the release path may
+    // touch the websocket handler.
+    @org.springframework.context.annotation.Lazy
+    private final WorkspaceReleaseOrchestrator workspaceReleaseOrchestrator;
 
     /**
      * Called after a task completes successfully.
@@ -428,6 +434,18 @@ public class WorkflowProgressionService {
         request.setStatus(RequestStatus.COMPLETED);
         request.setCompletedAt(java.time.Instant.now());
         requestRepository.save(request);
+
+        // Feature 10 (§16.5): a completed orchestrated request releases
+        // the run's workspace lease through the coordinator — the
+        // deterministic release frame, acknowledged by the Supervisor.
+        try {
+            workspaceReleaseOrchestrator.releaseIfOrchestrated(request);
+        } catch (Exception e) {
+            // Release is best-effort here: the idempotent acknowledgement
+            // and the expiry sweep reconcile the lease later.
+            log.warn("Post-completion release for run {} failed: {}",
+                    request.getId(), e.getMessage());
+        }
 
         log.info("Workflow request {} completed with {} step outputs",
                 request.getId(), output.size());

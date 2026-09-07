@@ -6,6 +6,7 @@ import ai.myrmec.engine.websocket.AgentWebSocketHandler;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,15 +22,28 @@ import java.util.UUID;
  * those exact bytes until a matching {@code inference.accept} flips the
  * row to {@code ACCEPTED} under a lock. Send, relay, engine, and Agent
  * crashes never create another attempt or consume a retry.
+ *
+ * <p>The websocket handler is {@code @Lazy}: handler → inbound
+ * orchestration handler → relay → handler would otherwise be an
+ * unresolvable constructor-injection cycle (the same pattern the
+ * conversation inbound service uses).</p>
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class OrchestrationDispatchRelay {
 
     private final OrchestrationDispatchRepository dispatchRepository;
     private final AgentWebSocketHandler webSocketHandler;
     private final ObjectMapper objectMapper;
+
+    public OrchestrationDispatchRelay(
+            OrchestrationDispatchRepository dispatchRepository,
+            @Lazy AgentWebSocketHandler webSocketHandler,
+            ObjectMapper objectMapper) {
+        this.dispatchRepository = dispatchRepository;
+        this.webSocketHandler = webSocketHandler;
+        this.objectMapper = objectMapper;
+    }
 
     /**
      * Record one dispatch durably: canonical assignment bytes committed

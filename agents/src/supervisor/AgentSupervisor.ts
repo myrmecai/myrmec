@@ -277,9 +277,25 @@ export abstract class AgentSupervisor {
         return this.onAgentBind(frame);
       case MessageType.AGENT_RELEASE:
         return this.onAgentRelease(frame);
+      // ── Unified Inference Dispatch (§5) + orchestration (§16.3) ──
+      // Frames the engine streams to a connected agent: forwarded into
+      // the worker pool (the worker routes orchestration payloads itself).
+      case MessageType.SESSION_OPEN:
+      case MessageType.SESSION_CLOSE:
+      case MessageType.INFERENCE_ASSIGN:
+      case MessageType.INFERENCE_CANCEL:
+      case MessageType.ORCHESTRATION_RELEASE:
+      case MessageType.ORCHESTRATION_BUDGET_UPDATED:
+        return this.onInferenceFrame(frame);
       default:
         this.log.warn("Unknown message type:", frame.type);
     }
+  }
+
+  /** A session/inference/orchestration frame from the engine (§5/§16.3):
+   * forwarded to the worker pool. Overridable for tests. */
+  protected async onInferenceFrame(frame: RawEnvelope): Promise<void> {
+    this.forwardToWorker(frame);
   }
 
   /** Send a frame on the control socket. */

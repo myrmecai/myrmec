@@ -27,7 +27,17 @@ export interface StepWorkspace {
 }
 
 export interface WorkspaceManager {
-  acquire(source: ResolvedSource, signal?: AbortSignal): Promise<CheckoutHandle>;
+  /**
+   * Acquire a checkout for the resolved source. Feature 10 (§17.1) may
+   * pass a run-keyed layout so managed runs live at
+   * `<root>/runs/<runId>/<generation>/checkout`; without it the manager
+   * picks its own unique layout.
+   */
+  acquire(
+    source: ResolvedSource,
+    signal?: AbortSignal,
+    runLayout?: { runId: string; generation: number },
+  ): Promise<CheckoutHandle>;
   release(checkout: CheckoutHandle): Promise<void>;
 }
 

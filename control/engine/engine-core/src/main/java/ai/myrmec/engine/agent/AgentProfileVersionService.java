@@ -193,6 +193,18 @@ public class AgentProfileVersionService {
         return versionRepository.findByProfileIdAndStatus(profileId, AgentProfileVersion.Status.PUBLISHED);
     }
 
+    /**
+     * The published version with its tools initialized inside the
+     * transaction — safe for response assembly once the session closes
+     * (open-in-view off): the lazy @ManyToMany collection is JOIN FETCHed
+     * before the read-only transaction commits.
+     */
+    @Transactional(readOnly = true)
+    public Optional<AgentProfileVersion> findPublishedWithTools(UUID profileId) {
+        return versionRepository.findPublishedWithTools(
+                profileId, AgentProfileVersion.Status.PUBLISHED);
+    }
+
     /** All versions of a profile, newest first. */
     @Transactional(readOnly = true)
     public List<AgentProfileVersion> listVersions(UUID profileId) {

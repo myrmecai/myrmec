@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -99,18 +100,61 @@ public class OrchestrationSourceResolver {
      * branch-head identity pin — the adapter's fetch-verify path proves
      * obtainability before dispatch; failure surfaces as terminal
      * SOURCE_BASE_UNAVAILABLE at the outcome layer.
+     *
+     * <p>Feature 10 (§16.2 step 4): a REAL {@code git ls-remote} resolves
+     * the branch head to the immutable full SHA — the agent fetches that
+     * exact object and never re-resolves the branch. V1 credential
+     * handling: a credentialSecretId names a vault secret used via the
+     * {@code Credential} helper env (never on the command line); the
+     * deterministic local fixtures run unauthenticated.</p>
      */
     private String resolveBaseCommit(String repoUrl, String sourceBranch, String credentialSecretId) {
-        // The engine-side durable pin: the branch identity resolved at
-        // dispatch time. A full remote ls-remote fetch runs in the engine
-        // scenario adapter (E2E); within the engine this durable identity
-        // is recorded and verified by the dispatch acceptance contract.
-        return "branch-head:" + sourceBranch + "@" + digestOf(repoUrl, sourceBranch);
-    }
+        try {
+            List<String> command = new java.util.ArrayList<>();
+            command.add("git");
+            command.add("ls-remote");
+            // Only the exact branch — never wildcard resolution.
+            command.add(repoUrl);
+            command.add("refs/heads/" + sourceBranch);
 
-    private String digestOf(String repoUrl, String sourceBranch) {
-        String input = repoUrl + "#" + sourceBranch;
-        return ai.myrmec.engine.workflow.OrchestrationIds.sha256Hex(
-                input.getBytes(java.nio.charset.StandardCharsets.UTF_8)).substring(0, 16);
+            ProcessBuilder pb = new ProcessBuilder(command);
+            pb.environment().put("GIT_TERMINAL_PROMPT", "0");
+            pb.environment().put("GIT_ASKPASS", "/bin/true");
+            pb.environment().put("GIT_CONFIG_NOSYSTEM", "1");
+            pb.environment().put("HOME", "");
+            pb.environment().put("GIT_CONFIG", "");
+            // V1: no credential injection on the command line. A null
+            // credentialSecretId (local fixtures) needs none; a secret id
+            // resolves through the engine's credential policy in a later
+            // slice — never embedded here.
+            pb.redirectErrorStream(false);
+
+            Process process = pb.start();
+            String stdout = new String(process.getInputStream().readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            int code = process.waitFor();
+            process.getErrorStream().readAllBytes(); // drain
+
+            if (code != 0) {
+                throw new IllegalStateException(
+                        "git ls-remote failed for " + repoUrl + " (exit " + code + ")");
+            }
+            // Output: "<40-hex-sha>\trefs/heads/<branch>"
+            for (String line : stdout.split("\n")) {
+                String trimmed = line.trim();
+                if (trimmed.endsWith("\trefs/heads/" + sourceBranch)) {
+                    String sha = trimmed.substring(0, trimmed.indexOf('\t')).trim();
+                    if (sha.matches("[0-9a-f]{40}")) {
+                        return sha;
+                    }
+                }
+            }
+            throw new IllegalStateException(
+                    "branch refs/heads/" + sourceBranch + " not found at " + repoUrl);
+        } catch (Exception e) {
+            // §14: the object is unobtainable — terminal, never a fallback.
+            throw new IllegalStateException("SOURCE_BASE_UNAVAILABLE: "
+                    + e.getMessage());
+        }
     }
 }

@@ -19,6 +19,15 @@ public interface AgentProfileVersionRepository extends JpaRepository<AgentProfil
     /** The one currently published version of a profile (§16.1). */
     Optional<AgentProfileVersion> findByProfileIdAndStatus(UUID profileId, AgentProfileVersion.Status status);
 
+    /** The published version with its tools collection fetched eagerly —
+     * response assembly outside a Hibernate session (open-in-view off)
+     * requires the tools initialized before the transaction commits. */
+    @Query("SELECT v FROM AgentProfileVersion v LEFT JOIN FETCH v.tools "
+            + "WHERE v.profileId = :profileId AND v.status = :status")
+    Optional<AgentProfileVersion> findPublishedWithTools(
+            @Param("profileId") UUID profileId,
+            @Param("status") AgentProfileVersion.Status status);
+
     /** All versions of a profile, newest first. */
     List<AgentProfileVersion> findByProfileIdOrderByVersionNumberDesc(UUID profileId);
 

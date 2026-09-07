@@ -70,9 +70,22 @@ export async function git(
 export class GitWorkspaceManager implements WorkspaceManager {
   constructor(private readonly workspaceRoot: string = path.join(tmpdir(), "myrmec-ws")) {}
 
-  async acquire(source: ResolvedSource, signal?: AbortSignal): Promise<CheckoutHandle> {
+  /**
+   * Acquire a checkout. The default layout is Feature-4's
+   * `<root>/ws-<uuid>/1/checkout` (unique per run, no run identity in the
+   * path). Feature 10 (§17.1) managed runs pass a `runLayout` — the run-
+   * keyed path `<root>/runs/<runId>/<generation>/checkout` — so the
+   * lease manifest, restart reconciliation, and cleanup all address the
+   * checkout through its durable run identity.
+   */
+  async acquire(source: ResolvedSource, signal?: AbortSignal, runLayout?: {
+    runId: string;
+    generation: number;
+  }): Promise<CheckoutHandle> {
     const workspaceId = `ws-${randomUUID()}`;
-    const baseDir = path.join(this.workspaceRoot, workspaceId, "1");
+    const baseDir = runLayout
+      ? path.join(this.workspaceRoot, "runs", runLayout.runId, String(runLayout.generation))
+      : path.join(this.workspaceRoot, workspaceId, "1");
     let checkoutPath: string;
     try {
       checkoutPath = path.join(baseDir, "checkout");
