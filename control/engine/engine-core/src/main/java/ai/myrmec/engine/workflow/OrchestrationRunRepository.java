@@ -29,4 +29,10 @@ public interface OrchestrationRunRepository extends JpaRepository<OrchestrationR
      * availability condition — all runs coordinated by this instance.
      */
     java.util.List<OrchestrationRun> findByCoordinatorAgentId(UUID coordinatorAgentId);
+
+    /**
+     * §16.5 lease renewal: live leases whose deadline the engine keeps
+     * in the future (ACTIVE/ACQUIRING/SUSPENDED).
+     */
+    java.util.List<OrchestrationRun> findByLeaseStateIn(java.util.List<String> leaseStates);
 }
