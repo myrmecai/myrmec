@@ -166,7 +166,7 @@ describe('validateWorkflowYaml', () => {
 
   it('rejects unknown engine model code in models', () => {
     const v = validateWorkflowYaml(
-      ORCHESTRATOR_YAML.replaceAll('"glm-5.3"', '"nope"'),
+      ORCHESTRATOR_YAML.replace(/"glm-5\.3"/g, '"nope"'),
       CTX
     )
     expect(v.ok).toBe(false)
