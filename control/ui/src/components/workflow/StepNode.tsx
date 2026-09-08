@@ -9,11 +9,12 @@ export interface StepNodeData extends Record<string, unknown> {
   name: string
   agentProfileId: string
   agentProfileName?: string
-  prompt?: string
+  /** Mirrors WorkflowStep: the engine echoes unset fields as null. */
+  prompt?: string | null
   dependsOn?: string[]
-  transitions?: Record<string, string>
-  timeoutSeconds?: number
-  maxRetries?: number
+  transitions?: Record<string, string> | null
+  timeoutSeconds?: number | null
+  maxRetries?: number | null
   // Runtime info (for request view)
   status?: 'pending' | 'ready' | 'running' | 'completed' | 'cancelled'
   result?: 'success' | 'failure' | 'timeout'

@@ -177,10 +177,14 @@ export function workflowToYaml(input: {
       agentProfileCode: code,
       dependsOn: step.dependsOn ?? [],
     }
-    if (step.prompt !== undefined) yamlStep.prompt = step.prompt
-    if (step.transitions !== undefined) yamlStep.transitions = step.transitions
-    if (step.timeoutSeconds !== undefined) yamlStep.timeoutSeconds = step.timeoutSeconds
-    if (step.maxRetries !== undefined) yamlStep.maxRetries = step.maxRetries
+    // Engine JSON may carry explicit nulls for unset fields — the UI
+    // YAML treats them as absent (the schema's fields are optional(),
+    // not nullable).
+    if (step.prompt != null) yamlStep.prompt = step.prompt
+    if (step.transitions != null && Object.keys(step.transitions).length > 0)
+      yamlStep.transitions = step.transitions
+    if (step.timeoutSeconds != null) yamlStep.timeoutSeconds = step.timeoutSeconds
+    if (step.maxRetries != null) yamlStep.maxRetries = step.maxRetries
     yamlStep.pauseMode = step.pauseMode ?? 'NONE'
     return yamlStep
   })

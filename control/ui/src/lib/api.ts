@@ -757,6 +757,11 @@ export interface UpdateAgentProfileDraftRequest {
 export const agentProfilesApi = {
   list: (activeOnly = false) =>
     api.get<AgentProfile[]>(`/admin/agent-profiles?activeOnly=${activeOnly}`),
+  // Authenticated non-admin roster (public projection — identity +
+  // published-version pointers, no behaviour contract). Authoring and
+  // run-view surfaces use this; the admin list stays for the admin UI.
+  listPublic: (activeOnly = true) =>
+    api.get<AgentProfile[]>(`/agent-profiles?activeOnly=${activeOnly}`),
   get: (id: string) => api.get<AgentProfile>(`/admin/agent-profiles/${id}`),
   create: (data: CreateAgentProfileRequest) =>
     api.post<AgentProfile>('/admin/agent-profiles', data),
@@ -964,11 +969,12 @@ export interface WorkflowStep {
   id: string
   name: string
   agentProfileId: string
-  prompt?: string
+  /** The engine echoes unset optional fields as JSON null. */
+  prompt?: string | null
   dependsOn?: string[]
-  transitions?: Record<string, string>
-  timeoutSeconds?: number
-  maxRetries?: number
+  transitions?: Record<string, string> | null
+  timeoutSeconds?: number | null
+  maxRetries?: number | null
   /** Feature 10 §16.1: INFERENCE (default) or ORCHESTRATOR. */
   taskType?: 'INFERENCE' | 'ORCHESTRATOR'
   /** ORCHESTRATOR steps only: the complete §6 orchestration map. */
@@ -980,7 +986,7 @@ export interface WorkflowStep {
     maxBackoffSeconds: number
   }
   /** J3 pause gate (INFERENCE steps). */
-  pauseMode?: 'NONE' | 'BEFORE' | 'AFTER' | 'BOTH'
+  pauseMode?: 'NONE' | 'BEFORE' | 'AFTER' | 'BOTH' | null
 }
 
 export interface ArtifactsRepo {

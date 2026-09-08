@@ -2,7 +2,7 @@
 // Copyright 2026 The Myrmec Authors
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Editor from '@monaco-editor/react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AlertCircle } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
@@ -34,6 +34,7 @@ import {
 export interface WorkflowYamlEditorApi {
   save: () => void
   isSaveable: () => boolean
+  isPending: () => boolean
 }
 
 interface WorkflowYamlEditorProps {
@@ -46,6 +47,8 @@ interface WorkflowYamlEditorProps {
   onDirtyChange: (dirty: boolean) => void
   /** The latest successful compile flows up (Run-dialog target branch). */
   onCompiledChange?: (compiled: CompiledWorkflow | null) => void
+  /** Save-in-flight flows up (header disables Save while posting). */
+  onPendingChange?: (pending: boolean) => void
   /** Imperative handle for the header's Save button (a plain mutable
    * ref object — React's RefObject.current is readonly in effects). */
   apiRef?: { current: WorkflowYamlEditorApi | null }
@@ -59,8 +62,11 @@ export function WorkflowYamlEditor({
   readOnly = false,
   onDirtyChange,
   onCompiledChange,
+  onPendingChange,
   apiRef,
 }: WorkflowYamlEditorProps) {
+  const queryClient = useQueryClient()
+
   const ctx = useMemo<WorkflowYamlContext>(
     () => ({
       profiles: Object.fromEntries(profiles.map((p) => [p.name, p.id])),
@@ -89,8 +95,16 @@ export function WorkflowYamlEditor({
   onDirtyRef.current = onDirtyChange
   const onCompiledRef = useRef(onCompiledChange)
   onCompiledRef.current = onCompiledChange
+  const onPendingRef = useRef(onPendingChange)
+  onPendingRef.current = onPendingChange
 
+  // Re-serialize from the persisted state only when the document is
+  // clean. Resetting a dirty document would clobber in-progress edits
+  // when a background refetch (another tab's save, invalidation after
+  // our own save) recomputes initialYaml mid-editing.
+  const dirtyRef = useRef(false)
   useEffect(() => {
+    if (dirtyRef.current) return
     setYamlText(initialYaml)
   }, [initialYaml])
 
@@ -127,7 +141,15 @@ export function WorkflowYamlEditor({
     },
     onSuccess: () => {
       setSaveError(null)
+      // Keep dirtyRef asserted until the refetched workflow re-serializes
+      // the document (the version bump recomputes initialYaml); otherwise
+      // a stale initialYaml render could clobber the just-saved content.
       onDirtyRef.current(false)
+      // The save bumps the version and may publish bindings — refetch so
+      // the header's status/version badges and the document re-serialize
+      // from the persisted state (the version dep resets initialYaml).
+      queryClient.invalidateQueries({ queryKey: ['workflow', projectId, workflow.id] })
+      queryClient.invalidateQueries({ queryKey: ['workflows', projectId] })
     },
     onError: (err: unknown) => {
       setSaveError(err instanceof Error ? err.message : 'Failed to save workflow')
@@ -139,19 +161,29 @@ export function WorkflowYamlEditor({
     saveMutation.mutate()
   }, [validation.ok, saveMutation])
 
+  // Save-in-flight flows up to the header (disables its Save button).
+  useEffect(() => {
+    onPendingRef.current?.(saveMutation.isPending)
+  }, [saveMutation.isPending])
+
   // Expose the imperative handle to the parent header. A fresh object
   // each render keeps the latest save/validation closure; the parent's
   // ref object is a plain mutable { current } — no ref-type friction.
   useEffect(() => {
     if (apiRef) {
-      apiRef.current = { save, isSaveable: () => validation.ok }
+      apiRef.current = {
+        save,
+        isSaveable: () => validation.ok,
+        isPending: () => saveMutation.isPending,
+      }
     }
     return () => {
       if (apiRef) apiRef.current = null
     }
-  }, [apiRef, save, validation.ok])
+  }, [apiRef, save, validation.ok, saveMutation.isPending])
 
   const handleChange = useCallback((value: string | undefined) => {
+    dirtyRef.current = true
     setYamlText(value ?? '')
     onDirtyRef.current(true)
   }, [])

@@ -121,6 +121,35 @@ describe('workflowToYaml ∘ yamlToWorkflow round-trip', () => {
     expect(round.bindings).toEqual(compiled.bindings)
     expect(round.defaultTargetBranch).toBe(compiled.defaultTargetBranch)
   })
+
+  it('treats engine nulls as absent fields (prompt: null etc.)', () => {
+    // The engine JSON echoes unset optional fields as explicit nulls
+    // (e.g. a step authored without a prompt). The UI YAML variant's
+    // fields are optional(), not nullable — the converter must drop
+    // them instead of emitting `prompt: null`.
+    const yText = workflowToYaml({
+      name: 'WF',
+      steps: [
+        {
+          id: 'review',
+          name: 'Review Step',
+          agentProfileId: Object.values(CTX.profiles)[0],
+          prompt: null,
+          dependsOn: [],
+          transitions: {},
+          timeoutSeconds: 300,
+          maxRetries: 0,
+          pauseMode: 'NONE',
+          taskType: 'INFERENCE',
+        },
+      ],
+      profiles: CTX.profiles,
+    })
+    expect(yText).not.toMatch(/prompt:/)
+    expect(yText).not.toMatch(/transitions:/)
+    const round = yamlToWorkflow(yText, CTX)
+    expect(round.steps[0].prompt).toBeUndefined()
+  })
 })
 
 describe('addressbook fixture import', () => {

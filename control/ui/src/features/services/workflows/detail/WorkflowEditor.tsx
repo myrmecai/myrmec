@@ -50,6 +50,7 @@ export function WorkflowEditor({ workflowId }: { workflowId: string }) {
 
   const [localName, setLocalName] = useState('')
   const [hasChanges, setHasChanges] = useState(false)
+  const [saveInFlight, setSaveInFlight] = useState(false)
   const [runDialogOpen, setRunDialogOpen] = useState(false)
   const [openSection, setOpenSection] = useState<'inputs' | null>(null)
   const [compiled, setCompiled] = useState<CompiledWorkflow | null>(null)
@@ -72,6 +73,10 @@ export function WorkflowEditor({ workflowId }: { workflowId: string }) {
     setCompiled(next)
   }, [])
 
+  const handlePendingChange = useCallback((pending: boolean) => {
+    setSaveInFlight(pending)
+  }, [])
+
   // Initialize the name once per workflow/version (not on refetch).
   useEffect(() => {
     if (workflow) {
@@ -82,9 +87,12 @@ export function WorkflowEditor({ workflowId }: { workflowId: string }) {
   }, [workflow?.id, workflow?.version])
 
   const { data: profiles } = useAgentProfiles()
+  // Public active-model roster — authoring surfaces only need the code
+  // set for validation; the admin list (pricing, apiEndpoint) stays with
+  // the admin UI.
   const { data: models } = useQuery<Model[]>({
-    queryKey: ['models', 'all'],
-    queryFn: () => modelsApi.list(),
+    queryKey: ['models', 'active'],
+    queryFn: () => modelsApi.listActive(),
     staleTime: 5 * 60 * 1000,
   })
 
@@ -160,6 +168,10 @@ export function WorkflowEditor({ workflowId }: { workflowId: string }) {
 
   const isReadOnly = workflow.status === 'ARCHIVED'
   const yamlValid = compiled !== null
+  // Save exists to persist pending edits — it must stay clickable while
+  // dirty (that's its whole job). Gate on validity and in-flight state;
+  // the YAML editor's imperative handle no-ops invalid documents.
+  const saveDisabled = !yamlValid || saveInFlight
 
   return (
     <div className="h-screen flex flex-col">
@@ -214,9 +226,9 @@ export function WorkflowEditor({ workflowId }: { workflowId: string }) {
                 variant="outline"
                 size="sm"
                 onClick={handleSave}
-                disabled={hasChanges || !yamlValid}
+                disabled={saveDisabled}
                 data-testid="workflow-save-button"
-                title={!yamlValid ? 'Fix validation issues before saving' : undefined}
+                title={saveDisabled && !yamlValid ? 'Fix validation issues before saving' : undefined}
               >
                 <Save className="h-4 w-4 mr-2" />
                 Save
@@ -294,6 +306,7 @@ export function WorkflowEditor({ workflowId }: { workflowId: string }) {
               readOnly={isReadOnly}
               onDirtyChange={handleDirtyChange}
               onCompiledChange={handleCompiledChange}
+              onPendingChange={handlePendingChange}
               apiRef={yamlEditorApiRef}
             />
           ) : (
