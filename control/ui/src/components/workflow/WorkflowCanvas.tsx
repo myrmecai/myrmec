@@ -34,9 +34,9 @@ const edgeColors: Record<string, string> = {
 
 interface WorkflowCanvasProps {
   steps: WorkflowStep[]
-  onStepsChange: (steps: WorkflowStep[]) => void
-  onStepSelect: (stepId: string | null) => void
-  selectedStepId: string | null
+  onStepsChange?: (steps: WorkflowStep[]) => void
+  onStepSelect?: (stepId: string | null) => void
+  selectedStepId?: string | null
   readOnly?: boolean
   agentProfiles?: Array<{ id: string; name: string }>
   invalidStepIds?: Set<string>
@@ -142,7 +142,7 @@ export function WorkflowCanvas({
   steps,
   onStepsChange,
   onStepSelect,
-  selectedStepId,
+  selectedStepId = null,
   readOnly = false,
   agentProfiles = [],
   invalidStepIds,
@@ -216,14 +216,14 @@ export function WorkflowCanvas({
         return step
       })
 
-      onStepsChange(updatedSteps)
+      onStepsChange?.(updatedSteps)
     },
     [readOnly, steps, onStepsChange, setEdges]
   )
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
-      onStepSelect(node.id)
+      onStepSelect?.(node.id)
     },
     [onStepSelect]
   )
@@ -251,13 +251,13 @@ export function WorkflowCanvas({
           return step
         })
       }
-      onStepsChange(updated)
+      onStepsChange?.(updated)
     },
     [readOnly, steps, onStepsChange]
   )
 
   const onPaneClick = useCallback(() => {
-    onStepSelect(null)
+    onStepSelect?.(null)
   }, [onStepSelect])
 
   const handleAddStep = useCallback(() => {
@@ -271,8 +271,8 @@ export function WorkflowCanvas({
       timeoutSeconds: 300,
       maxRetries: 0,
     }
-    onStepsChange([...steps, newStep])
-    onStepSelect(newStepId)
+    onStepsChange?.([...steps, newStep])
+    onStepSelect?.(newStepId)
   }, [steps, agentProfiles, onStepsChange, onStepSelect])
 
   const handleAutoLayout = useCallback(() => {

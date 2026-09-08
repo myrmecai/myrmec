@@ -1,6 +1,6 @@
 export { StepNode, type StepNodeData, type StepNodeType } from './StepNode'
 export { WorkflowCanvas } from './WorkflowCanvas'
-export { StepPropertiesPanel } from './StepPropertiesPanel'
+export { CanvasPreview } from './CanvasPreview'
 export { StepRunPanel, type StepRunAction } from './StepRunPanel'
 export { LogViewer } from './LogViewer'
 export { TaskPauseCard } from './TaskPauseCard'

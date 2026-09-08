@@ -3,22 +3,16 @@
 
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState, useCallback, useMemo, useEffect } from 'react'
-import {
-  workflowsApi,
-  type WorkflowStep,
-  type UpdateWorkflowRequest,
-  type ArtifactsRepo,
-} from '@/lib/api'
+import { useState, useCallback, useRef, useEffect } from 'react'
+import { workflowsApi, modelsApi, type Model } from '@/lib/api'
 import { useAgentProfiles } from '@/lib/use-agent-profiles'
-import { validateWorkflowSteps } from '@/lib/workflow-schema'
-import {
-  WorkflowCanvas,
-  StepPropertiesPanel,
-} from '@/components/workflow'
 import { InputSchemaEditor } from '@/components/workflow/InputSchemaEditor'
-import { ArtifactsRepoSection } from '@/components/workflow/ArtifactsRepoSection'
 import { RunWorkflowDialog } from '@/components/workflow/RunWorkflowDialog'
+import {
+  WorkflowYamlEditor,
+  type WorkflowYamlEditorApi,
+} from './WorkflowYamlEditor'
+import type { CompiledWorkflow } from '@/lib/workflow-yaml-convert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -33,7 +27,6 @@ import {
   Archive,
   AlertCircle,
   Loader2,
-  ChevronUp,
   ChevronDown,
   ChevronRight,
 } from 'lucide-react'
@@ -45,65 +38,54 @@ const statusColors: Record<string, string> = {
   ARCHIVED: 'bg-red-600',
 }
 
+/**
+ * The workflow detail page: header lifecycle (name, badges, Save /
+ * Publish / Archive / Run) + the YAML authoring surface. Step authoring
+ * is YAML-only (spec 2026-09-08-workflow-yaml-authoring-design); the
+ * canvas lives inside the YAML editor's read-only Preview tab.
+ */
 export function WorkflowEditor({ workflowId }: { workflowId: string }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
-  const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
-  const [localSteps, setLocalSteps] = useState<WorkflowStep[]>([])
   const [localName, setLocalName] = useState('')
-  const [localInputSchema, setLocalInputSchema] = useState<
-    Record<string, unknown> | null
-  >(null)
-  const [localArtifactsRepo, setLocalArtifactsRepo] =
-    useState<ArtifactsRepo | null>(null)
   const [hasChanges, setHasChanges] = useState(false)
   const [runDialogOpen, setRunDialogOpen] = useState(false)
-  const [openSection, setOpenSection] = useState<
-    'steps' | 'inputs' | 'artifacts'
-  >('steps')
+  const [openSection, setOpenSection] = useState<'inputs' | null>(null)
+  const [compiled, setCompiled] = useState<CompiledWorkflow | null>(null)
+
+  const yamlEditorApiRef = useRef<WorkflowYamlEditorApi | null>(null)
 
   const { projectId } = useSearch({ strict: false }) as { projectId?: string }
 
-  // Load workflow
   const { data: workflow, isLoading, error } = useQuery({
     queryKey: ['workflow', projectId, workflowId],
     queryFn: () => workflowsApi.get(projectId!, workflowId),
     enabled: !!projectId,
   })
 
-  // Initialize local state when workflow loads or version changes (after save).
-  // Do NOT depend on the workflow object reference — query refetches would otherwise
-  // wipe in-progress edits.
+  const handleDirtyChange = useCallback((dirty: boolean) => {
+    setHasChanges(dirty)
+  }, [])
+
+  const handleCompiledChange = useCallback((next: CompiledWorkflow | null) => {
+    setCompiled(next)
+  }, [])
+
+  // Initialize the name once per workflow/version (not on refetch).
   useEffect(() => {
     if (workflow) {
-      setLocalSteps(workflow.steps)
       setLocalName(workflow.name)
-      setLocalInputSchema(workflow.inputSchema ?? null)
-      setLocalArtifactsRepo(workflow.artifactsRepo ?? null)
       setHasChanges(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workflow?.id, workflow?.version])
 
-  // Load agent profiles for step configuration (cached, deduped across views)
   const { data: profiles } = useAgentProfiles()
-
-  const [saveError, setSaveError] = useState<string | null>(null)
-
-  const updateMutation = useMutation({
-    mutationFn: (data: UpdateWorkflowRequest) =>
-      workflowsApi.update(projectId!, workflowId, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['workflow', projectId, workflowId] })
-      queryClient.invalidateQueries({ queryKey: ['workflows', projectId] })
-      setHasChanges(false)
-      setSaveError(null)
-    },
-    onError: (err: unknown) => {
-      const msg = err instanceof Error ? err.message : 'Failed to save workflow'
-      setSaveError(msg)
-    },
+  const { data: models } = useQuery<Model[]>({
+    queryKey: ['models', 'all'],
+    queryFn: () => modelsApi.list(),
+    staleTime: 5 * 60 * 1000,
   })
 
   const publishMutation = useMutation({
@@ -122,62 +104,14 @@ export function WorkflowEditor({ workflowId }: { workflowId: string }) {
     },
   })
 
-  const handleStepsChange = useCallback((steps: WorkflowStep[]) => {
-    setLocalSteps(steps)
-    setHasChanges(true)
-  }, [])
-
-  const handleStepUpdate = useCallback((updatedStep: WorkflowStep) => {
-    setLocalSteps((prev) =>
-      prev.map((s) => (s.id === updatedStep.id ? updatedStep : s))
-    )
-    setHasChanges(true)
-  }, [])
-
-  const handleStepsBulkUpdate = useCallback((next: WorkflowStep[]) => {
-    setLocalSteps(next)
-    setHasChanges(true)
-  }, [])
-
-  const handleStepDelete = useCallback((stepId: string) => {
-    setLocalSteps((prev) => prev.filter((s) => s.id !== stepId))
-    setSelectedStepId(null)
+  const handleNameChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setLocalName(e.target.value)
     setHasChanges(true)
   }, [])
 
   const handleSave = useCallback(() => {
-    if (!workflow) return
-    // Omit artifactsRepo entirely when no URL is configured (backend requires url when present)
-    const artifactsRepo =
-      localArtifactsRepo && localArtifactsRepo.url && localArtifactsRepo.url.trim()
-        ? localArtifactsRepo
-        : undefined
-    updateMutation.mutate({
-      name: localName,
-      description: workflow.description || undefined,
-      steps: localSteps,
-      inputSchema: localInputSchema || undefined,
-      artifactsRepo,
-      status: workflow.status,
-    })
-  }, [workflow, localName, localSteps, localInputSchema, localArtifactsRepo, updateMutation])
-
-  const selectedStep = useMemo(
-    () => localSteps.find((s) => s.id === selectedStepId) || null,
-    [localSteps, selectedStepId]
-  )
-
-  const validation = useMemo(
-    () => validateWorkflowSteps(localSteps),
-    [localSteps]
-  )
-  const invalidCount = validation.invalidStepIds.size
-
-  const profilesForCanvas = useMemo(
-    () =>
-      profiles?.map((p) => ({ id: p.id, name: p.name })) || [],
-    [profiles]
-  )
+    yamlEditorApiRef.current?.save()
+  }, [])
 
   if (!projectId) {
     return (
@@ -225,6 +159,7 @@ export function WorkflowEditor({ workflowId }: { workflowId: string }) {
   }
 
   const isReadOnly = workflow.status === 'ARCHIVED'
+  const yamlValid = compiled !== null
 
   return (
     <div className="h-screen flex flex-col">
@@ -242,10 +177,7 @@ export function WorkflowEditor({ workflowId }: { workflowId: string }) {
             <div className="flex items-center gap-2">
               <Input
                 value={localName}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  setLocalName(e.target.value)
-                  setHasChanges(true)
-                }}
+                onChange={handleNameChange}
                 className="h-8 text-lg font-semibold border-transparent hover:border-input focus:border-input"
                 disabled={isReadOnly}
               />
@@ -253,28 +185,14 @@ export function WorkflowEditor({ workflowId }: { workflowId: string }) {
                 {workflow.status}
               </Badge>
               <span className="text-sm text-muted-foreground">v{workflow.version}</span>
-              {invalidCount > 0 && (
-                <Badge variant="destructive" className="gap-1">
-                  <AlertCircle className="h-3 w-3" />
-                  {invalidCount} invalid
-                </Badge>
-              )}
             </div>
             <p className="text-sm text-muted-foreground">
-              {workflow.projectName} • {localSteps.length} steps
+              {workflow.projectName}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          {saveError && (
-            <span
-              className="text-sm text-red-600 max-w-xs truncate"
-              title={saveError}
-            >
-              {saveError}
-            </span>
-          )}
           {hasChanges && (
             <span className="text-sm text-yellow-600">Unsaved changes</span>
           )}
@@ -296,28 +214,22 @@ export function WorkflowEditor({ workflowId }: { workflowId: string }) {
                 variant="outline"
                 size="sm"
                 onClick={handleSave}
-                disabled={updateMutation.isPending || !hasChanges}
+                disabled={hasChanges || !yamlValid}
+                data-testid="workflow-save-button"
+                title={!yamlValid ? 'Fix validation issues before saving' : undefined}
               >
-                {updateMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Save className="h-4 w-4 mr-2" />
-                )}
+                <Save className="h-4 w-4 mr-2" />
                 Save
               </Button>
               {workflow.status === 'DRAFT' && (
                 <Button
                   size="sm"
                   onClick={() => publishMutation.mutate()}
-                  disabled={
-                    publishMutation.isPending ||
-                    hasChanges ||
-                    !validation.ok
-                  }
+                  disabled={publishMutation.isPending || hasChanges || !yamlValid}
                   data-testid="workflow-publish-button"
                   title={
-                    !validation.ok
-                      ? 'Fix validation errors before publishing'
+                    !yamlValid
+                      ? 'Fix validation issues before publishing'
                       : hasChanges
                         ? 'Save changes before publishing'
                         : undefined
@@ -347,147 +259,48 @@ export function WorkflowEditor({ workflowId }: { workflowId: string }) {
         </div>
       </header>
 
-      {/* Main Content */}
+      {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left rail */}
+        {/* Left rail: workflow inputs only. Steps and the artifacts
+            repository are authored in the YAML (the source: block owns
+            artifactsRepo per the spec). */}
         <div className="w-72 border-r overflow-y-auto bg-card/30">
-          <LeftRailSection
-            title="Steps"
-            open={openSection === 'steps'}
-            onToggle={() =>
-              setOpenSection(openSection === 'steps' ? 'steps' : 'steps')
-            }
-            forceOpen={openSection === 'steps'}
-            onOpenChange={() => setOpenSection('steps')}
-          >
-            {localSteps.length === 0 ? (
-              <p className="text-xs text-muted-foreground py-2">
-                No steps yet. Add steps from the canvas.
-              </p>
-            ) : (
-              <ul className="space-y-1">
-                {localSteps.map((s, idx) => {
-                  const invalid = validation.invalidStepIds.has(s.id)
-                  return (
-                    <li
-                      key={s.id}
-                      className={`flex items-center gap-1 px-2 py-1 rounded text-xs cursor-pointer ${
-                        selectedStepId === s.id
-                          ? 'bg-accent'
-                          : 'hover:bg-accent/50'
-                      }`}
-                      onClick={() => setSelectedStepId(s.id)}
-                    >
-                      <span className="flex-1 truncate">
-                        {invalid && (
-                          <AlertCircle className="h-3 w-3 inline mr-1 text-red-600" />
-                        )}
-                        {idx + 1}. {s.name || s.id}
-                      </span>
-                      {!isReadOnly && (
-                        <>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="h-5 w-5"
-                            disabled={idx === 0}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              if (idx === 0) return
-                              const next = [...localSteps]
-                              ;[next[idx - 1], next[idx]] = [next[idx], next[idx - 1]]
-                              handleStepsChange(next)
-                            }}
-                          >
-                            <ChevronUp className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="h-5 w-5"
-                            disabled={idx === localSteps.length - 1}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              if (idx === localSteps.length - 1) return
-                              const next = [...localSteps]
-                              ;[next[idx], next[idx + 1]] = [next[idx + 1], next[idx]]
-                              handleStepsChange(next)
-                            }}
-                          >
-                            <ChevronDown className="h-3 w-3" />
-                          </Button>
-                        </>
-                      )}
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </LeftRailSection>
-
           <LeftRailSection
             title="Inputs"
             open={openSection === 'inputs'}
-            forceOpen={openSection === 'inputs'}
-            onOpenChange={() => setOpenSection('inputs')}
-          >
-            <InputSchemaEditor
-              value={localInputSchema}
-              readOnly={isReadOnly}
-              onChange={(v) => {
-                setLocalInputSchema(v)
-                setHasChanges(true)
-              }}
-            />
-          </LeftRailSection>
-
-          <LeftRailSection
-            title="Artifacts repository"
-            open={openSection === 'artifacts'}
-            forceOpen={openSection === 'artifacts'}
-            onOpenChange={() => setOpenSection('artifacts')}
-          >
-            <ArtifactsRepoSection
-              projectId={projectId}
-              value={localArtifactsRepo}
-              readOnly={isReadOnly}
-              onChange={(v) => {
-                setLocalArtifactsRepo(v)
-                setHasChanges(true)
-              }}
-            />
-          </LeftRailSection>
-        </div>
-
-        {/* Canvas */}
-        <div className="flex-1 relative">
-          <WorkflowCanvas
-            steps={localSteps}
-            onStepsChange={handleStepsChange}
-            onStepSelect={setSelectedStepId}
-            selectedStepId={selectedStepId}
-            readOnly={isReadOnly}
-            agentProfiles={profilesForCanvas}
-            invalidStepIds={validation.invalidStepIds}
-          />
-        </div>
-
-        {/* Properties Panel */}
-        <div className="w-80 border-l overflow-hidden">
-          <StepPropertiesPanel
-            step={selectedStep}
-            allSteps={localSteps}
-            profiles={profiles || []}
-            onUpdate={handleStepUpdate}
-            onStepsBulkUpdate={handleStepsBulkUpdate}
-            onDelete={handleStepDelete}
-            onClose={() => setSelectedStepId(null)}
-            errors={
-              selectedStep ? validation.byStepId[selectedStep.id] : undefined
+            onOpenChange={() =>
+              setOpenSection(openSection === 'inputs' ? null : 'inputs')
             }
-          />
+          >
+            <p className="text-xs text-muted-foreground pb-2">
+              Input schema for run dialogs. Steps live in the YAML.
+            </p>
+            <InputSchemaEditor
+              value={workflow.inputSchema}
+              readOnly={isReadOnly}
+              onChange={() => setHasChanges(true)}
+            />
+          </LeftRailSection>
+        </div>
+
+        {/* YAML authoring surface */}
+        <div className="flex-1 flex overflow-hidden">
+          {profiles && models ? (
+            <WorkflowYamlEditor
+              workflow={workflow}
+              projectId={projectId}
+              profiles={profiles}
+              models={models}
+              readOnly={isReadOnly}
+              onDirtyChange={handleDirtyChange}
+              onCompiledChange={handleCompiledChange}
+              apiRef={yamlEditorApiRef}
+            />
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          )}
         </div>
       </div>
 
