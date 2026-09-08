@@ -71,4 +71,25 @@ public class AgentProfileResponse {
                 .updatedAt(profile.getUpdatedAt())
                 .build();
     }
+
+    /**
+     * Public projection for authenticated non-admin surfaces (workflow
+     * authoring, run views): identity + version pointers only — the
+     * behaviour contract (system prompt, tools) and draft state stay
+     * admin-only. Mirrors {@code ModelResponse.fromPublic}.
+     */
+    public static AgentProfileResponse fromPublic(
+            AgentProfile profile,
+            AgentProfileVersion published) {
+        return AgentProfileResponse.builder()
+                .id(profile.getId())
+                .name(profile.getName())
+                .description(profile.getDescription())
+                .status(profile.getStatus().name())
+                .interactionMode(published != null ? published.getInteractionMode().name() : null)
+                .defaultModel(published != null ? published.getDefaultModel() : null)
+                .publishedVersionId(published != null ? published.getId() : null)
+                .publishedVersionNumber(published != null ? published.getVersionNumber() : null)
+                .build();
+    }
 }

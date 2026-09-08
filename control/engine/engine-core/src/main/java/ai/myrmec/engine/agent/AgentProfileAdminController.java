@@ -25,11 +25,16 @@ import java.util.stream.Collectors;
 
 /**
  * Admin controller for managing agent profiles.
+ *
+ * <p>The {@code SecurityConfig} ACL gates {@code /api/v1/admin/**} to
+ * {@code PLATFORM_ADMIN}/{@code ORG_ADMIN} before method security runs;
+ * authenticated non-admin consumers use {@link AgentProfileController}
+ * (the public projection) instead.</p>
  */
 @RestController
 @RequestMapping("/api/v1/admin/agent-profiles")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('PLATFORM_ADMIN') or hasRole('EDITOR')")
+@PreAuthorize("hasRole('PLATFORM_ADMIN') or hasRole('ORG_ADMIN')")
 @Tag(name = "Agent Profiles (Admin)", description = "Agent profile management operations")
 public class AgentProfileAdminController {
 

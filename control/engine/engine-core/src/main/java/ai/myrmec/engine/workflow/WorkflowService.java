@@ -205,6 +205,7 @@ public class WorkflowService {
                 mapListToSteps(workflow.getSteps()),
                 workflow.getInputSchema(),
                 mapToArtifactsRepo(workflow.getArtifactsRepo()),
+                workflow.getOrchestrationBindings(),
                 workflow.getVersion(),
                 workflow.getStatus(),
                 workflow.getCreatedBy().getId(),
