@@ -106,7 +106,9 @@ public class OrchestrationAffinityResolver {
     /**
      * The coordinator reconnected with same-Host/generation proof before the
      * deadline: clear the availability condition (a new outage starts a new
-     * episode).
+     * episode). The reconnect proof is the established authenticated
+     * WebSocket session itself — same instance identity, same Host
+     * registration the dispatcher pins against.
      */
     @Transactional
     public void observeAvailable(UUID runId) {
@@ -114,6 +116,20 @@ public class OrchestrationAffinityResolver {
                 .orElseThrow(() -> new IllegalArgumentException("Unknown run: " + runId));
         run.setAvailabilityState("AVAILABLE");
         log.info("Run {} coordinator reconnected — availability restored", runId);
+    }
+
+    /**
+     * §16.4 (7): clear the availability condition of every run coordinated
+     * by the reconnecting instance (reconnect proof = the authenticated
+     * session's instance identity). AVAILABLE/unknown runs are no-ops.
+     */
+    @Transactional
+    public void observeAvailableForCoordinator(UUID coordinatorAgentId) {
+        for (OrchestrationRun run : runRepository.findByCoordinatorAgentId(coordinatorAgentId)) {
+            if ("UNAVAILABLE".equals(run.getAvailabilityState())) {
+                observeAvailable(run.getId());
+            }
+        }
     }
 
     /**

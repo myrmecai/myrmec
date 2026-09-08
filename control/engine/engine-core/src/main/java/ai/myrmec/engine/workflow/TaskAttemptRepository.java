@@ -18,6 +18,9 @@ public interface TaskAttemptRepository extends JpaRepository<TaskAttempt, UUID> 
      */
     List<TaskAttempt> findByTaskIdOrderByAttemptNumberAsc(UUID taskId);
 
+    /** All attempts of a task (unordered view for contract assertions). */
+    List<TaskAttempt> findByTaskId(UUID taskId);
+
     /**
      * Find the latest attempt for a task.
      */

@@ -77,6 +77,18 @@ public class AgentConnectionManager {
     }
     
     /**
+     * Remove an agent connection by instance id (e.g. simulated Host loss in
+     * affinity tests). No-op when the instance has no live connection.
+     */
+    public void unregisterByAgentInstanceId(UUID agentInstanceId) {
+        AgentConnection connection = connections.remove(agentInstanceId);
+        if (connection != null) {
+            sessionToAgent.remove(connection.getSession().getId());
+            log.info("Agent {} ({}) disconnected", connection.getAgentName(), agentInstanceId);
+        }
+    }
+
+    /**
      * Get connection by agent instance ID.
      */
     public Optional<AgentConnection> getConnection(UUID agentInstanceId) {

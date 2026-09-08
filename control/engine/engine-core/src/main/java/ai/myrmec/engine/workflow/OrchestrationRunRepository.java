@@ -23,4 +23,10 @@ public interface OrchestrationRunRepository extends JpaRepository<OrchestrationR
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<OrchestrationRun> findWithLockById(UUID id);
+
+    /**
+     * §16.4 (7): reconnection of the coordinator clears the run's
+     * availability condition — all runs coordinated by this instance.
+     */
+    java.util.List<OrchestrationRun> findByCoordinatorAgentId(UUID coordinatorAgentId);
 }
