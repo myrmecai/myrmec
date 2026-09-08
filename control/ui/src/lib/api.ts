@@ -969,6 +969,18 @@ export interface WorkflowStep {
   transitions?: Record<string, string>
   timeoutSeconds?: number
   maxRetries?: number
+  /** Feature 10 §16.1: INFERENCE (default) or ORCHESTRATOR. */
+  taskType?: 'INFERENCE' | 'ORCHESTRATOR'
+  /** ORCHESTRATOR steps only: the complete §6 orchestration map. */
+  orchestration?: Record<string, unknown>
+  /** Step-level retry policy (ORCHESTRATOR steps; §6). */
+  retryPolicy?: {
+    maxRetries: number
+    initialBackoffSeconds: number
+    maxBackoffSeconds: number
+  }
+  /** J3 pause gate (INFERENCE steps). */
+  pauseMode?: 'NONE' | 'BEFORE' | 'AFTER' | 'BOTH'
 }
 
 export interface ArtifactsRepo {
@@ -986,6 +998,8 @@ export interface Workflow {
   steps: WorkflowStep[]
   inputSchema: Record<string, unknown> | null
   artifactsRepo: ArtifactsRepo | null
+  /** Feature 10 §16.1: alias → agent-profile UUID bindings (ORCHESTRATOR steps). */
+  orchestrationBindings?: Record<string, string> | null
   version: number
   status: WorkflowStatus
   createdById: string
@@ -1103,6 +1117,16 @@ export const workflowsApi = {
     api.post<Workflow>(`/projects/${projectId}/workflows/${id}/publish`),
   archive: (projectId: string, id: string) =>
     api.post<Workflow>(`/projects/${projectId}/workflows/${id}/archive`),
+  /** Feature 10 §16.1: bind authoring aliases to agent-profile UUIDs. */
+  setOrchestrationBindings: (
+    projectId: string,
+    workflowId: string,
+    bindings: Record<string, string>
+  ) =>
+    api.post<Workflow>(
+      `/projects/${projectId}/workflows/${workflowId}/orchestration-bindings`,
+      bindings
+    ),
   // Requests
   listRequests: (projectId: string, workflowId: string) =>
     api.get<WorkflowRequest[]>(`/projects/${projectId}/workflows/${workflowId}/requests`),
