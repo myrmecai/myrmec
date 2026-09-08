@@ -73,6 +73,9 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     private final InboundOrchestrationHandler inboundOrchestrationHandler;
     // §16.4 (7): reconnecting coordinator clears run availability.
     private final ai.myrmec.engine.workflow.OrchestrationAffinityResolver affinityResolver;
+    // §16.4 (6): reconnect retransmits unaccepted dispatches (same
+    // @Lazy break as the relay's own handler dependency).
+    private final ai.myrmec.engine.workflow.OrchestrationDispatchRelay dispatchRelay;
 
     private static final String ATTR_AGENT_INSTANCE_ID = "agentInstanceId";
     private static final String ATTR_AGENT_NAME = "agentName";
@@ -96,7 +99,9 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
             @org.springframework.context.annotation.Lazy ConversationInboundService conversationInboundService,
             InboundInferenceHandler inboundInferenceHandler,
             InboundOrchestrationHandler inboundOrchestrationHandler,
-            ai.myrmec.engine.workflow.OrchestrationAffinityResolver affinityResolver) {
+            ai.myrmec.engine.workflow.OrchestrationAffinityResolver affinityResolver,
+            @org.springframework.context.annotation.Lazy
+            ai.myrmec.engine.workflow.OrchestrationDispatchRelay dispatchRelay) {
         this.jwtTokenProvider = jwtTokenProvider;
         this.agentInstanceRepository = agentInstanceRepository;
         this.agentService = agentService;
@@ -116,6 +121,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         this.inboundInferenceHandler = inboundInferenceHandler;
         this.inboundOrchestrationHandler = inboundOrchestrationHandler;
         this.affinityResolver = affinityResolver;
+        this.dispatchRelay = dispatchRelay;
     }
 
     @Override
@@ -148,6 +154,17 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
             affinityResolver.observeAvailableForCoordinator(agentInstanceId);
         } catch (Exception e) {
             log.warn("Availability restore for agent {} failed: {}",
+                    agentInstanceId, e.getMessage());
+        }
+
+        // §16.4 (6): respawn/restart recovery — retransmit this
+        // instance's unaccepted orchestration dispatches (the exact
+        // stored bytes, the same attempt; inference.accept idempotence
+        // makes re-admission safe).
+        try {
+            dispatchRelay.retransmitUnacceptedForInstance(agentInstanceId);
+        } catch (Exception e) {
+            log.warn("Dispatch retransmission for agent {} failed: {}",
                     agentInstanceId, e.getMessage());
         }
 
