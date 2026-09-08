@@ -28,6 +28,9 @@ import type {
 import { orchestrationAssignmentSchema } from "./schema.js";
 import { normalizeUsage, WorkerInvoker } from "./WorkerInvoker.js";
 import { InMemoryBudgetController, type BudgetBreach, type BudgetController } from "./BudgetController.js";
+import { ORCHESTRATION_SCHEDULING_NS, uuidV5 } from "./constants.js";
+import { governedActionDigest } from "./ApprovalPolicyEvaluator.js";
+import { validateApprovalResume } from "./ApprovalResumeValidator.js";
 import {
   InMemoryVerificationLedger,
   toVerifierResult,
@@ -68,6 +71,80 @@ export interface OrchestrationRunnerOptions {
    * occurs. Cancellation never pretends to roll back a completed
    * external side effect — evidence is reported as-is. */
   cancellation?: { readonly cancelled: boolean };
+  /** HITL (§17.4): the risk/policy evaluator. Absent with a policy that
+   * would suspend → fail closed (the runner never executes an action
+   * that requires approval without the ability to suspend durably). */
+  approvalEvaluator?: {
+    evaluate(
+      assignment: OrchestrationAssignment,
+      action: import("./GovernedAction.js").GovernedAction,
+    ): import("./ApprovalPolicyEvaluator.js").ApprovalPolicyDecision;
+    effectiveWorkerRisk(
+      assignment: OrchestrationAssignment,
+      worker: import("./types.js").WorkerAuthoring,
+    ): "SAFE" | "DESTRUCTIVE" | "IRREVERSIBLE";
+  };
+  /** HITL (§17.4): the durable approval sink. REQUIRED when the
+   * evaluator returns REQUIRE_APPROVAL — its absence fails closed with
+   * APPROVAL_POLICY_DENIED (§17.4: "the runner must have an
+   * OrchestrationApprovalSink; its absence fails closed"). */
+  approvalSink?: import("./GovernedAction.js").OrchestrationApprovalSink;
+  /** HITL (§17.4): suspension publication — the continuation store. The
+   * runner publishes the continuation + suspension state BEFORE the
+   * request and returns PAUSED only after the sink durably accepts it. */
+  suspensionPublisher?: {
+    publish(input: {
+      dispatch: OrchestrationAssignment["dispatch"];
+      action: import("./GovernedAction.js").GovernedAction;
+      approvalRequestId: string;
+      candidateTreeHash: string;
+      workspaceRevision: number;
+      expiresAt: string;
+    }): Promise<{
+      continuationId: string;
+      continuationRef: string;
+      snapshotTreeHash: string;
+      stateDigest: string;
+    }>;
+  };
+  /** HITL (§17.4, slice C): restores the stored suspension for a
+   * decision-bearing continuation — the §7 validation binds the typed
+   * decision against it before the runner resumes the exact pending
+   * action. Absent with a decision-bearing continuation → fail closed. */
+  suspensionLoader?: {
+    load(
+      continuationId: string,
+    ): import("./ApprovalResumeValidator.js").RestoredSuspension | null;
+  };
+  /** §17.2/§17.5 (retry continuation): publishes the durable continuation
+   * manifest after a WORKER_FAILED (RETRYABLE) safe boundary — completed
+   * call identities, budget counters, verifier history, candidate tree.
+   * The engine stores the returned §7.3 ContinuationRecord on the result;
+   * a retry dispatch carries the continuationId and the runner restores
+   * here. Absent on a retryable failure → the result fails closed (the
+   * engine refuses a RETRYABLE without a continuation, §16.6). */
+  retryContinuationPublisher?: {
+    publish(input: {
+      dispatchId: string;
+      attemptOrdinal: number;
+      budgetCounters: { workerCalls: number; totalTokens: number; rejectionCount: number };
+      completedCalls: WorkerCallResult[];
+      candidateTreeHash: string;
+      workspaceRevision: number;
+      verifierHistory: VerdictRecord[];
+    }): Promise<{
+      continuationId: string;
+      continuationRef: string;
+      stateDigest: string;
+    }>;
+  };
+  /** §17.5 (retry restore): loads the published continuation manifest
+   * for a decision-less continuation (engine retry) so the retried
+   * dispatch deduplicates completed calls and restores the counters
+   * (§13 same-dispatch restart semantics). */
+  retryContinuationLoader?: {
+    load(continuationId: string): import("./ContinuationStateStore.js").ContinuationManifest | null;
+  };
 }
 
 export interface OrchestrationRunOptions {
@@ -81,8 +158,42 @@ interface InvokeWorkerInput {
   instruction: string;
 }
 
+/**
+ * §17.4: thrown by the HITL gate when a worker invocation requires
+ * approval. The run() body catches it, publishes the suspension, sends
+ * the request through the durable sink, and returns PAUSED. Carries the
+ * governed action + expiry — never raw tool arguments, source, diffs, or
+ * credentials.
+ */
+class ApprovalRequiredSignal extends Error {
+  constructor(
+    readonly action: import("./GovernedAction.js").GovernedAction,
+    readonly expiresAt: string,
+  ) {
+    super(`approval required for ${action.type} (${action.riskClass})`);
+    this.name = "ApprovalRequiredSignal";
+  }
+}
+
+/**
+ * §17.4: thrown by the HITL gate on a profile/host DENY — terminal
+ * APPROVAL_POLICY_DENIED; no approval request is created and the turn
+ * must not keep planning around the denied action.
+ */
+class PolicyDeniedSignal extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+    this.name = "PolicyDeniedSignal";
+  }
+}
+
 export class OrchestrationRunner {
   private readonly options: OrchestrationRunnerOptions;
+  /** §17.4 (slice C): the approved pending action's semantic identity
+   * (type:riskClass:summary) — the gate matches THIS (a fresh attempt
+   * derives a new attempt-local actionId, so the digest alone can never
+   * match across attempts). */
+  private approvedActionKey: string | null = null;
 
   constructor(options: OrchestrationRunnerOptions) {
     this.options = options;
@@ -127,6 +238,78 @@ export class OrchestrationRunner {
     const { step, dispatch } = assignment;
     const o = step.orchestration;
 
+    // §7/§17.4 (HITL slice C): a decision-bearing continuation is a HITL
+    // resume. The typed ApprovalDecision is validated against the
+    // restored suspension BEFORE any work — identity, digests, status,
+    // generation, and expiry all bind; any mismatch fails closed and no
+    // pending action executes.
+    const decision = assignment.continuation?.decision;
+    if (decision) {
+      const loader = this.options.suspensionLoader;
+      if (!loader) {
+        return this.failure(
+          dispatch,
+          "APPROVAL_POLICY_DENIED",
+          "resume decision present but no suspension loader is wired — failing closed",
+          { workerCalls: 0, rejectionCount: 0, totalTokens: 0 },
+        );
+      }
+      const restored = loader.load(assignment.continuation!.continuationId);
+      if (!restored) {
+        return this.failure(
+          dispatch,
+          "APPROVAL_POLICY_DENIED",
+          "resume decision for an unrestorable suspension — failing closed",
+          { workerCalls: 0, rejectionCount: 0, totalTokens: 0 },
+        );
+      }
+      const validation = validateApprovalResume(decision, restored);
+      if (!validation.valid) {
+        return this.failure(
+          dispatch,
+          validation.rejection ?? "APPROVAL_POLICY_DENIED",
+          `resume decision rejected: ${validation.reason}`,
+          { workerCalls: 0, rejectionCount: 0, totalTokens: 0 },
+        );
+      }
+      // §17.4: "APPROVED authorizes only the stored pending action."
+      // The validated decision authorizes the pending action's
+      // SEMANTIC identity (type:riskClass:summary — the what), not the
+      // attempt-local actionId (a fresh attempt derives a new id). The
+      // HITL gate lets exactly that invocation through on this attempt;
+      // every other action still evaluates normally.
+      const pending = restored.suspension.pendingAction;
+      this.approvedActionKey = pending
+        ? `${pending.type}:${pending.riskClass}:${pending.summary}`
+        : null;
+    }
+
+    // §17.5 (retry restore): a decision-less continuation is an engine
+    // retry of a FAILED/RETRYABLE dispatch. The published manifest
+    // restores the completed-call identities (replay dedup by callId),
+    // the budget counters, and the verifier history (§13 same-dispatch
+    // restart semantics — a crash cannot reset a budget). Absent
+    // loader/manifest → the retry still runs, but with fresh state
+    // (§13: a new attempt's counters; dedup simply finds nothing).
+    let restoredManifest: import("./ContinuationStateStore.js").ContinuationManifest | null =
+      null;
+    if (assignment.continuation && !decision) {
+      const retryLoader = this.options.retryContinuationLoader;
+      restoredManifest = retryLoader
+        ? retryLoader.load(assignment.continuation.continuationId)
+        : null;
+      // A retry continuation that cannot be restored fails closed — the
+      // engine's §16.6 contract only retries with a valid continuation.
+      if (!restoredManifest) {
+        return this.failure(
+          dispatch,
+          "RECOVERY_SNAPSHOT_INVALID",
+          `retry continuation ${assignment.continuation.continuationId} could not be restored — failing closed`,
+          { workerCalls: 0, rejectionCount: 0, totalTokens: 0 },
+        );
+      }
+    }
+
     let sequence = 0;
     const nextSequence = () => ++sequence;
     const workerCalls: WorkerCallResult[] = [];
@@ -145,10 +328,27 @@ export class OrchestrationRunner {
     let rejectionCount = 0;
     const verifierResults: VerdictRecord[] = [];
     // Feature 7 (design §13): the per-attempt budget controller shared by
-    // the orchestrator and every worker TurnExecutor. Counter restoration
-    // for a same-dispatch restart is the continuation store's job; a new
-    // attempt gets fresh counters.
+    // the orchestrator and every worker TurnExecutor. A new engine
+    // attempt has a new dispatchId and FRESH counters (§17.2) — the
+    // restored manifest contributes completed-call identities, candidate
+    // state, and verifier history only, never counters.
     const budget: BudgetController = new InMemoryBudgetController(o.budget);
+    // §17.5: the restored completed-call identities are available for
+    // replay dedup at the §17.5 seam (same-dispatch restart); a NEW
+    // engine attempt carries fresh callIds by design (§13), so no
+    // invoke-path consultation applies in V1.
+    if (restoredManifest) {
+      void restoredManifest.completedCallIds;
+    }
+    // §17.5: replay the verifier history so the completion gate's
+    // satisfies() sees the prior attempt's verdicts for the same tree.
+    for (const record of restoredManifest?.verifierHistory ?? []) {
+      ledger.record(record);
+      verifierResults.push(record);
+      if (record.verdict === "REJECTED") {
+        rejectionCount += 1;
+      }
+    }
     let budgetBreach: BudgetBreach | null = null;
     const recordVerdict = (
       input: Omit<VerdictRecord, "sequence" | "attemptOrdinal">,
@@ -284,9 +484,54 @@ export class OrchestrationRunner {
         if (this.options.cancellation?.cancelled) {
           return { status: "CANCELLED", summary: "cancelled before worker invocation" };
         }
+        // §17.4 HITL gate: evaluate the worker invocation BEFORE the
+        // worker starts — and BEFORE the budget reservation, so a
+        // suspended invocation never consumes a worker-call slot (the
+        // resumed attempt gets fresh counters per §13). The pending
+        // action is the whole WORKER_TOOL invocation; approval lets the
+        // worker run to completion. The gate throws a typed signal that
+        // the run() body catches to return PAUSED — a tool-result code
+        // would let the orchestrator loop keep planning, which §17.4
+        // forbids ("suspend once, before the worker starts").
+        if (this.options.approvalEvaluator) {
+          const worker = o.workers.find((w) => w.name === args.workerName);
+          const riskClass = worker
+            ? this.options.approvalEvaluator.effectiveWorkerRisk(assignment, worker)
+            : "SAFE";
+          const action: import("./GovernedAction.js").GovernedAction = {
+            actionId: `action-${dispatch.dispatchId}-${startedSequence}`,
+            type: "WORKER_TOOL",
+            riskClass,
+            summary: `worker:${args.workerName}:${args.purpose}`,
+            digest: "",
+          };
+          action.digest = governedActionDigest(action);
+          // §17.4: an APPROVED resume authorizes the exact pending
+          // action — the gate matches the pending action's semantic
+          // identity (the human already approved this invocation); every
+          // other action evaluates normally.
+          const actionKey = `${action.type}:${action.riskClass}:${action.summary}`;
+          if (
+            this.approvedActionKey !== null &&
+            actionKey === this.approvedActionKey
+          ) {
+            // fall through to execution
+          } else {
+            const decision = this.options.approvalEvaluator.evaluate(assignment, action);
+            if (decision.outcome === "DENY") {
+              // §17.4: terminal — no request is created, and the turn must
+              // NOT keep planning around a denied action.
+              throw new PolicyDeniedSignal(decision.reason);
+            }
+            if (decision.outcome === "REQUIRE_APPROVAL") {
+              throw new ApprovalRequiredSignal(action, decision.expiresAt);
+            }
+          }
+        }
         // §13: count every accepted invoke_worker execution toward
         // maxWorkerCalls — a delegation rejected by the budget never
-        // becomes an execution.
+        // becomes an execution. A suspended invocation was never
+        // accepted; only post-gate (approved) executions reserve.
         const callBreach = budget.tryReserveWorkerCall();
         if (callBreach) {
           budgetBreach = callBreach;
@@ -376,17 +621,61 @@ export class OrchestrationRunner {
       },
     };
 
-    const result: TaskResult = await this.options.turnExecutor.execute(task, {
-      model: orchestratorModel,
-      tools: [invokeWorkerTool],
-      maxIterationsOverride: o.budget.maxOrchestratorIterations,
-      // §13: the orchestrator turn shares the per-attempt budget — its
-      // responses are recorded and checked inside the model-tool loop.
-      budget,
-      // §13: the dispatch's cooperative cancellation propagates into
-      // the orchestrator turn loop.
-      ...(this.options.cancellation ? { cancellation: this.options.cancellation } : {}),
-    });
+    let result: TaskResult;
+    try {
+      result = await this.options.turnExecutor.execute(task, {
+        model: orchestratorModel,
+        tools: [invokeWorkerTool],
+        maxIterationsOverride: o.budget.maxOrchestratorIterations,
+        // §13: the orchestrator turn shares the per-attempt budget — its
+        // responses are recorded and checked inside the model-tool loop.
+        budget,
+        // §13: the dispatch's cooperative cancellation propagates into
+        // the orchestrator turn loop.
+        ...(this.options.cancellation ? { cancellation: this.options.cancellation } : {}),
+      });
+    } catch (signal) {
+      // §17.4: the HITL gate suspended a worker invocation. Publish the
+      // continuation + suspension state FIRST, then send the idempotent
+      // request through the durable sink, and only then return PAUSED.
+      // The sink's absence fails closed (§17.4).
+      if (signal instanceof ApprovalRequiredSignal) {
+        const usageNow = {
+          workerCalls: budget.counters().workerCalls,
+          rejectionCount,
+          totalTokens: budget.counters().totalTokens,
+        };
+        return await this.suspendForApproval(
+          assignment,
+          dispatch,
+          signal,
+          lastTree.value,
+          revision.value,
+          workerCalls,
+          verifierResults,
+          commandExecutions,
+          usageNow,
+        );
+      }
+      // §17.4: a profile/host DENY is terminal — the wire result keeps
+      // the denial reason; no approval request exists.
+      if (signal instanceof PolicyDeniedSignal) {
+        return this.failure(
+          dispatch,
+          "APPROVAL_POLICY_DENIED",
+          signal.reason,
+          {
+            workerCalls: budget.counters().workerCalls,
+            rejectionCount,
+            totalTokens: budget.counters().totalTokens,
+          },
+          workerCalls,
+          verifierResults,
+          commandExecutions,
+        );
+      }
+      throw signal;
+    }
 
     const usage = normalizeUsage(result.usage);
 
@@ -475,7 +764,48 @@ export class OrchestrationRunner {
       if (code === "ORCHESTRATOR_ITERATION_LIMIT" && usage === null) {
         return this.failure(dispatch, "TOKEN_USAGE_UNAVAILABLE", "orchestration turn lacked authoritative token usage", usageOut, workerCalls, verifierResults);
       }
-      return this.failure(dispatch, code, result.failure?.message ?? "orchestrator turn failed", usageOut, workerCalls, verifierResults);
+      // §16.6: when the orchestrator cannot recover from a worker
+      // invocation that failed with WORKER_FAILED, the RUN result
+      // carries the worker's stable code — the §16.6 RETRYABLE
+      // classification (engine retries within the step's maxRetries).
+      const lastFailedWorkerCall = [...workerCalls]
+        .reverse()
+        .find((c) => c.status === "FAILED" && c.errorCode === "WORKER_FAILED");
+      if (lastFailedWorkerCall) {
+        // §17.2/§17.5: publish the durable retry continuation at this
+        // safe boundary — completed-call identities, candidate state,
+        // verifier history (fresh counters per §13 new-attempt rule).
+        // The §7.3 ContinuationRecord rides the RETRYABLE result; the
+        // engine stores it and the retry dispatch carries the
+        // continuationId. Without a publisher the result stays RETRYABLE
+        // but carries no continuation — the engine fails closed (§16.6).
+        const publisher = this.options.retryContinuationPublisher;
+        const published = publisher
+          ? await publisher.publish({
+              dispatchId: dispatch.dispatchId,
+              attemptOrdinal,
+              budgetCounters: budget.counters(),
+              completedCalls: workerCalls,
+              candidateTreeHash: lastTree.value,
+              workspaceRevision: revision.value,
+              verifierHistory: verifierResults,
+            })
+          : null;
+        const failed = this.failure(dispatch, "WORKER_FAILED", result.failure?.message ?? "worker failed and the orchestrator did not recover", usageOut, workerCalls, verifierResults, commandExecutions);
+        return published
+          ? {
+              ...failed,
+              continuation: {
+                continuationId: published.continuationId,
+                continuationRef: published.continuationRef,
+                snapshotTreeHash: lastTree.value,
+                workspaceRevision: revision.value,
+                stateDigest: published.stateDigest,
+              },
+            }
+          : failed;
+      }
+      return this.failure(dispatch, code, result.failure?.message ?? "orchestrator turn failed", usageOut, workerCalls, verifierResults, commandExecutions);
     }
     if (result.status === "CANCELLED") {
       return {
@@ -594,6 +924,109 @@ export class OrchestrationRunner {
   }
 
   // ── result identity (§7.3: deterministic per dispatch+digest) ──────
+
+  /**
+   * §17.4 HITL suspension: publish the continuation + suspension state,
+   * send ONE idempotent request through the durable sink, and return
+   * PAUSED only after the sink durably accepts it. No raw tool
+   * arguments, source, diffs, or credentials cross the sink boundary.
+   */
+  private async suspendForApproval(
+    _assignment: OrchestrationAssignment,
+    dispatch: OrchestrationAssignment["dispatch"],
+    signal: ApprovalRequiredSignal,
+    candidateTreeHash: string,
+    workspaceRevision: number,
+    workerCalls: WorkerCallResult[],
+    verifierRecords: VerdictRecord[],
+    commandExecutions: import("./types.js").CommandExecutionRecord[],
+    usage: { workerCalls: number; rejectionCount: number; totalTokens: number },
+  ): Promise<OrchestrationRunResult> {
+    const evaluator = this.options.approvalEvaluator;
+    const sink = this.options.approvalSink;
+    // §17.4 fail-closed: the gate only fires with an evaluator, but the
+    // SINK must exist to suspend durably — its absence is terminal.
+    if (!evaluator || !sink) {
+      return this.failure(
+        dispatch,
+        "APPROVAL_POLICY_DENIED",
+        "approval required but no OrchestrationApprovalSink is wired — failing closed",
+        usage,
+        workerCalls,
+        verifierRecords,
+        commandExecutions,
+      );
+    }
+
+    // The §7.2/§16.3 approval request — idempotent by approvalRequestId;
+    // the engine dedups on receipt. Derived BEFORE publication so the
+    // persisted manifest binds the exact request identity.
+    const approvalRequestId = uuidV5(
+      ORCHESTRATION_SCHEDULING_NS,
+      `approval:${dispatch.dispatchId}:${signal.action.actionId}`,
+    );
+
+    const publisher = this.options.suspensionPublisher;
+    // §17.4: the runner first creates and publishes the continuation
+    // (creating/reusing a private artifact only when reconstruction
+    // requires it — V1 publishes the lightweight state; the artifact
+    // seam lands with the recovery integration).
+    const published = publisher
+      ? await publisher.publish({
+          dispatch,
+          action: signal.action,
+          approvalRequestId,
+          candidateTreeHash,
+          workspaceRevision,
+          expiresAt: signal.expiresAt,
+        })
+      : {
+          continuationId: `cont-${dispatch.dispatchId}-hitl`,
+          continuationRef: `local:cont-${dispatch.dispatchId}-hitl`,
+          snapshotTreeHash: candidateTreeHash,
+          stateDigest: createHash("sha256")
+            .update(`${dispatch.dispatchId}:${candidateTreeHash}:${workspaceRevision}:${signal.action.digest}`)
+            .digest("hex"),
+        };
+
+    await sink.request({
+      schemaVersion: "1.0",
+      approvalRequestId,
+      dispatch,
+      action: signal.action,
+      snapshotTreeHash: published.snapshotTreeHash,
+      stateDigest: published.stateDigest,
+      expiresAt: signal.expiresAt,
+    });
+
+    return {
+      schemaVersion: "1.0",
+      resultId: this.resultId(dispatch),
+      resultDigest: this.resultDigest(dispatch),
+      dispatch,
+      status: "PAUSED",
+      retryDisposition: "NONE",
+      summary: `suspended for approval: ${signal.action.summary}`,
+      workerCalls,
+      verifierResults: verifierRecords.map(toVerifierResult),
+      commandExecutions,
+      changedFiles: [],
+      commits: [],
+      cleanWorktree: false,
+      usage,
+      suspension: {
+        continuationId: published.continuationId,
+        continuationRef: published.continuationRef,
+        snapshotTreeHash: published.snapshotTreeHash,
+        workspaceRevision,
+        stateDigest: published.stateDigest,
+        reason: "HITL_APPROVAL",
+        approvalRequestId,
+        pendingAction: signal.action,
+        expiresAt: signal.expiresAt,
+      },
+    };
+  }
 
   /**
    * The real worktree cleanliness (§13/§18): via the inspector when a

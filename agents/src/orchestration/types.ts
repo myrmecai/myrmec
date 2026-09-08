@@ -182,9 +182,28 @@ export interface DispatchIdentity {
   continuationId?: string;
 }
 
+/** §7 ApprovalDecision — carried by a HITL-resume continuation. */
+export interface ApprovalDecisionEnvelope {
+  schemaVersion: "1.0";
+  decisionId: string;
+  approvalRequestId: string;
+  continuationId: string;
+  previousDispatchId: string;
+  status: "APPROVED" | "REJECTED";
+  actionDigest: string;
+  stateDigest: string;
+  snapshotTreeHash: string;
+  workspaceGeneration: number;
+  decidedAt: string;
+  expiresAt: string;
+}
+
 export interface ContinuationDirective {
   continuationId: string;
   previousDispatchId: string;
+  /** §7/§17.4: present only on a HITL-resume continuation — the typed
+   * decision validated against the restored suspension before resume. */
+  decision?: ApprovalDecisionEnvelope;
 }
 
 export interface OrchestrationAssignment {

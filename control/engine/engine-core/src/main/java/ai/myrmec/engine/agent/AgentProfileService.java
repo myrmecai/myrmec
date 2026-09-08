@@ -98,6 +98,38 @@ public class AgentProfileService {
     }
 
     /**
+     * Create with orchestration policy content (§7/§17.4): the published
+     * version 1 carries the command templates + approval policy the
+     * assignment assembler projects into the ExecutionPolicy block, plus
+     * the §17.4 approval-request TTL that bounds the decision window.
+     */
+    @Transactional
+    public AgentProfile createProfile(String name, String description,
+                                       List<String> capabilities, Set<String> toolCodes,
+                                       String systemPrompt, String defaultModel,
+                                       java.util.Map<String, Object> commandTemplates,
+                                       java.util.Map<String, Object> approvalPolicy,
+                                       Integer approvalRequestTtlSeconds) {
+        if (profileRepository.existsByName(name)) {
+            throw new DuplicateResourceException("AgentProfile", "name", name);
+        }
+        AgentProfile profile = new AgentProfile();
+        profile.setName(name);
+        profile.setDescription(description);
+        profile.setStatus(AgentProfile.Status.ACTIVE);
+        profile = profileRepository.save(profile);
+
+        versionService.publishInitial(profile.getId(), capabilities, toolCodes,
+                systemPrompt, defaultModel,
+                AgentProfileVersion.InteractionMode.ONE_SHOT,
+                commandTemplates, approvalPolicy, approvalRequestTtlSeconds);
+        log.info("Created agent profile: {} ({}) with published version 1 "
+                        + "(orchestration policy attached)",
+                profile.getName(), profile.getId());
+        return profile;
+    }
+
+    /**
      * Update an existing agent profile. Zone 1 fields (name, description)
      * update directly. Zone 2 fields (capabilities, tools, system prompt,
      * default model) run the draft → publish cycle — editing a published

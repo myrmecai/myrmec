@@ -24,6 +24,31 @@ export {
 } from "./schema.js";
 export { OrchestrationRunner, type OrchestrationRunnerOptions, type OrchestrationRunOptions } from "./OrchestrationRunner.js";
 export { WorkerInvoker, normalizeUsage, type WorkerInvokerOptions, type InvokeWorkerOutcome } from "./WorkerInvoker.js";
+// HITL (§17.4): the governed-action types, the policy evaluator, the
+// resume validator, and the continuation store.
+export type {
+  GovernedAction,
+  GovernedActionType,
+  OrchestrationApprovalRequest,
+  OrchestrationApprovalSink,
+} from "./GovernedAction.js";
+export {
+  ApprovalPolicyEvaluator,
+  type ApprovalPolicyDecision,
+  type ApprovalPolicyEvaluatorOptions,
+} from "./ApprovalPolicyEvaluator.js";
+export {
+  validateApprovalResume,
+  type ApprovalDecisionEnvelope,
+  type ResumeValidation,
+  type RestoredSuspension,
+} from "./ApprovalResumeValidator.js";
+export {
+  LocalContinuationStateStore,
+  RecoveryStore,
+  type ContinuationManifest,
+  type ContinuationStateStore,
+} from "./ContinuationStateStore.js";
 export {
   InMemoryVerificationLedger,
   toVerifierResult,

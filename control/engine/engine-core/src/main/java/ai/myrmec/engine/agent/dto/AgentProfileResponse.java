@@ -34,10 +34,21 @@ public class AgentProfileResponse {
     private UUID publishedVersionId;
     /** The published version's number, for the UI version banner. */
     private Integer publishedVersionNumber;
+    /** The single open draft's ID when one exists (the UI draft banner). */
+    private UUID draftVersionId;
+    /** The open draft's version number. */
+    private Integer draftVersionNumber;
     private Instant createdAt;
     private Instant updatedAt;
 
     public static AgentProfileResponse from(AgentProfile profile, AgentProfileVersion published) {
+        return from(profile, published, null);
+    }
+
+    public static AgentProfileResponse from(
+            AgentProfile profile,
+            AgentProfileVersion published,
+            AgentProfileVersion openDraft) {
         return AgentProfileResponse.builder()
                 .id(profile.getId())
                 .name(profile.getName())
@@ -54,6 +65,8 @@ public class AgentProfileResponse {
                 .status(profile.getStatus().name())
                 .publishedVersionId(published != null ? published.getId() : null)
                 .publishedVersionNumber(published != null ? published.getVersionNumber() : null)
+                .draftVersionId(openDraft != null ? openDraft.getId() : null)
+                .draftVersionNumber(openDraft != null ? openDraft.getVersionNumber() : null)
                 .createdAt(profile.getCreatedAt())
                 .updatedAt(profile.getUpdatedAt())
                 .build();

@@ -45,6 +45,9 @@ public class ApprovalExpirySweeper {
     private final ConversationStreamBroker streamBroker;
     private final ConversationSocketRegistry conversationSocketRegistry;
     private final ObjectMapper objectMapper;
+    // HITL slice B: the orchestration-review sweep (§17.4/§16.6).
+    private final ai.myrmec.engine.workflow.WorkflowTaskRepository workflowTaskRepository;
+    private final ai.myrmec.engine.workflow.OrchestrationApprovalService orchestrationApprovalService;
 
     /** Disabled by default in tests that don't want timing pressure. */
     @Value("${myrmec.hitl.expiry-sweeper.enabled:true}")
@@ -59,6 +62,49 @@ public class ApprovalExpirySweeper {
         if (!enabled) {
             return;
         }
+        sweepConversationApprovals();
+        // §17.4/§16.6 (HITL slice B): orchestration-review tasks past
+        // their approval expiry apply the terminal APPROVAL_EXPIRED
+        // tuple through the orchestration-aware decide path.
+        try {
+            sweepOrchestrationReviews();
+        } catch (Exception e) {
+            log.warn("Orchestration-review sweep failed: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * §17.4/§16.6: sweep {@code pauseState=ORCH_REVIEW} tasks whose
+     * {@code approval_expires_at} has passed — each applies the terminal
+     * {@code APPROVAL_EXPIRED} tuple (task COMPLETED/FAILURE, request
+     * FAILED, no continuation attempt, workspace release). Per-row
+     * failures never block the rest.
+     */
+    private void sweepOrchestrationReviews() {
+        Instant cutoff = Instant.now();
+        List<ai.myrmec.engine.workflow.WorkflowTask> due;
+        try {
+            due = workflowTaskRepository
+                    .findByPauseStateAndApprovalExpiresAtBefore("ORCH_REVIEW", cutoff);
+        } catch (Exception e) {
+            log.warn("Orchestration-review sweep query failed: {}", e.getMessage(), e);
+            return;
+        }
+        for (ai.myrmec.engine.workflow.WorkflowTask task : due) {
+            if (!"PENDING".equals(task.getApprovalStatus())) {
+                continue; // already decided
+            }
+            try {
+                orchestrationApprovalService.expire(task.getId());
+                log.info("Orchestration approval for task {} expired by sweeper", task.getId());
+            } catch (Exception e) {
+                log.warn("Failed to expire orchestration approval for task {}: {}",
+                        task.getId(), e.getMessage(), e);
+            }
+        }
+    }
+
+    private void sweepConversationApprovals() {
         Instant cutoff = Instant.now();
         List<ConversationMessage> due;
         try {

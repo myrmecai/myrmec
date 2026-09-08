@@ -145,6 +145,11 @@ public class InboundOrchestrationHandler {
         } catch (IllegalStateException conflict) {
             // Conflicting duplicate / slot collision — audited, state intact.
             log.warn("orchestration.event {} rejected: {}", sourceEventId, conflict.getMessage());
+        } catch (IllegalArgumentException unknown) {
+            // A hostile/buggy event referencing a dispatch with no engine
+            // row — audited and dropped, never thrown into the container.
+            log.warn("orchestration.event {} for unknown dispatch {} — dropped",
+                    sourceEventId, dispatchId);
         }
     }
 
@@ -192,6 +197,11 @@ public class InboundOrchestrationHandler {
         } catch (IllegalStateException conflict) {
             log.error("orchestration.result {} for dispatch {} REJECTED: {}",
                     resultId, dispatchId, conflict.getMessage());
+        } catch (IllegalArgumentException unknown) {
+            // A hostile/buggy agent referencing a dispatch with no engine
+            // row — audited and dropped, never thrown into the container.
+            log.warn("orchestration.result {} for unknown dispatch {} — dropped",
+                    resultId, dispatchId);
         }
     }
 

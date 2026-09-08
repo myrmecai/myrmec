@@ -23,4 +23,10 @@ public interface OrchestrationDispatchRepository extends JpaRepository<Orchestra
 
     /** Pending/accepted dispatches for a run, oldest first (relay scan). */
     List<OrchestrationDispatch> findByRunIdOrderByCreatedAtAsc(UUID runId);
+
+    /**
+     * §16.3/§16.4 (6): unaccepted dispatch rows — the relay retransmits
+     * the exact stored bytes until {@code inference.accept} flips them.
+     */
+    List<OrchestrationDispatch> findByDeliveryState(String deliveryState);
 }

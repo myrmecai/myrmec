@@ -19,6 +19,7 @@ import org.springframework.security.core.Authentication;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -52,6 +53,9 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
     @Autowired private MyWorkService myWorkService;
     @Autowired private ConversationService conversationService;
     @Autowired private ConversationMessageRepository conversationMessageRepository;
+    @Autowired private ai.myrmec.engine.workflow.WorkflowRepository workflowRepository;
+    @Autowired private ai.myrmec.engine.workflow.WorkflowRequestRepository requestRepository;
+    @Autowired private ai.myrmec.engine.workflow.WorkflowTaskRepository workflowTaskRepository;
 
     @Test
     void conversationApprovalAppearsInMyWorkQueue() throws Exception {
@@ -239,6 +243,109 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
     private Authentication adminAuth() {
         UserPrincipal principal = new UserPrincipal(
                 TEST_ADMIN_ID, TEST_ADMIN_NAME, TEST_ADMIN_EMAIL,
+                List.of("sys:ORG_ADMIN"));
+        return new UsernamePasswordAuthenticationToken(principal, null, List.of());
+    }
+
+    /**
+     * §17.4 approver targeting on the read side: the My Work approvals tab
+     * narrows workflow-sourced (execution/orchestration) rows to the
+     * triggering user ({@code WorkflowRequest.createdBy}) — a different
+     * user with full project view access never sees the request, because
+     * the decide path would reject them under the task row lock anyway.
+     */
+    @Test
+    void workflowApprovalsNarrowToTheTriggeringUser() throws Exception {
+        // ---------- Arrange: a full workflow graph with a PENDING approval ----------
+        Project project = data.project().named("orch-visibility").create();
+        var triggerer = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
+        var otherUser = new ai.myrmec.engine.user.User();
+        otherUser.setEmail("orch-vis-other-" + System.nanoTime() + "@test.local");
+        otherUser.setName("Orch visibility other");
+        otherUser.setPasswordHash("$2a$10$dummy");
+        otherUser.setProviderCode(ai.myrmec.engine.user.AuthenticationProvider.LOCAL_CODE);
+        otherUser.setIsActive(true);
+        otherUser.setIsSystem(false);
+        otherUser.setCreatedAt(Instant.now());
+        otherUser.setUpdatedAt(Instant.now());
+        otherUser = userRepository.save(otherUser);
+
+        var profile = data.agentProfile().named("orch-vis-profile").create();
+        var wf = new ai.myrmec.engine.workflow.Workflow();
+        wf.setProject(project);
+        wf.setName("orch-vis-wf-" + System.nanoTime());
+        wf.setSteps(java.util.List.<java.util.Map<String, Object>>of());
+        wf.setVersion(1);
+        wf.setStatus(ai.myrmec.engine.workflow.WorkflowStatus.PUBLISHED);
+        wf.setCreatedBy(triggerer);
+        wf = workflowRepository.save(wf);
+
+        var req = new ai.myrmec.engine.workflow.WorkflowRequest();
+        req.setWorkflow(wf);
+        req.setWorkflowVersion(1);
+        req.setInput(java.util.Map.of());
+        req.setStatus(ai.myrmec.engine.workflow.RequestStatus.PAUSED);
+        req.setBranch("myrmec/vis");
+        req.setCreatedBy(triggerer);
+        req.setCreatedAt(Instant.now());
+        req = requestRepository.save(req);
+
+        var task = new ai.myrmec.engine.workflow.WorkflowTask();
+        task.setRequest(req);
+        task.setStepId("step-1");
+        task.setAgentProfile(profile);
+        task.setInput(java.util.Map.of());
+        task.setStatus(ai.myrmec.engine.workflow.TaskStatus.PAUSED);
+        task.setAttempt(1);
+        task.setPauseState("ORCH_REVIEW");
+        task.setApprovalStatus("PENDING");
+        task.setApprovalRequestedAt(Instant.now());
+        task.setApprovalPayload(java.util.Map.of(
+                "approvalRequestId", java.util.UUID.randomUUID().toString(),
+                "summary", "worker:coder:IMPLEMENT",
+                "action", java.util.Map.of(
+                        "actionId", "action-1", "type", "WORKER_TOOL",
+                        "riskClass", "DESTRUCTIVE", "summary", "worker:coder:IMPLEMENT",
+                        "digest", "a".repeat(64))));
+        var savedTask = workflowTaskRepository.save(task);
+
+        // ---------- Act ----------
+        // The triggerer sees the pending orchestration approval...
+        List<MyApprovalRow> triggererRows =
+                myWorkService.approvals(triggererAuth(triggerer.getId()), List.of(project.getId()), null);
+        // ...a different project member (ORCH_REVIEW requests are not
+        // decidable by them, §17.4) does not.
+        List<MyApprovalRow> otherRows =
+                myWorkService.approvals(adminAuthOf(otherUser), List.of(project.getId()), null);
+
+        // ---------- Assert ----------
+        assertThat(triggererRows)
+                .as("the triggering user sees the pending orchestration approval")
+                .anyMatch(r -> r.source() == MyApprovalRow.Source.EXECUTION
+                        && r.messageId().equals(savedTask.getId()));
+        assertThat(otherRows)
+                .as("no other user sees a workflow approval they cannot decide")
+                .noneMatch(r -> r.source() == MyApprovalRow.Source.EXECUTION
+                        && r.messageId().equals(savedTask.getId()));
+        // The row carries the triggering user as requestedBy (§17.4).
+        MyApprovalRow row = triggererRows.stream()
+                .filter(r -> r.source() == MyApprovalRow.Source.EXECUTION
+                        && r.messageId().equals(savedTask.getId()))
+                .findFirst().orElseThrow();
+        assertThat(row.requestedByUserId()).isEqualTo(triggerer.getId());
+    }
+
+    /** An ORG_ADMIN-scoped principal for a specific user id. */
+    private Authentication adminAuthOf(ai.myrmec.engine.user.User user) {
+        UserPrincipal principal = new UserPrincipal(
+                user.getId(), user.getName(), user.getEmail(),
+                List.of("sys:ORG_ADMIN"));
+        return new UsernamePasswordAuthenticationToken(principal, null, List.of());
+    }
+
+    private Authentication triggererAuth(UUID userId) {
+        UserPrincipal principal = new UserPrincipal(
+                userId, TEST_ADMIN_NAME, TEST_ADMIN_EMAIL,
                 List.of("sys:ORG_ADMIN"));
         return new UsernamePasswordAuthenticationToken(principal, null, List.of());
     }

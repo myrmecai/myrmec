@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -33,14 +34,17 @@ import java.util.UUID;
 public class OrchestrationDispatchRelay {
 
     private final OrchestrationDispatchRepository dispatchRepository;
+    private final TaskAttemptRepository attemptRepository;
     private final AgentWebSocketHandler webSocketHandler;
     private final ObjectMapper objectMapper;
 
     public OrchestrationDispatchRelay(
             OrchestrationDispatchRepository dispatchRepository,
+            TaskAttemptRepository attemptRepository,
             @Lazy AgentWebSocketHandler webSocketHandler,
             ObjectMapper objectMapper) {
         this.dispatchRepository = dispatchRepository;
+        this.attemptRepository = attemptRepository;
         this.webSocketHandler = webSocketHandler;
         this.objectMapper = objectMapper;
     }
@@ -133,5 +137,45 @@ public class OrchestrationDispatchRelay {
         dispatchRepository.save(dispatch);
         log.info("Dispatch {} durably accepted", dispatchId);
         return true;
+    }
+
+    /**
+     * §16.4 (6) respawn/restart recovery: after an instance reconnects,
+     * retransmit its unaccepted dispatches — the exact stored bytes, the
+     * same attempt, no new one. The Agent's {@code inference.accept}
+     * idempotence (stored acknowledgement) makes re-admission safe when
+     * the frame was already processed before the crash.
+     *
+     * @return the number of dispatches re-sent on this reconnect
+     */
+    @Transactional
+    public int retransmitUnacceptedForInstance(UUID agentInstanceId) {
+        int resent = 0;
+        // PENDING (never sent) and SENT (sent, never accepted — the
+        // crash-before-accept case) both retransmit the exact bytes.
+        List<OrchestrationDispatch> unaccepted = new java.util.ArrayList<>(
+                dispatchRepository.findByDeliveryState("PENDING"));
+        unaccepted.addAll(dispatchRepository.findByDeliveryState("SENT"));
+        for (OrchestrationDispatch dispatch : unaccepted) {
+            UUID attemptId = dispatch.getDispatchId();
+            TaskAttempt attempt = attemptRepository.findById(attemptId).orElse(null);
+            if (attempt == null || attempt.getAgentInstance() == null
+                    || !attempt.getAgentInstance().getId().equals(agentInstanceId)) {
+                continue;
+            }
+            try {
+                if (sendOnce(dispatch, agentInstanceId)) {
+                    resent++;
+                }
+            } catch (Exception e) {
+                log.warn("Retransmit of dispatch {} on reconnect failed: {}",
+                        attemptId, e.getMessage());
+            }
+        }
+        if (resent > 0) {
+            log.info("Reconnect of agent {}: retransmitted {} unaccepted orchestration dispatch(es)",
+                    agentInstanceId, resent);
+        }
+        return resent;
     }
 }

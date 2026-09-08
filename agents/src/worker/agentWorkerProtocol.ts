@@ -64,4 +64,7 @@ export interface AgentWorkerConfig {
   workspaceRoot?: string;
   /** Feature 10 (§16.3): durable outbox root (agent-local). */
   outboxRoot?: string;
+  /** HITL (§17.4): the orchestration project's autoHitlOnDestructive
+   * matrix input (from MYRMEC_AUTO_HITL; conservative default true). */
+  autoHitlOnDestructive?: boolean;
 }

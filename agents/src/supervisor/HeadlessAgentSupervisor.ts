@@ -141,6 +141,12 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
         outboxRoot:
           process.env.MYRMEC_OUTBOX_ROOT ??
           `${process.env.MYRMEC_WORKSPACE_ROOT ?? (process.platform === "win32" ? `${process.env.TEMP ?? "C:\\Windows\\Temp"}\\myrmec` : "/tmp/myrmec")}/outbox`,
+        // HITL (§17.4): the orchestration project's autoHitlOnDestructive
+        // matrix input. E2E sets MYRMEC_AUTO_HITL=true|false; the
+        // conservative default (suspend on destructive) applies otherwise.
+        ...(process.env.MYRMEC_AUTO_HITL
+          ? { autoHitlOnDestructive: process.env.MYRMEC_AUTO_HITL === "true" }
+          : {}),
       },
       onExit: (code) =>
         this.log.warn(`Agent worker exited (code=${code}); restart deferred`),

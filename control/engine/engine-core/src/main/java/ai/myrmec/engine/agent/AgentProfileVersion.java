@@ -147,6 +147,14 @@ public class AgentProfileVersion {
     @Column(name = "workspace_retention_seconds")
     private Integer workspaceRetentionSeconds;
 
+    /**
+     * Approval-request TTL in seconds (design §17.4): the bounded window
+     * an orchestration approval stays decidable before the sweeper applies
+     * the terminal APPROVAL_EXPIRED tuple. NULL = platform default.
+     */
+    @Column(name = "approval_request_ttl_seconds")
+    private Integer approvalRequestTtlSeconds;
+
     @Column(name = "published_at")
     private Instant publishedAt;
 

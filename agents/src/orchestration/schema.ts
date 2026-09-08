@@ -318,6 +318,26 @@ const dispatchIdentity = z
 
 const runtimeStep = stepAuthoring;
 
+/** §7 ApprovalDecision — the typed decision a HITL-resume continuation
+ * carries. The runner validates every field against the restored
+ * suspension before resuming the exact pending action. */
+const approvalDecision = z
+  .object({
+    schemaVersion: z.literal("1.0"),
+    decisionId: z.string().min(1),
+    approvalRequestId: z.string().min(1),
+    continuationId: z.string().min(1),
+    previousDispatchId: z.string().min(1),
+    status: z.enum(["APPROVED", "REJECTED"]),
+    actionDigest: z.string().min(1),
+    stateDigest: z.string().min(1),
+    snapshotTreeHash: z.string().min(1),
+    workspaceGeneration: z.number().int().nonnegative(),
+    decidedAt: z.string().min(1),
+    expiresAt: z.string().min(1),
+  })
+  .strict();
+
 const orchestrationAssignment = z
   .object({
     schemaVersion: z.literal("1.0"),
@@ -330,6 +350,10 @@ const orchestrationAssignment = z
       .object({
         continuationId: z.string().min(1),
         previousDispatchId: z.string().min(1),
+        /** §7/§17.4: present only on a HITL-resume continuation — the
+         * typed decision the runner validates against the restored
+         * suspension before resuming the exact pending action. */
+        decision: approvalDecision.optional(),
       })
       .strict()
       .optional(),
@@ -385,6 +409,19 @@ const orchestrationAssignment = z
     }
     if (a.continuation && !a.dispatch.continuationId) {
       add(["continuation"], "continuation present without dispatch.continuationId");
+    }
+    // §7: a decision-bearing continuation binds the same continuation +
+    // prior dispatch; a decision without the directive fields fails.
+    if (a.continuation?.decision) {
+      if (a.continuation.decision.continuationId !== a.continuation.continuationId) {
+        add(["continuation", "decision"], "decision.continuationId must match the continuation");
+      }
+      if (a.continuation.decision.previousDispatchId !== a.continuation.previousDispatchId) {
+        add(
+          ["continuation", "decision"],
+          "decision.previousDispatchId must match the continuation",
+        );
+      }
     }
   });
 

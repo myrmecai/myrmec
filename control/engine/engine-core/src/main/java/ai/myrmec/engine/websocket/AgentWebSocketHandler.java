@@ -71,6 +71,11 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     private final ConversationInboundService conversationInboundService;
     private final InboundInferenceHandler inboundInferenceHandler;
     private final InboundOrchestrationHandler inboundOrchestrationHandler;
+    // §16.4 (7): reconnecting coordinator clears run availability.
+    private final ai.myrmec.engine.workflow.OrchestrationAffinityResolver affinityResolver;
+    // §16.4 (6): reconnect retransmits unaccepted dispatches (same
+    // @Lazy break as the relay's own handler dependency).
+    private final ai.myrmec.engine.workflow.OrchestrationDispatchRelay dispatchRelay;
 
     private static final String ATTR_AGENT_INSTANCE_ID = "agentInstanceId";
     private static final String ATTR_AGENT_NAME = "agentName";
@@ -93,7 +98,10 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
             ExecutionApprovalService executionApprovalService,
             @org.springframework.context.annotation.Lazy ConversationInboundService conversationInboundService,
             InboundInferenceHandler inboundInferenceHandler,
-            InboundOrchestrationHandler inboundOrchestrationHandler) {
+            InboundOrchestrationHandler inboundOrchestrationHandler,
+            ai.myrmec.engine.workflow.OrchestrationAffinityResolver affinityResolver,
+            @org.springframework.context.annotation.Lazy
+            ai.myrmec.engine.workflow.OrchestrationDispatchRelay dispatchRelay) {
         this.jwtTokenProvider = jwtTokenProvider;
         this.agentInstanceRepository = agentInstanceRepository;
         this.agentService = agentService;
@@ -112,6 +120,8 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         this.conversationInboundService = conversationInboundService;
         this.inboundInferenceHandler = inboundInferenceHandler;
         this.inboundOrchestrationHandler = inboundOrchestrationHandler;
+        this.affinityResolver = affinityResolver;
+        this.dispatchRelay = dispatchRelay;
     }
 
     @Override
@@ -136,6 +146,27 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         connectionManager.register(agentInstanceId, agentName, session);
 
         log.info("Agent WebSocket connected: {} ({})", agentName, agentInstanceId);
+
+        // §16.4 (7): a reconnecting orchestration coordinator clears the
+        // availability condition of its runs before the recovery
+        // deadline (the authenticated session is the reconnect proof).
+        try {
+            affinityResolver.observeAvailableForCoordinator(agentInstanceId);
+        } catch (Exception e) {
+            log.warn("Availability restore for agent {} failed: {}",
+                    agentInstanceId, e.getMessage());
+        }
+
+        // §16.4 (6): respawn/restart recovery — retransmit this
+        // instance's unaccepted orchestration dispatches (the exact
+        // stored bytes, the same attempt; inference.accept idempotence
+        // makes re-admission safe).
+        try {
+            dispatchRelay.retransmitUnacceptedForInstance(agentInstanceId);
+        } catch (Exception e) {
+            log.warn("Dispatch retransmission for agent {} failed: {}",
+                    agentInstanceId, e.getMessage());
+        }
 
         // Check for running attempts that were assigned to this agent (reconnection scenario)
         checkRunningAttempts(agentInstanceId);

@@ -61,6 +61,26 @@ public class AgentProfileVersionService {
             String systemPrompt,
             String defaultModel,
             AgentProfileVersion.InteractionMode interactionMode) {
+        return publishInitial(profileId, capabilities, toolCodes, systemPrompt,
+                defaultModel, interactionMode, null, null, null);
+    }
+
+    /**
+     * The first publish with orchestration policy content (§7/§17.4): the
+     * version's command templates + approval policy ride the same
+     * immutable published version; serialized as canonical JSON maps.
+     */
+    @Transactional
+    public AgentProfileVersion publishInitial(
+            UUID profileId,
+            List<String> capabilities,
+            Set<String> toolCodes,
+            String systemPrompt,
+            String defaultModel,
+            AgentProfileVersion.InteractionMode interactionMode,
+            java.util.Map<String, Object> commandTemplates,
+            java.util.Map<String, Object> approvalPolicy,
+            Integer approvalRequestTtlSeconds) {
         profileRepository.findById(profileId)
                 .orElseThrow(() -> ResourceNotFoundException.agentProfile(profileId));
 
@@ -72,12 +92,26 @@ public class AgentProfileVersionService {
         version.setDefaultModel(defaultModel);
         version.setInteractionMode(
                 interactionMode == null ? AgentProfileVersion.InteractionMode.ONE_SHOT : interactionMode);
+        version.setCommandTemplates(writeJsonMap(commandTemplates));
+        version.setApprovalPolicy(writeJsonMap(approvalPolicy));
+        version.setApprovalRequestTtlSeconds(approvalRequestTtlSeconds);
         version.setStatus(AgentProfileVersion.Status.PUBLISHED);
         version.setPublishedAt(Instant.now());
         version = versionRepository.save(version);
         assignTools(version, toolCodes);
         log.info("Published initial agent-profile version v1 for profile {}", profileId);
         return version;
+    }
+
+    private String writeJsonMap(java.util.Map<String, Object> map) {
+        if (map == null || map.isEmpty()) {
+            return null;
+        }
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(map);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid orchestration policy map", e);
+        }
     }
 
     /**
@@ -209,6 +243,37 @@ public class AgentProfileVersionService {
     @Transactional(readOnly = true)
     public List<AgentProfileVersion> listVersions(UUID profileId) {
         return versionRepository.findByProfileIdOrderByVersionNumberDesc(profileId);
+    }
+
+    // ── Draft/Publish lifecycle surface (§16.1, the UI Draft/Publish
+    //    actions' engine API — mirrors the AssistantVersion pattern) ──
+
+    /** The single open DRAFT — throws when none exists (404-mapped). */
+    @Transactional(readOnly = true)
+    public AgentProfileVersion getOpenDraft(UUID profileId) {
+        return versionRepository
+                .findByProfileIdAndStatus(profileId, AgentProfileVersion.Status.DRAFT)
+                .orElseThrow(() -> ResourceNotFoundException.of(
+                        "AgentProfileVersion", "open draft for profile " + profileId));
+    }
+
+    /** Optional form for the UI's draft banner (no throw when absent). */
+    @Transactional(readOnly = true)
+    public Optional<AgentProfileVersion> findOpenDraft(UUID profileId) {
+        return versionRepository.findByProfileIdAndStatus(profileId, AgentProfileVersion.Status.DRAFT);
+    }
+
+    /** Discard the open draft — frees the single-draft slot; the
+     * published version (if any) stays untouched. */
+    @Transactional
+    public void discardDraft(UUID profileId) {
+        AgentProfileVersion draft = versionRepository
+                .findByProfileIdAndStatus(profileId, AgentProfileVersion.Status.DRAFT)
+                .orElseThrow(() -> ResourceNotFoundException.of(
+                        "AgentProfileVersion", "open draft for profile " + profileId));
+        versionRepository.delete(draft);
+        log.info("Discarded open draft v{} for agent profile {}",
+                draft.getVersionNumber(), profileId);
     }
 
     // ── internals ──────────────────────────────────────────────

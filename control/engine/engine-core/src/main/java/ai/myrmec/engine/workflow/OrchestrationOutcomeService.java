@@ -196,8 +196,12 @@ public class OrchestrationOutcomeService {
         task.setResult(TaskResult.SUCCESS);
         task.setCompletedAt(Instant.now());
         // Request completion/progression handled by the existing
-        // WorkflowProgressionService onTaskCompleted path.
-        if (request.getStatus() == RequestStatus.PENDING) {
+        // WorkflowProgressionService onTaskCompleted path. §17.4: a
+        // resumed attempt (after HITL approve) proves the run continues —
+        // a PAUSED request returns to RUNNING so progression can complete
+        // it when nothing remains.
+        if (request.getStatus() == RequestStatus.PENDING
+                || request.getStatus() == RequestStatus.PAUSED) {
             request.setStatus(RequestStatus.RUNNING);
             if (request.getStartedAt() == null) request.setStartedAt(Instant.now());
         }
@@ -226,7 +230,10 @@ public class OrchestrationOutcomeService {
             // §16.6: retryable failure consumes one retry and applies the
             // step's bounded exponential backoff.
             task.setNextEligibleAt(Instant.now());
-            if (request.getStatus() == RequestStatus.PENDING) {
+            // §17.4: a retryable failure on a resumed run also returns a
+            // PAUSED request to RUNNING (the retry continues the run).
+            if (request.getStatus() == RequestStatus.PENDING
+                    || request.getStatus() == RequestStatus.PAUSED) {
                 request.setStatus(RequestStatus.RUNNING);
             }
         } else {

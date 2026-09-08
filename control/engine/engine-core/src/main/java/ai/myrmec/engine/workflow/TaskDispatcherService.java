@@ -47,6 +47,7 @@ public class TaskDispatcherService {
     private final ToolService toolService;
     private final ModelService modelService;
     private final TaskAttemptService taskAttemptService;
+    private final TaskAttemptRepository attemptRepository;
     private final TaskContextResolver contextResolver;
     private final SessionContextAssembler sessionContextAssembler;
     private final ai.myrmec.engine.agent.AgentProfileVersionService agentProfileVersionService;
@@ -57,6 +58,9 @@ public class TaskDispatcherService {
     private final OrchestrationRunService orchestrationRunService;
     private final OrchestrationAssignmentAssembler assignmentAssembler;
     private final OrchestrationDispatchRelay dispatchRelay;
+    // §16.4(4-8): availability throttling + terminal loss persistence.
+    private final OrchestrationRunRepository orchestrationRunRepository;
+    private final ExecutionEventRepository executionEventRepository;
 
     /**
      * Dispatch pending tasks to available agents.
@@ -245,6 +249,57 @@ public class TaskDispatcherService {
     }
 
     /**
+     * The §16.2/§17.4 continuation for a resume attempt. Two origins:
+     *
+     * <ul>
+     *   <li>§17.4 HITL approve — the decide path enriched the approval
+     *       payload with {@code decisionStatus=APPROVED}; the assembler
+     *       embeds the typed decision envelope alongside the directive.</li>
+     *   <li>§16.6 FAILED/RETRYABLE reset — the retryable result's stored
+     *       structured output carries the §7.3 ContinuationRecord; the
+     *       retry dispatch (no decision) restores it agent-side.</li>
+     * </ul>
+     * Fresh attempts omit it.
+     */
+    private OrchestrationAssignmentAssembler.ContinuationDirective continuationOf(WorkflowTask task) {
+        Map<String, Object> payload = task.getApprovalPayload();
+        if (payload != null) {
+            Object continuationId = payload.get("suspensionContinuationId");
+            Object previousDispatchId = payload.get("previousDispatchId");
+            Object decisionStatus = payload.get("decisionStatus");
+            if (continuationId != null && previousDispatchId != null
+                    && "APPROVED".equals(decisionStatus)) {
+                return new OrchestrationAssignmentAssembler.ContinuationDirective(
+                        String.valueOf(continuationId), String.valueOf(previousDispatchId));
+            }
+        }
+        // §16.6 retryable reset: the stored structured result's own
+        // continuation record (decision-less — an engine retry).
+        Map<String, Object> output = task.getOutput();
+        if (output != null && output.get("continuation") instanceof Map<?, ?> continuation) {
+            Object id = continuation.get("continuationId");
+            if (id != null) {
+                return new OrchestrationAssignmentAssembler.ContinuationDirective(
+                        String.valueOf(id), currentAttemptIdOf(task));
+            }
+        }
+        return null;
+    }
+
+    /** The prior attempt id — §16.2 dispatchId (V1) for a retry's
+     * previousDispatchId binding. */
+    private String currentAttemptIdOf(WorkflowTask task) {
+        TaskAttempt prior = task.getCurrentAttempt();
+        if (prior != null && prior.getId() != null) {
+            return prior.getId().toString();
+        }
+        return attemptRepository.findFirstByTaskIdOrderByAttemptNumberDesc(task.getId())
+                .map(a -> a.getId().toString())
+                .orElseThrow(() -> new IllegalStateException(
+                        "Task " + task.getId() + " has no prior attempt to continue"));
+    }
+
+    /**
      * Dispatch one orchestration task (§16.3 Engine→Agent delivery):
      *
      * <ol>
@@ -272,72 +327,96 @@ public class TaskDispatcherService {
             return;
         }
 
-        for (AgentHost agent : matchingAgents) {
-            java.util.Optional<Agent> instance = coordinator
-                    .flatMap(id -> findByIdIfAlive(agent, id))
-                    .or(() -> coordinator.isPresent()
-                            ? java.util.Optional.empty() // coordinator pinned: no substitute (§16.4)
-                            : findAvailableInstance(agent.getId()));
-            if (instance.isEmpty()) {
-                continue;
+        // §16.4 (2)-(4): a PINNED coordinator is the only eligible instance —
+        // no substitute while pinned. When it is not connected/idle, the
+        // task stays PENDING (throttled events + backoff; terminal loss
+        // after the pinned recovery deadline) — handled exactly once.
+        if (coordinator.isPresent()) {
+            for (AgentHost agent : matchingAgents) {
+                java.util.Optional<Agent> pinned = findByIdIfAlive(agent, coordinator.get());
+                if (pinned.isPresent()) {
+                    dispatchToInstance(task, requestId, pinned.get());
+                    return;
+                }
             }
-            Agent selected = instance.get();
+            handlePinnedCoordinatorUnavailable(task, requestId, coordinator.get());
+            return;
+        }
 
-            // The attempt-creating transaction commits the dispatch row
-            // before any send (§16.3 durable delivery).
-            TaskAttempt attempt = taskAttemptService.createAttempt(task, selected);
-
-            // §16.4 (2): the first dispatch pins the coordinator.
-            affinityResolver.recordCoordinator(
-                    requestId, selected.getId(), selected.getAgentHostId());
-
-            try {
-                var pinnedVersion = orchestrationRunService.pinnedVersionOf(requestId);
-                var assembled = assignmentAssembler.assemble(task, attempt, pinnedVersion, null);
-                // §16.2: dispatchId == the attempt UUID in V1.
-                var dispatch = dispatchRelay.recordDispatch(
-                        attempt.getId(),
-                        requestId,
-                        task.getId(),
-                        assembled.canonicalJson(),
-                        assembled.assignmentDigest());
-
-                boolean sent = dispatchRelay.sendOnce(dispatch, selected.getId());
-                if (!sent) {
-                    // Row stays PENDING — the relay retransmits on the
-                    // next dispatch pass (or after reconnect).
-                    log.info("Orchestration dispatch {} for task {} not sent yet; relay pending",
-                            attempt.getId(), task.getId());
-                }
-
-                Instant now = Instant.now();
-                task.setStatus(TaskStatus.RUNNING);
-                task.setAgentInstance(selected);
-                task.setStartedAt(now);
-                taskRepository.save(task);
-
-                WorkflowRequest request = task.getRequest();
-                if (request.getStatus() == RequestStatus.PENDING) {
-                    request.setStatus(RequestStatus.RUNNING);
-                    if (request.getStartedAt() == null) {
-                        request.setStartedAt(now);
-                    }
-                    requestRepository.save(request);
-                }
-
-                log.info("Dispatched orchestration task {} (attempt {}, dispatch {}) to agent {}",
-                        task.getId(), attempt.getAttemptNumber(), attempt.getId(), selected.getId());
-                return;
-            } catch (Exception e) {
-                log.error("Orchestration dispatch for task {} failed: {}",
-                        task.getId(), e.getMessage(), e);
-                taskAttemptService.markAbandoned(attempt.getId(),
-                        "Orchestration assembly/dispatch failed: " + e.getMessage());
+        // No coordinator yet: the first available eligible instance wins
+        // and is pinned by the dispatch (§16.4 (1)-(2)).
+        for (AgentHost agent : matchingAgents) {
+            java.util.Optional<Agent> instance = findAvailableInstance(agent.getId());
+            if (instance.isPresent()) {
+                dispatchToInstance(task, requestId, instance.get());
                 return;
             }
         }
 
         log.debug("No available agent instances for orchestration task {}", task.getId());
+    }
+
+    /**
+     * The attempt-creating dispatch: record the attempt + dispatch row,
+     * pin the coordinator (first dispatch wins), assemble from the run's
+     * pinned Profile version, send the exact stored bytes.
+     */
+    private void dispatchToInstance(WorkflowTask task, UUID requestId, Agent selected) {
+        // The attempt-creating transaction commits the dispatch row
+        // before any send (§16.3 durable delivery).
+        TaskAttempt attempt = taskAttemptService.createAttempt(task, selected);
+
+        // §16.4 (2): the first dispatch pins the coordinator.
+        affinityResolver.recordCoordinator(
+                requestId, selected.getId(), selected.getAgentHostId());
+
+        try {
+            var pinnedVersion = orchestrationRunService.pinnedVersionOf(requestId);
+            // §16.2/§17.4: a resume attempt carries the typed
+            // continuation from the stored approval payload — the
+            // suspended continuation + prior dispatch. Fresh
+            // attempts omit it.
+            var continuation = continuationOf(task);
+            var assembled = assignmentAssembler.assemble(task, attempt, pinnedVersion, continuation);
+            // §16.2: dispatchId == the attempt UUID in V1.
+            var dispatch = dispatchRelay.recordDispatch(
+                    attempt.getId(),
+                    requestId,
+                    task.getId(),
+                    assembled.canonicalJson(),
+                    assembled.assignmentDigest());
+
+            boolean sent = dispatchRelay.sendOnce(dispatch, selected.getId());
+            if (!sent) {
+                // Row stays PENDING — the relay retransmits on the
+                // next dispatch pass (or after reconnect).
+                log.info("Orchestration dispatch {} for task {} not sent yet; relay pending",
+                        attempt.getId(), task.getId());
+            }
+
+            Instant now = Instant.now();
+            task.setStatus(TaskStatus.RUNNING);
+            task.setAgentInstance(selected);
+            task.setStartedAt(now);
+            taskRepository.save(task);
+
+            WorkflowRequest request = task.getRequest();
+            if (request.getStatus() == RequestStatus.PENDING) {
+                request.setStatus(RequestStatus.RUNNING);
+                if (request.getStartedAt() == null) {
+                    request.setStartedAt(now);
+                }
+                requestRepository.save(request);
+            }
+
+            log.info("Dispatched orchestration task {} (attempt {}, dispatch {}) to agent {}",
+                    task.getId(), attempt.getAttemptNumber(), attempt.getId(), selected.getId());
+        } catch (Exception e) {
+            log.error("Orchestration dispatch for task {} failed: {}",
+                    task.getId(), e.getMessage(), e);
+            taskAttemptService.markAbandoned(attempt.getId(),
+                    "Orchestration assembly/dispatch failed: " + e.getMessage());
+        }
     }
 
     /** The coordinator instance when it belongs to this host and is idle. */
@@ -355,6 +434,136 @@ public class TaskDispatcherService {
             log.debug("Coordinator lookup failed: {}", e.getMessage());
         }
         return java.util.Optional.empty();
+    }
+
+    /**
+     * §16.4 (4): while the coordinator is pinned but not connected/idle,
+     * the task stays PENDING without consuming an attempt. An eligible
+     * scheduler pass (past persisted nextEligibleAt) observes the
+     * unavailability durably, inserts the deterministic throttled
+     * AGENT_UNAVAILABLE scheduling event, and advances nextEligibleAt
+     * using the step's bounded exponential backoff — all in one
+     * transaction. §16.4 (5)/(8): once the pinned recovery deadline has
+     * expired without reconnect proof, the run is terminally LOST.
+     */
+    private void handlePinnedCoordinatorUnavailable(
+            WorkflowTask task, UUID requestId, UUID coordinatorId) {
+        Instant now = Instant.now();
+
+        // §16.4 (8): expiry without same-Host lease proof is terminal.
+        if (affinityResolver.isRecoveryExpired(requestId, now)) {
+            applyWorkspaceLost(task, requestId, coordinatorId);
+            return;
+        }
+
+        // A scheduler pass before persisted nextEligibleAt emits nothing.
+        if (task.getNextEligibleAt() != null && task.getNextEligibleAt().isAfter(now)) {
+            return;
+        }
+
+        var observation = affinityResolver.observeUnavailable(requestId, task.getId(), now);
+
+        // The throttled §16.4 scheduling event — engine-constructed, never
+        // Agent-sourced: EventType.ORCHESTRATION, LogSource.SYSTEM, null
+        // attempt/sequence, deterministic UUIDv5 id (idempotent pass).
+        persistSchedulingEvent(task, requestId, observation);
+
+        // Bounded exponential backoff from the step's retryPolicy.
+        Map<String, Object> stepDef = stepDefOf(task);
+        RetryPolicyParser.Backoff backoff = RetryPolicyParser.backoff(stepDef);
+        long delaySeconds = backoff.delaySeconds(observation.occurrence());
+        task.setNextEligibleAt(now.plusSeconds(delaySeconds));
+        taskRepository.save(task);
+        log.warn("Run {} coordinator {} unavailable (episode {}, occurrence {}) — "
+                + "AGENT_UNAVAILABLE emitted; next eligible pass in {}s "
+                + "(recovery deadline {})",
+                requestId, coordinatorId, observation.episode(),
+                observation.occurrence(), delaySeconds, observation.recoveryDeadline());
+    }
+
+    /**
+     * §16.4 (8): explicit/expiry loss — atomically mark the run LOST and
+     * fail the request with an engine-generated terminal WORKSPACE_LOST
+     * result (the Agent is gone; no runner result will arrive).
+     */
+    private void applyWorkspaceLost(WorkflowTask task, UUID requestId, UUID coordinatorId) {
+        OrchestrationRun run = orchestrationRunRepository.findById(requestId)
+                .orElse(null);
+        if (run != null && !"LOST".equals(run.getLeaseState())) {
+            run.setLeaseState("LOST");
+            orchestrationRunRepository.save(run);
+        }
+        task.setStatus(TaskStatus.COMPLETED);
+        task.setResult(TaskResult.FAILURE);
+        // The engine tuple convention (§16.6, matching the HITL rejection):
+        // the code lives in errorMessage — WorkflowTask has no errorCode column.
+        task.setErrorMessage("WORKSPACE_LOST");
+        task.setCompletedAt(Instant.now());
+        task.setNextEligibleAt(null);
+        taskRepository.save(task);
+
+        WorkflowRequest request = task.getRequest();
+        request.setStatus(RequestStatus.FAILED);
+        if (request.getCompletedAt() == null) {
+            request.setCompletedAt(Instant.now());
+        }
+        requestRepository.save(request);
+
+        log.error("Run {} coordinator {} recovery deadline expired — run LOST, "
+                + "request FAILED with engine-generated WORKSPACE_LOST",
+                requestId, coordinatorId);
+    }
+
+    /** The step definition map for the task's stepId, or null. */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> stepDefOf(WorkflowTask task) {
+        List<Map<String, Object>> steps = task.getRequest().getWorkflow().getSteps();
+        if (steps == null) {
+            return null;
+        }
+        for (Map<String, Object> step : steps) {
+            if (task.getStepId().equals(step.get("id"))) {
+                return step;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The §16.4 throttled scheduling event, persisted directly by the
+     * engine (design §16.7 events note): ORCHESTRATION/SYSTEM, null
+     * attempt/sequence, deterministic UUIDv5 event id — a repeated pass
+     * is idempotent.
+     */
+    private void persistSchedulingEvent(WorkflowTask task, UUID requestId,
+            OrchestrationAffinityResolver.UnavailableObservation observation) {
+        if (executionEventRepository.findBySourceEventId(observation.schedulingEventId())
+                .isPresent()) {
+            return; // idempotent pass
+        }
+        Map<String, Object> data = new java.util.LinkedHashMap<>();
+        data.put("type", "AGENT_UNAVAILABLE");
+        data.put("runId", requestId.toString());
+        data.put("taskId", task.getId().toString());
+        data.put("availabilityEpisode", observation.episode());
+        data.put("occurrence", observation.occurrence());
+        data.put("nextEligibleAt", String.valueOf(task.getNextEligibleAt()));
+        data.put("affinityRecoveryDeadline",
+                String.valueOf(observation.recoveryDeadline()));
+        data.put("occurredAt", Instant.now().toString());
+
+        ExecutionEvent event = new ExecutionEvent();
+        event.setId(observation.schedulingEventId()); // deterministic id == row id
+        event.setTaskId(task.getId());
+        event.setAttemptId(null);
+        event.setEventType(EventType.ORCHESTRATION);
+        event.setMessage("AGENT_UNAVAILABLE");
+        event.setData(data);
+        event.setSource(LogSource.SYSTEM);
+        event.setSourceEventId(observation.schedulingEventId());
+        event.setSequenceNumber(null);
+        event.setCreatedAt(Instant.now());
+        executionEventRepository.save(event);
     }
 
     /**

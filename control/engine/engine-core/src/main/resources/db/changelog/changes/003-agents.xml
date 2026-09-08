@@ -373,4 +373,20 @@
         </addColumn>
     </changeSet>
 
+    <!-- ================================================================
+         HITL (§17.4): the pinned Profile's approval-request TTL — the
+         bounded window an approval request stays decidable before the
+         sweeper applies the terminal APPROVAL_EXPIRED tuple. NULL = the
+         platform default (1 hour).
+         ================================================================ -->
+    <changeSet id="003-agents-profile-approval-ttl" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="agent_profile_versions"/>
+            <not><columnExists tableName="agent_profile_versions" columnName="approval_request_ttl_seconds"/></not>
+        </preConditions>
+        <addColumn tableName="agent_profile_versions">
+            <column name="approval_request_ttl_seconds" type="integer"/>
+        </addColumn>
+    </changeSet>
+
 </databaseChangeLog>

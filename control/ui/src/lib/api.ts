@@ -702,6 +702,9 @@ export interface AgentProfile {
   status: AgentProfileStatus
   publishedVersionId: string | null
   publishedVersionNumber: number | null
+  /** The single open draft (§16.1) — the UI draft banner. */
+  draftVersionId: string | null
+  draftVersionNumber: number | null
   createdAt: string
   updatedAt: string | null
 }
@@ -726,6 +729,31 @@ export interface UpdateAgentProfileRequest {
   defaultModel?: string
 }
 
+/** One agent-profile version (§16.1 Draft/Publish lifecycle). */
+export interface AgentProfileVersion {
+  id: string
+  profileId: string
+  versionNumber: number
+  status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED'
+  capabilities: string[]
+  toolCodes: string[]
+  systemPrompt: string | null
+  defaultModel: string | null
+  interactionMode: 'ONE_SHOT' | 'CONVERSATIONAL' | null
+  publishedAt: string | null
+  publishedBy: string | null
+  createdAt: string
+}
+
+/** PATCH the open draft's behaviour fields (null fields keep current). */
+export interface UpdateAgentProfileDraftRequest {
+  capabilities?: string[]
+  toolCodes?: string[]
+  systemPrompt?: string
+  defaultModel?: string
+  interactionMode?: 'ONE_SHOT' | 'CONVERSATIONAL'
+}
+
 export const agentProfilesApi = {
   list: (activeOnly = false) =>
     api.get<AgentProfile[]>(`/admin/agent-profiles?activeOnly=${activeOnly}`),
@@ -737,6 +765,19 @@ export const agentProfilesApi = {
   delete: (id: string) => api.delete<void>(`/admin/agent-profiles/${id}`),
   deactivate: (id: string) => api.post<void>(`/admin/agent-profiles/${id}/deactivate`),
   activate: (id: string) => api.post<void>(`/admin/agent-profiles/${id}/activate`),
+  // ── Draft/Publish version lifecycle (§16.1) ──
+  listVersions: (id: string) =>
+    api.get<AgentProfileVersion[]>(`/admin/agent-profiles/${id}/versions`),
+  getDraft: (id: string) =>
+    api.get<AgentProfileVersion>(`/admin/agent-profiles/${id}/draft`),
+  openDraft: (id: string) =>
+    api.post<AgentProfileVersion>(`/admin/agent-profiles/${id}/versions`),
+  updateDraft: (id: string, data: UpdateAgentProfileDraftRequest) =>
+    api.patch<AgentProfileVersion>(`/admin/agent-profiles/${id}/draft`, data),
+  discardDraft: (id: string) =>
+    api.delete<void>(`/admin/agent-profiles/${id}/draft`),
+  publish: (id: string) =>
+    api.post<AgentProfileVersion>(`/admin/agent-profiles/${id}/publish`),
 }
 
 // Agent Hosts API
@@ -2450,7 +2491,8 @@ export type MyApprovalSource = 'EXECUTION' | 'CONVERSATION'
 /** One pending decision in the My Work Approvals tab. */
 export interface MyApprovalRow {
   messageId: string
-  conversationId: string
+  /** Null for EXECUTION-source approvals (no conversation context). */
+  conversationId: string | null
   projectId: string
   projectName: string | null
   source: MyApprovalSource
@@ -2517,4 +2559,29 @@ export const myWorkApi = {
     api.get<MyApprovalRow[]>(`/my-work/approvals${myWorkQueryString(opts)}`),
   archived: (opts?: Pick<MyWorkQuery, 'projectIds' | 'type' | 'q'>) =>
     api.get<MyArchivedRow[]>(`/my-work/archived${myWorkQueryString(opts)}`),
+}
+
+/** Response of POST /approvals/{id}/decide — the applied decision. */
+export interface ApprovalDecisionResponse {
+  source: 'CONVERSATION' | 'EXECUTION'
+  approvalId: string
+  decision: string
+}
+
+export const approvalsApi = {
+  /**
+   * §17.4/§16.6: submit a human decision (APPROVED/REJECTED) through the
+   * unified approvals endpoint. An EXECUTION-source approval (workflow
+   * orchestration / ORCH_REVIEW task) is decided by exactly the
+   * triggering user — the engine's decide path enforces that gate.
+   */
+  decide: (
+    approvalId: string,
+    decision: 'APPROVED' | 'REJECTED',
+    comment?: string,
+  ) =>
+    api.post<ApprovalDecisionResponse>(`/approvals/${approvalId}/decide`, {
+      decision,
+      comment: comment ?? null,
+    }),
 }

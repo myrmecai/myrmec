@@ -105,7 +105,7 @@ public class MyWorkService {
             }
         }
 
-        long approvalsPending = pendingApprovalRows(scope).size();
+        long approvalsPending = pendingApprovalRows(scope, callerIdOf(authentication)).size();
 
         boolean firstRun = scope.workflows().isEmpty() && scope.assistants().isEmpty();
         boolean canCreateWorkflow = canCreateServiceOfType(authentication, scope, ServiceType.WORKFLOW);
@@ -187,7 +187,7 @@ public class MyWorkService {
     public List<MyApprovalRow> approvals(Authentication authentication, List<UUID> projectIds, String q) {
         Scope scope = resolveScope(authentication, projectIds);
         String needle = normalize(q);
-        return pendingApprovalRows(scope).stream()
+        return pendingApprovalRows(scope, callerIdOf(authentication)).stream()
                 .filter(r -> matches(needle, r.summary(), r.projectName()))
                 // Soonest-expiring first; rows without an expiry sort last.
                 .sorted(Comparator.comparing(
@@ -224,8 +224,15 @@ public class MyWorkService {
 
     // -------------------------------------------------------------- internals
 
-    /** All still-PENDING approval requests (conversation + execution sources) whose project is in scope, as rows. */
-    private List<MyApprovalRow> pendingApprovalRows(Scope scope) {
+    /** All still-PENDING approval requests (conversation + execution sources) whose project is in scope, as rows.
+     *
+     * <p>§17.4 approver targeting (workflows only): an orchestration /
+     * workflow-execution approval is decided by exactly one human — the
+     * triggering user ({@code WorkflowRequest.createdBy}). The tab narrows
+     * those rows to {@code createdBy = caller}; conversation approvals
+     * keep their interactive-session model (any project member sees the
+     * request — the second-person review semantic).</p> */
+    private List<MyApprovalRow> pendingApprovalRows(Scope scope, UUID callerId) {
         List<MyApprovalRow> rows = new ArrayList<>();
         
         // Query conversation-source approvals (APPROVAL_REQUEST with PENDING status)
@@ -244,7 +251,10 @@ public class MyWorkService {
             }
         }
         
-        // Query execution-source approvals (WorkflowTask with approval_status=PENDING)
+        // Query execution-source approvals (WorkflowTask with approval_status=PENDING).
+        // §17.4: workflow-sourced requests narrow to the triggering user —
+        // decisions from any other user are rejected under the task row
+        // lock, so the tab never surfaces an undecidable request.
         List<WorkflowTask> pendingExecutions = workflowTaskRepository.findByApprovalStatus("PENDING");
         if (!pendingExecutions.isEmpty()) {
             for (WorkflowTask task : pendingExecutions) {
@@ -257,11 +267,25 @@ public class MyWorkService {
                 if (!scope.contains(projectId)) {
                     continue;
                 }
+                UUID triggerer = request.getCreatedBy() != null
+                        ? request.getCreatedBy().getId() : null;
+                if (callerId == null || triggerer == null || !triggerer.equals(callerId)) {
+                    continue;
+                }
                 rows.add(MyApprovalRow.fromExecution(task, scope.projectName(projectId)));
             }
         }
         
         return rows;
+    }
+
+    /** The caller's user id from the authentication principal (null when
+     * not a user principal — agent/system callers see no approvals). */
+    private UUID callerIdOf(Authentication authentication) {
+        if (authentication.getPrincipal() instanceof ai.myrmec.engine.user.UserPrincipal principal) {
+            return principal.getUserId();
+        }
+        return null;
     }
 
     private boolean hasActiveExecution(UUID workflowId) {
