@@ -58,6 +58,13 @@ public class WorkflowProgressionService {
 
         List<Map<String, Object>> steps = workflow.getSteps();
         if (steps == null || steps.isEmpty()) {
+            // §17.4/§16.2: an orchestrated request whose workflow carries
+            // no step definitions is a single-task run — the task IS the
+            // whole request. With nothing left to progress, the request
+            // must complete here (a completed task with a request stuck
+            // RUNNING forever is a leak). checkWorkflowCompletion's
+            // no-terminal-steps path completes it.
+            checkWorkflowCompletion(request, workflow);
             return;
         }
 
