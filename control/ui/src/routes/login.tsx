@@ -5,13 +5,19 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { ApiRequestError, authApi, type EnabledAuthProvider } from '@/lib/api'
+import { ApiRequestError, api, authApi, type EnabledAuthProvider, type LoginResponse } from '@/lib/api'
 import {
   clearExternalCallbackParams,
   consumeExternalAuthProvider,
   readExternalCallbackParams,
   registerExternalAuthState,
 } from '@/lib/external-auth'
+import {
+  captureDesktopHandoff,
+  clearDesktopHandoff,
+  readDesktopHandoff,
+  redirectUriForHandoff,
+} from '@/lib/desktop-auth'
 
 export const Route = createFileRoute('/login')({
   beforeLoad: ({ context }) => {
@@ -37,6 +43,46 @@ function LoginPage() {
   const [providers, setProviders] = useState<EnabledAuthProvider[]>([])
   const processingExternalStateRef = useRef<Set<string>>(new Set())
 
+  // Desktop-client login (VS Code plugin): capture the loopback
+  // redirectUri + state nonce on first load; survives the external-
+  // provider round-trip via sessionStorage.
+  useEffect(() => {
+    captureDesktopHandoff(window.location.search)
+  }, [])
+
+  /**
+   * After ANY successful login: when the browser came from the plugin,
+   * redeem the fresh JWT for a one-time code and hand it to the
+   * plugin's loopback listener instead of navigating to /dashboard.
+   * Returns true when the desktop handoff consumed the login (the
+   * caller must not run the normal post-login navigation).
+   */
+  const deliverDesktopHandoff = async (loginResponse: LoginResponse): Promise<boolean> => {
+    const handoff = readDesktopHandoff()
+    if (!handoff) {
+      return false
+    }
+    // The fresh token authorizes the authorize-code call.
+    api.setAccessToken(loginResponse.accessToken)
+    try {
+      const { code } = await authApi.authorizeCode(handoff.redirectUri)
+      const target = redirectUriForHandoff(handoff, code)
+      clearDesktopHandoff()
+      window.location.assign(target)
+      return true
+    } catch (err) {
+      // Fail the handoff loudly — but never block the browser session
+      // the user just established.
+      if (err instanceof ApiRequestError) {
+        setError(`Could not connect the VS Code plugin: ${err.error.message}`)
+      } else {
+        setError('Could not connect the VS Code plugin')
+      }
+      clearDesktopHandoff()
+      return false
+    }
+  }
+
   useEffect(() => {
     const loadProviders = async () => {
       try {
@@ -52,6 +98,12 @@ function LoginPage() {
 
   useEffect(() => {
     if (isAuthenticated) {
+      // A pending desktop handoff (VS Code plugin) delivers its one-time
+      // code to the plugin's loopback listener — navigating away would
+      // cancel the browser redirect that carries it.
+      if (readDesktopHandoff()) {
+        return
+      }
       router.navigate({ to: '/dashboard', replace: true })
     }
   }, [isAuthenticated, router])
@@ -94,6 +146,10 @@ function LoginPage() {
         const response = await authApi.completeExternalLogin(providerCode, state, code, redirectUri)
         finalizeLogin(response)
         clearExternalCallbackParams()
+        const delivered = await deliverDesktopHandoff(response)
+        if (delivered) {
+          return
+        }
       } catch (err) {
         if (err instanceof ApiRequestError) {
           setError(err.error.message)
@@ -121,7 +177,14 @@ function LoginPage() {
     setIsLoading(true)
 
     try {
-      await login({ email, password })
+      const response = await login({ email, password })
+      // Desktop-client handoff (VS Code plugin): when the login page
+      // was opened by the plugin, deliver the one-time code to its
+      // loopback listener instead of navigating to the dashboard.
+      const delivered = await deliverDesktopHandoff(response)
+      if (delivered) {
+        return
+      }
     } catch (err) {
       if (err instanceof ApiRequestError) {
         setError(err.error.message)

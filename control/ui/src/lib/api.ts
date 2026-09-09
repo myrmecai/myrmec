@@ -188,6 +188,12 @@ export interface ExternalAuthStartResponse {
   authorizationUrl: string
 }
 
+/** POST /auth/authorize-code — one-time code for the desktop client (VS Code plugin). */
+export interface AuthorizeCodeResponse {
+  code: string
+  expiresAt: string
+}
+
 export interface EnabledAuthProvider {
   code: string
   providerType: 'LOCAL' | 'OIDC' | 'GITHUB' | 'GOOGLE'
@@ -216,6 +222,10 @@ export const authApi = {
         redirectUri ? `&redirectUri=${encodeURIComponent(redirectUri)}` : ''
       }`
     ),
+  /** Desktop-client login (VS Code plugin): redeem the logged-in JWT for a
+   *  one-time code bound to the plugin's loopback redirect. */
+  authorizeCode: (redirectUri: string) =>
+    api.post<AuthorizeCodeResponse>('/auth/authorize-code', { redirectUri }),
 }
 
 // Users API

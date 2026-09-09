@@ -10,7 +10,7 @@ interface AuthContextType {
   user: AuthUser | null
   isAuthenticated: boolean
   isLoading: boolean
-  login: (credentials: LoginRequest) => Promise<void>
+  login: (credentials: LoginRequest) => Promise<LoginResponse>
   finalizeLogin: (response: LoginResponse) => void
   logout: () => void
   /** True if user holds the system-wide PLATFORM_ADMIN role. */
@@ -197,9 +197,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initAuth()
   }, [])
 
-  const login = useCallback(async (credentials: LoginRequest) => {
-    const response: LoginResponse = await authApi.login(credentials)
+  const login = useCallback(async (credentials: LoginRequest): Promise<LoginResponse> => {
+    const response = await authApi.login(credentials)
     finalizeLogin(response)
+    return response
   }, [finalizeLogin])
 
   const logout = useCallback(() => {

@@ -1,5 +1,6 @@
 import { test, expect } from '../fixtures'
 import { E2E_ADMIN } from '../helpers/api'
+import * as http from 'node:http'
 
 /**
  * Phase 4a smoke spec: proves the full E2E harness is wired correctly.
@@ -56,5 +57,78 @@ test.describe('Phase 4a harness smoke', () => {
     expect(res.status).toBe(400)
     const body = (await res.json()) as { errorCode?: string }
     expect(body.errorCode).toBe('BAD_REQUEST')
+  })
+
+  /**
+   * Desktop-client login handoff (VS Code plugin), browser side:
+   * /login?redirectUri=<loopback>&state=<nonce> captures the handoff,
+   * a LOCAL form login redeems the fresh JWT for a one-time code, and
+   * the browser redirects to the loopback listener with code + state.
+   * The plugin then exchanges the code once (second use rejected).
+   */
+  test('login page hands a one-time code to the plugin loopback listener', async ({
+    page,
+  }) => {
+    // The plugin's loopback listener: an ephemeral-port HTTP server
+    // that captures the handoff and closes after the first request.
+    const STATE = 'e2e-handoff-state'
+    const server = http.createServer()
+    const listenPort = new Promise<number>((resolve) => {
+      server.once('listening', () =>
+        resolve(server.address() !== null && typeof server.address() === 'object'
+          ? (server.address() as { port: number }).port
+          : 0),
+      )
+    })
+    const captured = new Promise<{ code: string; state: string }>((resolve) => {
+      server.once('request', (req, res) => {
+        const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+        resolve({
+          code: url.searchParams.get('code') ?? '',
+          state: url.searchParams.get('state') ?? '',
+        })
+        res.writeHead(200, { 'Content-Type': 'text/plain' })
+        res.end('ok')
+        // One-shot listener — the real plugin closes after capture.
+        server.close()
+      })
+    })
+    server.listen(0, '127.0.0.1')
+    const port = await listenPort
+
+    try {
+      await page.goto(
+        `/login?redirectUri=http://127.0.0.1:${port}/callback&state=${STATE}`,
+      )
+      await page.locator('#email').fill(E2E_ADMIN.email)
+      await page.locator('#password').fill(E2E_ADMIN.password)
+      await page.getByRole('button', { name: 'Sign in' }).click()
+
+      const handoff = await captured
+      expect(handoff.state).toBe(STATE)
+      expect(handoff.code).toMatch(/^myr_auth_/)
+
+      // The plugin side of the loop: exchange once (200 + tokens),
+      // exchange again (single-use CAS rejects the replay).
+      const exchange = (code: string) =>
+        fetch(`http://localhost:9090/api/v1/auth/code/exchange`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code,
+            redirectUri: `http://127.0.0.1:${port}/callback`,
+          }),
+        })
+
+      const first = await exchange(handoff.code)
+      expect(first.status).toBe(200)
+      const tokens = (await first.json()) as { accessToken: string }
+      expect(tokens.accessToken).toBeTruthy()
+
+      const replay = await exchange(handoff.code)
+      expect(replay.status).toBe(401)
+    } finally {
+      server.close()
+    }
   })
 })
