@@ -44,6 +44,11 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/providers/enabled").permitAll()
                         .requestMatchers("/api/v1/auth/external/**").permitAll()
                         .requestMatchers("/api/v1/auth/oidc/**").permitAll()
+                        // Desktop-client code exchange (VS Code plugin): the
+                        // one-time code is the bearer — the plugin holds no
+                        // token yet. authorize-code stays authenticated (the
+                        // login page presents the user JWT).
+                        .requestMatchers("/api/v1/auth/code/exchange").permitAll()
                         // Agent auth endpoints (public - before agent role check)
                         .requestMatchers("/api/v1/agent/auth/**").permitAll()
                         // WebSocket endpoint - auth handled by handshake interceptor

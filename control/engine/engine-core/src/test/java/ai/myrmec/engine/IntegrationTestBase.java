@@ -47,6 +47,9 @@ public abstract class IntegrationTestBase {
     protected AuditEventRepository auditEventRepository;
 
     @Autowired
+    protected ai.myrmec.engine.auth.AuthCodeRepository authCodeRepository;
+
+    @Autowired
     protected UserRepository userRepository;
 
     @Autowired
@@ -230,6 +233,8 @@ public abstract class IntegrationTestBase {
         assistantContextBindingRepository.deleteAllInBatch();
         // audit_events references projects(id) and users(id); clear before projects.
         auditEventRepository.deleteAllInBatch();
+        // auth_codes references users(id); clear before users.
+        authCodeRepository.deleteAllInBatch();
         projectRepository.deleteAll();
 
         // Get or create the test admin user

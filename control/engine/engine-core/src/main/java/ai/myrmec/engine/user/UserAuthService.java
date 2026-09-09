@@ -113,6 +113,43 @@ public class UserAuthService {
     }
 
     /**
+     * Mint a fresh access + refresh token pair for an already-verified
+     * user. Used by the desktop-client login flow ({@code AuthCodeService}
+     * exchange): the user authenticated on the hosted login page, the
+     * plugin redeemed the one-time code, and now needs its own session.
+     * Re-checks active status at mint time so a disabled user cannot
+     * obtain a session through an outstanding code.
+     */
+    @Transactional(readOnly = true)
+    public LoginResponse issueTokensForUser(UUID userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new InvalidTokenException("User not found"));
+
+        if (!user.getIsActive()) {
+            throw new InvalidTokenException("User account is disabled");
+        }
+
+        List<String> roles = buildRolesClaim(user.getId());
+
+        String accessToken = jwtTokenProvider.generateUserAccessToken(
+                user.getId(), user.getName(), user.getEmail(), roles);
+        String refreshToken = jwtTokenProvider.generateUserRefreshToken(user.getId());
+
+        log.info("Issued token pair for user via authorization code: {}", user.getEmail());
+
+        return LoginResponse.builder()
+                .userId(user.getId())
+                .name(user.getName())
+                .email(user.getEmail())
+                .roles(roles)
+                .accessToken(accessToken)
+                .accessTokenExpiresAt(jwtTokenProvider.getExpiration(accessToken))
+                .refreshToken(refreshToken)
+                .refreshTokenExpiresAt(jwtTokenProvider.getExpiration(refreshToken))
+                .build();
+    }
+
+    /**
      * Refresh user access token.
      */
     @Transactional(readOnly = true)
