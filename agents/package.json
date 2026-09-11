@@ -1,10 +1,55 @@
 {
   "name": "@myrmec/agent",
   "version": "0.1.0",
-  "main": "index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    },
+    "./supervisor/index.js": {
+      "types": "./dist/supervisor/index.d.ts",
+      "require": "./dist/supervisor/index.cjs",
+      "default": "./dist/supervisor/index.js"
+    },
+    "./supervisor/AgentSupervisor.js": {
+      "types": "./dist/supervisor/AgentSupervisor.d.ts",
+      "require": "./dist/supervisor/AgentSupervisor.cjs",
+      "default": "./dist/supervisor/AgentSupervisor.js"
+    },
+    "./transport/httpClient.js": {
+      "types": "./dist/transport/httpClient.d.ts",
+      "require": "./dist/transport/httpClient.cjs",
+      "default": "./dist/transport/httpClient.js"
+    },
+    "./worker/AgentWorkerHost.js": {
+      "types": "./dist/worker/AgentWorkerHost.d.ts",
+      "require": "./dist/worker/AgentWorkerHost.cjs",
+      "default": "./dist/worker/AgentWorkerHost.js"
+    },
+    "./protocol/hostFrames.js": {
+      "types": "./dist/protocol/hostFrames.d.ts",
+      "require": "./dist/protocol/hostFrames.cjs",
+      "default": "./dist/protocol/hostFrames.js"
+    },
+    "./models/index.js": {
+      "types": "./dist/models/index.d.ts",
+      "require": "./dist/models/index.cjs",
+      "default": "./dist/models/index.js"
+    },
+    "./protocol/envelope.js": {
+      "types": "./dist/protocol/envelope.d.ts",
+      "require": "./dist/protocol/envelope.cjs",
+      "default": "./dist/protocol/envelope.js"
+    }
+  },
   "scripts": {
     "test": "vitest run",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-cjs.cjs && node scripts/rename-cjs.cjs",
+    "build:esm": "tsc -p tsconfig.build.json",
+    "build:cjs": "node scripts/build-cjs.cjs",
     "dev": "tsx watch src/bin/headless.ts",
     "test:watch": "vitest",
     "lint": "eslint .",
