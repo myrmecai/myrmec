@@ -33,8 +33,13 @@ public class AuthCodeSweeper {
     /**
      * Purge rows past their TTL. Production default 5 minutes — codes
      * live 60s, so this runs well past any live code's lifetime.
+     * <p>
+     * Transaction is declared here because {@code @Scheduled} is the proxy
+     * entry point; a {@code @Transactional} on the private self-call below
+     * would be ignored by Spring AOP.
      */
     @Scheduled(fixedRateString = "${myrmec.auth.code-sweeper.interval-ms:300000}")
+    @Transactional
     public void sweep() {
         if (!enabled) {
             return;
