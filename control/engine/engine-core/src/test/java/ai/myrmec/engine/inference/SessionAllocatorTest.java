@@ -10,11 +10,13 @@ import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentRepository;
+import ai.myrmec.engine.node.NodeRegistryService;
 import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Map;
@@ -40,6 +42,7 @@ class SessionAllocatorTest extends IntegrationTestBase {
     @Autowired AgentHostInstanceRepository instances;
     @Autowired AgentRepository agentRepository;
     @Autowired SessionRepository sessionRepository;
+    @Autowired NodeRegistryService nodeRegistryService;
 
     private AgentHostInstance openInstance(int pool) {
         AgentProfile profile = data.agentProfile().named("a-profile").create();
@@ -244,14 +247,29 @@ class SessionAllocatorTest extends IntegrationTestBase {
     }
 
     @Test
-    void sweeperWrapsExpireBodiesWithNoExtraBehavior() {
-        // The scheduled wrapper delegates to expireOffers/expireIdleLeases —
-        // both already unit-tested. This asserts the guard flag short-circuits
-        // when disabled (e2e) and delegates when enabled.
-        // Enabled-by-default in production; the flag matters only for tests.
-        assertThat(allocator).isNotNull();
-        // Direct body call remains the tested seam:
-        assertThat(allocator.expireOffers(Instant.now())).isGreaterThanOrEqualTo(0);
-        assertThat(allocator.expireIdleLeases(Instant.now())).isGreaterThanOrEqualTo(0);
+    @Transactional
+    void sweepAllocationHonorsGuardFlag() {
+        // Disabled half: the e2e profile sets myrmec.host.allocation-sweep.enabled=false,
+        // so the autowired allocator's sweep must be a no-op — an expired offer survives.
+        AgentHostInstance instance = openInstance(2);
+        Project project = project();
+        UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
+                project.getId(), instance.getAgentHostId()).orElseThrow();
+        // Force the offer to be already expired.
+        Session row = sessionRepository.findById(sessionId).orElseThrow();
+        row.setOfferExpiresAt(Instant.now().minusSeconds(60));
+        sessionRepository.saveAndFlush(row);
+
+        allocator.sweepAllocation();
+        assertThat(sessionRepository.findById(sessionId).orElseThrow().getAllocationState())
+                .isEqualTo(SessionAllocator.ALLOC_STATE_OFFERED);
+
+        // Enabled half: a directly-constructed allocator with enabled=true must sweep
+        // the expired offer to CLOSED.
+        SessionAllocator enabledSweep = new SessionAllocator(sessionRepository,
+                instances, agentRepository, nodeRegistryService, 10, 1800, true);
+        enabledSweep.sweepAllocation();
+        assertThat(sessionRepository.findById(sessionId).orElseThrow().getAllocationState())
+                .isEqualTo(SessionAllocator.ALLOC_STATE_CLOSED);
     }
 }
