@@ -51,9 +51,15 @@ class LocalHostPerUserTest extends IntegrationTestBase {
     void localHostIsPerUserNotPerProject() {
         seedLocalDefaultProfile();
         UUID user = UUID.randomUUID();
+        // Real projects (fk_agent_hosts_project rejects random UUIDs); two
+        // DISTINCT projects prove the lookup is user-scoped, not
+        // project-scoped — a per-(user, project) regression would create a
+        // second host and fail the assertion below.
+        ai.myrmec.engine.project.Project projectA = data.project().named("lh-a").create();
+        ai.myrmec.engine.project.Project projectB = data.project().named("lh-b").create();
 
-        AgentHost first = agentHostService.upsertLocalAgentHost(user, null, null, "laptop");
-        AgentHost second = agentHostService.upsertLocalAgentHost(user, null, null, "desktop");
+        AgentHost first = agentHostService.upsertLocalAgentHost(user, projectA.getId(), null, "laptop-a");
+        AgentHost second = agentHostService.upsertLocalAgentHost(user, projectB.getId(), null, "laptop-b");
 
         assertThat(second.getId()).isEqualTo(first.getId());
         assertThat(first.getHostType()).isEqualTo(AgentHostType.LOCAL);
