@@ -50,6 +50,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (jwtTokenProvider.validateAccessToken(token)) {
                 if (jwtTokenProvider.isAgentToken(token)) {
                     authenticateAgent(token);
+                } else if (jwtTokenProvider.isAgentHostToken(token)) {
+                    authenticateAgentHost(token);
                 } else if (jwtTokenProvider.isUserToken(token)) {
                     authenticateUser(token);
                 }
@@ -131,6 +133,51 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         return authorities;
+    }
+
+    /**
+     * Authenticate an AGENT_HOST-principal token (unified protocol §4.1). The
+     * subject is a durable agent_hosts.id — the entity is loaded from the
+     * durable record so hostType/ownership are never taken from claims
+     * (protocol §15.4).
+     */
+    private void authenticateAgentHost(String token) {
+        UUID hostId = jwtTokenProvider.getSubjectId(token);
+        String hostName = jwtTokenProvider.getName(token);
+        AgentHost host = agentRepository.findById(hostId).orElse(null);
+
+        if (host == null || host.getStatus() != AgentHost.Status.ACTIVE
+                || isRegistrationKeyRevokedForHost(host)) {
+            log.debug("Agent host token rejected: hostId={} status={} revoked={}",
+                    hostId,
+                    host == null ? "null" : host.getStatus(),
+                    host != null && isRegistrationKeyRevokedForHost(host));
+            return;
+        }
+
+        AgentHostPrincipal principal = new AgentHostPrincipal(host, hostName);
+        UsernamePasswordAuthenticationToken authentication =
+                new UsernamePasswordAuthenticationToken(
+                        principal,
+                        null,
+                        List.of(new SimpleGrantedAuthority("ROLE_AGENT_HOST"))
+                );
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        log.debug("Authenticated agent host: {} (host: {})", hostId, host.getName());
+    }
+
+    /**
+     * True when the host's registration key has been revoked or expired.
+     * Local hosts have no durable registration key to revoke (protocol §4.1
+     * local registration owns identity via the user), so they pass.
+     */
+    private boolean isRegistrationKeyRevokedForHost(AgentHost host) {
+        if (Boolean.TRUE.equals(host.getIsLocal()) || host.getRegistrationKey() == null) {
+            return false;
+        }
+        return registrationKeyService.findByKeyValue(host.getRegistrationKey())
+                .filter(key -> !key.isValid())
+                .isPresent();
     }
 
     /**
