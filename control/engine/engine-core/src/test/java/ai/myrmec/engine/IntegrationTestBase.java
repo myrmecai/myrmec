@@ -143,6 +143,9 @@ public abstract class IntegrationTestBase {
     protected ai.myrmec.engine.agent.AgentHostRepository agentHostRepository;
 
     @Autowired
+    protected ai.myrmec.engine.agent.AgentHostInstanceRepository agentHostInstanceRepository;
+
+    @Autowired
     protected ai.myrmec.engine.agent.AgentRepository agentRepository;
 
     // Workflow graph repositories (cleanup FK order: attempts → events →
@@ -213,6 +216,9 @@ public abstract class IntegrationTestBase {
         // assistants reference projects(id) and agent_profiles(id); clear before both.
         assistantRepository.deleteAllInBatch();
         // agent_hosts reference agent_profiles(id); clear before agent_profiles.
+        // agent_host_instances reference agent_hosts(id) (CASCADE); clear
+        // instances before hosts.
+        agentHostInstanceRepository.deleteAllInBatch();
         agentHostRepository.deleteAllInBatch();
         // agents reference agent_hosts(id); clear before agent_hosts.
         agentRepository.deleteAllInBatch();

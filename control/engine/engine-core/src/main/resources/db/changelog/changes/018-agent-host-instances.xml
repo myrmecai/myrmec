@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Unified agent protocol (2026-09-12 §4.1/§19.1; design 2026-09-11 §2.5):
+        agent_host_instances is the append-only runtime layer — one row per
+        supervisor process run. OPEN rows carry live_key='OPEN' so the
+        portable unique index (agent_host_id, owner_user_id, live_key)
+        enforces one live instance per owner while NULL (closed) rows never
+        collide and history is retained. CLOSED is terminal; no row is ever
+        reopened or reused.
+    -->
+
+    <changeSet id="018-create-agent-host-instances" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="agent_host_instances"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="agent_host_instances">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="agent_host_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <!-- LOCAL/DEDICATED only; NULL for MANAGED (§2.3) -->
+            <column name="owner_user_id" type="uuid"/>
+            <column name="hostname" type="varchar(255)"/>
+            <column name="pool_size" type="integer" defaultValueNumeric="1">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reported_capacity" type="text"/>
+            <column name="control_node_id" type="varchar(255)"/>
+            <column name="status" type="varchar(20)" defaultValue="OPEN">
+                <constraints nullable="false"/>
+            </column>
+            <!-- 'OPEN' while live, NULL once closed — portable partial
+                 uniqueness without a filtered index (R4/R11). -->
+            <column name="live_key" type="varchar(8)"/>
+            <column name="opened_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_heartbeat_at" type="timestamp with time zone"/>
+            <column name="closed_at" type="timestamp with time zone"/>
+            <column name="close_reason" type="varchar(100)"/>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="agent_host_instances"
+            baseColumnNames="agent_host_id"
+            referencedTableName="agent_hosts"
+            referencedColumnNames="id"
+            constraintName="fk_agent_host_instances_host"
+            onDelete="CASCADE"/>
+
+        <createIndex indexName="idx_agent_host_instances_host_status" tableName="agent_host_instances">
+            <column name="agent_host_id"/>
+            <column name="status"/>
+        </createIndex>
+
+        <!-- Portable one-live-per-owner: NULL live_key (closed rows) and NULL
+             owner (MANAGED) never collide under NULL-distinct semantics. -->
+        <createIndex indexName="uk_agent_host_instances_live" tableName="agent_host_instances" unique="true">
+            <column name="agent_host_id"/>
+            <column name="owner_user_id"/>
+            <column name="live_key"/>
+        </createIndex>
+
+        <createIndex indexName="idx_agent_host_instances_host_opened" tableName="agent_host_instances">
+            <column name="agent_host_id"/>
+            <column name="opened_at"/>
+        </createIndex>
+
+        <createIndex indexName="idx_agent_host_instances_control_node" tableName="agent_host_instances">
+            <column name="control_node_id"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>
