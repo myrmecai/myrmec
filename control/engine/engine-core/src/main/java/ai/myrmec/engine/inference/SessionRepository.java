@@ -35,6 +35,11 @@ public interface SessionRepository extends JpaRepository<Session, UUID> {
     Optional<Session> findByRefIdAndServiceTypeAndAllocationStateIn(
             UUID refId, String serviceType, Collection<String> allocationStates);
 
+    /** §7.1 atomic allocation: capacity counted from session FSM rows. */
+    @Query("SELECT COUNT(s) FROM Session s WHERE s.hostInstanceId = :id AND s.allocationState IN :states")
+    long countByHostInstanceIdAndAllocationStateIn(@Param("id") UUID id,
+                                                   @Param("states") Collection<String> states);
+
     /** §7.1 atomic allocation state transitions lock the session row. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT s FROM Session s WHERE s.id = :id")
