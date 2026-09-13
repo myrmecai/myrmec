@@ -26,6 +26,7 @@ import java.util.UUID;
  * <ul>
  *   <li>AGENT: For agent authentication</li>
  *   <li>USER: For human user authentication</li>
+ *   <li>AGENT_HOST: For durable agent host (machine) authentication</li>
  * </ul>
  */
 @Component
@@ -42,6 +43,7 @@ public class JwtTokenProvider {
 
     public static final String PRINCIPAL_AGENT = "AGENT";
     public static final String PRINCIPAL_USER = "USER";
+    public static final String PRINCIPAL_AGENT_HOST = "AGENT_HOST";
 
     private final SecretKey secretKey;
     private final long accessTokenMinutes;
@@ -81,6 +83,48 @@ public class JwtTokenProvider {
                 .subject(agentId.toString())
                 .claim(TOKEN_TYPE_CLAIM, REFRESH_TOKEN)
                 .claim(PRINCIPAL_CLAIM, PRINCIPAL_AGENT)
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(expiry))
+                .signWith(secretKey)
+                .compact();
+    }
+
+    // ==================== Agent Host tokens (protocol §4.1) ====================
+
+    /**
+     * Access token for a durable Agent Host principal (unified protocol §4.1).
+     * Subject is agent_hosts.id — NOT a runtime agents.id. The host-control
+     * WebSocket handshake validates this principal; hostType/ownership are
+     * read from the durable host record, never from claims.
+     */
+    public String generateHostAccessToken(UUID agentHostId, String hostName) {
+        Instant now = Instant.now();
+        Instant expiry = now.plus(accessTokenMinutes, ChronoUnit.MINUTES);
+
+        return Jwts.builder()
+                .subject(agentHostId.toString())
+                .claim(TOKEN_TYPE_CLAIM, ACCESS_TOKEN)
+                .claim(PRINCIPAL_CLAIM, PRINCIPAL_AGENT_HOST)
+                .claim(NAME_CLAIM, hostName)
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(expiry))
+                .signWith(secretKey)
+                .compact();
+    }
+
+    /**
+     * Refresh token for a durable Agent Host principal. Same subject and
+     * principal; tokenType=refresh. Rotated on use by HostRefreshTokenStore;
+     * reuse revokes the family.
+     */
+    public String generateHostRefreshToken(UUID agentHostId) {
+        Instant now = Instant.now();
+        Instant expiry = now.plus(refreshTokenDays, ChronoUnit.DAYS);
+
+        return Jwts.builder()
+                .subject(agentHostId.toString())
+                .claim(TOKEN_TYPE_CLAIM, REFRESH_TOKEN)
+                .claim(PRINCIPAL_CLAIM, PRINCIPAL_AGENT_HOST)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiry))
                 .signWith(secretKey)
@@ -180,6 +224,14 @@ public class JwtTokenProvider {
 
     public boolean isUserToken(String token) {
         return PRINCIPAL_USER.equals(getPrincipalType(token));
+    }
+
+    /**
+     * True iff the token is an AGENT_HOST-principal token (either type).
+     * The subject is a durable agent_hosts.id, never an agents.id.
+     */
+    public boolean isAgentHostToken(String token) {
+        return PRINCIPAL_AGENT_HOST.equals(getPrincipalType(token));
     }
 
     public boolean isAccessToken(String token) {
