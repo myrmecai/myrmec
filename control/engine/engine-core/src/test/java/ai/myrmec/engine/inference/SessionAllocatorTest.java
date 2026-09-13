@@ -209,4 +209,37 @@ class SessionAllocatorTest extends IntegrationTestBase {
     private static final class SessionCloseReasonForTest {
         static final String CONVERSATION_ARCHIVED = "CONVERSATION_ARCHIVED";
     }
+
+    @Test
+    void twoSessionsOnOneInstanceMintExactlyOneWorkerEachAndCloseReleases() {
+        AgentHostInstance instance = openInstance(2);
+        Project project = project();
+
+        UUID conversationA = UUID.randomUUID();
+        UUID conversationB = UUID.randomUUID();
+        UUID sessionA = allocator.offer("CONVERSATION", conversationA, "CONVERSATION",
+                project.getId(), instance.getAgentHostId()).orElseThrow();
+        UUID sessionB = allocator.offer("CONVERSATION", conversationB, "CONVERSATION",
+                project.getId(), instance.getAgentHostId()).orElseThrow();
+
+        allocator.accept(sessionA);
+        allocator.accept(sessionB);
+        allocator.confirmOpened(sessionA, "slot-a");
+        allocator.confirmOpened(sessionB, "slot-b");
+
+        // Two DISTINCT conversations -> exactly two workers, one per refId.
+        var workers = agentRepository.findByAgentHostId(instance.getAgentHostId());
+        assertThat(workers).hasSize(2);
+        assertThat(workers.stream().map(Agent::getConversationId).toList())
+                .containsExactlyInAnyOrder(conversationA, conversationB);
+
+        // Close releases A's worker: its conversationId is cleared.
+        allocator.close(sessionA, "CONVERSATION_ARCHIVED");
+        Agent releasedA = agentRepository.findByAgentHostId(instance.getAgentHostId()).stream()
+                .filter(a -> a.getConversationId() == null)
+                .findFirst().orElseThrow();
+        // And B's worker is untouched.
+        assertThat(agentRepository.findByAgentHostId(instance.getAgentHostId()).stream()
+                .anyMatch(a -> conversationB.equals(a.getConversationId()))).isTrue();
+    }
 }

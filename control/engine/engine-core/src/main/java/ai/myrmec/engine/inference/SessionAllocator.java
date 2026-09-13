@@ -156,7 +156,7 @@ public class SessionAllocator {
         if (agentRepository.countByAgentHostInstanceIdAndStatusIn(
                 instance.getId(), List.of(Agent.Status.IDLE, Agent.Status.RESERVED, Agent.Status.BOUND)) == 0
                 || agentRepository.findByAgentHostId(instance.getAgentHostId()).stream()
-                        .noneMatch(a -> sessionId.equals(a.getConversationId()))) {
+                        .noneMatch(a -> session.getRefId().equals(a.getConversationId()))) {
             Agent worker = new Agent();
             worker.setAgentHostId(instance.getAgentHostId());
             worker.setAgentHostInstanceId(instance.getId());
@@ -180,6 +180,7 @@ public class SessionAllocator {
         if (session == null || ALLOC_STATE_CLOSED.equals(session.getAllocationState())) {
             return; // idempotent
         }
+        UUID refId = session.getRefId();
         session.setAllocationState(ALLOC_STATE_CLOSING);
         session.setAllocationState(ALLOC_STATE_CLOSED);
         session.setClosedAt(Instant.now());
@@ -188,7 +189,7 @@ public class SessionAllocator {
         // Release the serving worker (IDLE = reusable) — capacity returns.
         agentRepository.findByAgentHostIdAndStatus(instanceHostId(session), Agent.Status.IDLE)
                 .stream()
-                .filter(a -> sessionId.equals(a.getConversationId()))
+                .filter(a -> refId.equals(a.getConversationId()))
                 .findFirst()
                 .ifPresent(worker -> {
                     worker.setConversationId(null);
