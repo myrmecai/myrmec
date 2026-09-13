@@ -59,6 +59,10 @@ myrmec:
   agent:
     reaper:
       enabled: false
+    # Instance retention sweeper (design §3.2a). Off under test so instance
+    # history is not deleted mid-test; the retention API is driven directly.
+    instance-retention:
+      enabled: false
     # Home-node failover sweep (slice #106a). Off under test for the same
     # reason as the reaper — a test re-homes BOUND/CONNECTING workers by hand.
     failover:
