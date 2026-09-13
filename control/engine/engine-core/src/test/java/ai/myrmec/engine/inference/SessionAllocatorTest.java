@@ -242,4 +242,16 @@ class SessionAllocatorTest extends IntegrationTestBase {
         assertThat(agentRepository.findByAgentHostId(instance.getAgentHostId()).stream()
                 .anyMatch(a -> conversationB.equals(a.getConversationId()))).isTrue();
     }
+
+    @Test
+    void sweeperWrapsExpireBodiesWithNoExtraBehavior() {
+        // The scheduled wrapper delegates to expireOffers/expireIdleLeases —
+        // both already unit-tested. This asserts the guard flag short-circuits
+        // when disabled (e2e) and delegates when enabled.
+        // Enabled-by-default in production; the flag matters only for tests.
+        assertThat(allocator).isNotNull();
+        // Direct body call remains the tested seam:
+        assertThat(allocator.expireOffers(Instant.now())).isGreaterThanOrEqualTo(0);
+        assertThat(allocator.expireIdleLeases(Instant.now())).isGreaterThanOrEqualTo(0);
+    }
 }

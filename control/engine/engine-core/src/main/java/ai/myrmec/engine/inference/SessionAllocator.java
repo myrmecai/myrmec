@@ -9,6 +9,7 @@ import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.node.NodeRegistryService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,6 +47,7 @@ public class SessionAllocator {
 
     private final int offerTimeoutSeconds;
     private final int idleTimeoutSeconds;
+    private final boolean enabled;
 
     public SessionAllocator(
             SessionRepository sessionRepository,
@@ -53,13 +55,15 @@ public class SessionAllocator {
             AgentRepository agentRepository,
             NodeRegistryService nodeRegistryService,
             @Value("${myrmec.host.offer-timeout-seconds:10}") int offerTimeoutSeconds,
-            @Value("${myrmec.host.session-idle-timeout-seconds:1800}") int idleTimeoutSeconds) {
+            @Value("${myrmec.host.session-idle-timeout-seconds:1800}") int idleTimeoutSeconds,
+            @Value("${myrmec.host.allocation-sweep.enabled:true}") boolean enabled) {
         this.sessionRepository = sessionRepository;
         this.instanceRepository = instanceRepository;
         this.agentRepository = agentRepository;
         this.nodeRegistryService = nodeRegistryService;
         this.offerTimeoutSeconds = offerTimeoutSeconds;
         this.idleTimeoutSeconds = idleTimeoutSeconds;
+        this.enabled = enabled;
     }
 
     /**
@@ -220,6 +224,19 @@ public class SessionAllocator {
             close(session.getId(), "IDLE_LEASE_EXPIRED");
         }
         return stale.size();
+    }
+
+    /** §12.2 scheduled sweep — disabled in e2e like the reaper. */
+    @Scheduled(fixedDelayString = "${myrmec.host.allocation-sweep.interval-ms:15000}")
+    public void sweepAllocation() {
+        if (!enabled) {
+            return;
+        }
+        int expiredOffers = expireOffers(Instant.now());
+        int expiredLeases = expireIdleLeases(Instant.now());
+        if (expiredOffers + expiredLeases > 0) {
+            log.info("Allocation sweep: {} offers, {} leases expired", expiredOffers, expiredLeases);
+        }
     }
 
     private UUID instanceHostId(Session session) {

@@ -73,6 +73,9 @@ myrmec:
   hitl:
     expiry-sweeper:
       interval-ms: 2000
+  host:
+    allocation-sweep:
+      enabled: false
 
 # API Documentation
 springdoc:
