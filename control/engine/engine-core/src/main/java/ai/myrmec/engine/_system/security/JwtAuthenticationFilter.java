@@ -1,6 +1,7 @@
 package ai.myrmec.engine._system.security;
 
 import ai.myrmec.engine.agent.AgentHost;
+import ai.myrmec.engine.agent.AgentHostType;
 import ai.myrmec.engine.agent.Agent;
 import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.agent.AgentHostRepository;
@@ -172,7 +173,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      * local registration owns identity via the user), so they pass.
      */
     private boolean isRegistrationKeyRevokedForHost(AgentHost host) {
-        if (Boolean.TRUE.equals(host.getIsLocal()) || host.getRegistrationKey() == null) {
+        if (host.getHostType() == AgentHostType.LOCAL || host.getRegistrationKey() == null) {
             return false;
         }
         return registrationKeyService.findByKeyValue(host.getRegistrationKey())

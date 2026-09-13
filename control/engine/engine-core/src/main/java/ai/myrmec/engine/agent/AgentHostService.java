@@ -220,15 +220,17 @@ public class AgentHostService {
     /**
      * Create or reuse the ephemeral local {@link AgentHost} for a signed-in user.
      *
-     * <p>At most one local host per (user, project) is enforced by the unique
-     * index on {@code agent_hosts(local_user_id, project_id, is_local)}. If
-     * the user already has a local host for the project, its profile may be
-     * updated and the existing host is returned. A fresh local host gets no
-     * durable registration key — the extension authenticates with short-lived
-     * agent JWTs minted against the returned host/instance.</p>
+     * <p>At most one local host per user is enforced by the unique index on
+     * {@code agent_hosts(host_type, owner_user_id)}. If the user already has a
+     * local host, its profile may be updated and the existing host is returned.
+     * A fresh local host gets no durable registration key — the extension
+     * authenticates with short-lived agent JWTs minted against the returned
+     * host/instance.</p>
      *
      * @param userId    the authenticated user who owns the local agent
-     * @param projectId project scope, or null for a system-wide local agent
+     * @param projectId project scope recorded at creation for governance
+     *                  display only; reuse is per-user, so it is not updated
+     *                  on later registrations
      * @param profileId requested agent profile, or null to keep the existing
      *                  profile or to fall back to a system default
      * @param hostname  host identity reported by the IDE extension (e.g. the
@@ -242,8 +244,9 @@ public class AgentHostService {
             throw new BadRequestException("userId is required for a local agent host");
         }
 
+        // Per-USER local host (design 2026-09-11 §1.3): not project-scoped.
         Optional<AgentHost> existing =
-                agentHostRepository.findByLocalUserIdAndProjectIdAndIsLocalTrue(userId, projectId);
+                agentHostRepository.findByHostTypeAndOwnerUserId(AgentHostType.LOCAL, userId);
         if (existing.isPresent()) {
             AgentHost host = existing.get();
             if (profileId != null && !profileId.equals(host.getProfileId())) {
@@ -253,7 +256,7 @@ public class AgentHostService {
                 host.setProfileId(profileId);
             }
             if (hostname != null) {
-                host.setName(buildLocalHostName(userId, projectId, hostname));
+                host.setName(buildLocalHostName(userId, hostname));
             }
             host.setStatus(AgentHost.Status.ACTIVE);
             log.info("Reused local agent host {} for user {} (project {})",
@@ -270,15 +273,17 @@ public class AgentHostService {
         }
 
         AgentHost host = new AgentHost();
-        host.setName(buildLocalHostName(userId, projectId, hostname));
+        host.setName(buildLocalHostName(userId, hostname));
         host.setDescription("Local IDE agent for user " + userId);
         host.setProfileId(effectiveProfileId);
+        // Project scope recorded at creation for governance display only;
+        // reuse is per-user, so it is not updated on later registrations.
         host.setProjectId(projectId);
         host.setRegistrationKey(generateRegistrationKey());
         host.setMaxAgents(1);
         host.setStatus(AgentHost.Status.ACTIVE);
-        host.setIsLocal(true);
-        host.setLocalUserId(userId);
+        host.setHostType(AgentHostType.LOCAL);
+        host.setOwnerUserId(userId);
         // Local agents are single-node by definition: the extension host is
         // the control node for the lifetime of the local host.
         host.setControlNodeId(nodeRegistryService.getSelfNodeId());
@@ -289,10 +294,9 @@ public class AgentHostService {
         return host;
     }
 
-    private String buildLocalHostName(UUID userId, UUID projectId, String hostname) {
+    private String buildLocalHostName(UUID userId, String hostname) {
         String suffix = hostname != null && !hostname.isBlank() ? hostname : "local";
-        String scope = projectId != null ? projectId.toString().substring(0, 8) : "system";
-        return "local-" + scope + "-" + userId.toString().substring(0, 8) + "-" + suffix;
+        return "local-" + userId.toString().substring(0, 8) + "-" + suffix;
     }
 
     private static final UUID DEFAULT_LOCAL_PROFILE_ID =

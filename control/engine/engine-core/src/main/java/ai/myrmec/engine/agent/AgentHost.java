@@ -41,9 +41,11 @@ public class AgentHost {
     private String description;
 
     /**
-     * Foreign key to agent_profiles table.
+     * Foreign key to agent_profiles table. Nullable (protocol §19.1):
+     * profiles bind at session time; the host no longer requires one.
+     * The admin API keeps requiring it until the cutover plan.
      */
-    @Column(name = "profile_id", nullable = false)
+    @Column(name = "profile_id")
     private UUID profileId;
 
     /**
@@ -99,19 +101,19 @@ public class AgentHost {
     private Status status = Status.ACTIVE;
 
     /**
-     * True when this host is an ephemeral local agent running inside a user
-     * IDE / extension host (e.g. VS Code). Local agents are created on-demand
-     * by the signed-in user and do not require a durable registration key.
+     * Durable host type (protocol §2.3) — replaces the former is_local
+     * boolean. MANAGED for cluster/headless hosts, LOCAL for a user's IDE
+     * supervisor, DEDICATED reserved.
      */
-    @Column(name = "is_local", nullable = false)
-    private Boolean isLocal = false;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "host_type", nullable = false, length = 20)
+    private AgentHostType hostType = AgentHostType.MANAGED;
 
     /**
-     * For local agents: the user who owns this ephemeral host. Null for
-     * traditional cloud/headless agents that authenticate via registration key.
+     * The owning user for LOCAL/DEDICATED hosts; NULL for MANAGED (§2.3).
      */
-    @Column(name = "local_user_id")
-    private UUID localUserId;
+    @Column(name = "owner_user_id")
+    private UUID ownerUserId;
 
     /**
      * Replica currently holding this Host's control socket (slice 4a). Null

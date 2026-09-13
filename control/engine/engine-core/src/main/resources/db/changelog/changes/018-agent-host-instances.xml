@@ -84,4 +84,100 @@
         </createIndex>
     </changeSet>
 
+    <!--
+        agent_hosts rework (design §2.3/§2.4): host_type replaces the is_local
+        boolean; local_user_id renames to owner_user_id; local hosts become
+        per-USER (unique host_type+owner) instead of per-(user, project);
+        profile_id becomes nullable (profiles bind at session time, §19.1).
+        Order is load-bearing (R4): add nullable → backfill → NOT NULL → only
+        then drop is_local and the 016 index.
+    -->
+
+    <changeSet id="018-agent-hosts-host-type" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <columnExists tableName="agent_hosts" columnName="is_local"/>
+                <not>
+                    <columnExists tableName="agent_hosts" columnName="host_type"/>
+                </not>
+            </and>
+        </preConditions>
+
+        <addColumn tableName="agent_hosts">
+            <column name="host_type" type="varchar(20)">
+                <!-- Nullable at first: backfill below, NOT NULL after (R4). -->
+            </column>
+        </addColumn>
+
+        <sql>UPDATE agent_hosts SET host_type = CASE WHEN is_local THEN 'LOCAL' ELSE 'MANAGED' END</sql>
+
+        <addNotNullConstraint
+            tableName="agent_hosts"
+            columnName="host_type"
+            columnDataType="varchar(20)"
+            constraintName="nn_agent_hosts_host_type"/>
+    </changeSet>
+
+    <changeSet id="018-agent-hosts-owner-rename" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <columnExists tableName="agent_hosts" columnName="local_user_id"/>
+                <not>
+                    <columnExists tableName="agent_hosts" columnName="owner_user_id"/>
+                </not>
+            </and>
+        </preConditions>
+
+        <renameColumn
+            tableName="agent_hosts"
+            oldColumnName="local_user_id"
+            newColumnName="owner_user_id"
+            columnDataType="uuid"/>
+    </changeSet>
+
+    <changeSet id="018-agent-hosts-drop-is-local" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <columnExists tableName="agent_hosts" columnName="is_local"/>
+        </preConditions>
+
+        <dropIndex
+            tableName="agent_hosts"
+            indexName="idx_agent_hosts_local_user_project"/>
+
+        <dropColumn tableName="agent_hosts" columnName="is_local"/>
+    </changeSet>
+
+    <changeSet id="018-agent-hosts-owner-unique" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <columnExists tableName="agent_hosts" columnName="host_type"/>
+                <columnExists tableName="agent_hosts" columnName="owner_user_id"/>
+                <not>
+                    <indexExists tableName="agent_hosts" indexName="uk_agent_hosts_type_owner"/>
+                </not>
+            </and>
+        </preConditions>
+
+        <!-- One LOCAL/DEDICATED host per owner; MANAGED rows carry a NULL
+             owner and never collide under NULL-distinct semantics. -->
+        <createIndex indexName="uk_agent_hosts_type_owner" tableName="agent_hosts" unique="true">
+            <column name="host_type"/>
+            <column name="owner_user_id"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="018-agent-hosts-profile-nullable" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <columnExists tableName="agent_hosts" columnName="profile_id"/>
+            </and>
+        </preConditions>
+
+        <!-- H2 requires columnDataType on dropNotNullConstraint (R4). -->
+        <dropNotNullConstraint
+            tableName="agent_hosts"
+            columnName="profile_id"
+            columnDataType="uuid"/>
+    </changeSet>
+
 </databaseChangeLog>
