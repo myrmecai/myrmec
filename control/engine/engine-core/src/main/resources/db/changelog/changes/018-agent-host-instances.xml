@@ -180,4 +180,75 @@
             columnDataType="uuid"/>
     </changeSet>
 
+    <!--
+        agents + sessions additive columns (protocol §19.1): a worker row may
+        reference the live supervisor run that minted it (Plan 4: rows are
+        minted at session.opened), and the sessions table gains the protocol's
+        kind / instance / allocation-state / lease fields. The agents FK is
+        ON DELETE SET NULL — instance retention must never delete work records
+        (design §3.2a).
+    -->
+
+    <changeSet id="018-agents-host-instance-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="agents" columnName="agent_host_instance_id"/>
+            </not>
+        </preConditions>
+
+        <addColumn tableName="agents">
+            <column name="agent_host_instance_id" type="uuid"/>
+        </addColumn>
+
+        <addForeignKeyConstraint
+            baseTableName="agents"
+            baseColumnNames="agent_host_instance_id"
+            referencedTableName="agent_host_instances"
+            referencedColumnNames="id"
+            constraintName="fk_agents_host_instance"
+            onDelete="SET NULL"/>
+
+        <createIndex indexName="idx_agents_host_instance" tableName="agents">
+            <column name="agent_host_instance_id"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="018-sessions-protocol-columns" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <not>
+                    <columnExists tableName="sessions" columnName="host_instance_id"/>
+                </not>
+                <tableExists tableName="agent_host_instances"/>
+            </and>
+        </preConditions>
+
+        <addColumn tableName="sessions">
+            <column name="kind" type="varchar(20)">
+                <!-- CONVERSATION | ORCHESTRATION_TASK (§3.1); NULL on legacy rows. -->
+            </column>
+            <column name="host_instance_id" type="uuid"/>
+            <column name="allocation_state" type="varchar(20)">
+                <!-- §11.1 FSM; NULL on legacy rows. -->
+            </column>
+            <column name="offer_expires_at" type="timestamp with time zone"/>
+            <column name="idle_lease_expires_at" type="timestamp with time zone"/>
+        </addColumn>
+
+        <addForeignKeyConstraint
+            baseTableName="sessions"
+            baseColumnNames="host_instance_id"
+            referencedTableName="agent_host_instances"
+            referencedColumnNames="id"
+            constraintName="fk_sessions_host_instance"
+            onDelete="SET NULL"/>
+
+        <createIndex indexName="idx_sessions_host_instance" tableName="sessions">
+            <column name="host_instance_id"/>
+        </createIndex>
+        <createIndex indexName="idx_sessions_allocation_state" tableName="sessions">
+            <column name="allocation_state"/>
+        </createIndex>
+    </changeSet>
+
 </databaseChangeLog>

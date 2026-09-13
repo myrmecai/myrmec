@@ -55,6 +55,26 @@ public class Session {
     @Column(name = "status", nullable = false, length = 20)
     private String status;  // "ACTIVE" or "CLOSED"
 
+    /** Protocol §3.1 session kind: CONVERSATION | ORCHESTRATION_TASK. */
+    @Column(name = "kind", length = 20)
+    private String kind;
+
+    /** The agent_host_instances row serving this session (FK SET NULL). */
+    @Column(name = "host_instance_id")
+    private UUID hostInstanceId;
+
+    /** Protocol §11.1 allocation FSM: OFFERED|INITIALIZING|ACTIVE|CLOSING|CLOSED|RECOVERING. */
+    @Column(name = "allocation_state", length = 20)
+    private String allocationState;
+
+    /** Pending-offer lease expiry (§7.1); engine-expired offers return capacity. */
+    @Column(name = "offer_expires_at")
+    private Instant offerExpiresAt;
+
+    /** Conversation idle-lease expiry (§12.2); NULL when no idle lease runs. */
+    @Column(name = "idle_lease_expires_at")
+    private Instant idleLeaseExpiresAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

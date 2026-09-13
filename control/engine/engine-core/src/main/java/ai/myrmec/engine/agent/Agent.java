@@ -43,6 +43,15 @@ public class Agent {
     private UUID agentHostId;
 
     /**
+     * The live supervisor run that minted/serves this worker (protocol §19.1
+     * decision 1: rows are minted at session.opened). FK is ON DELETE SET
+     * NULL — instance retention nulls the reference, never deletes work
+     * records (design §3.2a).
+     */
+    @Column(name = "agent_host_instance_id")
+    private UUID agentHostInstanceId;
+
+    /**
      * The conversation this agent is bound to (set at reserve-time). Null when idle.
      */
     @Column(name = "conversation_id")
