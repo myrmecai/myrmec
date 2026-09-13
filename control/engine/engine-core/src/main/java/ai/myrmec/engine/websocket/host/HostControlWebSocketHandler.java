@@ -6,12 +6,21 @@ import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentHostRepository;
+import ai.myrmec.engine.inference.SessionAllocator;
+import ai.myrmec.engine.inference.SessionContextAssembler;
+import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.node.NodeRegistryService;
 import ai.myrmec.engine.websocket.host.payload.HostCapacityPayload;
 import ai.myrmec.engine.websocket.host.payload.HostHeartbeatPayload;
 import ai.myrmec.engine.websocket.host.payload.HostOpenPayload;
 import ai.myrmec.engine.websocket.host.payload.HostOpenedPayload;
 import ai.myrmec.engine.websocket.host.payload.ProtocolErrorPayload;
+import ai.myrmec.engine.websocket.host.payload.SessionAcceptPayload;
+import ai.myrmec.engine.websocket.host.payload.SessionClosedPayload;
+import ai.myrmec.engine.websocket.host.payload.SessionOfferPayload;
+import ai.myrmec.engine.websocket.host.payload.SessionOpenedPayload;
+import ai.myrmec.engine.websocket.host.payload.SessionRejectPayload;
+import ai.myrmec.engine.websocket.message.payload.SessionOpenPayload;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +32,7 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -45,6 +55,9 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     private final AgentHostInstanceRepository instanceRepository;
     private final HostConnectionManager connectionManager;
     private final NodeRegistryService nodeRegistryService;
+    private final SessionAllocator sessionAllocator;
+    private final SessionContextAssembler sessionAssembler;
+    private final SessionRepository sessionRepository;
 
     @Value("${myrmec.host.heartbeat-interval-seconds:15}")
     private int heartbeatIntervalSeconds;
@@ -60,17 +73,25 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     private int maxUnackedEventBytes;
     @Value("${myrmec.host.stream.event-backpressure-timeout-seconds:30}")
     private int eventBackpressureTimeoutSeconds;
+    @Value("${myrmec.host.session-idle-timeout-seconds:1800}")
+    private int idleTimeoutSeconds;
 
     public HostControlWebSocketHandler(ObjectMapper objectMapper,
                                        AgentHostRepository agentHostRepository,
                                        AgentHostInstanceRepository instanceRepository,
                                        HostConnectionManager connectionManager,
-                                       NodeRegistryService nodeRegistryService) {
+                                       NodeRegistryService nodeRegistryService,
+                                       SessionAllocator sessionAllocator,
+                                       SessionContextAssembler sessionAssembler,
+                                       SessionRepository sessionRepository) {
         this.objectMapper = objectMapper;
         this.agentHostRepository = agentHostRepository;
         this.instanceRepository = instanceRepository;
         this.connectionManager = connectionManager;
         this.nodeRegistryService = nodeRegistryService;
+        this.sessionAllocator = sessionAllocator;
+        this.sessionAssembler = sessionAssembler;
+        this.sessionRepository = sessionRepository;
     }
 
     /** Exposed for handler tests to assert registration. */
@@ -107,10 +128,22 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             case HostProtocol.HOST_OPEN -> handleHostOpen(session, envelope);
             case HostProtocol.HOST_HEARTBEAT -> handleHostHeartbeat(session, envelope);
             case HostProtocol.HOST_CAPACITY -> handleHostCapacity(session, envelope);
+            case HostProtocol.SESSION_ACCEPT -> handleSessionAccept(session, envelope);
+            case HostProtocol.SESSION_REJECT -> handleSessionReject(session, envelope);
+            case HostProtocol.SESSION_OPENED -> handleSessionOpened(session, envelope);
+            case HostProtocol.SESSION_CLOSED -> handleSessionClosed(session, envelope);
+            case HostProtocol.SESSION_OFFER, HostProtocol.SESSION_OPEN, HostProtocol.SESSION_CLOSE ->
+                    logEngineToHostIgnored(session, envelope);
             default ->
                     sendError(session, correlationId, HostProtocol.UNSUPPORTED_MESSAGE,
                             "Unknown message type: " + type, false, "CONNECTION", null);
         }
+    }
+
+    /** §5: engine->host frames echoed back are ignored — they carry no host command. */
+    private void logEngineToHostIgnored(WebSocketSession session, HostProtocolEnvelope envelope) {
+        log.debug("Ignoring engine->host frame {} on session {}",
+                envelope.getType(), session.getId());
     }
 
     /** §6.1/§6.2: mint (or idempotently answer) the live supervisor run. */
@@ -267,6 +300,148 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             log.info("Host instance {} capacity updated to {}",
                     instanceId, instance.getPoolSize());
         });
+    }
+
+    /** §7.2: host committed a local slot for the offered session. */
+    private void handleSessionAccept(WebSocketSession session, HostProtocolEnvelope envelope) {
+        UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
+        if (instanceId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                    "session.accept before host.opened", false, "SESSION", null);
+            return;
+        }
+        UUID sessionId = envelope.getSessionId();
+        if (sessionId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "sessionId is required", false, "SESSION", null);
+            return;
+        }
+        try {
+            var accept = objectMapper.treeToValue(envelope.getPayload(), SessionAcceptPayload.class);
+            boolean ok = sessionAllocator.accept(sessionId);
+            if (!ok) {
+                sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                        "session.accept for a session not in OFFERED", false, "SESSION", null);
+                return;
+            }
+            log.info("Session {} accepted by instance {}", sessionId, instanceId);
+        } catch (Exception e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "session.accept payload invalid: " + e.getMessage(), false, "SESSION", null);
+        }
+    }
+
+    /** §7.2: host refused the offer — release the reservation. */
+    private void handleSessionReject(WebSocketSession session, HostProtocolEnvelope envelope) {
+        UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
+        if (instanceId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                    "session.reject before host.opened", false, "SESSION", null);
+            return;
+        }
+        UUID sessionId = envelope.getSessionId();
+        if (sessionId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "sessionId is required", false, "SESSION", null);
+            return;
+        }
+        try {
+            var reject = objectMapper.treeToValue(envelope.getPayload(), SessionRejectPayload.class);
+            sessionAllocator.reject(sessionId, reject.reasonCode(), reject.message(), reject.retryable());
+        } catch (Exception e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "session.reject payload invalid: " + e.getMessage(), false, "SESSION", null);
+        }
+    }
+
+    /** §7.4/§19.1: context installed — mint the worker row, flip ACTIVE. */
+    private void handleSessionOpened(WebSocketSession session, HostProtocolEnvelope envelope) {
+        UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
+        if (instanceId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                    "session.opened before host.opened", false, "SESSION", null);
+            return;
+        }
+        UUID sessionId = envelope.getSessionId();
+        if (sessionId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "sessionId is required", false, "SESSION", null);
+            return;
+        }
+        try {
+            var opened = objectMapper.treeToValue(envelope.getPayload(), SessionOpenedPayload.class);
+            boolean ok = sessionAllocator.confirmOpened(sessionId, opened.channelMode());
+            if (!ok) {
+                sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                        "session.opened for a session not in INITIALIZING", false, "SESSION", null);
+                return;
+            }
+            log.info("Session {} opened on instance {}", sessionId, instanceId);
+        } catch (Exception e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "session.opened payload invalid: " + e.getMessage(), false, "SESSION", null);
+        }
+    }
+
+    /** §9: host confirmed cleanup — terminal close on the engine side. */
+    private void handleSessionClosed(WebSocketSession session, HostProtocolEnvelope envelope) {
+        UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
+        if (instanceId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                    "session.closed before host.opened", false, "SESSION", null);
+            return;
+        }
+        UUID sessionId = envelope.getSessionId();
+        if (sessionId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "sessionId is required", false, "SESSION", null);
+            return;
+        }
+        try {
+            var closed = objectMapper.treeToValue(envelope.getPayload(), SessionClosedPayload.class);
+            sessionAllocator.close(sessionId, closed.reasonCode());
+        } catch (Exception e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "session.closed payload invalid: " + e.getMessage(), false, "SESSION", null);
+        }
+    }
+
+    /**
+     * §7.3: send the fully assembled session.open to the host that accepted
+     * the session. Public so Plan 5's dispatch path can call it after accept.
+     */
+    public void sendSessionOpen(UUID sessionId, UUID agentProfileId) {
+        ai.myrmec.engine.inference.Session session = sessionRepository.findById(sessionId).orElse(null);
+        if (session == null) {
+            return;
+        }
+        WebSocketSession socket = connectionManager.getSession(session.getHostInstanceId()).orElse(null);
+        if (socket == null) {
+            return;
+        }
+        SessionOpenPayload context = sessionAssembler.assembleContext(
+                sessionId, session.getServiceType(), session.getRefId(),
+                session.getProjectId(), agentProfileId);
+        send(socket, HostProtocolEnvelope.reply(HostProtocol.SESSION_OPEN, null, context, objectMapper));
+    }
+
+    /** §7.1: send the offer for a reserved session (Plan 5's dispatcher calls this). */
+    public void sendSessionOffer(UUID sessionId, String kind, UUID refId) {
+        ai.myrmec.engine.inference.Session session = sessionRepository.findById(sessionId).orElse(null);
+        if (session == null) {
+            return;
+        }
+        WebSocketSession socket = connectionManager.getSession(session.getHostInstanceId()).orElse(null);
+        if (socket == null) {
+            return;
+        }
+        send(socket, HostProtocolEnvelope.reply(HostProtocol.SESSION_OFFER, null,
+                new SessionOfferPayload(sessionId, sessionId, kind,
+                        new SessionOfferPayload.Ref(kind, refId),
+                        new SessionOfferPayload.Requirements(List.of(), List.of(), List.of()),
+                        new SessionOfferPayload.Lease(session.getOfferExpiresAt(), idleTimeoutSeconds),
+                        new SessionOfferPayload.Routing(nodeRegistryService.getSelfNodeId(), null)),
+                objectMapper));
     }
 
     private void sendError(WebSocketSession session, String correlationId, String code,

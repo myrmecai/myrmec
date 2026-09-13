@@ -71,6 +71,87 @@ public class SessionContextAssembler {
                         "Agent profile not found: " + agentProfileId));
         AgentProfileVersion version = agentProfileVersionService.requirePublished(agentProfileId);
 
+        // 2-6. Resolve model, workspace, tools, knowledge, HITL policy, and pins.
+        ResolvedContext ctx = resolveContext(profile, version, projectId);
+
+        // 7. Create session row
+        Session session = new Session();
+        session.setServiceType(serviceType);
+        session.setRefId(refId);
+        session.setProjectId(projectId);
+        session.setContextPins(ctx.contextPins());
+        session.setStatus(EntityStatus.ACTIVE);
+        session = sessionRepository.save(session);
+
+        log.info("Created session {} for {} refId={}", session.getId(), serviceType, refId);
+
+        // §9.5 / §16.1: the pin is the real published version row ID —
+        // a worker bound to this session replays against exactly this
+        // content even if the profile publishes a newer version later.
+        return new SessionOpenPayload(
+                session.getId(),
+                serviceType,
+                projectId,
+                version.getId(),
+                ctx.modelConfig(),
+                ctx.workspace(),
+                ctx.tools(),
+                ctx.kbHandles(),
+                ctx.autoHitl());
+    }
+
+    /**
+     * Assemble the full execution context WITHOUT creating a session row —
+     * the unified protocol's allocator owns the row (§7.1: created at
+     * offer). The legacy assemble(...) keeps creating rows for the legacy
+     * dispatch path until cutover. Pins context onto the given session id.
+     */
+    @Transactional
+    public SessionOpenPayload assembleContext(UUID sessionId, String serviceType, UUID refId,
+                                              UUID projectId, UUID agentProfileId) {
+        AgentProfile profile = agentProfileRepository.findById(agentProfileId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Agent profile not found: " + agentProfileId));
+        AgentProfileVersion version = agentProfileVersionService.requirePublished(agentProfileId);
+
+        ResolvedContext ctx = resolveContext(profile, version, projectId);
+
+        // Install the pins on the EXISTING allocator-owned row.
+        Session session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
+        session.setContextPins(ctx.contextPins());
+        sessionRepository.save(session);
+
+        return new SessionOpenPayload(
+                sessionId,
+                serviceType,
+                projectId,
+                version.getId(),
+                ctx.modelConfig(),
+                ctx.workspace(),
+                ctx.tools(),
+                ctx.kbHandles(),
+                ctx.autoHitl());
+    }
+
+    /**
+     * Intermediate context bundle used by both {@link #assemble(String, UUID, UUID, UUID)}
+     * and {@link #assembleContext(UUID, String, UUID, UUID, UUID)}. Keeps the
+     * legacy row-creating path and the allocator path identical in what they
+     * resolve, while only the persistence step differs.
+     */
+    private record ResolvedContext(
+            SessionOpenPayload.ModelConfig modelConfig,
+            SessionOpenPayload.WorkspaceConfig workspace,
+            List<SessionOpenPayload.ToolDefinition> tools,
+            List<SessionOpenPayload.KnowledgeSourceHandle> kbHandles,
+            boolean autoHitl,
+            Map<String, Object> contextPins) {
+    }
+
+    private ResolvedContext resolveContext(AgentProfile profile,
+                                            AgentProfileVersion version,
+                                            UUID projectId) {
         // 2. Resolve model (decrypt API key once per session)
         SessionOpenPayload.ModelConfig modelConfig = resolveModel(profile, version);
 
@@ -78,7 +159,7 @@ public class SessionContextAssembler {
         SessionOpenPayload.WorkspaceConfig workspace = resolveWorkspace(projectId);
 
         // 4. Resolve tool catalog (authorized set — filtered by the version)
-        List<SessionOpenPayload.ToolDefinition> tools = resolveTools(agentProfileId, version);
+        List<SessionOpenPayload.ToolDefinition> tools = resolveTools(profile.getId(), version);
 
         // 5. Resolve knowledge-source handles (pinned KB catalog — handles only)
         List<KnowledgeSource> activeSources = resolveActiveKnowledgeSources(projectId);
@@ -106,30 +187,7 @@ public class SessionContextAssembler {
         contextPins.put("instructionAssetVersionIds",
                 instructionVersionIds.stream().map(UUID::toString).toList());
 
-        // 7. Create session row
-        Session session = new Session();
-        session.setServiceType(serviceType);
-        session.setRefId(refId);
-        session.setProjectId(projectId);
-        session.setContextPins(contextPins);
-        session.setStatus(EntityStatus.ACTIVE);
-        session = sessionRepository.save(session);
-
-        log.info("Created session {} for {} refId={}", session.getId(), serviceType, refId);
-
-        // §9.5 / §16.1: the pin is the real published version row ID —
-        // a worker bound to this session replays against exactly this
-        // content even if the profile publishes a newer version later.
-        return new SessionOpenPayload(
-                session.getId(),
-                serviceType,
-                projectId,
-                version.getId(),
-                modelConfig,
-                workspace,
-                tools,
-                kbHandles,
-                autoHitl);
+        return new ResolvedContext(modelConfig, workspace, tools, kbHandles, autoHitl, contextPins);
     }
 
     private SessionOpenPayload.ModelConfig resolveModel(AgentProfile profile, AgentProfileVersion version) {
