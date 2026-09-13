@@ -60,6 +60,14 @@ public interface AgentRepository extends JpaRepository<Agent, UUID> {
     long countByAgentHostId(UUID agentId);
 
     /**
+     * Workers minted for this live instance in the given statuses (§2.7):
+     * capacity counts IDLE (reusable) + RESERVED/BOUND (serving) + DEAD
+     * (not yet released) against the instance's pool.
+     */
+    long countByAgentHostInstanceIdAndStatusIn(UUID agentHostInstanceId,
+                                               java.util.Collection<Agent.Status> statuses);
+
+    /**
      * Count workers currently holding an active binding to a conversation
      * (any of {@code statuses}). Used by the #87 backlog drainer to skip a
      * conversation whose turn is already in flight, preventing a double

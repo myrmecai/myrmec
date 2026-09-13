@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Plan 4 (protocol §7/§11.1): allocation-state helper index for the
+        expiry sweeps. All allocation columns themselves landed in 018.
+    -->
+
+    <changeSet id="020-allocation-state-sweep-index" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="sessions"/>
+                <columnExists tableName="sessions" columnName="allocation_state"/>
+                <not>
+                    <indexExists tableName="sessions" indexName="idx_sessions_allocation_expiry"/>
+                </not>
+            </and>
+        </preConditions>
+
+        <createIndex indexName="idx_sessions_allocation_expiry" tableName="sessions">
+            <column name="allocation_state"/>
+            <column name="offer_expires_at"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

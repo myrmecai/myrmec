@@ -2,7 +2,9 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.agent;
 
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -32,6 +34,11 @@ public interface AgentHostInstanceRepository extends JpaRepository<AgentHostInst
 
     /** Instance history — newest run first (restart timeline, design §3.2a). */
     List<AgentHostInstance> findByAgentHostIdOrderByOpenedAtDesc(UUID agentHostId);
+
+    /** §7.1 atomic reservation: allocation locks the instance row. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT i FROM AgentHostInstance i WHERE i.id = :id")
+    Optional<AgentHostInstance> findWithLockById(@Param("id") UUID id);
 
     /**
      * Close every still-OPEN instance homed on a control node (engine

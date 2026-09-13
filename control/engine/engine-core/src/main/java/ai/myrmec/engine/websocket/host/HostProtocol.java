@@ -27,4 +27,13 @@ public final class HostProtocol {
     public static final String UNSUPPORTED_MESSAGE = "UNSUPPORTED_MESSAGE";
     public static final String INVALID_STATE = "INVALID_STATE";
     public static final String IDENTITY_MISMATCH = "IDENTITY_MISMATCH";
+
+    // ---- Session allocation (§5 catalogue, §7 payloads) ----
+    public static final String SESSION_OFFER = "session.offer";
+    public static final String SESSION_ACCEPT = "session.accept";
+    public static final String SESSION_REJECT = "session.reject";
+    public static final String SESSION_OPEN = "session.open";
+    public static final String SESSION_OPENED = "session.opened";
+    public static final String SESSION_CLOSE = "session.close";
+    public static final String SESSION_CLOSED = "session.closed";
 }
