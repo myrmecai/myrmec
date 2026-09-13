@@ -7,6 +7,8 @@ import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentHostRepository;
 import ai.myrmec.engine.node.NodeRegistryService;
+import ai.myrmec.engine.websocket.host.payload.HostCapacityPayload;
+import ai.myrmec.engine.websocket.host.payload.HostHeartbeatPayload;
 import ai.myrmec.engine.websocket.host.payload.HostOpenPayload;
 import ai.myrmec.engine.websocket.host.payload.HostOpenedPayload;
 import ai.myrmec.engine.websocket.host.payload.ProtocolErrorPayload;
@@ -15,6 +17,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
@@ -102,13 +105,8 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
 
         switch (type) {
             case HostProtocol.HOST_OPEN -> handleHostOpen(session, envelope);
-            case HostProtocol.HOST_HEARTBEAT, HostProtocol.HOST_CAPACITY ->
-                    // Task 4 wires these; until then they are structurally valid
-                    // but arrive only after host.opened, so reject as not-opened
-                    // when no instance is bound yet.
-                    requireInstance(session, envelope, () ->
-                            sendError(session, correlationId, HostProtocol.UNSUPPORTED_MESSAGE,
-                                    "Not implemented yet", false, "CONNECTION", null));
+            case HostProtocol.HOST_HEARTBEAT -> handleHostHeartbeat(session, envelope);
+            case HostProtocol.HOST_CAPACITY -> handleHostCapacity(session, envelope);
             default ->
                     sendError(session, correlationId, HostProtocol.UNSUPPORTED_MESSAGE,
                             "Unknown message type: " + type, false, "CONNECTION", null);
@@ -194,19 +192,81 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                 objectMapper));
     }
 
-    /** Messages after host.opened carry the instance id; reject earlier ones. */
-    private void requireInstance(WebSocketSession session, HostProtocolEnvelope envelope,
-                                 Runnable onMissing) {
+    /** §3.2: disconnect closes the instance row (append-only history) and
+     *  unregisters the socket. The close reason is standardized. */
+    @Override
+    public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
+        connectionManager.unregister(session);
         Object instanceId = session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
+        if (instanceId instanceof UUID id) {
+            instanceRepository.findById(id).ifPresent(instance -> {
+                instance.close(CloseStatus.NORMAL.equals(status)
+                        ? "DISCONNECT" : "ABNORMAL_DISCONNECT");
+                instanceRepository.save(instance);
+                log.info("Host instance {} closed ({})", id, status);
+            });
+            session.getAttributes().remove(ATTR_HOST_INSTANCE_ID);
+        }
+    }
+
+    /** §6.4: liveness signal — refreshes last_heartbeat_at only. */
+    private void handleHostHeartbeat(WebSocketSession session, HostProtocolEnvelope envelope) {
+        UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
         if (instanceId == null) {
-            onMissing.run();
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                    "host.heartbeat is not valid before host.opened", false, "CONNECTION", null);
             return;
         }
-        if (envelope.getHostInstanceId() != null
-                && !envelope.getHostInstanceId().equals(instanceId)) {
+        if (envelope.getHostInstanceId() != null && !envelope.getHostInstanceId().equals(instanceId)) {
             sendError(session, envelope.getMessageId(), HostProtocol.IDENTITY_MISMATCH,
                     "hostInstanceId does not match the connection", false, "CONNECTION", null);
+            return;
         }
+        try {
+            objectMapper.treeToValue(envelope.getPayload(), HostHeartbeatPayload.class);
+        } catch (Exception e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "host.heartbeat payload failed validation: " + e.getMessage(),
+                    false, "CONNECTION", null);
+            return;
+        }
+        instanceRepository.findById(instanceId).ifPresent(instance -> {
+            instance.markHeartbeat();
+            instanceRepository.save(instance);
+        });
+    }
+
+    /** §6.5: capacity change — clamps the announced pool to maxAgents. */
+    private void handleHostCapacity(WebSocketSession session, HostProtocolEnvelope envelope) {
+        UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
+        if (instanceId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                    "host.capacity is not valid before host.opened", false, "CONNECTION", null);
+            return;
+        }
+        if (envelope.getHostInstanceId() != null && !envelope.getHostInstanceId().equals(instanceId)) {
+            sendError(session, envelope.getMessageId(), HostProtocol.IDENTITY_MISMATCH,
+                    "hostInstanceId does not match the connection", false, "CONNECTION", null);
+            return;
+        }
+        HostCapacityPayload capacity;
+        try {
+            capacity = objectMapper.treeToValue(envelope.getPayload(), HostCapacityPayload.class);
+        } catch (Exception e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "host.capacity payload failed validation: " + e.getMessage(),
+                    false, "CONNECTION", null);
+            return;
+        }
+        instanceRepository.findById(instanceId).ifPresent(instance -> {
+            AgentHost host = agentHostRepository.findById(instance.getAgentHostId()).orElse(null);
+            int ceiling = host != null ? host.getMaxAgents() : 1;
+            int effective = Math.min(Math.max(1, capacity.poolSize()), ceiling);
+            instance.setPoolSize(effective);
+            instanceRepository.save(instance);
+            log.info("Host instance {} capacity updated to {}",
+                    instanceId, instance.getPoolSize());
+        });
     }
 
     private void sendError(WebSocketSession session, String correlationId, String code,

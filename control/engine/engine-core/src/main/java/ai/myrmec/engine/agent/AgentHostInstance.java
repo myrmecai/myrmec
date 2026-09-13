@@ -69,6 +69,10 @@ public class AgentHostInstance {
     @Column(name = "pool_size", nullable = false)
     private Integer poolSize = 1;
 
+    public void setPoolSize(Integer poolSize) {
+        this.poolSize = poolSize;
+    }
+
     @Convert(converter = JsonMapConverter.class)
     @Column(name = "reported_capacity")
     private Map<String, Object> reportedCapacity;
