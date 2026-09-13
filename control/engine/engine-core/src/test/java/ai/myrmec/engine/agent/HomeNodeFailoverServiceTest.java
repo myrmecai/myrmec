@@ -10,6 +10,7 @@ import ai.myrmec.engine.conversation.ConversationEventRepository;
 import ai.myrmec.engine.conversation.ConversationRepository;
 import ai.myrmec.engine.node.EngineNode;
 import ai.myrmec.engine.node.EngineNodeRepository;
+import ai.myrmec.engine.node.NodeRegistryService;
 import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +37,7 @@ class HomeNodeFailoverServiceTest extends IntegrationTestBase {
     @Autowired private AgentHostService agentService;
     @Autowired private AgentRepository instanceRepository;
     @Autowired private EngineNodeRepository nodeRepository;
+    @Autowired private NodeRegistryService nodeRegistryService;
     @Autowired private ConversationRepository conversationRepository;
     @Autowired private ConversationEventRepository eventRepository;
 
@@ -43,8 +45,12 @@ class HomeNodeFailoverServiceTest extends IntegrationTestBase {
     void clearNodes() {
         // The e2e profile leaves engine_nodes empty (self-registration off), so
         // these tests own the table; scrub it so findDownNodeIds() is scoped to
-        // exactly the rows a test creates.
+        // exactly the rows a test creates. Re-register the self node afterwards:
+        // deleteAll() also removes the boot-time self row, and any later test
+        // that pins a host's control_node_id to the self node (local agent host
+        // registration) would otherwise violate FK_AGENT_HOSTS_CONTROL_NODE.
         nodeRepository.deleteAll();
+        nodeRegistryService.registerSelf();
     }
 
     // ---- failover sweep unit cases (§9.11 test gate) ----------------------
