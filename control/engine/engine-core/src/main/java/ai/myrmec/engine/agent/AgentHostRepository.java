@@ -58,4 +58,10 @@ public interface AgentHostRepository extends JpaRepository<AgentHost, UUID> {
      * Find agents by project ID.
      */
     List<AgentHost> findByProjectId(UUID projectId);
+
+    /**
+     * Find the local agent host owned by a specific user in a project.
+     * At most one local host per (user, project) is allowed.
+     */
+    Optional<AgentHost> findByLocalUserIdAndProjectIdAndIsLocalTrue(UUID localUserId, UUID projectId);
 }

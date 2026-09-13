@@ -71,6 +71,18 @@ export interface ProviderConfig {
   stubModulePath?: string;
   /** Agent-side tool implementations (only used when `mode='real'`). */
   realTools?: Tool[];
+  /**
+   * Workspace root for the real session tools (only used when `mode='real'`).
+   *
+   * When set, the session is offered the workspace-backed file tools
+   * (`read_file`, `list_directory`, `write_file`, `create_directory`), each
+   * confined to this root. When absent, the session gets no agent-side tools
+   * and `realTools` (if any) is used instead.
+   *
+   * Tools are built INSIDE the worker because a {@link Tool} carries an
+   * `invoke` function, which cannot cross the `worker_threads` boundary.
+   */
+  workspaceRoot?: string;
 }
 
 // ── Real implementations ──────────────────────────────────────────────
@@ -139,12 +151,22 @@ export async function createChatModelFactory(config: ProviderConfig): Promise<Ch
 /**
  * Create a {@link SessionToolFactory} from config.
  * Called inside the worker from serializable config.
+ *
+ * Real mode prefers workspace-backed file tools when a `workspaceRoot` is
+ * supplied: those are built here (inside the worker) because a tool's `invoke`
+ * function cannot cross the `worker_threads` boundary. Without a root, an
+ * explicitly supplied `realTools` list is used.
  */
 export async function createSessionToolFactory(config: ProviderConfig): Promise<SessionToolFactory> {
   if (config.mode === "stub") {
     const { StubSessionToolFactory } = await import("./stub.js");
     return new StubSessionToolFactory(config.stubModulePath);
-    return new StubSessionToolFactory(config.stubModulePath);
+  }
+  if (config.workspaceRoot) {
+    const { createWorkspaceSessionTools } = await import("./workspaceTools.js");
+    return new DefaultSessionToolFactory(
+      createWorkspaceSessionTools(config.workspaceRoot),
+    );
   }
   return new DefaultSessionToolFactory(config.realTools);
 }

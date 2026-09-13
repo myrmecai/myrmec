@@ -1,6 +1,9 @@
 package ai.myrmec.engine.auth;
 
 import ai.myrmec.engine._system.exception.ErrorResponse;
+import ai.myrmec.engine._system.security.CurrentUser;
+import ai.myrmec.engine.auth.dto.LocalAgentRegisterRequest;
+import ai.myrmec.engine.auth.dto.LocalAgentRegisterResponse;
 import ai.myrmec.engine.auth.dto.RefreshRequest;
 import ai.myrmec.engine.auth.dto.RefreshResponse;
 import ai.myrmec.engine.auth.dto.RegisterRequest;
@@ -15,11 +18,14 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.UUID;
 
 /**
  * Authentication controller for agent registration and token refresh.
@@ -66,6 +72,30 @@ public class AuthController {
     @PostMapping("/refresh")
     public ResponseEntity<RefreshResponse> refresh(@Valid @RequestBody RefreshRequest request) {
         RefreshResponse response = authService.refresh(request);
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(
+            summary = "Register a local agent instance",
+            description = "Register an ephemeral local agent inside a user's IDE / extension host. "
+                    + "Requires the user's access token. Returns agent credentials for the WebSocket."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Local agent registered successfully"),
+            @ApiResponse(responseCode = "400", description = "Validation error",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid user token",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "403", description = "Insufficient project access",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PreAuthorize("(#request.projectId == null or @projectAccess.canEdit(#request.projectId, authentication))")
+    @PostMapping("/local/register")
+    public ResponseEntity<LocalAgentRegisterResponse> registerLocalAgent(
+            @Valid @RequestBody LocalAgentRegisterRequest request,
+            @RequestHeader(value = "X-Local-Agent-Hostname", required = false) String hostname,
+            @CurrentUser UUID userId) {
+        LocalAgentRegisterResponse response = authService.registerLocalAgent(userId, request, hostname);
         return ResponseEntity.ok(response);
     }
 }

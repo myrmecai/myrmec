@@ -409,9 +409,11 @@ public class ConversationTurnDispatcher {
                                              AgentProfile profile, Agent boundInstance,
                                              UUID conversationId) {
         // §16.1: the behaviour contract (system prompt, tools, default
-        // model) lives on the published version row.
+        // model) lives on the published version row. Use the eager-tools
+        // variant because the sticky path runs outside the original
+        // transaction and must read the tool collection before it closes.
         AgentProfileVersion profileVersion = agentProfileVersionService
-                .findPublished(agent.getProfileId()).orElse(null);
+                .findPublishedWithTools(agent.getProfileId()).orElse(null);
         List<ConversationMessage> all = conversationService.listMessages(conversationId);
         List<ConversationMessage> active = all.stream()
                 .filter(m -> !m.isSuperseded())

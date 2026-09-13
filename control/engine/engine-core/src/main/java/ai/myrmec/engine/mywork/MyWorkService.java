@@ -3,6 +3,7 @@ package ai.myrmec.engine.mywork;
 import ai.myrmec.engine._system.security.ProjectAccessEvaluator;
 import ai.myrmec.engine.assistant.Assistant;
 import ai.myrmec.engine.assistant.AssistantRepository;
+import ai.myrmec.engine.assistant.AssistantVersionRepository;
 import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.conversation.ConversationMessage;
 import ai.myrmec.engine.conversation.ConversationMessageRepository;
@@ -69,6 +70,7 @@ public class MyWorkService {
     private final AssistantRepository assistantRepository;
     private final ConversationRepository conversationRepository;
     private final ConversationMessageRepository conversationMessageRepository;
+    private final AssistantVersionRepository assistantVersionRepository;
 
     // ------------------------------------------------------------------ summary
 
@@ -150,6 +152,7 @@ public class MyWorkService {
     public List<MyAssistantRow> conversations(Authentication authentication, List<UUID> projectIds, String q) {
         Scope scope = resolveScope(authentication, projectIds);
         Map<UUID, List<Conversation>> activeByAssistant = activeSessionsByAssistant(scope);
+        Map<UUID, UUID> profileByAssistant = assistantProfileIds(scope.assistants());
         String needle = normalize(q);
         List<MyAssistantRow> rows = new ArrayList<>();
         for (Assistant a : scope.assistants()) {
@@ -164,7 +167,7 @@ public class MyWorkService {
                     .map(MyWorkService::sessionTimestamp)
                     .max(Comparator.naturalOrder())
                     .orElse(null);
-            rows.add(MyAssistantRow.of(a, scope.projectName(a.getProjectId()), sessions.size(), lastSessionAt));
+            rows.add(MyAssistantRow.of(a, scope.projectName(a.getProjectId()), profileByAssistant.get(a.getId()), sessions.size(), lastSessionAt));
         }
         rows.sort(Comparator.comparing(MyAssistantRow::name, String.CASE_INSENSITIVE_ORDER));
         return rows;
@@ -323,6 +326,23 @@ public class MyWorkService {
         return cache.computeIfAbsent(
                 assistantId,
                 id -> assistantRepository.findById(id).map(Assistant::getName).orElse(null));
+    }
+
+    /**
+     * Map each assistant to the {@code agentProfileId} of its currently-published
+     * version. Draft assistants have no profile id until first publish.
+     */
+    private Map<UUID, UUID> assistantProfileIds(List<Assistant> assistants) {
+        Map<UUID, UUID> result = new HashMap<>();
+        for (Assistant a : assistants) {
+            if (a.getCurrentVersionId() == null) {
+                continue;
+            }
+            assistantVersionRepository.findById(a.getCurrentVersionId())
+                    .map(ai.myrmec.engine.assistant.AssistantVersion::getAgentProfileId)
+                    .ifPresent(profileId -> result.put(a.getId(), profileId));
+        }
+        return result;
     }
 
     /**

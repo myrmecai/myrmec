@@ -47,6 +47,11 @@ const chatModelFactory = await createChatModelFactory({
 const sessionToolFactory = await createSessionToolFactory({
   mode: config.sessionToolMode ?? "real",
   stubModulePath: config.stubModulePath,
+  // Real session tools are built in-worker from this root (a Tool's invoke
+  // function cannot cross the worker boundary). Confined to the root.
+  ...(config.workspaceRoot !== undefined
+    ? { workspaceRoot: config.workspaceRoot }
+    : {}),
 });
 
 const worker = new AgentWorker({

@@ -99,6 +99,21 @@ public class AgentHost {
     private Status status = Status.ACTIVE;
 
     /**
+     * True when this host is an ephemeral local agent running inside a user
+     * IDE / extension host (e.g. VS Code). Local agents are created on-demand
+     * by the signed-in user and do not require a durable registration key.
+     */
+    @Column(name = "is_local", nullable = false)
+    private Boolean isLocal = false;
+
+    /**
+     * For local agents: the user who owns this ephemeral host. Null for
+     * traditional cloud/headless agents that authenticate via registration key.
+     */
+    @Column(name = "local_user_id")
+    private UUID localUserId;
+
+    /**
      * Replica currently holding this Host's control socket (slice 4a). Null
      * when no control socket is attached; on a single node it resolves to
      * "self". The cross-node router (slice 4b) reads this to forward Host

@@ -22,6 +22,7 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -212,6 +213,96 @@ public class AgentHostService {
         byte[] bytes = new byte[24];
         RANDOM.nextBytes(bytes);
         return KEY_PREFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    // ========== Local agent operations ==========
+
+    /**
+     * Create or reuse the ephemeral local {@link AgentHost} for a signed-in user.
+     *
+     * <p>At most one local host per (user, project) is enforced by the unique
+     * index on {@code agent_hosts(local_user_id, project_id, is_local)}. If
+     * the user already has a local host for the project, its profile may be
+     * updated and the existing host is returned. A fresh local host gets no
+     * durable registration key — the extension authenticates with short-lived
+     * agent JWTs minted against the returned host/instance.</p>
+     *
+     * @param userId    the authenticated user who owns the local agent
+     * @param projectId project scope, or null for a system-wide local agent
+     * @param profileId requested agent profile, or null to keep the existing
+     *                  profile or to fall back to a system default
+     * @param hostname  host identity reported by the IDE extension (e.g. the
+     *                  machine name or VS Code session id)
+     * @return the local agent host definition (existing or newly created)
+     */
+    @Transactional
+    public AgentHost upsertLocalAgentHost(UUID userId, UUID projectId,
+                                          UUID profileId, String hostname) {
+        if (userId == null) {
+            throw new BadRequestException("userId is required for a local agent host");
+        }
+
+        Optional<AgentHost> existing =
+                agentHostRepository.findByLocalUserIdAndProjectIdAndIsLocalTrue(userId, projectId);
+        if (existing.isPresent()) {
+            AgentHost host = existing.get();
+            if (profileId != null && !profileId.equals(host.getProfileId())) {
+                if (!agentProfileRepository.existsById(profileId)) {
+                    throw ResourceNotFoundException.agentProfile(profileId);
+                }
+                host.setProfileId(profileId);
+            }
+            if (hostname != null) {
+                host.setName(buildLocalHostName(userId, projectId, hostname));
+            }
+            host.setStatus(AgentHost.Status.ACTIVE);
+            log.info("Reused local agent host {} for user {} (project {})",
+                    host.getId(), userId, projectId);
+            return agentHostRepository.save(host);
+        }
+
+        UUID effectiveProfileId = profileId;
+        if (effectiveProfileId == null) {
+            effectiveProfileId = resolveDefaultLocalProfileId();
+        }
+        if (!agentProfileRepository.existsById(effectiveProfileId)) {
+            throw ResourceNotFoundException.agentProfile(effectiveProfileId);
+        }
+
+        AgentHost host = new AgentHost();
+        host.setName(buildLocalHostName(userId, projectId, hostname));
+        host.setDescription("Local IDE agent for user " + userId);
+        host.setProfileId(effectiveProfileId);
+        host.setProjectId(projectId);
+        host.setRegistrationKey(generateRegistrationKey());
+        host.setMaxAgents(1);
+        host.setStatus(AgentHost.Status.ACTIVE);
+        host.setIsLocal(true);
+        host.setLocalUserId(userId);
+        // Local agents are single-node by definition: the extension host is
+        // the control node for the lifetime of the local host.
+        host.setControlNodeId(nodeRegistryService.getSelfNodeId());
+
+        host = agentHostRepository.save(host);
+        log.info("Created local agent host {} for user {} (project {})",
+                host.getId(), userId, projectId);
+        return host;
+    }
+
+    private String buildLocalHostName(UUID userId, UUID projectId, String hostname) {
+        String suffix = hostname != null && !hostname.isBlank() ? hostname : "local";
+        String scope = projectId != null ? projectId.toString().substring(0, 8) : "system";
+        return "local-" + scope + "-" + userId.toString().substring(0, 8) + "-" + suffix;
+    }
+
+    private static final UUID DEFAULT_LOCAL_PROFILE_ID =
+            UUID.fromString("6d7b8c9d-0e1f-4a2b-8c3d-9e4f5a6b7c8d");
+
+    private UUID resolveDefaultLocalProfileId() {
+        if (!agentProfileRepository.existsById(DEFAULT_LOCAL_PROFILE_ID)) {
+            throw new BadRequestException("Default local agent profile is not seeded; supply an explicit profileId");
+        }
+        return DEFAULT_LOCAL_PROFILE_ID;
     }
 
     // ========== Runtime Operations ==========

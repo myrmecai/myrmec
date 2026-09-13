@@ -8,6 +8,8 @@ import ai.myrmec.engine.agent.Agent;
 import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.agent.AgentHostRepository;
 import ai.myrmec.engine.agent.AgentHostService;
+import ai.myrmec.engine.auth.dto.LocalAgentRegisterRequest;
+import ai.myrmec.engine.auth.dto.LocalAgentRegisterResponse;
 import ai.myrmec.engine.auth.dto.RefreshRequest;
 import ai.myrmec.engine.auth.dto.RefreshResponse;
 import ai.myrmec.engine.auth.dto.RegisterRequest;
@@ -19,6 +21,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -73,6 +76,45 @@ public class AuthService {
                 instance.getId(), agent.getName(), agent.getId());
 
         return RegisterResponse.builder()
+                .instanceId(instance.getId())
+                .accessToken(accessToken)
+                .accessTokenExpiresAt(jwtTokenProvider.getExpiration(accessToken))
+                .refreshToken(refreshToken)
+                .refreshTokenExpiresAt(jwtTokenProvider.getExpiration(refreshToken))
+                .build();
+    }
+
+    /**
+     * Register a local agent instance from an authenticated user's
+     * IDE/extension host. The caller (the engine auth controller) must have
+     * already verified the user's access token and project access rights.
+     *
+     * <p>This mints a fresh {@link AgentHost} bound to the user and a single
+     * agent instance, then returns the short-lived AGENT credential pair the
+     * local runtime needs to open the agent WebSocket.
+     */
+    @Transactional
+    public LocalAgentRegisterResponse registerLocalAgent(UUID userId, LocalAgentRegisterRequest request,
+                                                         String hostname) {
+        AgentHost host = agentService.upsertLocalAgentHost(
+                userId, request.getProjectId(), request.getProfileId(), hostname);
+
+        Agent instance = agentService.createInstance(
+                host.getId(),
+                hostname != null ? hostname : "local",
+                null,
+                "local-vscode",
+                Map.of("local", true, "userId", userId.toString())
+        );
+
+        String accessToken = jwtTokenProvider.generateAgentAccessToken(instance.getId(), host.getName());
+        String refreshToken = jwtTokenProvider.generateAgentRefreshToken(instance.getId());
+
+        log.info("Local agent registered: instance {} for host {} (user {}, project {})",
+                instance.getId(), host.getId(), userId, request.getProjectId());
+
+        return LocalAgentRegisterResponse.builder()
+                .agentId(host.getId())
                 .instanceId(instance.getId())
                 .accessToken(accessToken)
                 .accessTokenExpiresAt(jwtTokenProvider.getExpiration(accessToken))

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.24.xsd">
+
+    <changeSet id="017-local-agent-profile" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="agent_profiles"/>
+                <tableExists tableName="agent_profile_versions"/>
+                <sqlCheck expectedResult="0">SELECT COUNT(*) FROM agent_profiles WHERE name = 'Myrmec Local Agent'</sqlCheck>
+            </and>
+        </preConditions>
+
+        <comment>Seed the default local agent profile (system, conversational)</comment>
+
+        <!-- Zone 1: identity/admin row -->
+        <insert tableName="agent_profiles">
+            <column name="id" value="6d7b8c9d-0e1f-4a2b-8c3d-9e4f5a6b7c8d"/>
+            <column name="name" value="Myrmec Local Agent"/>
+            <column name="description" value="Built-in profile for the local IDE agent"/>
+            <column name="is_system" valueBoolean="true"/>
+            <column name="addendum_allowed" valueBoolean="true"/>
+            <column name="status" value="ACTIVE"/>
+        </insert>
+
+        <!-- Zone 2: published behaviour contract v1 -->
+        <insert tableName="agent_profile_versions">
+            <column name="id" value="7e8c9d0e-1f2a-4b3c-9d4e-0f1a2b3c4d5e"/>
+            <column name="profile_id" value="6d7b8c9d-0e1f-4a2b-8c3d-9e4f5a6b7c8d"/>
+            <column name="version_number" valueNumeric="1"/>
+            <column name="status" value="PUBLISHED"/>
+            <column name="capabilities" value="[&quot;conversational&quot;]"/>
+            <column name="default_model" value="github-gpt-4o"/>
+            <column name="system_prompt" value="You are a helpful local coding assistant running inside the user's VS Code workspace. You can answer questions and use workspace tools when explicitly asked."/>
+            <column name="interaction_mode" value="CONVERSATIONAL"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="published_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+    </changeSet>
+
+</databaseChangeLog>

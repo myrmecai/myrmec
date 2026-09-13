@@ -22,6 +22,7 @@ public record MyAssistantRow(
         String projectName,
         String name,
         String description,
+        UUID agentProfileId,
         String status,
         long activeSessions,
         Instant lastSessionAt) {
@@ -33,13 +34,14 @@ public record MyAssistantRow(
         return a.getCurrentVersionId() != null ? "PUBLISHED" : "DRAFT";
     }
 
-    public static MyAssistantRow of(Assistant a, String projectName, long activeSessions, Instant lastSessionAt) {
+    public static MyAssistantRow of(Assistant a, String projectName, UUID agentProfileId, long activeSessions, Instant lastSessionAt) {
         return new MyAssistantRow(
                 a.getId(),
                 a.getProjectId(),
                 projectName,
                 a.getName(),
                 a.getDescription(),
+                agentProfileId,
                 deriveStatus(a),
                 activeSessions,
                 lastSessionAt);

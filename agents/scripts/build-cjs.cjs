@@ -55,11 +55,40 @@ walk(cjsDir, (src) => {
   const cjsPath = src.replace(/\.js$/, '.cjs')
   let code = fs.readFileSync(src, 'utf8')
 
-  // Replace sibling .js ESM imports with .cjs requires.
+  // Replace all top-level ESM import declarations with CommonJS require() calls.
+  // This covers sibling imports, package imports (`node:worker_threads`), default
+  // imports, and namespace imports.
   code = code.replace(
-    /from\s+(['"])\.\/([^'"]+)\.js\1/g,
-    (match, quote, base) => `from ${quote}./${base}.cjs${quote}`,
+    /^import\s+\*\s+as\s+(\w+)\s+from\s+(['"])([^'"]+)\2\s*;?\s*$/gm,
+    (match, binding, quote, modulePath) => {
+      return `const ${binding} = require(${quote}${modulePath}${quote});`
+    },
   )
+  code = code.replace(
+    /^import\s+(\w+)\s+from\s+(['"])([^'"]+)\2\s*;?\s*$/gm,
+    (match, binding, quote, modulePath) => {
+      return `const ${binding} = require(${quote}${modulePath}${quote});`
+    },
+  )
+  code = code.replace(
+    /^import\s+\{([^}]+)\}\s+from\s+(['"])([^'"]+)\2\s*;?\s*$/gm,
+    (match, bindings, quote, modulePath) => {
+      const cleaned = bindings.split(',').map((s) => s.trim()).filter(Boolean).join(', ')
+      return `const { ${cleaned} } = require(${quote}${modulePath}${quote});`
+    },
+  )
+
+  // Replace any remaining `require('./x.js')` sibling references with
+  // `require('./x.cjs')` so the CJS build resolves to the mirrored .cjs files.
+  code = code.replace(
+    /require\((['"])\.\/([^'"]+)\.js\1\)/g,
+    (match, quote, base) => `require(${quote}./${base}.cjs${quote})`,
+  )
+
+  // Replace any remaining `export * from './x.js'` with `module.exports = require('./x.cjs')`
+  // is intentionally not applied; the SDK uses only named exports in the public entry files
+  // and keeps `export class` / `export function` declarations which are valid in CJS under
+  // Node's ESM-in-CJS interop. This step documents that boundary.
 
   // Replace internal import.meta.url references used by resolveWorkerSource.
   code = code.replace(

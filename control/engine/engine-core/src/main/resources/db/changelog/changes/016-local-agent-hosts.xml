@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Local agents: ephemeral agent hosts that live inside the VS Code
+        extension host. They are created on-demand when a user signs in and
+        are owned by that user (local_user_id). They do not use a durable
+        registration key; instead the extension obtains a short-lived agent
+        credential via POST /api/v1/agent/auth/local/register using the
+        user's access token.
+    -->
+
+    <changeSet id="016-local-agent-hosts" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="agent_hosts"/>
+            <not>
+                <columnExists tableName="agent_hosts" columnName="is_local"/>
+            </not>
+        </preConditions>
+
+        <addColumn tableName="agent_hosts">
+            <column name="is_local" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="local_user_id" type="uuid"/>
+        </addColumn>
+
+        <createIndex indexName="idx_agent_hosts_local_user_project" tableName="agent_hosts" unique="true">
+            <column name="local_user_id"/>
+            <column name="project_id"/>
+            <column name="is_local"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>
