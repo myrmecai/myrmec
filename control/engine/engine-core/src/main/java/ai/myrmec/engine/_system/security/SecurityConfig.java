@@ -59,6 +59,9 @@ public class SecurityConfig {
                         // Slice 4c — conversation-scoped agent socket; auth is
                         // performed in the WS handshake interceptor (agent JWT).
                         .requestMatchers("/api/v1/agent/conversation").permitAll()
+                        // Unified protocol §4.2 — host-control socket; auth is
+                        // performed in the handshake interceptor (HOST_JWT).
+                        .requestMatchers("/api/v1/agent/host/ws").permitAll()
                         // User-facing conversation stream (SSE) - token arrives as a
                         // ?token= query param (EventSource can't set headers) and is
                         // validated inside ConversationStreamController.

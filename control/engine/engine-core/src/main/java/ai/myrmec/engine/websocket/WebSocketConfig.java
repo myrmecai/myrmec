@@ -1,5 +1,7 @@
 package ai.myrmec.engine.websocket;
 
+import ai.myrmec.engine.websocket.host.HostControlHandshakeInterceptor;
+import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -20,6 +22,8 @@ public class WebSocketConfig implements WebSocketConfigurer {
     private final AgentWebSocketHandler agentWebSocketHandler;
     private final AgentWebSocketHandshakeInterceptor handshakeInterceptor;
     private final AgentConversationWebSocketHandler agentConversationWebSocketHandler;
+    private final HostControlWebSocketHandler hostControlWebSocketHandler;
+    private final HostControlHandshakeInterceptor hostControlHandshakeInterceptor;
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
@@ -34,6 +38,13 @@ public class WebSocketConfig implements WebSocketConfigurer {
         // conversation id arrives in the conversation.attach frame.
         registry.addHandler(agentConversationWebSocketHandler, "/api/v1/agent/conversation")
                 .addInterceptors(handshakeInterceptor)
+                .setAllowedOrigins("*");
+
+        // Unified protocol §4.2 — host-principal control socket; auth is the
+        // HOST_JWT validated in the handshake interceptor. The live instance
+        // is created by the first host.open, not by the connection.
+        registry.addHandler(hostControlWebSocketHandler, "/api/v1/agent/host/ws")
+                .addInterceptors(hostControlHandshakeInterceptor)
                 .setAllowedOrigins("*");
     }
 }
