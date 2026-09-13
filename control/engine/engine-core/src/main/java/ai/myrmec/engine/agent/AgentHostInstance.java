@@ -55,6 +55,14 @@ public class AgentHostInstance {
     @Column(name = "owner_user_id", updatable = false)
     private UUID ownerUserId;
 
+    /**
+     * Supervisor-run identity (§6.1): generated once per process run.
+     * Replaying host.open with the same nonce is idempotent; a new nonce
+     * supersedes the live instance.
+     */
+    @Column(name = "instance_nonce", length = 36, updatable = false)
+    private String instanceNonce;
+
     @Column(name = "hostname", length = 255)
     private String hostname;
 
@@ -104,8 +112,17 @@ public class AgentHostInstance {
     public static AgentHostInstance open(AgentHost host, UUID ownerUserId, String hostname,
                                          int poolSize, Map<String, Object> reportedCapacity,
                                          String controlNodeId) {
-        return new AgentHostInstance(host, ownerUserId, hostname, poolSize,
-                reportedCapacity, controlNodeId);
+        return open(host, ownerUserId, null, hostname, poolSize, reportedCapacity, controlNodeId);
+    }
+
+    /** Full factory including the supervisor-run nonce (§6.1). */
+    public static AgentHostInstance open(AgentHost host, UUID ownerUserId, String instanceNonce,
+                                         String hostname, int poolSize,
+                                         Map<String, Object> reportedCapacity, String controlNodeId) {
+        AgentHostInstance instance = new AgentHostInstance(host, ownerUserId, hostname,
+                poolSize, reportedCapacity, controlNodeId);
+        instance.instanceNonce = instanceNonce;
+        return instance;
     }
 
     @PrePersist

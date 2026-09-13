@@ -24,6 +24,10 @@ public interface AgentHostInstanceRepository extends JpaRepository<AgentHostInst
     Optional<AgentHostInstance> findByAgentHostIdAndOwnerUserIdAndStatus(
             UUID agentHostId, UUID ownerUserId, AgentHostInstance.Status status);
 
+    /** §6.1 replay-idempotency lookup: the live run with this nonce, if any. */
+    Optional<AgentHostInstance> findByAgentHostIdAndInstanceNonceAndStatus(
+            UUID agentHostId, String instanceNonce, AgentHostInstance.Status status);
+
     long countByAgentHostIdAndStatus(UUID agentHostId, AgentHostInstance.Status status);
 
     /** Instance history — newest run first (restart timeline, design §3.2a). */

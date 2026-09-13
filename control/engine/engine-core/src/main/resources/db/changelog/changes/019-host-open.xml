@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Unified protocol §6.1: instanceNonce identifies one supervisor
+        process run. host.open replay with the same nonce is idempotent, so
+        the row must be findable by nonce. The unique (host, nonce, live_key)
+        index uses the same portable NULL-distinct trick as 018: a live row
+        carries live_key='OPEN', closed rows NULL — replay collides and the
+        engine answers with the existing instance instead of inserting.
+    -->
+
+    <changeSet id="019-instance-nonce" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="agent_host_instances"/>
+                <not>
+                    <columnExists tableName="agent_host_instances" columnName="instance_nonce"/>
+                </not>
+            </and>
+        </preConditions>
+
+        <addColumn tableName="agent_host_instances">
+            <column name="instance_nonce" type="varchar(36)"/>
+        </addColumn>
+
+        <createIndex indexName="uk_agent_host_instances_nonce" tableName="agent_host_instances" unique="true">
+            <column name="agent_host_id"/>
+            <column name="instance_nonce"/>
+            <column name="live_key"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>
