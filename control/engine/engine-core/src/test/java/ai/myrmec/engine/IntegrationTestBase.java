@@ -77,6 +77,9 @@ public abstract class IntegrationTestBase {
     protected ai.myrmec.engine.inference.SessionRepository sessionRepository;
 
     @Autowired
+    protected ai.myrmec.engine.inference.execution.SessionExecutionRepository sessionExecutionRepository;
+
+    @Autowired
     protected ai.myrmec.engine.quota.QuotaConsumptionRepository quotaConsumptionRepository;
 
     @Autowired
@@ -189,6 +192,8 @@ public abstract class IntegrationTestBase {
         executionSnapshotRepository.deleteAllInBatch();
         // context_manifests references conversations(id); clear before conversations.
         contextManifestRepository.deleteAllInBatch();
+        // executions reference sessions(id); clear before sessions.
+        sessionExecutionRepository.deleteAllInBatch();
         // sessions references projects(id); clear before projects.
         sessionRepository.deleteAllInBatch();
         quotaConsumptionRepository.deleteAllInBatch();

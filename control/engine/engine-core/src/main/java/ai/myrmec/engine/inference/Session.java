@@ -67,6 +67,10 @@ public class Session {
     @Column(name = "allocation_state", length = 20)
     private String allocationState;
 
+    /** Protocol §12.3 durable event-ack cursor: highest contiguous envelope sequence. */
+    @Column(name = "highest_contiguous_sequence", nullable = false)
+    private Long highestContiguousSequence;
+
     /** Pending-offer lease expiry (§7.1); engine-expired offers return capacity. */
     @Column(name = "offer_expires_at")
     private Instant offerExpiresAt;
@@ -85,5 +89,6 @@ public class Session {
     void onCreate() {
         createdAt = Instant.now();
         if (status == null) status = "ACTIVE";
+        if (highestContiguousSequence == null) highestContiguousSequence = 0L;
     }
 }

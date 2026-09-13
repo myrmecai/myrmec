@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Plan 5 (protocol §8/§11.2/§12.3): engine-owned execution lifecycle rows
+        for conversation turns and orchestration attempts, plus the per-session
+        durable event-ack cursor.
+    -->
+
+    <changeSet id="021-execution-lifecycle-1" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="session_executions"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="session_executions">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="session_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="service_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="request_id" type="varchar(255)"/>
+            <column name="resolved_model_id" type="varchar(100)"/>
+            <column name="dispatch_id" type="UUID"/>
+            <column name="assignment_digest" type="varchar(128)"/>
+            <column name="state" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="sequence_no" type="int"/>
+            <column name="input_payload" type="jsonb"/>
+            <column name="terminal_message_id" type="varchar(255)"/>
+            <column name="terminal_payload" type="jsonb"/>
+            <column name="deadline" type="timestamp with time zone"/>
+            <column name="started_at" type="timestamp with time zone"/>
+            <column name="terminal_at" type="timestamp with time zone"/>
+            <column name="created_at" type="timestamp with time zone">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="session_executions"
+            baseColumnNames="session_id"
+            constraintName="fk_session_executions_session"
+            referencedTableName="sessions"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <createIndex indexName="idx_session_executions_session_state" tableName="session_executions">
+            <column name="session_id"/>
+            <column name="state"/>
+        </createIndex>
+
+        <!--
+            Terminal dedup (§12.1/§11.3.6): one terminal outcome per execution.
+            NULLs do not conflict in H2 or PostgreSQL, so in-flight executions
+            (terminal_message_id NULL) coexist safely.
+        -->
+        <createIndex indexName="uk_session_executions_terminal_message" tableName="session_executions" unique="true">
+            <column name="terminal_message_id"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="021-execution-lifecycle-2" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="sessions" columnName="highest_contiguous_sequence"/>
+            </not>
+        </preConditions>
+        <addColumn tableName="sessions">
+            <column name="highest_contiguous_sequence" type="bigint" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>

@@ -36,4 +36,21 @@ public final class HostProtocol {
     public static final String SESSION_OPENED = "session.opened";
     public static final String SESSION_CLOSE = "session.close";
     public static final String SESSION_CLOSED = "session.closed";
+
+    // ---- Execution lifecycle (§5 catalogue, §8 payloads) ----
+    public static final String EXECUTION_START = "execution.start";
+    public static final String EXECUTION_ACCEPT = "execution.accept";
+    public static final String EXECUTION_REJECT = "execution.reject";
+    public static final String EXECUTION_DELTA = "execution.delta";
+    public static final String EXECUTION_EVENT = "execution.event";
+    public static final String EXECUTION_COMPLETE = "execution.complete";
+    public static final String EXECUTION_FAILED = "execution.failed";
+    public static final String EXECUTION_PAUSED = "execution.paused";
+    public static final String EXECUTION_CANCEL = "execution.cancel";
+    public static final String EXECUTION_CANCELLED = "execution.cancelled";
+    public static final String EXECUTION_POLICY_UPDATE = "execution.policy.update";
+    public static final String EXECUTION_APPROVAL_REQUESTED = "execution.approval.requested";
+    public static final String EVENT_BACKPRESSURE_TIMEOUT = "EVENT_BACKPRESSURE_TIMEOUT";
+    public static final String SESSION_NOT_FOUND = "SESSION_NOT_FOUND";
+    public static final String EXECUTION_NOT_FOUND = "EXECUTION_NOT_FOUND";
 }
