@@ -37,6 +37,7 @@ public class JwtTokenProvider {
     private static final String NAME_CLAIM = "name";
     private static final String EMAIL_CLAIM = "email";
     private static final String ROLES_CLAIM = "roles";
+    private static final String JTI_CLAIM = "jti";
 
     private static final String ACCESS_TOKEN = "access";
     private static final String REFRESH_TOKEN = "refresh";
@@ -125,6 +126,7 @@ public class JwtTokenProvider {
                 .subject(agentHostId.toString())
                 .claim(TOKEN_TYPE_CLAIM, REFRESH_TOKEN)
                 .claim(PRINCIPAL_CLAIM, PRINCIPAL_AGENT_HOST)
+                .claim(JTI_CLAIM, UUID.randomUUID().toString())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiry))
                 .signWith(secretKey)

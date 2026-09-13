@@ -3,11 +3,14 @@
 package ai.myrmec.engine.auth;
 
 import ai.myrmec.engine._system.exception.InvalidRegistrationKeyException;
+import ai.myrmec.engine._system.exception.InvalidTokenException;
 import ai.myrmec.engine._system.security.JwtTokenProvider;
 import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentHostRepository;
 import ai.myrmec.engine.agent.AgentHostService;
 import ai.myrmec.engine.auth.dto.HostLocalRegisterRequest;
+import ai.myrmec.engine.auth.dto.HostRefreshRequest;
+import ai.myrmec.engine.auth.dto.HostRefreshResponse;
 import ai.myrmec.engine.auth.dto.HostRegisterRequest;
 import ai.myrmec.engine.auth.dto.HostRegisterResponse;
 import ai.myrmec.engine.registration.RegistrationKeyService;
@@ -77,6 +80,32 @@ public class HostAuthService {
                 .accessTokenExpiresAt(jwtTokenProvider.getExpiration(accessToken))
                 .refreshToken(refreshToken)
                 .refreshTokenExpiresAt(jwtTokenProvider.getExpiration(refreshToken))
+                .build();
+    }
+
+    /**
+     * Rotate a host refresh token (protocol §4.1). Only AGENT_HOST-principal
+     * refresh tokens are accepted — a legacy AGENT instance token is
+     * rejected (protocol §18 "Token isolation").
+     */
+    @Transactional
+    public HostRefreshResponse refresh(HostRefreshRequest request) {
+        String refreshToken = request.getRefreshToken();
+
+        if (!jwtTokenProvider.validateRefreshToken(refreshToken)) {
+            throw new InvalidTokenException("Invalid or expired refresh token");
+        }
+        if (!jwtTokenProvider.isAgentHostToken(refreshToken)) {
+            throw new InvalidTokenException("Invalid token type for host refresh");
+        }
+
+        HostRefreshTokenStore.TokenPair pair = hostRefreshTokenStore.rotate(refreshToken);
+
+        return HostRefreshResponse.builder()
+                .accessToken(pair.accessToken())
+                .accessTokenExpiresAt(jwtTokenProvider.getExpiration(pair.accessToken()))
+                .refreshToken(pair.refreshToken())
+                .refreshTokenExpiresAt(jwtTokenProvider.getExpiration(pair.refreshToken()))
                 .build();
     }
 }

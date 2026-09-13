@@ -5,6 +5,8 @@ package ai.myrmec.engine.auth;
 import ai.myrmec.engine._system.exception.ErrorResponse;
 import ai.myrmec.engine._system.security.CurrentUser;
 import ai.myrmec.engine.auth.dto.HostLocalRegisterRequest;
+import ai.myrmec.engine.auth.dto.HostRefreshRequest;
+import ai.myrmec.engine.auth.dto.HostRefreshResponse;
 import ai.myrmec.engine.auth.dto.HostRegisterRequest;
 import ai.myrmec.engine.auth.dto.HostRegisterResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -78,5 +80,21 @@ public class HostAuthController {
             @RequestHeader(value = "X-Local-Agent-Hostname", required = false) String hostname,
             @CurrentUser UUID userId) {
         return ResponseEntity.ok(hostAuthService.registerLocal(userId, request, hostname));
+    }
+
+    @Operation(
+            summary = "Rotate host refresh token",
+            description = "Present a live host refresh token to receive a rotated pair. "
+                    + "Replay of a consumed token revokes the token family."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Token rotated successfully"),
+            @ApiResponse(responseCode = "401", description = "Invalid, replayed, or revoked refresh token",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @SecurityRequirements
+    @PostMapping("/refresh")
+    public ResponseEntity<HostRefreshResponse> refresh(@Valid @RequestBody HostRefreshRequest request) {
+        return ResponseEntity.ok(hostAuthService.refresh(request));
     }
 }
