@@ -2,39 +2,41 @@
 // Copyright 2026 The Myrmec Authors
 
 /**
- * InferenceExecutor: handles `inference.assign` frames for the unified
- * inference dispatch protocol (T11).
+ * InferenceExecutor: handles `execution.start` frames for the unified
+ * host-control protocol (Plan 6 Task 3).
  *
- * The engine sends an `inference.assign` frame when it wants the agent to run
+ * The engine sends an `execution.start` frame when it wants the agent to run
  * one model turn inside an already-open {@link Session} (opened via
  * `session.open` and tracked by {@link SessionRegistry}). The executor:
  *
- *   1. Looks up the session; on miss it emits `inference.failed`
+ *   1. Looks up the session; on miss it emits `execution.failed`
  *      (`SESSION_NOT_OPEN`).
- *   2. Emits `inference.accept`.
+ *   2. Emits `execution.accept`.
  *   3. Converts the wire {@link InferenceMessage}s to internal
  *      {@link ConversationMessage}s.
  *   4. Selects the active tools from `session.tools` by `activeToolNames`.
- *   5. Streams (`inference.delta` per chunk) or invokes the model once.
- *   6. On tool calls: emits `inference.tool_call`, runs the tool, emits
- *      `inference.tool_result`, appends the result, and loops back to the
- *      model (up to `maxIterations`).
- *   7. On cancellation: emits `inference.cancelled` with partial content.
- *   8. Emits `inference.complete` (content + tokenCount) or `inference.failed`.
+ *   5. Streams (`execution.delta` per chunk) or invokes the model once.
+ *   6. On tool calls: runs the tool, appends the result, and loops back to the
+ *      model (up to `maxIterations`).  (Legacy `inference.tool_call/result`
+ *      emissions are deleted; tool calls are now internal to the agent.)
+ *   7. On cancellation: emits `execution.cancelled` with partial content.
+ *   8. Emits `execution.complete` (content + usage) or `execution.failed`.
  *
  * The tool loop reuses the pattern from {@link TurnExecutor.runTool}:
  * unknown tools and thrown errors are recorded as tool errors and fed back
  * to the model rather than aborting the turn.
  */
 import type { Logger } from "../models/index.js";
-import type { Envelope } from "../protocol/envelope.js";
-import { makeEnvelope } from "../protocol/envelope.js";
-import { MessageType } from "../protocol/messages.js";
 import type {
-  InferenceAssignPayload,
-  InferenceCancelPayload,
+  ExecutionAcceptPayload,
+  ExecutionCancelPayload,
+  ExecutionCancelledPayload,
+  ExecutionCompletePayload,
+  ExecutionDeltaPayload,
+  ExecutionFailedPayload,
+  ExecutionStartPayload,
   InferenceMessage,
-} from "../protocol/inferenceFrames.js";
+} from "../protocol/unifiedFrames.js";
 import type { SessionRegistry, Session } from "../session/SessionRegistry.js";
 import type {
   CancellationSignal,
@@ -49,14 +51,15 @@ import type {
 } from "./types.js";
 import type { EngineHttpClient } from "../transport/httpClient.js";
 import type { ApprovalCoordinator } from "./ApprovalCoordinator.js";
+import type { ExecutionFrameSender } from "./ExecutionFrameSender.js";
 
 /** Constructor options for {@link InferenceExecutor}. */
 export interface InferenceExecutorOptions {
   /** Session lookup — must be the same registry the supervisor feeds
    * `session.open`/`session.close` into. */
   registry: SessionRegistry;
-  /** Outbound frame sender (the supervisor's transport). */
-  send: (frame: Envelope) => Promise<void>;
+  /** Outbound unified execution-frame sender (typically HostControlClient). */
+  sender: ExecutionFrameSender;
   /** HTTP client used to fetch image attachment bytes. Optional; when absent,
    * image parts degrade to text-only content. */
   httpClient?: EngineHttpClient;
@@ -90,15 +93,15 @@ const DEFAULT_MAX_ITERATIONS = 25;
  */
 export class InferenceExecutor {
   private readonly registry: SessionRegistry;
-  private readonly send: (frame: Envelope) => Promise<void>;
+  private readonly sender: ExecutionFrameSender;
   private readonly httpClient?: EngineHttpClient;
   private readonly agentAccessToken?: string;
   private readonly maxIterations: number;
   private readonly approvals?: ApprovalCoordinator;
   private readonly log: Logger;
 
-  /** In-flight requests keyed by `requestId`, each with its abort controller
-   * so an `inference.cancel` can stop the matching turn. */
+  /** In-flight executions keyed by `executionId`, each with its abort controller
+   * so an `execution.cancel` can stop the matching turn. */
   private readonly inFlight = new Map<
     string,
     { controller: AbortController; partialContent: string }
@@ -106,7 +109,7 @@ export class InferenceExecutor {
 
   constructor(options: InferenceExecutorOptions) {
     this.registry = options.registry;
-    this.send = options.send;
+    this.sender = options.sender;
     this.httpClient = options.httpClient;
     this.agentAccessToken = options.agentAccessToken;
     this.maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS;
@@ -149,19 +152,19 @@ export class InferenceExecutor {
   }
 
   /**
-   * Main handler for an `inference.assign` frame.
+   * Main handler for an `execution.start` frame.
    *
-   * Flow: session lookup → `inference.accept` → convert messages → select
-   * tools → stream/invoke → tool loop → `inference.complete`/`inference.failed`.
-   * On cancellation, emits `inference.cancelled` with whatever partial content
+   * Flow: session lookup → `execution.accept` → convert messages → select
+   * tools → stream/invoke → tool loop → `execution.complete`/`execution.failed`.
+   * On cancellation, emits `execution.cancelled` with whatever partial content
    * was accumulated.
    */
-  async handleAssign(payload: InferenceAssignPayload): Promise<void> {
-    const { requestId, sessionId } = payload;
+  async handleStart(payload: ExecutionStartPayload): Promise<void> {
+    const { executionId, sessionId } = payload;
 
     // 1. Session lookup — with retry because session.open() is async
     //    (it resolves the LLM model) and may still be in-flight when
-    //    inference.assign arrives. Wait up to 10s for it to appear.
+    //    execution.start arrives. Wait up to 10s for it to appear.
     let session = this.registry.get(sessionId);
     if (!session) {
       this.log.debug(`Session ${sessionId} not ready yet — waiting for session.open() to complete...`);
@@ -174,8 +177,7 @@ export class InferenceExecutor {
     if (!session) {
       this.log.warn(`No active session for sessionId: ${sessionId}`);
       await this.emitFailed(
-        requestId,
-        sessionId,
+        executionId,
         "SESSION_NOT_OPEN",
         `No active session for sessionId: ${sessionId}`,
       );
@@ -185,17 +187,18 @@ export class InferenceExecutor {
     // Register the in-flight turn for cancellation.
     const controller = new AbortController();
     const state = { controller, partialContent: "" };
-    this.inFlight.set(requestId, state);
+    this.inFlight.set(executionId, state);
 
     try {
-      // 2. Emit inference.accept.
-      await this.emitAccept(requestId, sessionId);
+      // 2. Emit execution.accept.
+      await this.emitAccept(executionId, sessionId, payload);
 
       // 3. Convert wire messages to internal transcript.
-      const messages = this.toConversationMessages(payload.messages);
+      const messages = this.toConversationMessages(payload.input?.messages ?? []);
 
       // 4. Select active tools from the session's tool map.
-      const tools = this.selectTools(session, payload.activeToolNames);
+      const activeToolNames = payload.toolPolicy?.activeToolNames ?? [];
+      const tools = this.selectTools(session, activeToolNames);
       const toolSpecs: ToolSpec[] = tools.map(({ name, description, parameters }) => ({
         name,
         description,
@@ -203,7 +206,7 @@ export class InferenceExecutor {
       }));
 
       this.log.info(
-        `Inference ${requestId}: ${toolSpecs.length} active tools (${toolSpecs.map(t => t.name).join(', ') || 'none'}), streaming=${payload.stream}`
+        `Execution ${executionId}: ${toolSpecs.length} active tools (${toolSpecs.map(t => t.name).join(', ') || 'none'}), streaming=${payload.output?.stream ?? false}`
       );
 
       const cancellation: CancellationSignal = {
@@ -226,60 +229,56 @@ export class InferenceExecutor {
       // 7. Cancellation takes precedence over completion.
       if (cancellation.cancelled) {
         await this.emitCancelled(
-          requestId,
-          sessionId,
-          payload.response.sequenceNo,
+          executionId,
+          payload.sequenceNo ?? 0,
           state.partialContent,
         );
         return;
       }
 
-      // 8. Emit inference.complete (or inference.failed on error).
+      // 8. Emit execution.complete (or execution.failed on error).
       if (result.kind === "complete") {
         await this.emitComplete(
-          requestId,
-          sessionId,
-          payload.response.sequenceNo,
+          executionId,
+          payload.sequenceNo ?? 0,
           result.content,
           result.tokenCount,
           result.modelCode,
         );
       } else {
         await this.emitFailed(
-          requestId,
-          sessionId,
+          executionId,
           result.errorCode,
           result.message,
         );
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.log.error(`Inference turn failed for request ${requestId}:`, message);
+      this.log.error(`Execution turn failed for ${executionId}:`, message);
       await this.emitFailed(
-        requestId,
-        sessionId,
+        executionId,
         "PROVIDER_ERROR",
         message,
       );
     } finally {
-      this.inFlight.delete(requestId);
+      this.inFlight.delete(executionId);
     }
   }
 
   /**
-   * Handle an `inference.cancel` frame: abort the matching in-flight turn.
-   * The main loop in {@link handleAssign} observes the abort and emits
-   * `inference.cancelled` with the partial content accumulated so far.
+   * Handle an `execution.cancel` frame: abort the matching in-flight turn.
+   * The main loop in {@link handleStart} observes the abort and emits
+   * `execution.cancelled` with the partial content accumulated so far.
    */
-  handleCancel(payload: InferenceCancelPayload): void {
-    const state = this.inFlight.get(payload.requestId);
+  handleCancel(payload: ExecutionCancelPayload): void {
+    const state = this.inFlight.get(payload.executionId);
     if (!state) {
       this.log.debug(
-        `No in-flight inference request to cancel for requestId: ${payload.requestId}`,
+        `No in-flight execution to cancel for executionId: ${payload.executionId}`,
       );
       return;
     }
-    this.log.info(`Cancelling in-flight inference request ${payload.requestId}`);
+    this.log.info(`Cancelling in-flight execution ${payload.executionId}`);
     state.controller.abort();
   }
 
@@ -329,7 +328,7 @@ export class InferenceExecutor {
         m.role === "tool" ? this.toolCallIdFor(m) : undefined;
 
       out.push({
-        role: m.role,
+        role: m.role as ConversationMessage["role"],
         content,
         ...(toolCalls ? { toolCalls } : {}),
         ...(toolCallId ? { toolCallId } : {}),
@@ -382,32 +381,31 @@ export class InferenceExecutor {
     tools: SessionTool[],
     toolSpecs: ToolSpec[],
     cancellation: CancellationSignal,
-    payload: InferenceAssignPayload,
+    payload: ExecutionStartPayload,
     state: { controller: AbortController; partialContent: string },
   ): Promise<
     | { kind: "complete"; content: string; tokenCount?: number; modelCode?: string }
     | { kind: "failed"; errorCode: string; message: string }
   > {
-    const { requestId, sessionId } = payload;
-    const conversationId = payload.requestId;
+    const { executionId } = payload;
     const toolMap = new Map<string, SessionTool>(tools.map((t) => [t.name, t]));
     const model = session.model;
 
     let iteration = 0;
     while (iteration < this.maxIterations) {
       if (cancellation.cancelled) {
-        this.log.info("Inference cancelled; stopping tool loop");
+        this.log.info("Execution cancelled; stopping tool loop");
         return {
           kind: "complete",
           content: state.partialContent,
         };
       }
       iteration += 1;
-      this.log.debug(`Inference iteration ${iteration} for request ${requestId}`);
+      this.log.debug(`Execution iteration ${iteration} for ${executionId}`);
 
       let response: ModelResponse;
       try {
-        if (payload.stream && typeof model.stream === "function") {
+        if (payload.output?.stream && typeof model.stream === "function") {
           response = await this.streamModel(
             model,
             messages,
@@ -449,8 +447,8 @@ export class InferenceExecutor {
         toolCalls: requested,
       });
 
-      // Execute each requested tool call, emitting frames and feeding the
-      // results back into the transcript.
+      // Execute each requested tool call and feed the result back into the
+      // transcript. Legacy inference.tool_call/result emissions are deleted.
       for (const call of requested) {
         if (cancellation.cancelled) {
           break;
@@ -458,7 +456,7 @@ export class InferenceExecutor {
 
         // HITL risk gate (UC-014 §A4a): before executing a DESTRUCTIVE or
         // IRREVERSIBLE tool on a project with autoHitlOnDestructive=true,
-        // emit an approval.request and block until the human decides.
+        // emit execution.approval.requested and block until the human decides.
         // If no ApprovalCoordinator is wired, or the project doesn't require
         // HITL, or the tool is SAFE, execute immediately (backward compatible).
         const sessionTool = toolMap.get(call.name);
@@ -472,12 +470,11 @@ export class InferenceExecutor {
           this.log.info(
             `Tool ${call.name} is ${riskClass} and project has autoHitlOnDestructive — requesting approval`,
           );
-          await this.emitToolCall(requestId, sessionId, call.id, call.name, call.args);
 
           let outcome;
           try {
             outcome = await this.approvals!.requestApproval({
-              conversationId,
+              executionId,
               content: `Approve ${call.name}?`,
               payload: { toolName: call.name, args: call.args },
             });
@@ -487,9 +484,6 @@ export class InferenceExecutor {
               `Approval request for ${call.name} failed: ${err instanceof Error ? err.message : String(err)}`,
             );
             const rejectContent = `Tool '${call.name}' was not approved: approval request failed.`;
-            await this.emitToolResult(
-              requestId, sessionId, call.id, rejectContent, true,
-            );
             messages.push({ role: "tool", content: rejectContent, toolCallId: call.id });
             continue;
           }
@@ -499,9 +493,6 @@ export class InferenceExecutor {
               ? `Tool '${call.name}' was rejected by a human: ${outcome.comment}`
               : `Tool '${call.name}' was rejected by a human.`;
             this.log.info(`Approval for ${call.name} rejected — skipping tool execution`);
-            await this.emitToolResult(
-              requestId, sessionId, call.id, rejectContent, true,
-            );
             messages.push({ role: "tool", content: rejectContent, toolCallId: call.id });
             continue;
           }
@@ -509,16 +500,7 @@ export class InferenceExecutor {
           this.log.info(`Approval for ${call.name} approved — proceeding with tool execution`);
         }
 
-        await this.emitToolCall(requestId, sessionId, call.id, call.name, call.args);
-
         const result = await this.runTool(call, toolMap);
-        await this.emitToolResult(
-          requestId,
-          sessionId,
-          call.id,
-          result.content,
-          result.isError,
-        );
 
         messages.push({
           role: "tool",
@@ -529,11 +511,11 @@ export class InferenceExecutor {
     }
 
     // Iteration cap hit without a final answer.
-    this.log.warn(`Max iterations (${this.maxIterations}) reached for ${requestId}`);
+    this.log.warn(`Max iterations (${this.maxIterations}) reached for ${executionId}`);
     return {
       kind: "failed",
       errorCode: "MAX_ITERATIONS",
-      message: `Inference did not converge within ${this.maxIterations} iterations`,
+      message: `Execution did not converge within ${this.maxIterations} iterations`,
     };
   }
 
@@ -548,11 +530,11 @@ export class InferenceExecutor {
     model: ChatModel,
     messages: ConversationMessage[],
     toolSpecs: ToolSpec[],
-    payload: InferenceAssignPayload,
+    payload: ExecutionStartPayload,
     state: { controller: AbortController; partialContent: string },
     cancellation: CancellationSignal,
   ): Promise<ModelResponse> {
-    const { requestId, sessionId } = payload;
+    const { executionId } = payload;
     let deltaIndex = 0;
     let fullContent = "";
     let tokenCount: number | undefined;
@@ -571,9 +553,7 @@ export class InferenceExecutor {
         fullContent += chunk.content;
         state.partialContent = fullContent;
         await this.emitDelta(
-          requestId,
-          sessionId,
-          payload.response.sequenceNo,
+          executionId,
           deltaIndex++,
           chunk.content,
         );
@@ -619,123 +599,95 @@ export class InferenceExecutor {
     }
   }
 
-  // ──────────────────────── frame builders ────────────────────────
+  // ──────────────────────── unified frame builders ────────────────────────
 
-  private async emitAccept(requestId: string, sessionId: string): Promise<void> {
-    await this.send(
-      makeEnvelope(MessageType.INFERENCE_ACCEPT, {
-        requestId,
-        sessionId,
-      }),
-    );
+  private async emitAccept(
+    executionId: string,
+    _sessionId: string,
+    payload: ExecutionStartPayload,
+  ): Promise<void> {
+    const accept: ExecutionAcceptPayload = {
+      executionId,
+      startedAt: new Date().toISOString(),
+      resolvedModelId: "unknown",
+      dispatchId: payload.requestId ?? executionId,
+      assignmentDigest: "",
+    };
+    await this.sender.sendExecutionAccept(accept);
   }
 
   private async emitDelta(
-    requestId: string,
-    sessionId: string,
-    sequenceNo: number,
+    executionId: string,
     deltaIndex: number,
     content: string,
   ): Promise<void> {
-    await this.send(
-      makeEnvelope(MessageType.INFERENCE_DELTA, {
-        requestId,
-        sessionId,
-        sequenceNo,
-        deltaIndex,
-        content,
-      }),
-    );
+    const delta: ExecutionDeltaPayload = {
+      executionId,
+      index: deltaIndex,
+      content,
+      contentType: "TEXT",
+    };
+    await this.sender.sendExecutionDelta(delta);
   }
 
   private async emitComplete(
-    requestId: string,
-    sessionId: string,
-    sequenceNo: number,
+    executionId: string,
+    _sequenceNo: number,
     content: string,
     tokenCount?: number,
     modelCode?: string,
   ): Promise<void> {
-    await this.send(
-      makeEnvelope(MessageType.INFERENCE_COMPLETE, {
-        requestId,
-        sessionId,
-        sequenceNo,
-        content,
-        ...(tokenCount !== undefined ? { tokenCount } : {}),
-        ...(modelCode !== undefined ? { modelCode } : {}),
-      }),
-    );
+    const complete: ExecutionCompletePayload = {
+      executionId,
+      completedAt: new Date().toISOString(),
+      result: { content, structured: null, artifacts: null },
+      usage: {
+        modelId: modelCode ?? null,
+        inputTokens: null,
+        outputTokens: tokenCount ?? null,
+        durationMs: null,
+      },
+    };
+    await this.sender.sendExecutionComplete(complete);
   }
 
   private async emitFailed(
-    requestId: string,
-    sessionId: string,
+    executionId: string,
     errorCode: string,
     message: string,
-    retryHint?: string,
   ): Promise<void> {
-    await this.send(
-      makeEnvelope(MessageType.INFERENCE_FAILED, {
-        requestId,
-        sessionId,
-        errorCode,
+    const failed: ExecutionFailedPayload = {
+      executionId,
+      failedAt: new Date().toISOString(),
+      error: {
+        code: errorCode,
         message,
-        ...(retryHint !== undefined ? { retryHint } : {}),
-      }),
-    );
-  }
-
-  private async emitToolCall(
-    requestId: string,
-    sessionId: string,
-    toolCallId: string,
-    name: string,
-    args: Record<string, unknown>,
-  ): Promise<void> {
-    await this.send(
-      makeEnvelope(MessageType.INFERENCE_TOOL_CALL, {
-        requestId,
-        sessionId,
-        toolCallId,
-        name,
-        args,
-      }),
-    );
-  }
-
-  private async emitToolResult(
-    requestId: string,
-    sessionId: string,
-    toolCallId: string,
-    result: string,
-    isError: boolean,
-  ): Promise<void> {
-    await this.send(
-      makeEnvelope(MessageType.INFERENCE_TOOL_RESULT, {
-        requestId,
-        sessionId,
-        toolCallId,
-        result,
-        isError,
-      }),
-    );
+        category: null,
+        retryable: errorCode === "PROVIDER_ERROR" || errorCode === "TRANSIENT",
+        retryAfterSeconds: null,
+      },
+      usage: {
+        modelId: null,
+        inputTokens: null,
+        outputTokens: null,
+        durationMs: null,
+      },
+    };
+    await this.sender.sendExecutionFailed(failed);
   }
 
   private async emitCancelled(
-    requestId: string,
-    sessionId: string,
-    sequenceNo: number,
-    partialContent: string,
+    executionId: string,
+    _sequenceNo: number,
+    _partialContent: string,
   ): Promise<void> {
-    await this.send(
-      makeEnvelope(MessageType.INFERENCE_CANCELLED, {
-        requestId,
-        sessionId,
-        sequenceNo,
-        ...(partialContent ? { partialContent } : {}),
-      }),
-    );
+    const cancelled: ExecutionCancelledPayload = {
+      executionId,
+      dispatchId: executionId,
+      cancelledAt: new Date().toISOString(),
+      reasonCode: "USER_REQUEST",
+    };
+    await this.sender.sendExecutionCancelled(cancelled);
   }
 }
 

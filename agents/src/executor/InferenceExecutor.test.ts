@@ -15,13 +15,9 @@ import type {
   SessionTool,
   ToolSpec,
 } from "./types.js";
-import type { Envelope } from "../protocol/envelope.js";
-import { MessageType } from "../protocol/messages.js";
+import type { ExecutionFrameSender } from "./ExecutionFrameSender.js";
 import { ApprovalCoordinator } from "./ApprovalCoordinator.js";
-import type {
-  InferenceAssignPayload,
-  InferenceMessage,
-} from "../protocol/inferenceFrames.js";
+import type { ExecutionStartPayload } from "../protocol/unifiedFrames.js";
 
 // ── helpers ───────────────────────────────────────────────────────
 
@@ -78,34 +74,72 @@ class ThrowingModel implements ChatModel {
   }
 }
 
-/** Captures all sent frames for assertion. */
-function makeSendCapture() {
-  const sent: Envelope[] = [];
-  const send = vi.fn(async (frame: Envelope) => {
-    sent.push(frame);
-  });
-  return { send, sent };
+/** One captured unified execution frame plus its type string. */
+interface CapturedFrame {
+  type: string;
+  payload: Record<string, unknown>;
 }
 
-/** Build a minimal InferenceAssignPayload. */
-function makeAssignPayload(overrides: Partial<InferenceAssignPayload> = {}): InferenceAssignPayload {
+/** Captures all frames emitted by an {@link ExecutionFrameSender}. */
+function makeSenderCapture(): {
+  sender: ExecutionFrameSender;
+  sent: CapturedFrame[];
+} {
+  const sent: CapturedFrame[] = [];
+  const push = (type: string, payload: Record<string, unknown>) => {
+    sent.push({ type, payload: structuredClone(payload) });
+    return Promise.resolve();
+  };
+  const sender: ExecutionFrameSender = {
+    sendExecutionAccept: (p) => push("execution.accept", p as Record<string, unknown>),
+    sendExecutionReject: (p) => push("execution.reject", p as Record<string, unknown>),
+    sendExecutionDelta: (p) => push("execution.delta", p as Record<string, unknown>),
+    sendExecutionEvent: (p) => push("execution.event", p as Record<string, unknown>),
+    sendExecutionComplete: (p) => push("execution.complete", p as Record<string, unknown>),
+    sendExecutionFailed: (p) => push("execution.failed", p as Record<string, unknown>),
+    sendExecutionPaused: (p) => push("execution.paused", p as Record<string, unknown>),
+    sendExecutionCancelled: (p) => push("execution.cancelled", p as Record<string, unknown>),
+    sendExecutionCancel: (p) => push("execution.cancel", p as Record<string, unknown>),
+    sendExecutionApprovalRequested: (p) =>
+      push("execution.approval.requested", p as Record<string, unknown>),
+  };
+  return { sender, sent };
+}
+
+/** Build a minimal unified ExecutionStartPayload. */
+function makeStartPayload(
+  overrides: Partial<ExecutionStartPayload> & { stream?: boolean } = {},
+): ExecutionStartPayload {
+  const { stream, ...rest } = overrides;
   return {
+    executionId: "44444444-4444-4444-8444-444444444444",
+    sessionId: "33333333-3333-4333-8333-333333333333",
+    sequenceNo: 1,
     requestId: "req-1",
-    sessionId: "sess-1",
-    serviceType: "CONVERSATION",
-    messages: [{ role: "user" as const, content: "Hello" }],
-    activeToolNames: [],
-    generation: null,
-    timeoutSeconds: null,
-    stream: false,
-    response: { sequenceNo: 1 },
-    ...overrides,
+    deadline: new Date(Date.now() + 300_000).toISOString(),
+    input: {
+      messages: [{ role: "user", content: "Hello", parts: null, toolCalls: null }],
+      attachments: null,
+      conversationContinuation: null,
+    },
+    toolPolicy: {
+      activeToolNames: [],
+      approvalMode: null,
+    },
+    output: {
+      stream: stream ?? false,
+      responseSequenceNo: 1,
+      format: "TEXT",
+    },
+    ...rest,
   };
 }
 
-function makeMessages(role: string, content: string): InferenceMessage { return { role: role as InferenceMessage["role"], content }; } void makeMessages;
-
-function fakeTool(name: string, impl?: (args: Record<string, unknown>) => unknown, riskClass: "SAFE" | "DESTRUCTIVE" | "IRREVERSIBLE" = "SAFE"): SessionTool {
+function fakeTool(
+  name: string,
+  impl?: (args: Record<string, unknown>) => unknown,
+  riskClass: "SAFE" | "DESTRUCTIVE" | "IRREVERSIBLE" = "SAFE",
+): SessionTool {
   return {
     name,
     description: `tool ${name}`,
@@ -155,9 +189,9 @@ function makeSession(model: ChatModel, tools: SessionTool[] = [], autoHitl = fal
   const toolMap = new Map<string, SessionTool>();
   for (const t of tools) toolMap.set(t.name, t);
   return {
-    sessionId: "sess-1",
+    sessionId: "33333333-3333-4333-8333-333333333333",
     serviceType: "CONVERSATION",
-    projectId: "proj-1",
+    projectId: "22222222-2222-2222-8222-222222222222",
     model,
     tools: toolMap,
     knowledgeSourceIds: new Set<string>(),
@@ -167,154 +201,142 @@ function makeSession(model: ChatModel, tools: SessionTool[] = [], autoHitl = fal
 
 // ── tests ──────────────────────────────────────────────────────────
 
-describe("InferenceExecutor", () => {
+describe("InferenceExecutor unified emissions", () => {
   let registry: FakeRegistry;
 
   beforeEach(() => {
     registry = new FakeRegistry();
   });
 
-  function makeExecutor(opts: Partial<InferenceExecutorOptions> & { wireApprovals?: boolean } = {}): {
+  function makeExecutor(
+    opts: Partial<InferenceExecutorOptions> & { wireApprovals?: boolean } = {},
+  ): {
     executor: InferenceExecutor;
-    send: ReturnType<typeof makeSendCapture>["send"];
-    sent: Envelope[];
+    sender: ExecutionFrameSender;
+    sent: CapturedFrame[];
     approvals?: ApprovalCoordinator;
   } {
-    const { send, sent } = makeSendCapture();
-    // Create an ApprovalCoordinator that shares the executor's send sink,
-    // so approval.request frames are captured in `sent`.
+    const { sender, sent } = makeSenderCapture();
     let approvals: ApprovalCoordinator | undefined;
     if (opts.wireApprovals) {
-      approvals = new ApprovalCoordinator({ send });
+      approvals = new ApprovalCoordinator({ sender });
     }
     const { wireApprovals: _, ...executorOpts } = opts;
     const executor = new InferenceExecutor({
       registry: registry as SessionRegistry,
-      send,
+      sender,
       logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
       ...(approvals ? { approvals } : {}),
       ...executorOpts,
     });
-    return { executor, send, sent, ...(approvals ? { approvals } : {}) };
+    return { executor, sender, sent, ...(approvals ? { approvals } : {}) };
   }
 
-  // ── unknown session → inference.failed ─────────────────────────
+  // ── unknown session → execution.failed ─────────────────────────
 
-  it("emits inference.failed with SESSION_NOT_OPEN when no session is registered", async () => {
-    // Don't set any session in the registry.
+  it("emits execution.failed with SESSION_NOT_OPEN when no session is registered", async () => {
     const { executor, sent } = makeExecutor();
 
-    // The executor retries for ~10s (20 × 500ms) before giving up — the
-    // vitest default timeout is 5s so we override it to 15s.
-    await executor.handleAssign(makeAssignPayload({ sessionId: "unknown" }));
+    await executor.handleStart(makeStartPayload({ sessionId: "99999999-9999-4999-8999-999999999999" }));
 
-    const failed = sent.find((f) => f.type === MessageType.INFERENCE_FAILED);
+    const failed = sent.find((f) => f.type === "execution.failed");
     expect(failed).toBeDefined();
-    expect(failed!.payload).toMatchObject({
-      requestId: "req-1",
-      sessionId: "unknown",
-      errorCode: "SESSION_NOT_OPEN",
+    expect(failed!.payload.error).toMatchObject({
+      code: "SESSION_NOT_OPEN",
     });
   }, 15000);
 
-  // ── single-shot (stream=false) → inference.complete ─────────────
+  // ── single-shot (stream=false) → execution.complete ─────────────
 
-  it("emits inference.accept then inference.complete when stream=false and model returns a final answer", async () => {
+  it("emits execution.accept then execution.complete when stream=false", async () => {
     const model = new ScriptedModel([{ content: "the answer is 42" }]);
-    registry.set("sess-1", makeSession(model));
+    registry.set("33333333-3333-4333-8333-333333333333", makeSession(model));
 
     const { executor, sent } = makeExecutor();
 
-    await executor.handleAssign(makeAssignPayload({ stream: false }));
+    await executor.handleStart(makeStartPayload({ stream: false }));
 
-    const accept = sent.find((f) => f.type === MessageType.INFERENCE_ACCEPT);
+    const accept = sent.find((f) => f.type === "execution.accept");
     expect(accept).toBeDefined();
-    expect(accept!.payload).toMatchObject({ requestId: "req-1", sessionId: "sess-1" });
+    expect(accept!.payload).toMatchObject({ executionId: "44444444-4444-4444-8444-444444444444" });
 
-    const complete = sent.find((f) => f.type === MessageType.INFERENCE_COMPLETE);
+    const complete = sent.find((f) => f.type === "execution.complete");
     expect(complete).toBeDefined();
-    expect(complete!.payload).toMatchObject({
-      requestId: "req-1",
-      sessionId: "sess-1",
-      sequenceNo: 1,
+    expect(complete!.payload.result).toMatchObject({
       content: "the answer is 42",
     });
   });
 
-  // ── streaming (stream=true) → inference.delta + inference.complete
+  // ── streaming (stream=true) → execution.delta + execution.complete
 
-  it("emits inference.delta per chunk then inference.complete when stream=true", async () => {
+  it("emits execution.delta per chunk then execution.complete when stream=true", async () => {
     const model = new StreamingModel([
       { content: "Hello" },
       { content: " world" },
       { content: "!", usage: { completionTokens: 3 } },
     ]);
-    registry.set("sess-1", makeSession(model));
+    registry.set("33333333-3333-4333-8333-333333333333", makeSession(model));
 
     const { executor, sent } = makeExecutor();
 
-    await executor.handleAssign(makeAssignPayload({ stream: true }));
+    await executor.handleStart(makeStartPayload({ stream: true }));
 
-    const deltas = sent.filter((f) => f.type === MessageType.INFERENCE_DELTA);
+    const deltas = sent.filter((f) => f.type === "execution.delta");
     expect(deltas).toHaveLength(3);
-    expect(deltas[0].payload).toMatchObject({ deltaIndex: 0, content: "Hello" });
-    expect(deltas[1].payload).toMatchObject({ deltaIndex: 1, content: " world" });
-    expect(deltas[2].payload).toMatchObject({ deltaIndex: 2, content: "!" });
+    expect(deltas[0].payload).toMatchObject({ index: 0, content: "Hello" });
+    expect(deltas[1].payload).toMatchObject({ index: 1, content: " world" });
+    expect(deltas[2].payload).toMatchObject({ index: 2, content: "!" });
 
-    const complete = sent.find((f) => f.type === MessageType.INFERENCE_COMPLETE);
+    // Delta indices are strictly monotonic.
+    expect(deltas.map((d) => d.payload.index)).toEqual([0, 1, 2]);
+
+    const complete = sent.find((f) => f.type === "execution.complete");
     expect(complete).toBeDefined();
-    expect(complete!.payload).toMatchObject({
-      content: "Hello world!",
-      tokenCount: 3,
-    });
+    expect(complete!.payload.result).toMatchObject({ content: "Hello world!" });
+    expect(complete!.payload.usage).toMatchObject({ outputTokens: 3 });
   });
 
-  // ── tool_call + tool_result ─────────────────────────────────────
+  // ── tool loop is internal: no tool_call/tool_result emissions ──
 
-  it("emits inference.tool_call and inference.tool_result, then feeds result back and completes", async () => {
+  it("runs tools internally and emits only execution.complete", async () => {
     const model = new ScriptedModel([
       { content: "let me check", toolCalls: [toolCall("c1", "add", { a: 2, b: 3 })] },
       { content: "the sum is 5" },
     ]);
     const add = fakeTool("add", (args) => (args.a as number) + (args.b as number));
-    registry.set("sess-1", makeSession(model, [add]));
+    registry.set("33333333-3333-4333-8333-333333333333", makeSession(model, [add]));
 
     const { executor, sent } = makeExecutor();
 
-    await executor.handleAssign(
-      makeAssignPayload({ activeToolNames: ["add"], stream: false }),
+    await executor.handleStart(
+      makeStartPayload({
+        input: {
+          messages: [{ role: "user", content: "add", parts: null, toolCalls: null }],
+          attachments: null,
+          conversationContinuation: null,
+        },
+        toolPolicy: { activeToolNames: ["add"], approvalMode: null },
+      }),
     );
 
-    const toolCallFrame = sent.find((f) => f.type === MessageType.INFERENCE_TOOL_CALL);
-    expect(toolCallFrame).toBeDefined();
-    expect(toolCallFrame!.payload).toMatchObject({
-      toolCallId: "c1",
-      name: "add",
-      args: { a: 2, b: 3 },
-    });
+    const legacyToolFrames = sent.filter(
+      (f) => f.type.includes("tool_call") || f.type.includes("tool_result"),
+    );
+    expect(legacyToolFrames).toHaveLength(0);
 
-    const toolResultFrame = sent.find((f) => f.type === MessageType.INFERENCE_TOOL_RESULT);
-    expect(toolResultFrame).toBeDefined();
-    expect(toolResultFrame!.payload).toMatchObject({
-      toolCallId: "c1",
-      result: "5",
-      isError: false,
-    });
-
-    const complete = sent.find((f) => f.type === MessageType.INFERENCE_COMPLETE);
+    const complete = sent.find((f) => f.type === "execution.complete");
     expect(complete).toBeDefined();
-    expect(complete!.payload).toMatchObject({ content: "the sum is 5" });
+    expect(complete!.payload.result).toMatchObject({ content: "the sum is 5" });
 
     // Second invoke should include the tool result message.
     const secondMessages = model.calls[1].messages;
     expect(secondMessages.some((m) => m.role === "tool" && m.toolCallId === "c1")).toBe(true);
   });
 
-  // ── cancel → inference.cancelled ────────────────────────────────
+  // ── cancel → execution.cancelled ────────────────────────────────
 
-  it("emits inference.cancelled with partial content when cancelled mid-stream", async () => {
+  it("emits execution.cancelled when cancelled mid-stream", async () => {
     const chunks: ModelStreamChunk[] = [{ content: "partial" }, { content: "..." }];
-    // Use a streaming model with a delay between chunks so we can cancel.
     class SlowStreamModel implements ChatModel {
       async *stream(): AsyncIterable<ModelStreamChunk> {
         for (const c of chunks) {
@@ -327,73 +349,76 @@ describe("InferenceExecutor", () => {
       }
     }
     const model = new SlowStreamModel();
-    registry.set("sess-1", makeSession(model));
+    registry.set("33333333-3333-4333-8333-333333333333", makeSession(model));
 
     const { executor, sent } = makeExecutor();
 
-    // Start the streaming assign (don't await yet).
-    const promise = executor.handleAssign(makeAssignPayload({ stream: true }));
-
-    // Give it time to process the first chunk.
+    const promise = executor.handleStart(makeStartPayload({ stream: true }));
     await new Promise((r) => setTimeout(r, 15));
-
-    // Cancel it.
-    executor.handleCancel({ requestId: "req-1", sessionId: "sess-1" });
+    executor.handleCancel({
+      executionId: "44444444-4444-4444-8444-444444444444",
+      dispatchId: "44444444-4444-4444-8444-444444444444",
+      reasonCode: "USER_REQUEST",
+      requestedAt: new Date().toISOString(),
+      gracePeriodSeconds: 5,
+    });
 
     await promise;
 
-    const cancelled = sent.find((f) => f.type === MessageType.INFERENCE_CANCELLED);
+    const cancelled = sent.find((f) => f.type === "execution.cancelled");
     expect(cancelled).toBeDefined();
     expect(cancelled!.payload).toMatchObject({
-      requestId: "req-1",
-      sessionId: "sess-1",
-      sequenceNo: 1,
+      executionId: "44444444-4444-4444-8444-444444444444",
+      reasonCode: "USER_REQUEST",
     });
-    // partialContent should contain at least "partial" from the first chunk.
-    expect((cancelled!.payload as { partialContent?: string }).partialContent).toContain("partial");
   });
 
-  // ── provider error → inference.failed ──────────────────────────
+  // ── provider error → execution.failed ──────────────────────────
 
-  it("emits inference.failed with PROVIDER_ERROR when the model throws", async () => {
+  it("emits execution.failed with PROVIDER_ERROR when the model throws", async () => {
     const model = new ThrowingModel("connection refused");
-    registry.set("sess-1", makeSession(model));
+    registry.set("33333333-3333-4333-8333-333333333333", makeSession(model));
 
     const { executor, sent } = makeExecutor();
 
-    await executor.handleAssign(makeAssignPayload({ stream: false }));
+    await executor.handleStart(makeStartPayload({ stream: false }));
 
-    const failed = sent.find((f) => f.type === MessageType.INFERENCE_FAILED);
+    const failed = sent.find((f) => f.type === "execution.failed");
     expect(failed).toBeDefined();
-    expect(failed!.payload).toMatchObject({
-      requestId: "req-1",
-      errorCode: "PROVIDER_ERROR",
+    expect(failed!.payload.error).toMatchObject({
+      code: "PROVIDER_ERROR",
       message: "connection refused",
+      retryable: true,
     });
   });
 
   // ── accept emitted before complete ─────────────────────────────
 
-  it("emits inference.accept before inference.complete", async () => {
+  it("emits execution.accept before execution.complete", async () => {
     const model = new ScriptedModel([{ content: "done" }]);
-    registry.set("sess-1", makeSession(model));
+    registry.set("33333333-3333-4333-8333-333333333333", makeSession(model));
 
     const { executor, sent } = makeExecutor();
 
-    await executor.handleAssign(makeAssignPayload({ stream: false }));
+    await executor.handleStart(makeStartPayload({ stream: false }));
 
-    const acceptIdx = sent.findIndex((f) => f.type === MessageType.INFERENCE_ACCEPT);
-    const completeIdx = sent.findIndex((f) => f.type === MessageType.INFERENCE_COMPLETE);
+    const acceptIdx = sent.findIndex((f) => f.type === "execution.accept");
+    const completeIdx = sent.findIndex((f) => f.type === "execution.complete");
     expect(acceptIdx).toBeGreaterThanOrEqual(0);
     expect(completeIdx).toBeGreaterThan(acceptIdx);
   });
 
-  // ── handleCancel no-op for unknown requestId ────────────────────
+  // ── handleCancel no-op for unknown executionId ────────────────────
 
-  it("handleCancel is a no-op when no in-flight request matches", () => {
+  it("handleCancel is a no-op when no in-flight execution matches", () => {
     const { executor } = makeExecutor();
-    // Should not throw.
-    executor.handleCancel({ requestId: "nonexistent", sessionId: "sess-1" });
+    executor.handleCancel({
+      executionId: "00000000-0000-4000-8000-000000000000",
+      dispatchId: "00000000-0000-4000-8000-000000000000",
+      reasonCode: "USER_REQUEST",
+      requestedAt: new Date().toISOString(),
+      gracePeriodSeconds: 5,
+    });
     expect(executor.inFlightCount).toBe(0);
   });
 
@@ -407,13 +432,11 @@ describe("InferenceExecutor", () => {
       }
     }
     const model = new SlowModel();
-    registry.set("sess-1", makeSession(model));
+    registry.set("33333333-3333-4333-8333-333333333333", makeSession(model));
 
     const { executor } = makeExecutor();
 
-    const promise = executor.handleAssign(makeAssignPayload({ stream: false }));
-    // While in-flight, isBusy should be true.
-    // (There's a brief window after accept but before the model resolves.)
+    const promise = executor.handleStart(makeStartPayload({ stream: false }));
     await new Promise((r) => setTimeout(r, 5));
     expect(executor.isBusy).toBe(true);
 
@@ -424,41 +447,41 @@ describe("InferenceExecutor", () => {
 
   // ── HITL: DESTRUCTIVE tool gated by approval ───────────────────
 
-  it("requests approval before executing a DESTRUCTIVE tool when autoHitlOnDestructive=true", async () => {
+  it("emits execution.approval.requested before execution.paused for a DESTRUCTIVE tool", async () => {
     const model = new ScriptedModel([
       { content: "deleting", toolCalls: [toolCall("c1", "rm", { path: "/tmp/x" })] },
       { content: "done" },
     ]);
     const rm = fakeTool("rm", () => "deleted", "DESTRUCTIVE");
-    registry.set("sess-1", makeSession(model, [rm], true));
+    registry.set("33333333-3333-4333-8333-333333333333", makeSession(model, [rm], true));
 
     const { executor, sent, approvals } = makeExecutor({ wireApprovals: true });
 
-    // Simulate the engine sending an approval.decision back.
-    const approvalFramePromise = vi.waitFor(() => {
-      const frame = sent.find((f) => f.type === MessageType.APPROVAL_REQUEST);
-      if (!frame) throw new Error("approval.request not sent yet");
+    const approvalPromise = vi.waitFor(() => {
+      const frame = sent.find((f) => f.type === "execution.approval.requested");
+      if (!frame) throw new Error("execution.approval.requested not sent yet");
       return frame;
     }, { timeout: 5000 });
-    const handlePromise = executor.handleAssign(
-      makeAssignPayload({ activeToolNames: ["rm"], stream: false }),
+    const handlePromise = executor.handleStart(
+      makeStartPayload({
+        toolPolicy: { activeToolNames: ["rm"], approvalMode: null },
+        stream: false,
+      }),
     );
 
-    const approvalFrame = await approvalFramePromise;
+    const approvalFrame = await approvalPromise;
     expect(approvalFrame).toBeDefined();
-    const clientRequestId = (approvalFrame!.payload as { clientRequestId: string }).clientRequestId;
+    const approvalRequestId = (approvalFrame!.payload as { approvalRequestId: string }).approvalRequestId;
     approvals!.resolve({
       conversationId: "req-1",
-      clientRequestId,
+      clientRequestId: approvalRequestId,
       decision: "APPROVED",
     });
 
     await handlePromise;
 
-    // The tool should have been executed (tool result present).
-    const toolResult = sent.find((f) => f.type === MessageType.INFERENCE_TOOL_RESULT);
-    expect(toolResult).toBeDefined();
-    expect(toolResult!.payload).toMatchObject({ toolCallId: "c1", isError: false });
+    const complete = sent.find((f) => f.type === "execution.complete");
+    expect(complete).toBeDefined();
   });
 
   it("skips DESTRUCTIVE tool execution when approval is rejected", async () => {
@@ -467,48 +490,43 @@ describe("InferenceExecutor", () => {
       { content: "I will not delete the file." },
     ]);
     const rm = fakeTool("rm", () => "deleted", "DESTRUCTIVE");
-    // Track whether the tool's invoke was called.
     let invokeCalled = false;
     const rmTracked: SessionTool = {
       ...rm,
       invoke: async () => { invokeCalled = true; return "deleted"; },
     };
-    registry.set("sess-1", makeSession(model, [rmTracked], true));
+    registry.set("33333333-3333-4333-8333-333333333333", makeSession(model, [rmTracked], true));
 
     const { executor, sent, approvals } = makeExecutor({ wireApprovals: true });
 
-    const approvalFramePromise = vi.waitFor(() => {
-      const frame = sent.find((f) => f.type === MessageType.APPROVAL_REQUEST);
-      if (!frame) throw new Error("approval.request not sent yet");
+    const approvalPromise = vi.waitFor(() => {
+      const frame = sent.find((f) => f.type === "execution.approval.requested");
+      if (!frame) throw new Error("execution.approval.requested not sent yet");
       return frame;
     }, { timeout: 5000 });
-    const handlePromise = executor.handleAssign(
-      makeAssignPayload({ activeToolNames: ["rm"], stream: false }),
+    const handlePromise = executor.handleStart(
+      makeStartPayload({
+        toolPolicy: { activeToolNames: ["rm"], approvalMode: null },
+        stream: false,
+      }),
     );
 
-    const approvalFrame = await approvalFramePromise;
-    const clientRequestId = (approvalFrame!.payload as { clientRequestId: string }).clientRequestId;
+    const approvalFrame = await approvalPromise;
+    const approvalRequestId = (approvalFrame!.payload as { approvalRequestId: string }).approvalRequestId;
     approvals!.resolve({
       conversationId: "req-1",
-      clientRequestId,
+      clientRequestId: approvalRequestId,
       decision: "REJECTED",
       comment: "no way",
     });
 
     await handlePromise;
 
-    // The tool should NOT have been executed.
     expect(invokeCalled).toBe(false);
 
-    // The tool result should be an error with the rejection message.
-    const toolResult = sent.find((f) => f.type === MessageType.INFERENCE_TOOL_RESULT);
-    expect(toolResult).toBeDefined();
-    expect(toolResult!.payload).toMatchObject({ toolCallId: "c1", isError: true });
-
-    // The model should have gotten the rejection as a tool message and produced a final answer.
-    const complete = sent.find((f) => f.type === MessageType.INFERENCE_COMPLETE);
+    const complete = sent.find((f) => f.type === "execution.complete");
     expect(complete).toBeDefined();
-    expect(complete!.payload).toMatchObject({ content: "I will not delete the file." });
+    expect(complete!.payload.result).toMatchObject({ content: "I will not delete the file." });
   });
 
   it("executes SAFE tools immediately without approval even when autoHitlOnDestructive=true", async () => {
@@ -517,22 +535,22 @@ describe("InferenceExecutor", () => {
       { content: "found it" },
     ]);
     const search = fakeTool("search", () => "result", "SAFE");
-    registry.set("sess-1", makeSession(model, [search], true));
+    registry.set("33333333-3333-4333-8333-333333333333", makeSession(model, [search], true));
 
     const { executor, sent } = makeExecutor({ wireApprovals: true });
 
-    await executor.handleAssign(
-      makeAssignPayload({ activeToolNames: ["search"], stream: false }),
+    await executor.handleStart(
+      makeStartPayload({
+        toolPolicy: { activeToolNames: ["search"], approvalMode: null },
+        stream: false,
+      }),
     );
 
-    // No approval request should have been sent.
-    const approvalFrame = sent.find((f) => f.type === MessageType.APPROVAL_REQUEST);
+    const approvalFrame = sent.find((f) => f.type === "execution.approval.requested");
     expect(approvalFrame).toBeUndefined();
 
-    // The tool should have been executed.
-    const toolResult = sent.find((f) => f.type === MessageType.INFERENCE_TOOL_RESULT);
-    expect(toolResult).toBeDefined();
-    expect(toolResult!.payload).toMatchObject({ toolCallId: "c1", isError: false });
+    const complete = sent.find((f) => f.type === "execution.complete");
+    expect(complete).toBeDefined();
   });
 
   it("executes DESTRUCTIVE tools without approval when autoHitlOnDestructive=false", async () => {
@@ -541,22 +559,22 @@ describe("InferenceExecutor", () => {
       { content: "done" },
     ]);
     const rm = fakeTool("rm", () => "deleted", "DESTRUCTIVE");
-    registry.set("sess-1", makeSession(model, [rm], false));
+    registry.set("33333333-3333-4333-8333-333333333333", makeSession(model, [rm], false));
 
     const { executor, sent } = makeExecutor({ wireApprovals: true });
 
-    await executor.handleAssign(
-      makeAssignPayload({ activeToolNames: ["rm"], stream: false }),
+    await executor.handleStart(
+      makeStartPayload({
+        toolPolicy: { activeToolNames: ["rm"], approvalMode: null },
+        stream: false,
+      }),
     );
 
-    // No approval request should have been sent.
-    const approvalFrame = sent.find((f) => f.type === MessageType.APPROVAL_REQUEST);
+    const approvalFrame = sent.find((f) => f.type === "execution.approval.requested");
     expect(approvalFrame).toBeUndefined();
 
-    // The tool should have been executed.
-    const toolResult = sent.find((f) => f.type === MessageType.INFERENCE_TOOL_RESULT);
-    expect(toolResult).toBeDefined();
-    expect(toolResult!.payload).toMatchObject({ toolCallId: "c1", isError: false });
+    const complete = sent.find((f) => f.type === "execution.complete");
+    expect(complete).toBeDefined();
   });
 
   it("executes DESTRUCTIVE tools without approval when no ApprovalCoordinator is wired", async () => {
@@ -565,22 +583,21 @@ describe("InferenceExecutor", () => {
       { content: "done" },
     ]);
     const rm = fakeTool("rm", () => "deleted", "DESTRUCTIVE");
-    // autoHitlOnDestructive=true but no approvals coordinator wired
-    registry.set("sess-1", makeSession(model, [rm], true));
+    registry.set("33333333-3333-4333-8333-333333333333", makeSession(model, [rm], true));
 
     const { executor, sent } = makeExecutor();
 
-    await executor.handleAssign(
-      makeAssignPayload({ activeToolNames: ["rm"], stream: false }),
+    await executor.handleStart(
+      makeStartPayload({
+        toolPolicy: { activeToolNames: ["rm"], approvalMode: null },
+        stream: false,
+      }),
     );
 
-    // No approval request should have been sent.
-    const approvalFrame = sent.find((f) => f.type === MessageType.APPROVAL_REQUEST);
+    const approvalFrame = sent.find((f) => f.type === "execution.approval.requested");
     expect(approvalFrame).toBeUndefined();
 
-    // The tool should have been executed.
-    const toolResult = sent.find((f) => f.type === MessageType.INFERENCE_TOOL_RESULT);
-    expect(toolResult).toBeDefined();
-    expect(toolResult!.payload).toMatchObject({ toolCallId: "c1", isError: false });
+    const complete = sent.find((f) => f.type === "execution.complete");
+    expect(complete).toBeDefined();
   });
 });

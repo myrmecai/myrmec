@@ -13,7 +13,7 @@
  * adapters cannot cross the thread boundary, so the worker constructs them.
  */
 import { MessageType } from "../protocol/messages.js";
-import type { Envelope } from "../protocol/envelope.js";
+import { makeEnvelope } from "../protocol/envelope.js";
 import {
   agentBindPayloadSchema,
   agentReleasePayloadSchema,
@@ -22,11 +22,20 @@ import type { Logger } from "../models/index.js";
 import { InferenceExecutor } from "../executor/InferenceExecutor.js";
 import { SessionRegistry } from "../session/SessionRegistry.js";
 import { ApprovalCoordinator } from "../executor/ApprovalCoordinator.js";
-import type { SessionOpenPayload, InferenceAssignPayload, InferenceCancelPayload } from "../protocol/inferenceFrames.js";
+import type {
+  SessionOpenPayload,
+  InferenceAssignPayload,
+  InferenceCancelPayload,
+} from "../protocol/inferenceFrames.js";
+import type {
+  ExecutionCancelPayload,
+  ExecutionStartPayload,
+} from "../protocol/unifiedFrames.js";
 import type { ChatModelFactory, SessionToolFactory } from "../executor/providers.js";
 import type { EngineHttpClient } from "../transport/httpClient.js";
 import type { WorkerInbound, WorkerOutbound } from "./agentWorkerProtocol.js";
 import { AgentOrchestrationExecutor } from "./AgentOrchestrationExecutor.js";
+import type { ExecutionFrameSender } from "../executor/ExecutionFrameSender.js";
 
 export interface AgentWorkerOptions {
   /** Emit a frame back to the Supervisor for routing (the worker's only sink). */
@@ -58,13 +67,15 @@ export class AgentWorker {
   private readonly inference: InferenceExecutor;
   private readonly orchestration: AgentOrchestrationExecutor | null;
   private readonly log: Logger;
+  private readonly executionSender: ExecutionFrameSender;
 
   constructor(options: AgentWorkerOptions) {
     this.log = options.logger ?? console;
-    const send = (frame: Envelope): Promise<void> => {
-      options.post({ kind: "frame", frame });
-      return Promise.resolve();
-    };
+
+    // Unified outbound sender: every execution.* frame the worker produces
+    // is wrapped in the legacy Envelope shape (type is the unified frame
+    // family) and posted back to the Supervisor for routing.
+    this.executionSender = this.buildExecutionSender(options.post);
 
     // Unified Inference Dispatch (§6–§7)
     this.sessions = new SessionRegistry({
@@ -84,31 +95,58 @@ export class AgentWorker {
           workspaceRoot: options.workspaceRoot,
           outboxRoot: options.outboxRoot ?? `${options.workspaceRoot}/outbox`,
           chatModelFactory: options.chatModelFactory,
-          send: (frame) => void send(frame),
+          send: (frame) => void options.post({ kind: "frame", frame }),
           autoHitlOnDestructive: options.autoHitlOnDestructive ?? true,
           logger: this.log,
         })
       : null;
 
-    // HITL approval coordinator — emits approval.request frames over the
-    // worker's send sink and blocks until the matching approval.decision
-    // arrives (routed by the Supervisor back to the executor's
-    // handleApprovalDecision). One coordinator is shared by all in-flight
-    // turns in this worker.
+    // HITL approval coordinator — emits execution.approval.requested
+    // (unified) when an executionId is present, falling back to legacy
+    // approval.request for the conversation path until Task 6 deletes it.
     const approvals = new ApprovalCoordinator({
-      send,
+      sender: this.executionSender,
       logger: this.log,
     });
 
     this.inference = new InferenceExecutor({
       registry: this.sessions,
-      send,
+      sender: this.executionSender,
       httpClient: options.httpClient,
       agentAccessToken: options.agentAccessToken,
       maxIterations: options.maxIterations,
       approvals,
       logger: this.log,
     });
+  }
+
+  /** Build an {@link ExecutionFrameSender} that posts unified frames back
+   * through the worker's outbound sink. */
+  private buildExecutionSender(
+    post: (message: WorkerOutbound) => void,
+  ): ExecutionFrameSender {
+    const send =
+      <T extends Record<string, unknown>>(
+        type: string,
+        payload: T,
+      ): Promise<void> => {
+        post({ kind: "frame", frame: makeEnvelope(type as MessageType, payload) });
+        return Promise.resolve();
+      };
+    return {
+      sendExecutionAccept: (p) => send("execution.accept", p as Record<string, unknown>),
+      sendExecutionReject: (p) => send("execution.reject", p as Record<string, unknown>),
+      sendExecutionDelta: (p) => send("execution.delta", p as Record<string, unknown>),
+      sendExecutionEvent: (p) => send("execution.event", p as Record<string, unknown>),
+      sendExecutionComplete: (p) => send("execution.complete", p as Record<string, unknown>),
+      sendExecutionFailed: (p) => send("execution.failed", p as Record<string, unknown>),
+      sendExecutionPaused: (p) => send("execution.paused", p as Record<string, unknown>),
+      sendExecutionCancelled: (p) =>
+        send("execution.cancelled", p as Record<string, unknown>),
+      sendExecutionCancel: (p) => send("execution.cancel", p as Record<string, unknown>),
+      sendExecutionApprovalRequested: (p) =>
+        send("execution.approval.requested", p as Record<string, unknown>),
+    };
   }
 
   /** True while an inference turn is executing. */
@@ -131,6 +169,15 @@ export class AgentWorker {
       case MessageType.SESSION_CLOSE:
         this.handleSessionClose(frame.payload);
         return;
+      case "execution.start":
+        await this.handleExecutionStart(frame.payload as ExecutionStartPayload);
+        return;
+      case "execution.cancel":
+        this.handleExecutionCancel(frame.payload as ExecutionCancelPayload);
+        return;
+      // Legacy inference frames are still accepted inbound until the
+      // engine cutover lands (Tasks 4–5), but outbound emissions are
+      // unified execution.* frames.
       case MessageType.INFERENCE_ASSIGN:
         await this.handleInferenceAssign(frame.payload as InferenceAssignPayload);
         return;
@@ -167,39 +214,94 @@ export class AgentWorker {
     }
   }
 
-  /**
-   * `inference.assign` — one dispatch. An orchestration payload routes to
-   * the orchestration executor (§16.3); ordinary inference keeps the
-   * existing executor path unchanged.
-   */
-  private async handleInferenceAssign(payload: InferenceAssignPayload): Promise<void> {
-    const orchestration = (
-      payload as unknown as { orchestration?: unknown; assignmentDigest?: string }
-    ).orchestration;
+  /** Map a legacy `inference.assign` payload to a unified `ExecutionStartPayload`. */
+  private legacyAssignToExecutionStart(payload: InferenceAssignPayload): ExecutionStartPayload {
+    return {
+      executionId: payload.requestId,
+      sessionId: payload.sessionId,
+      sequenceNo: payload.response.sequenceNo,
+      requestId: payload.requestId,
+      deadline: new Date(Date.now() + 300_000).toISOString(),
+      input: {
+        messages: payload.messages.map((m) => ({
+          role: m.role,
+          content: m.content ?? null,
+          parts: m.parts?.map((p) => ({
+            type: p.type,
+            text: p.text ?? null,
+            attachmentId: p.attachmentId ?? null,
+            mediaType: p.mediaType ?? null,
+            readContentPath: p.readContentPath ?? null,
+          })) ?? null,
+          toolCalls: m.toolCalls?.map((tc) => ({
+            id: tc.id,
+            name: tc.name,
+            args: tc.args,
+          })) ?? null,
+        })),
+        attachments: null,
+        conversationContinuation: null,
+      },
+      toolPolicy: {
+        activeToolNames: payload.activeToolNames,
+        approvalMode: null,
+      },
+      output: {
+        stream: payload.stream,
+        responseSequenceNo: payload.response.sequenceNo,
+        format: "TEXT",
+      },
+    };
+  }
+
+  /** `execution.start` — unified dispatch entry point. */
+  private async handleExecutionStart(payload: ExecutionStartPayload): Promise<void> {
+    const orchestration = (payload as unknown as { orchestration?: unknown }).orchestration;
     if (orchestration !== undefined && orchestration !== null) {
       if (!this.orchestration) {
         this.log.warn(
-          "orchestration assign received without a workspace root — failing closed",
+          "orchestration execution.start received without a workspace root — failing closed",
         );
         return;
       }
       await this.orchestration.handleAssign({
-        requestId: payload.requestId,
+        requestId: payload.executionId,
         sessionId: payload.sessionId,
         orchestration,
-        assignmentDigest: (
-          payload as unknown as { assignmentDigest?: string }
-        ).assignmentDigest,
+        assignmentDigest: (payload as unknown as { assignmentDigest?: string }).assignmentDigest,
       });
       return;
     }
-    this.inference.handleAssign(payload);
+    await this.inference.handleStart(payload);
   }
 
-  /** `inference.cancel` — routes to whichever executor owns the dispatch. */
+  /** `execution.cancel` — unified cancellation entry point. */
+  private handleExecutionCancel(payload: ExecutionCancelPayload): void {
+    this.orchestration?.handleCancel({
+      attemptId: payload.executionId,
+      requestId: payload.executionId,
+    });
+    this.inference.handleCancel(payload);
+  }
+
+  /**
+   * `inference.assign` — legacy dispatch. An orchestration payload routes to
+   * the orchestration executor (§16.3); ordinary inference is mapped onto
+   * the unified `execution.start` path.
+   */
+  private async handleInferenceAssign(payload: InferenceAssignPayload): Promise<void> {
+    await this.handleExecutionStart(this.legacyAssignToExecutionStart(payload));
+  }
+
+  /** `inference.cancel` — legacy cancellation mapped onto `execution.cancel`. */
   private handleInferenceCancel(payload: InferenceCancelPayload): void {
-    this.orchestration?.handleCancel(payload as { attemptId?: string; requestId?: string });
-    this.inference.handleCancel(payload as InferenceCancelPayload);
+    this.handleExecutionCancel({
+      executionId: payload.requestId,
+      dispatchId: payload.requestId,
+      reasonCode: "USER_REQUEST",
+      requestedAt: new Date().toISOString(),
+      gracePeriodSeconds: 5,
+    });
   }
 
   /**

@@ -24,6 +24,7 @@ import {
   type ExecutionDeltaPayload,
   type ExecutionEventPayload,
   type ExecutionFailedPayload,
+  type ExecutionApprovalRequestedPayload,
   type ExecutionPausedPayload,
   type ExecutionRejectPayload,
   type HostCapacityPayload,
@@ -515,6 +516,20 @@ export class HostControlClient {
       protocolVersion: SUPPORTED_PROTOCOL_VERSION,
       messageId: this.nextMessageId(),
       type: UnifiedMessageType.EXECUTION_CANCEL,
+      sentAt: new Date().toISOString(),
+      executionId: payload.executionId,
+      payload,
+    });
+  }
+
+  /** Send a durable HITL approval request (execution.approval.requested). */
+  async sendExecutionApprovalRequested(
+    payload: ExecutionApprovalRequestedPayload,
+  ): Promise<void> {
+    await this.sendFrame({
+      protocolVersion: SUPPORTED_PROTOCOL_VERSION,
+      messageId: this.nextMessageId(),
+      type: UnifiedMessageType.EXECUTION_APPROVAL_REQUESTED,
       sentAt: new Date().toISOString(),
       executionId: payload.executionId,
       payload,

@@ -16,6 +16,8 @@ import type { Logger } from "../models/index.js";
 import type { Envelope } from "../protocol/envelope.js";
 import { approvalRequest } from "../protocol/conversationFrames.js";
 import type { ApprovalDecisionWire } from "../protocol/conversationFrames.js";
+import type { ExecutionApprovalRequestedPayload } from "../protocol/unifiedFrames.js";
+import type { ExecutionFrameSender } from "./ExecutionFrameSender.js";
 
 /** The outcome of a {@link ApprovalCoordinator.requestApproval} call. */
 export interface ApprovalOutcome {
@@ -32,12 +34,18 @@ export interface ApprovalOutcome {
 
 /** Options for a single approval request. */
 export interface RequestApprovalOptions {
-  conversationId: string;
+  /** Legacy conversation correlation id; still used by the conversation
+   *  path until Task 6 deletes it. */
+  conversationId?: string;
+  /** Unified execution correlation id. When present, the coordinator emits
+   *  `execution.approval.requested` instead of the legacy `approval.request`. */
+  executionId?: string;
   /** Short human-readable summary rendered on the approval card. */
   content?: string;
-  /** Free-form metadata serialised to `payloadJson`; the coordinator always
-   * injects `clientRequestId` so the engine can correlate via the persisted
-   * row even if the live frame is missed. */
+  /** Free-form metadata serialised to `payloadJson` (legacy) or to
+   *  `action.summary` (unified); the coordinator always injects
+   *  `clientRequestId` so the engine can correlate via the persisted row
+   *  even if the live frame is missed. */
   payload?: Record<string, unknown>;
   /** Milliseconds to await a decision before rejecting with
    * {@link ApprovalTimeoutError}. Omit to wait indefinitely (rarely wise —
@@ -65,7 +73,11 @@ const noopLogger: Logger = {
 
 /** Collaborators the coordinator needs, injected by the supervisor. */
 export interface ApprovalCoordinatorOptions {
-  send: (frame: Envelope) => Promise<void>;
+  /** Legacy envelope sink — used when a request has no `executionId`. */
+  send?: (frame: Envelope) => Promise<void>;
+  /** Unified execution-frame sender — used when a request carries an
+   *  `executionId`. One of `send` or `sender` must be provided. */
+  sender?: ExecutionFrameSender;
   logger?: Logger;
   /** Override the client-request-id generator (tests). Defaults to a UUID. */
   generateId?: () => string;
@@ -78,20 +90,34 @@ interface PendingApproval {
 }
 
 export class ApprovalCoordinator {
-  private readonly send: (frame: Envelope) => Promise<void>;
+  private readonly legacySend?: (frame: Envelope) => Promise<void>;
+  private readonly sender?: ExecutionFrameSender;
   private readonly log: Logger;
   private readonly generateId: () => string;
   private readonly pending = new Map<string, PendingApproval>();
 
   constructor(options: ApprovalCoordinatorOptions) {
-    this.send = options.send;
+    if (!options.send && !options.sender) {
+      throw new Error("ApprovalCoordinator requires either send or sender");
+    }
+    this.legacySend = options.send;
+    this.sender = options.sender;
     this.log = options.logger ?? noopLogger;
     this.generateId = options.generateId ?? randomUUID;
   }
 
-  /** Emit an `approval.request` and block until the decision returns. */
+  /**
+   * Emit an approval request and block until the decision returns.
+   *
+   * When `options.executionId` is present, sends a durable
+   * `execution.approval.requested` frame via the unified sender; otherwise
+   * falls back to the legacy `approval.request` envelope for the
+   * conversation path (deleted in Task 6).
+   */
   async requestApproval(options: RequestApprovalOptions): Promise<ApprovalOutcome> {
     const clientRequestId = this.generateId();
+    const executionId = options.executionId;
+    const unified = executionId !== undefined && this.sender !== undefined;
 
     const body: Record<string, unknown> = { ...(options.payload ?? {}) };
     if (body.clientRequestId === undefined) {
@@ -106,7 +132,7 @@ export class ApprovalCoordinator {
             this.pending.delete(clientRequestId);
             reject(
               new ApprovalTimeoutError(
-                `No approval decision for conversation ${options.conversationId} ` +
+                `No approval decision for ${unified ? executionId : options.conversationId} ` +
                   `(clientRequestId ${clientRequestId}) within ${options.timeoutMs}ms`,
               ),
             );
@@ -117,17 +143,37 @@ export class ApprovalCoordinator {
     );
 
     try {
-      await this.send(
-        approvalRequest({
-          conversationId: options.conversationId,
-          clientRequestId,
-          ...(options.content !== undefined ? { content: options.content } : {}),
-          payloadJson: safeStringify(body),
-          ...(options.expiresAt !== undefined
-            ? { expiresAt: options.expiresAt }
-            : {}),
-        }),
-      );
+      if (unified) {
+        const summary = options.content ?? "Approval requested";
+        const payload: ExecutionApprovalRequestedPayload = {
+          executionId,
+          dispatchId: executionId,
+          approvalRequestId: clientRequestId,
+          action: {
+            actionId: clientRequestId,
+            type: "TOOL_EXECUTION",
+            riskClass: (options.payload?.riskClass as string) ?? "DESTRUCTIVE",
+            summary,
+            digest: safeStringify(body),
+          },
+          snapshotTreeHash: null,
+          stateDigest: null,
+          expiresAt: options.expiresAt ?? new Date(Date.now() + 300_000).toISOString(),
+        };
+        await this.sender!.sendExecutionApprovalRequested(payload);
+      } else {
+        await this.legacySend!(
+          approvalRequest({
+            conversationId: options.conversationId ?? "unknown",
+            clientRequestId,
+            ...(options.content !== undefined ? { content: options.content } : {}),
+            payloadJson: safeStringify(body),
+            ...(options.expiresAt !== undefined
+              ? { expiresAt: options.expiresAt }
+              : {}),
+          }),
+        );
+      }
     } catch (err) {
       // Could not even send the request — clean up the pending wait.
       const entry = this.pending.get(clientRequestId);
@@ -139,7 +185,7 @@ export class ApprovalCoordinator {
     }
 
     this.log.info(
-      `Requested approval for conversation ${options.conversationId} (clientRequestId ${clientRequestId})`,
+      `Requested approval for ${unified ? executionId : options.conversationId} (clientRequestId ${clientRequestId})`,
     );
 
     const decision = await decisionPromise;
