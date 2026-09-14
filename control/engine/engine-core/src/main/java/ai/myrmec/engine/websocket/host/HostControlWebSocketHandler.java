@@ -27,6 +27,7 @@ import ai.myrmec.engine.inference.execution.ExecutionRegistry;
 import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
 import ai.myrmec.engine.websocket.host.payload.ExecutionAcceptPayload;
+import ai.myrmec.engine.websocket.host.payload.ExecutionApprovalRequestedPayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionCancelledPayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionCompletePayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionDeltaPayload;
@@ -39,6 +40,7 @@ import ai.myrmec.engine.websocket.message.MessageType;
 import ai.myrmec.engine.websocket.message.WebSocketMessage;
 import ai.myrmec.engine.websocket.message.payload.MessageDeltaPayload;
 import ai.myrmec.engine.websocket.message.payload.SessionOpenPayload;
+import ai.myrmec.engine.inference.execution.ExecutionBridge;
 import ai.myrmec.engine.workflow.OrchestrationEventIngestionService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -82,6 +84,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     private final ConversationService conversationService;
     private final SessionExecutionRepository executionRepository;
     private final OrchestrationEventIngestionService eventIngestionService;
+    private final ExecutionBridge executionBridge;
 
     @Value("${myrmec.host.heartbeat-interval-seconds:15}")
     private int heartbeatIntervalSeconds;
@@ -112,7 +115,8 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                                        ConversationStreamBroker conversationStreamBroker,
                                        ConversationService conversationService,
                                        SessionExecutionRepository executionRepository,
-                                       OrchestrationEventIngestionService eventIngestionService) {
+                                       OrchestrationEventIngestionService eventIngestionService,
+                                       ExecutionBridge executionBridge) {
         this.objectMapper = objectMapper;
         this.agentHostRepository = agentHostRepository;
         this.instanceRepository = instanceRepository;
@@ -126,6 +130,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         this.conversationService = conversationService;
         this.executionRepository = executionRepository;
         this.eventIngestionService = eventIngestionService;
+        this.executionBridge = executionBridge;
     }
 
     /** Exposed for handler tests to assert registration. */
@@ -628,8 +633,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
 
     /** §8.5: terminal success. */
     private void handleExecutionComplete(WebSocketSession session, HostProtocolEnvelope envelope) {
-        handleTerminal(session, envelope, SessionExecution.State.COMPLETED,
-                this::onConversationComplete, this::onOrchestrationOutcome);
+        handleTerminal(session, envelope, SessionExecution.State.COMPLETED);
     }
 
     /** §8.5: terminal failure. */
@@ -638,26 +642,21 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         // complete-bridge would be a no-op on it, but wiring it there is
         // semantically wrong; Task 4's ExecutionBridge.onConversationFailure
         // owns the viewer notification.
-        handleTerminal(session, envelope, SessionExecution.State.FAILED,
-                this::onConversationFailure, this::onOrchestrationOutcome);
+        handleTerminal(session, envelope, SessionExecution.State.FAILED);
     }
 
     /** §8.6: terminal pause. */
     private void handleExecutionPaused(WebSocketSession session, HostProtocolEnvelope envelope) {
-        handleTerminal(session, envelope, SessionExecution.State.PAUSED,
-                this::onConversationPaused, this::onOrchestrationPaused);
+        handleTerminal(session, envelope, SessionExecution.State.PAUSED);
     }
 
     /** §8.8: terminal cancellation. */
     private void handleExecutionCancelled(WebSocketSession session, HostProtocolEnvelope envelope) {
-        handleTerminal(session, envelope, SessionExecution.State.CANCELLED,
-                this::onConversationCancelled, this::onOrchestrationOutcome);
+        handleTerminal(session, envelope, SessionExecution.State.CANCELLED);
     }
 
     private void handleTerminal(WebSocketSession session, HostProtocolEnvelope envelope,
-                                SessionExecution.State terminalState,
-                                java.util.function.BiConsumer<SessionExecution, JsonNode> conversationBridge,
-                                java.util.function.BiConsumer<SessionExecution, JsonNode> orchestrationBridge) {
+                                SessionExecution.State terminalState) {
         UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
         if (instanceId == null) {
             sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
@@ -690,10 +689,13 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             }
             SessionExecution execution = executionRepository.findById(envelope.getExecutionId()).orElseThrow();
             if (!isReplay) {
+                ai.myrmec.engine.inference.Session sess = sessionRepository.findById(execution.getSessionId()).orElse(null);
+                UUID conversationId = sess != null && "CONVERSATION".equals(execution.getServiceType()) ? sess.getRefId() : null;
+                UUID projectId = sess != null ? sess.getProjectId() : null;
                 if ("CONVERSATION".equals(execution.getServiceType())) {
-                    conversationBridge.accept(execution, payloadNode);
+                    bridgeConversationTerminal(execution, sess, terminalState, payloadNode);
                 } else if ("WORKFLOW".equals(execution.getServiceType())) {
-                    orchestrationBridge.accept(execution, payloadNode);
+                    bridgeOrchestrationTerminal(execution, terminalState, payloadNode, payloadMap, conversationId, projectId);
                 }
             }
             acknowledge(session, envelope.getMessageId(), execution.getSessionId(), 0L);
@@ -707,65 +709,82 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    private void onConversationComplete(SessionExecution execution, JsonNode payloadNode) {
-        ExecutionCompletePayload complete = objectMapper.convertValue(payloadNode, ExecutionCompletePayload.class);
-        if (complete == null || complete.result() == null) return;
-        ai.myrmec.engine.inference.Session sess = sessionRepository.findById(execution.getSessionId()).orElse(null);
-        if (sess == null) return;
-        String text = complete.result().content();
-        if (text == null || text.isBlank()) return;
-        ConversationMessage saved = conversationService.appendMessage(
-                sess.getRefId(), ConversationMessage.Role.ASSISTANT, text, null, null);
-        if (complete.usage() != null && complete.usage().modelId() != null) {
-            saved.setModelCode(complete.usage().modelId());
+    private void bridgeConversationTerminal(SessionExecution execution,
+                                             ai.myrmec.engine.inference.Session sess,
+                                             SessionExecution.State terminalState,
+                                             JsonNode payloadNode) {
+        UUID conversationId = sess == null ? null : sess.getRefId();
+        if (conversationId == null) {
+            return;
         }
-        log.debug("Persisted assistant message {} for conversation {} from execution.complete",
-                saved.getId(), sess.getRefId());
+        switch (terminalState) {
+            case COMPLETED -> {
+                ExecutionCompletePayload complete = objectMapper.convertValue(payloadNode, ExecutionCompletePayload.class);
+                executionBridge.onConversationComplete(conversationId, sess.getProjectId(), null, complete);
+            }
+            case PAUSED -> {
+                ExecutionPausedPayload paused = objectMapper.convertValue(payloadNode, ExecutionPausedPayload.class);
+                executionBridge.onConversationPaused(conversationId, null, paused);
+            }
+            case FAILED -> executionBridge.onConversationFailure(conversationId,
+                    rebuildRawFrame(execution, terminalState, payloadNode));
+            case CANCELLED -> {
+                // No transcript row for a cancelled conversation turn.
+            }
+        }
     }
 
-    private void onConversationPaused(SessionExecution execution, JsonNode payloadNode) {
-        ExecutionPausedPayload paused = objectMapper.convertValue(payloadNode, ExecutionPausedPayload.class);
-        if (paused == null || paused.conversationContinuation() == null) return;
-        ai.myrmec.engine.inference.Session sess = sessionRepository.findById(execution.getSessionId()).orElse(null);
-        if (sess == null) return;
-        String approvalRequestId = paused.conversationContinuation().approvalRequestId();
-        String pendingActionId = paused.conversationContinuation().pendingActionId();
-        String digest = paused.conversationContinuation().pendingActionDigest();
-        Map<String, Object> marker = new java.util.LinkedHashMap<>();
-        marker.put("approvalRequestId", approvalRequestId);
-        marker.put("pendingActionId", pendingActionId);
-        marker.put("pendingActionDigest", digest);
-        String payloadJson;
+    private void bridgeOrchestrationTerminal(SessionExecution execution,
+                                              SessionExecution.State terminalState,
+                                              JsonNode payloadNode,
+                                              Map<String, Object> payloadMap,
+                                              UUID conversationId,
+                                              UUID projectId) {
+        UUID dispatchId = execution.getDispatchId();
+        if (dispatchId == null) {
+            log.debug("No dispatchId on orchestration execution {} — skipping outcome bridge", execution.getId());
+            return;
+        }
+        switch (terminalState) {
+            case COMPLETED, FAILED, CANCELLED ->
+                    executionBridge.onOrchestrationOutcome(dispatchId, execution.getId(), terminalState, payloadMap);
+            case PAUSED -> {
+                ExecutionPausedPayload paused = objectMapper.convertValue(payloadNode, ExecutionPausedPayload.class);
+                executionBridge.onOrchestrationApprovalRequested(dispatchId, mapApprovalRequested(paused));
+                executionBridge.onOrchestrationOutcome(dispatchId, execution.getId(), terminalState, payloadMap);
+            }
+        }
+    }
+
+    private ExecutionApprovalRequestedPayload mapApprovalRequested(ExecutionPausedPayload paused) {
+        if (paused == null || paused.suspension() == null) {
+            return null;
+        }
+        ExecutionPausedPayload.Suspension suspension = paused.suspension();
+        ExecutionPausedPayload.PendingAction pending = suspension.pendingAction();
+        return new ExecutionApprovalRequestedPayload(
+                paused.executionId(),
+                null,
+                suspension.approvalRequestId(),
+                pending == null ? null : new ExecutionApprovalRequestedPayload.Action(
+                        pending.actionId(), pending.type(), pending.riskClass(), pending.summary(), pending.digest()),
+                null,
+                null,
+                suspension.expiresAt());
+    }
+
+    private String rebuildRawFrame(SessionExecution execution, SessionExecution.State terminalState, JsonNode payloadNode) {
         try {
-            payloadJson = objectMapper.writeValueAsString(marker);
+            var reply = HostProtocolEnvelope.reply(
+                    terminalState.name().toLowerCase(), null,
+                    objectMapper.treeToValue(payloadNode, Object.class), objectMapper);
+            reply.setExecutionId(execution.getId());
+            reply.setSessionId(execution.getSessionId());
+            return objectMapper.writeValueAsString(reply);
         } catch (Exception e) {
-            payloadJson = "{}";
+            log.debug("Failed to rebuild raw failure frame for execution {}: {}", execution.getId(), e.getMessage());
+            return payloadNode != null ? payloadNode.toString() : "";
         }
-        conversationService.appendApprovalRequest(
-                sess.getRefId(), null,
-                "Approval required before continuing execution: " + pendingActionId,
-                payloadJson, null);
-        log.debug("Persisted approval request for conversation {} from execution.paused", sess.getRefId());
-    }
-
-    private void onConversationCancelled(SessionExecution execution, JsonNode payloadNode) {
-        // No transcript row for a cancelled conversation turn; the session close handles cleanup.
-    }
-
-    private void onConversationFailure(SessionExecution execution, JsonNode payloadNode) {
-        // Task 4: delegate to ExecutionBridge.onConversationFailure for viewer
-        // notification; until then a no-op seam.
-        log.debug("Conversation failure bridge not wired for execution {}", execution.getId());
-    }
-
-    private void onOrchestrationOutcome(SessionExecution execution, JsonNode payloadNode) {
-        // Task 4: delegate to ExecutionBridge; until then a no-op seam.
-        log.debug("Orchestration outcome bridge not wired for execution {}", execution.getId());
-    }
-
-    private void onOrchestrationPaused(SessionExecution execution, JsonNode payloadNode) {
-        // Task 4: delegate to ExecutionBridge for approval persistence; until then a no-op seam.
-        log.debug("Orchestration paused bridge not wired for execution {}", execution.getId());
     }
 
     /** §12.3: acknowledge a durable host→engine frame after its state is recorded. */
