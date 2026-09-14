@@ -115,16 +115,21 @@ public class ExecutionInputAssembler {
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Conversation not found: " + conversationId));
 
-        AgentHost agent = agentHostRepository.findById(conversation.getAgentId())
+        UUID pinnedVersionId = conversation.getAgentProfileVersionId();
+        if (pinnedVersionId == null) {
+            throw new IllegalArgumentException("Conversation has no pinned profile version");
+        }
+        AgentProfileVersion profileVersion = agentProfileVersionService.findByIdWithTools(pinnedVersionId)
                 .orElseThrow(() -> new IllegalArgumentException(
-                        "Agent host not found: " + conversation.getAgentId()));
+                        "Pinned agent profile version not found: " + pinnedVersionId));
 
-        AgentProfileVersion profileVersion = agentProfileVersionService
-                .findPublished(agent.getProfileId()).orElse(null);
-
+        // §3.7/§16.1: the pinned version carries the whole behaviour contract
+        // (profile id, system prompt, tools). No host lookup — the host is
+        // needed at SEND time, not at input-assembly time, and a conversation
+        // with a pin but no bound host still assembles valid input.
         // Assemble session.open to extract the active tool names.
         SessionOpenPayload sessionOpen = sessionContextAssembler.assemble(
-                "CONVERSATION", conversationId, projectId, agent.getProfileId());
+                "CONVERSATION", conversationId, projectId, profileVersion.getProfileId());
 
         List<ConversationMessage> all = conversationService.listMessages(conversationId);
         List<ConversationMessage> active = all.stream()

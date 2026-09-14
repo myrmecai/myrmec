@@ -239,6 +239,16 @@ public class AgentProfileVersionService {
                 profileId, AgentProfileVersion.Status.PUBLISHED);
     }
 
+    /**
+     * Pinned version by id with tools eagerly loaded. Used by the
+     * conversation dispatch sticky path so the tool collection is
+     * initialized before the transaction closes (open-in-view off).
+     */
+    @Transactional(readOnly = true)
+    public Optional<AgentProfileVersion> findByIdWithTools(UUID versionId) {
+        return versionRepository.findByIdWithTools(versionId);
+    }
+
     /** All versions of a profile, newest first. */
     @Transactional(readOnly = true)
     public List<AgentProfileVersion> listVersions(UUID profileId) {

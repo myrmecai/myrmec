@@ -9,6 +9,7 @@ import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileRepository;
 import ai.myrmec.engine.agent.AgentProfileVersion;
+import ai.myrmec.engine.agent.AgentProfileVersionRepository;
 import ai.myrmec.engine.agent.AgentProfileVersionService;
 import ai.myrmec.engine.agent.AgentHostRepository;
 import ai.myrmec.engine.agent.AgentHostService;
@@ -96,6 +97,7 @@ public class ConversationTurnDispatcher {
     private final ConversationService conversationService;
     private final AgentHostRepository agentRepository;
     private final AgentProfileRepository agentProfileRepository;
+    private final AgentProfileVersionRepository agentProfileVersionRepository;
     private final AgentProfileVersionService agentProfileVersionService;
     private final AgentRepository agentInstanceRepository;
     private final AgentConnectionManager connectionManager;
@@ -145,6 +147,20 @@ public class ConversationTurnDispatcher {
             log.debug("No conversation socket attached for conv {} \u2014 nothing to cancel", conversationId);
         }
         return delivered;
+    }
+
+    /**
+     * §3.7: the profile comes from the conversation's pinned version (the
+     * assistant pin), never from the host. Legacy conversations without a
+     * pin cannot dispatch (graceful no-agent decline).
+     */
+    private Optional<AgentProfile> pinnedProfileOf(Conversation conversation) {
+        UUID pinnedVersionId = conversation.getAgentProfileVersionId();
+        if (pinnedVersionId == null) {
+            return Optional.empty();
+        }
+        return agentProfileVersionRepository.findByIdWithTools(pinnedVersionId)
+                .map(v -> agentProfileRepository.findById(v.getProfileId()).orElse(null));
     }
 
     /**
@@ -216,17 +232,18 @@ public class ConversationTurnDispatcher {
         }
         AgentHost agent = agentOpt.get();
 
-        Optional<AgentProfile> profileOpt = agentProfileRepository.findById(agent.getProfileId());
+        // §3.7/§16.1: the profile comes from the conversation's pinned version.
+        Optional<AgentProfile> profileOpt = pinnedProfileOf(conversation);
         if (profileOpt.isEmpty()) {
-            log.warn("Cannot dispatch turn — profile {} not found for conv {}",
-                    agent.getProfileId(), conversationId);
+            log.warn("Cannot dispatch turn — conversation {} has no pinned profile version",
+                    conversationId);
+            conversationNoticeService.emitNoAgentNotice(conversationId);
             return false;
         }
         AgentProfile profile = profileOpt.get();
-        // §16.1: the behaviour contract (system prompt, tools, default
-        // model) lives on the published version row.
-        AgentProfileVersion profileVersion = agentProfileVersionService
-                .findPublished(agent.getProfileId()).orElse(null);
+        UUID pinnedVersionId = conversation.getAgentProfileVersionId();
+        AgentProfileVersion profileVersion = agentProfileVersionRepository.findByIdWithTools(pinnedVersionId)
+                .orElse(null);
 
         // §9.5 sticky binding — if a worker is already BOUND to this
         // conversation (the previous turn kept it alive), skip the
@@ -309,7 +326,7 @@ public class ConversationTurnDispatcher {
         // Assemble session.open (sent once when worker binds)
         SessionOpenPayload sessionOpen = sessionContextAssembler.assemble(
                 "CONVERSATION", conversationId, conversation.getProjectId(),
-                agent.getProfileId());
+                profileVersion != null ? profileVersion.getProfileId() : profile.getId());
 
         // Build the inference request spec for the conversation transcript composer
         List<InferenceRequestSpec.HistoryEntry> history = historyEntries.stream()
@@ -408,12 +425,14 @@ public class ConversationTurnDispatcher {
     private boolean dispatchOverBoundSocket(Conversation conversation, AgentHost agent,
                                              AgentProfile profile, Agent boundInstance,
                                              UUID conversationId) {
-        // §16.1: the behaviour contract (system prompt, tools, default
-        // model) lives on the published version row. Use the eager-tools
-        // variant because the sticky path runs outside the original
-        // transaction and must read the tool collection before it closes.
-        AgentProfileVersion profileVersion = agentProfileVersionService
-                .findPublishedWithTools(agent.getProfileId()).orElse(null);
+        // §3.7/§16.1: the pinned version row carries the behaviour contract.
+        // Use the eager-tools variant because the sticky path runs outside
+        // the original transaction and must read the tool collection before
+        // it closes.
+        AgentProfileVersion profileVersion = conversation.getAgentProfileVersionId() != null
+                ? agentProfileVersionService.findByIdWithTools(conversation.getAgentProfileVersionId())
+                        .orElse(null)
+                : null;
         List<ConversationMessage> all = conversationService.listMessages(conversationId);
         List<ConversationMessage> active = all.stream()
                 .filter(m -> !m.isSuperseded())
@@ -544,16 +563,17 @@ public class ConversationTurnDispatcher {
         }
         AgentHost agent = agentOpt.get();
 
-        Optional<AgentProfile> profileOpt = agentProfileRepository.findById(agent.getProfileId());
+        // §3.7/§16.1: the profile comes from the conversation's pinned version.
+        Optional<AgentProfile> profileOpt = pinnedProfileOf(conversation);
         if (profileOpt.isEmpty()) {
-            log.warn("Cannot dispatch summary — profile {} not found for conv {}",
-                    agent.getProfileId(), conversationId);
+            log.warn("Cannot dispatch summary — conversation {} has no pinned profile version",
+                    conversationId);
             return false;
         }
         AgentProfile profile = profileOpt.get();
-        // §16.1: the behaviour contract lives on the published version.
-        AgentProfileVersion profileVersion = agentProfileVersionService
-                .findPublished(agent.getProfileId()).orElse(null);
+        UUID pinnedVersionId = conversation.getAgentProfileVersionId();
+        AgentProfileVersion profileVersion = agentProfileVersionRepository.findByIdWithTools(pinnedVersionId)
+                .orElse(null);
 
         UUID profileVersionId = profileVersion != null
                 ? profileVersion.getId() : profile.getId();

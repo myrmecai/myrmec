@@ -2,6 +2,10 @@ package ai.myrmec.engine.conversation;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine._system.exception.BadRequestException;
+import ai.myrmec.engine.agent.AgentHost;
+import ai.myrmec.engine.agent.AgentHostCreationResult;
+import ai.myrmec.engine.agent.AgentHostInstance;
+import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.assistant.Assistant;
 import ai.myrmec.engine.assistant.AssistantService;
@@ -44,6 +48,9 @@ class ConversationAssistantPinningIT extends IntegrationTestBase {
 
     @Autowired
     private ai.myrmec.engine.agent.AgentProfileVersionService agentProfileVersionService;
+
+    @Autowired
+    private AgentHostInstanceRepository instanceRepository;
 
     @Test
     void createConversationPinsPublishedAssistantVersion() {
@@ -99,21 +106,37 @@ class ConversationAssistantPinningIT extends IntegrationTestBase {
     }
 
     @Test
-    void createConversationResolvesActiveAgentHostFromAssistantProfile() {
+    void createConversationResolvesHostByCapacityNotProfile() {
         Project project = data.project().named("conv-host").create();
-        AgentProfile profile = data.agentProfile().named("conv-host-profile").create();
-        UUID hostId = data.agent().named("conv-host-agent")
-                .withProfile(profile).inProject(project).create().agent().getId();
+
+        // Two unrelated profiles so that a profile-bound selector cannot
+        // accidentally return the in-project host.
+        AgentProfile unrelatedProfile = data.agentProfile().named("conv-host-unrelated").create();
+        AgentProfile assistantProfile = data.agentProfile().named("conv-host-assistant").create();
+
+        // An unrelated, live but unscoped host — must NOT be chosen just
+        // because it shares a profile with the assistant.
+        AgentHost unrelatedHost = data.agent().named("conv-host-unrelated-agent")
+                .withProfile(unrelatedProfile).create().agent();
+        // The in-project host shares the assistant's profile only by
+        // coincidence; selection depends on capacity and project scope.
+        AgentHostCreationResult inProjectResult = data.agent().named("conv-host-inproject-agent")
+                .withProfile(assistantProfile).inProject(project).create();
+        AgentHost inProjectHost = inProjectResult.agent();
+
+        openInstance(unrelatedHost);
+        openInstance(inProjectHost);
+
         Assistant assistant = assistantService.createAssistant(
-                project.getId(), "Hosted Assistant", "desc", profile.getId(), TEST_ADMIN_ID);
+                project.getId(), "Hosted Assistant", "desc", assistantProfile.getId(), TEST_ADMIN_ID);
         versionService.publish(assistant.getId(), TEST_ADMIN_ID);
 
         Conversation conversation = conversationService.createConversation(
                 project.getId(), TEST_ADMIN_ID, "chat", null, null, assistant.getId());
 
-        // No explicit agentId was passed, so the runtime host is resolved from
-        // the assistant's pinned profile, enabling turn dispatch.
-        assertThat(conversation.getAgentId()).isEqualTo(hostId);
+        // §3.7: runtime host is selected by capacity (live + project scope),
+        // never by profile binding. The in-project live host wins.
+        assertThat(conversation.getAgentId()).isEqualTo(inProjectHost.getId());
     }
 
     @Test
@@ -170,4 +193,10 @@ class ConversationAssistantPinningIT extends IntegrationTestBase {
         assertThat(conversation.getAssistantVersionId()).isNull();
         assertThat(conversation.getAgentProfileVersionId()).isNull();
     }
+
+    private void openInstance(AgentHost host) {
+        instanceRepository.saveAndFlush(AgentHostInstance.open(
+                host, null, "dev-laptop", 1, java.util.Map.of("cpuCount", 2), "engine-node-1"));
+    }
+
 }

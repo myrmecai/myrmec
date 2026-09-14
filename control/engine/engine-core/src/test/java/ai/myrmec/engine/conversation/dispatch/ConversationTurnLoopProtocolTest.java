@@ -112,6 +112,15 @@ class ConversationTurnLoopProtocolTest extends IntegrationTestBase {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private ai.myrmec.engine.assistant.AssistantService assistantService;
+
+    @Autowired
+    private ai.myrmec.engine.assistant.AssistantVersionService assistantVersionService;
+
+    @Autowired
+    private ai.myrmec.engine.conversation.ConversationRepository conversationRepository;
+
     @Test
     void userMessagePostDispatchesTurnAndAgentReplyFansOutToViewer() throws Exception {
         // ---------- Arrange ----------
@@ -143,9 +152,20 @@ class ConversationTurnLoopProtocolTest extends IntegrationTestBase {
         connectionManager.register(instance.getId(), "loop-agent", agentSession);
 
         // Conversation pinned to the agent + admin participant for ACL.
+        // §3.7 cutover: the dispatcher resolves the profile from the
+        // conversation's pinned assistant version, never from the host —
+        // pin one (reusing the host's profile keeps this test's semantics).
+        ai.myrmec.engine.assistant.Assistant pinAssistant = assistantService.createAssistant(
+                project.getId(), "Loop Pin Assistant", "desc", profile.getId(), TEST_ADMIN_ID);
+        ai.myrmec.engine.assistant.AssistantVersion pinVersion =
+                assistantVersionService.publish(pinAssistant.getId(), TEST_ADMIN_ID);
         Conversation conv = conversationService.createConversation(
                 project.getId(), TEST_ADMIN_ID,
                 "loop conv", agent.getId(), null);
+        conv.setAssistantId(pinAssistant.getId());
+        conv.setAssistantVersionId(pinVersion.getId());
+        conv.setAgentProfileVersionId(pinVersion.getAgentProfileVersionId());
+        conversationRepository.save(conv);
         conversationService.addParticipant(
                 conv.getId(), TEST_ADMIN_ID, ConversationParticipant.Role.OWNER);
 

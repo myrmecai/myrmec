@@ -3,7 +3,7 @@ package ai.myrmec.engine.conversation;
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine.agent.AgentHost;
-import ai.myrmec.engine.agent.AgentHostRepository;
+import ai.myrmec.engine.agent.HostSelectionService;
 import ai.myrmec.engine.assistant.Assistant;
 import ai.myrmec.engine.assistant.AssistantRepository;
 import ai.myrmec.engine.assistant.AssistantVersion;
@@ -49,7 +49,7 @@ public class ConversationService {
     private final AuditEventService auditEventService;
     private final AssistantRepository assistantRepository;
     private final AssistantVersionRepository assistantVersionRepository;
-    private final AgentHostRepository agentHostRepository;
+    private final HostSelectionService hostSelectionService;
     @org.springframework.context.annotation.Lazy
     private final ai.myrmec.engine.agent.AgentRepository agentInstanceRepository;
     @org.springframework.context.annotation.Lazy
@@ -159,34 +159,14 @@ public class ConversationService {
         conversation.setAssistantVersionId(version.getId());
         conversation.setAgentProfileVersionId(version.getAgentProfileVersionId());
 
-        // The conversation needs a runtime AgentHost to dispatch turns, but the
-        // assistant only pins an agent *profile*. Resolve an active host for
-        // that profile (preferring one scoped to this project, then an
-        // unscoped/system host) when the caller did not pin one explicitly.
-        // Leaving it null is non-fatal â€” the session is created and the turn
+                // The conversation pins its profile VERSION from the assistant; the
+        // runtime host is now selected by capacity (§3.7), never by profile.
+        // Leaving it null is non-fatal — the session is created and the turn
         // dispatcher simply declines until a host becomes available.
-        if (conversation.getAgentId() == null && version.getAgentProfileId() != null) {
-            resolveActiveAgentHost(version.getAgentProfileId(), projectId)
-                    .ifPresent(conversation::setAgentId);
+        if (conversation.getAgentId() == null) {
+            hostSelectionService.selectForProject(projectId)
+                    .ifPresent(h -> conversation.setAgentId(h.getId()));
         }
-    }
-
-    /**
-     * Pick an active {@link AgentHost} for the given profile, preferring a host
-     * scoped to {@code projectId}, then a system-wide (unscoped) host, then any
-     * active host. Returns the host id, or empty when none are active.
-     */
-    private Optional<UUID> resolveActiveAgentHost(UUID profileId, UUID projectId) {
-        List<AgentHost> hosts = agentHostRepository.findActiveByProfileId(profileId);
-        if (hosts.isEmpty()) {
-            return Optional.empty();
-        }
-        return hosts.stream()
-                .filter(h -> projectId != null && projectId.equals(h.getProjectId()))
-                .findFirst()
-                .or(() -> hosts.stream().filter(h -> h.getProjectId() == null).findFirst())
-                .or(() -> hosts.stream().findFirst())
-                .map(AgentHost::getId);
     }
 
     @Transactional

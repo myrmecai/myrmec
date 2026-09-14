@@ -63,6 +63,8 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
     @Autowired ExecutionRegistry registry;
     @Autowired ExecutionInputAssembler executionInputAssembler;
     @Autowired ai.myrmec.engine.conversation.ConversationRepository conversationRepository;
+    @Autowired ai.myrmec.engine.assistant.AssistantService assistantService;
+    @Autowired ai.myrmec.engine.assistant.AssistantVersionService assistantVersionService;
 
     private final ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
@@ -132,6 +134,18 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
         conversationService.appendMessage(conversation.getId(),
                 ai.myrmec.engine.conversation.ConversationMessage.Role.USER,
                 "Hello, engine", TEST_ADMIN_ID, null);
+        // Pin an assistant profile version: the assembler resolves the profile
+        // from the pin (§3.7), never from the host. Mirror the pinning-IT flow.
+        ai.myrmec.engine.assistant.Assistant pinAssistant =
+                assistantService.createAssistant(project.getId(),
+                        "flow-assistant-" + System.nanoTime(), "flow",
+                        hostSetup.profile().getId(), TEST_ADMIN_ID);
+        ai.myrmec.engine.assistant.AssistantVersion pinnedVersion =
+                assistantVersionService.publish(pinAssistant.getId(), TEST_ADMIN_ID);
+        conversation.setAssistantId(pinAssistant.getId());
+        conversation.setAssistantVersionId(pinnedVersion.getId());
+        conversation.setAgentProfileVersionId(pinnedVersion.getAgentProfileVersionId());
+        conversationRepository.save(conversation);
         // Bind the conversation to the host — the assembler's cold path resolves
         // the profile from conversation.agentId's AgentHost, exactly as the
         // dispatcher does (ExecutionInputAssembler.buildLegacySpec reads
