@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="022-host-profile-drop-1" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <columnExists tableName="agent_hosts" columnName="profile_id"/>
+            </and>
+        </preConditions>
+        <dropForeignKeyConstraint baseTableName="agent_hosts"
+                                  constraintName="fk_agent_hosts_profile"/>
+        <dropIndex tableName="agent_hosts" indexName="idx_agent_hosts_profile_id"/>
+        <dropColumn tableName="agent_hosts" columnName="profile_id"/>
+    </changeSet>
+
+</databaseChangeLog>

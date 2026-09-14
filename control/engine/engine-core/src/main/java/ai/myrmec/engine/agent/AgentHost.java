@@ -41,14 +41,6 @@ public class AgentHost {
     private String description;
 
     /**
-     * Foreign key to agent_profiles table. Nullable (protocol §19.1):
-     * profiles bind at session time; the host no longer requires one.
-     * The admin API keeps requiring it until the cutover plan.
-     */
-    @Column(name = "profile_id")
-    private UUID profileId;
-
-    /**
      * Optional project scope. Null means system-wide.
      */
     @Column(name = "project_id")

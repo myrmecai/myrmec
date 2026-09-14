@@ -72,7 +72,6 @@ class CapabilityMatchContractTest extends IntegrationTestBase {
 
         AgentHost host = new AgentHost();
         host.setName("recon05-host-" + System.nanoTime());
-        host.setProfileId(profile.getId());
         host.setStatus(AgentHost.Status.ACTIVE);
         host.setRegistrationKey("recon05-regkey-" + System.nanoTime());
         host.setMaxAgents(1);

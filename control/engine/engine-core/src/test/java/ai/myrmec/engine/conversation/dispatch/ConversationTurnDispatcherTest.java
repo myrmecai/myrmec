@@ -162,15 +162,14 @@ class ConversationTurnDispatcherTest {
 
         AgentHost agent = new AgentHost();
         agent.setId(agentId);
-        agent.setProfileId(profileId);
 
         AgentProfile profile = new AgentProfile();
         profile.setId(profileId);
-        // §16.1: behaviour contract lives on the published version row.
+        // Â§16.1: behaviour contract lives on the published version row.
         UUID profileVersionId = UUID.randomUUID();
         pinConversation(conv, profileVersionId, profileId);
         AgentProfileVersion published = pinnedVersion("Profile default prompt.", null, profileVersionId, profileId);
-        // No defaultModel — dispatcher skips model resolution and ships null modelInfo.
+        // No defaultModel â€” dispatcher skips model resolution and ships null modelInfo.
 
         Agent instance = new Agent();
         instance.setId(instanceId);
@@ -231,7 +230,6 @@ class ConversationTurnDispatcherTest {
 
         AgentHost agent = new AgentHost();
         agent.setId(agentId);
-        agent.setProfileId(profileId);
 
         AgentProfile profile = new AgentProfile();
         profile.setId(profileId);
@@ -282,7 +280,6 @@ class ConversationTurnDispatcherTest {
 
         AgentHost agent = new AgentHost();
         agent.setId(agentId);
-        agent.setProfileId(profileId);
 
         AgentProfile profile = new AgentProfile();
         profile.setId(profileId);
@@ -353,7 +350,6 @@ class ConversationTurnDispatcherTest {
 
         AgentHost agent = new AgentHost();
         agent.setId(agentId);
-        agent.setProfileId(profileId);
 
         Agent instance = new Agent();
         instance.setId(instanceId);
@@ -411,7 +407,6 @@ class ConversationTurnDispatcherTest {
 
         AgentHost agent = new AgentHost();
         agent.setId(agentId);
-        agent.setProfileId(profileId);
 
         AgentProfile profile = new AgentProfile();
         profile.setId(profileId);
@@ -455,7 +450,7 @@ class ConversationTurnDispatcherTest {
         verify(inferenceRequestAssembler).assemble(captor.capture());
         List<InferenceRequestSpec.HistoryEntry> history = captor.getValue().getHistory();
 
-        // Window = [summary(@3), asst(@4), user(@5)] — the folded turns 0..2 are gone.
+        // Window = [summary(@3), asst(@4), user(@5)] â€” the folded turns 0..2 are gone.
         assertThat(history).hasSize(3);
         // The summary anchors the front, shipped as a SYSTEM entry with the label.
         assertThat(history.get(0).role()).isEqualTo("SYSTEM");
@@ -467,7 +462,7 @@ class ConversationTurnDispatcherTest {
         assertThat(history.get(2).content()).isEqualTo("fresh question");
     }
 
-    // ===================== #103 Slice A — native image PARTS ====================
+    // ===================== #103 Slice A â€” native image PARTS ====================
 
     @Test
     void imageAttachmentWithVisionModelGetsImagePartFlagAndReadPath() {
@@ -479,7 +474,7 @@ class ConversationTurnDispatcherTest {
         UUID attachmentId = UUID.randomUUID();
 
         Conversation conv = newConversation(conversationId, agentId);
-        AgentHost agent = newAgentHost(agentId, profileId);
+        AgentHost agent = newAgentHost(agentId);
         AgentProfile profile = new AgentProfile();
         profile.setId(profileId);
         UUID profileVersionId = UUID.randomUUID();
@@ -520,7 +515,7 @@ class ConversationTurnDispatcherTest {
         UUID attachmentId = UUID.randomUUID();
 
         Conversation conv = newConversation(conversationId, agentId);
-        AgentHost agent = newAgentHost(agentId, profileId);
+        AgentHost agent = newAgentHost(agentId);
         AgentProfile profile = new AgentProfile();
         profile.setId(profileId);
         UUID profileVersionId = UUID.randomUUID();
@@ -548,7 +543,7 @@ class ConversationTurnDispatcherTest {
         assertThat(d.inlineText()).isNull();
     }
 
-    // ============== #103 Slice B — inline-ratio threshold policy ===============
+    // ============== #103 Slice B â€” inline-ratio threshold policy ===============
 
     @Test
     void demotesAttachmentsThatBreachAggregateInlineBudget() {
@@ -561,7 +556,7 @@ class ConversationTurnDispatcherTest {
         UUID att2 = UUID.randomUUID();
 
         Conversation conv = newConversation(conversationId, agentId);
-        AgentHost agent = newAgentHost(agentId, profileId);
+        AgentHost agent = newAgentHost(agentId);
         AgentProfile profile = new AgentProfile();
         profile.setId(profileId);
         UUID profileVersionId = UUID.randomUUID();
@@ -595,7 +590,7 @@ class ConversationTurnDispatcherTest {
         assertThat(ds).hasSize(2);
         // First (upload order) is inlined within budget.
         assertThat(ds.get(0).inlineText()).isNotNull();
-        // Second breaches the aggregate budget → demoted to read-on-demand.
+        // Second breaches the aggregate budget â†’ demoted to read-on-demand.
         assertThat(ds.get(1).inlineText()).isNull();
         assertThat(ds.get(1).readContentPath())
                 .isEqualTo("/api/v1/agent/conversations/" + conversationId
@@ -613,7 +608,7 @@ class ConversationTurnDispatcherTest {
         UUID att2 = UUID.randomUUID();
 
         Conversation conv = newConversation(conversationId, agentId);
-        AgentHost agent = newAgentHost(agentId, profileId);
+        AgentHost agent = newAgentHost(agentId);
         AgentProfile profile = new AgentProfile();
         profile.setId(profileId);
         UUID profileVersionId = UUID.randomUUID();
@@ -644,9 +639,9 @@ class ConversationTurnDispatcherTest {
 
         List<InferenceRequestSpec.AttachmentDescriptor> ds = captureAttachments(conversationId);
         assertThat(ds).hasSize(2);
-        // Exactly at the ratio budget → inlined.
+        // Exactly at the ratio budget â†’ inlined.
         assertThat(ds.get(0).inlineText()).isNotNull();
-        // One token over → demoted.
+        // One token over â†’ demoted.
         assertThat(ds.get(1).inlineText()).isNull();
     }
 
@@ -660,7 +655,7 @@ class ConversationTurnDispatcherTest {
         UUID attachmentId = UUID.randomUUID();
 
         Conversation conv = newConversation(conversationId, agentId);
-        AgentHost agent = newAgentHost(agentId, profileId);
+        AgentHost agent = newAgentHost(agentId);
         AgentProfile profile = new AgentProfile();
         profile.setId(profileId);
         UUID profileVersionId = UUID.randomUUID();
@@ -692,12 +687,12 @@ class ConversationTurnDispatcherTest {
     // ----- shared fixtures for the #103 attachment tests -----
 
     /**
-     * §16.1: the behaviour contract (system prompt, default model) lives on
+     * Â§16.1: the behaviour contract (system prompt, default model) lives on
      * the published version row. Builds an in-memory version the mock
      * version service hands back for the profile under test.
      */
 
-    // §3.7/§16.1: every dispatchable conversation must carry a pinned profile version.
+    // Â§3.7/Â§16.1: every dispatchable conversation must carry a pinned profile version.
     private static void pinConversation(Conversation conv, UUID profileVersionId, UUID profileId) {
         conv.setAgentProfileVersionId(profileVersionId);
     }
@@ -726,10 +721,9 @@ class ConversationTurnDispatcherTest {
         return conv;
     }
 
-    private static AgentHost newAgentHost(UUID agentId, UUID profileId) {
+    private static AgentHost newAgentHost(UUID agentId) {
         AgentHost agent = new AgentHost();
         agent.setId(agentId);
-        agent.setProfileId(profileId);
         return agent;
     }
 
@@ -765,7 +759,7 @@ class ConversationTurnDispatcherTest {
                            UUID profileVersionId, AgentProfileVersion version) {
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
         when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findById(agent.getProfileId())).thenReturn(Optional.of(profile));
+        when(agentProfileRepository.findById(profile.getId())).thenReturn(Optional.of(profile));
         when(agentProfileVersionRepository.findByIdWithTools(profileVersionId)).thenReturn(Optional.of(version));
         when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
                 .thenReturn(List.of(instance));

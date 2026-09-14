@@ -185,17 +185,16 @@ public class AgentProfileService {
 
     /**
      * Deactivate an agent profile (soft delete).
+     *
+     * <p>Since the host-profile decoupling (D2), agent hosts no longer carry
+     * a {@code profileId}. Deactivation/ deletion of a profile is therefore
+     * no longer blocked by host bindings; any running instances are bound at
+     * session time through {@link Agent#getProfileVersionId()}.</p>
      */
     @Transactional
     public void deactivateProfile(UUID id) {
         AgentProfile profile = profileRepository.findById(id)
                 .orElseThrow(() -> ResourceNotFoundException.agentProfile(id));
-
-        // Check if any agents are using this profile
-        long agentCount = agentRepository.countByProfileId(id);
-        if (agentCount > 0) {
-            throw ResourceInUseException.blockedBy("Agent", (int) agentCount);
-        }
 
         profile.setStatus(AgentProfile.Status.INACTIVE);
         profileRepository.save(profile);
@@ -217,17 +216,14 @@ public class AgentProfileService {
 
     /**
      * Delete an agent profile (hard delete). Versions cascade.
+     *
+     * <p>Host-profile bindings were dropped by the D2 decoupling; there is no
+     * need to check host references before deletion.</p>
      */
     @Transactional
     public void deleteProfile(UUID id) {
         AgentProfile profile = profileRepository.findById(id)
                 .orElseThrow(() -> ResourceNotFoundException.agentProfile(id));
-
-        // Check if any agents are using this profile
-        long agentCount = agentRepository.countByProfileId(id);
-        if (agentCount > 0) {
-            throw ResourceInUseException.blockedBy("Agent", (int) agentCount);
-        }
 
         profileRepository.delete(profile);
         log.info("Deleted agent profile: {} ({})", profile.getName(), id);
@@ -235,10 +231,13 @@ public class AgentProfileService {
 
     /**
      * Get agents using a profile.
+     *
+     * @deprecated Hosts no longer bind to a profile; kept for API compatibility.
      */
+    @Deprecated
     @Transactional(readOnly = true)
     public List<AgentHost> getAgentsForProfile(UUID profileId) {
-        return agentRepository.findByProfileId(profileId);
+        return java.util.List.of();
     }
 
     private Set<String> toolCodesOf(AgentProfileVersion version) {

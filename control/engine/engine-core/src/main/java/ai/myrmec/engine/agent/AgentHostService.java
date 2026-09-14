@@ -45,7 +45,6 @@ public class AgentHostService {
 
     private final AgentHostRepository agentHostRepository;
     private final AgentRepository agentInstanceRepository;
-    private final AgentProfileRepository agentProfileRepository;
     private final ConversationRepository conversationRepository;
     private final ConversationEventService conversationEventService;
     private final NodeRegistryService nodeRegistryService;
@@ -242,15 +241,9 @@ public class AgentHostService {
             return agentHostRepository.save(host);
         }
 
-        UUID effectiveProfileId = resolveDefaultLocalProfileId();
-        if (!agentProfileRepository.existsById(effectiveProfileId)) {
-            throw ResourceNotFoundException.agentProfile(effectiveProfileId);
-        }
-
         AgentHost host = new AgentHost();
         host.setName(buildLocalHostName(userId, hostname));
         host.setDescription("Local IDE agent for user " + userId);
-        host.setProfileId(effectiveProfileId);
         // Project scope recorded at creation for governance display only;
         // reuse is per-user, so it is not updated on later registrations.
         host.setProjectId(projectId);
@@ -272,16 +265,6 @@ public class AgentHostService {
     private String buildLocalHostName(UUID userId, String hostname) {
         String suffix = hostname != null && !hostname.isBlank() ? hostname : "local";
         return "local-" + userId.toString().substring(0, 8) + "-" + suffix;
-    }
-
-    private static final UUID DEFAULT_LOCAL_PROFILE_ID =
-            UUID.fromString("6d7b8c9d-0e1f-4a2b-8c3d-9e4f5a6b7c8d");
-
-    private UUID resolveDefaultLocalProfileId() {
-        if (!agentProfileRepository.existsById(DEFAULT_LOCAL_PROFILE_ID)) {
-            throw new BadRequestException("Default local agent profile is not seeded");
-        }
-        return DEFAULT_LOCAL_PROFILE_ID;
     }
 
     // ========== Runtime Operations ==========

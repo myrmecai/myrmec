@@ -314,8 +314,6 @@ public class TestDataBuilder {
         private String name = "test-agent";
         private boolean autoSuffix = true;
         private String description = "Test agent";
-        private AgentProfile profile;
-        private UUID profileId;
         private UUID projectId;
         private String modelOverride;
         private Integer maxAgents = 1;
@@ -337,14 +335,29 @@ public class TestDataBuilder {
             return this;
         }
 
+        /**
+         * Deprecated no-op: agent hosts are profile-free since the
+         * 2026-09-11 host-profile decoupling (D2). Kept one cycle so
+         * existing test files calling {@code .withProfile(...)} keep
+         * compiling; will be removed in the next cleanup plan.
+         *
+         * @param profile ignored
+         * @return this builder
+         */
+        @Deprecated
         public AgentBuilder withProfile(AgentProfile profile) {
-            this.profile = profile;
-            this.profileId = profile.getId();
             return this;
         }
 
+        /**
+         * Deprecated no-op: agent hosts are profile-free since the
+         * 2026-09-11 host-profile decoupling (D2).
+         *
+         * @param profileId ignored
+         * @return this builder
+         */
+        @Deprecated
         public AgentBuilder withProfileId(UUID profileId) {
-            this.profileId = profileId;
             return this;
         }
 
@@ -369,11 +382,6 @@ public class TestDataBuilder {
         }
 
         public AgentHostCreationResult create() {
-            if (profileId == null) {
-                throw new IllegalStateException(
-                        "AgentBuilder requires a profile — call withProfile() or "
-                                + "withProfileId() before create()");
-            }
             String effectiveName = autoSuffix ? unique(name) : name;
             AgentHostCreationResult result = agentService.createAgent(
                     effectiveName,
@@ -383,10 +391,6 @@ public class TestDataBuilder {
                     null,
                     maxAgents
             );
-            // TODO Task 5: remove profileId from host entity; for Task 4 we
-            // still set it via reflection-equivalent assignment so existing
-            // profile-bound tests keep passing until the column is dropped.
-            result.agent().setProfileId(profileId);
             return new AgentHostCreationResult(
                     result.agent(), result.registrationKey(), result.pskKeyId(), result.pskBase64());
         }

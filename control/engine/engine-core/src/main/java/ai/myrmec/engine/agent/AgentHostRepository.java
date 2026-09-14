@@ -34,22 +34,6 @@ public interface AgentHostRepository extends JpaRepository<AgentHost, UUID> {
     List<AgentHost> findAllActive();
 
     /**
-     * Find all agents for a given profile.
-     */
-    List<AgentHost> findByProfileId(UUID profileId);
-
-    /**
-     * Count agents for a given profile.
-     */
-    long countByProfileId(UUID profileId);
-
-    /**
-     * Find active agents for a profile.
-     */
-    @Query("SELECT a FROM AgentHost a WHERE a.profileId = :profileId AND a.status = 'ACTIVE'")
-    List<AgentHost> findActiveByProfileId(@Param("profileId") UUID profileId);
-
-    /**
      * Find agent by its registration key.
      */
     Optional<AgentHost> findByRegistrationKey(String registrationKey);

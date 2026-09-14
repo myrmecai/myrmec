@@ -57,7 +57,6 @@ class TestDataBuilderIT extends IntegrationTestBase {
 
         AgentHost agent = result.agent();
         assertThat(agent.getId()).isNotNull();
-        assertThat(agent.getProfileId()).isEqualTo(profile.getId());
         assertThat(agent.getProjectId()).isEqualTo(project.getId());
         assertThat(result.registrationKey()).startsWith("myr_agent_");
         assertThat(agentRepository.findById(agent.getId())).isPresent();
