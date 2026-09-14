@@ -30,18 +30,29 @@ public class HostSelectionService {
     private final AgentHostInstanceRepository instanceRepository;
 
     /**
+     * Return all active hosts able to serve {@code projectId} in
+     * selection order: project-scoped hosts with live OPEN instances first,
+     * then unscoped live hosts. Empty when no candidate exists.
+     */
+    @Transactional(readOnly = true)
+    public List<AgentHost> selectCandidatesForProject(UUID projectId) {
+        List<AgentHost> active = agentHostRepository.findByStatus(AgentHost.Status.ACTIVE);
+        return active.stream()
+                .filter(this::hasLiveInstance)
+                .filter(h -> projectId == null || h.getProjectId() == null
+                        || projectId.equals(h.getProjectId()))
+                .sorted(java.util.Comparator.comparingInt((AgentHost h) -> score(h, projectId)))
+                .toList();
+    }
+
+    /**
      * Pick one active host able to serve {@code projectId}: live OPEN
      * instance required, project-scoped hosts preferred, then unscoped.
      * Empty when no candidate exists (callers treat as "no host online").
      */
     @Transactional(readOnly = true)
     public Optional<AgentHost> selectForProject(UUID projectId) {
-        List<AgentHost> active = agentHostRepository.findByStatus(AgentHost.Status.ACTIVE);
-        return active.stream()
-                .filter(this::hasLiveInstance)
-                .filter(h -> projectId == null || h.getProjectId() == null
-                        || projectId.equals(h.getProjectId()))
-                .min((a, b) -> score(a, projectId) - score(b, projectId));
+        return selectCandidatesForProject(projectId).stream().findFirst();
     }
 
     /**

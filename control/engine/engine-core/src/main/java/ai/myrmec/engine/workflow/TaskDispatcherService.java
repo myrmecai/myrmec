@@ -40,7 +40,9 @@ public class TaskDispatcherService {
 
     private final WorkflowTaskRepository taskRepository;
     private final WorkflowRequestRepository requestRepository;
-    private final AgentHostRepository agentRepository;
+    // §3.7: host candidates come from the capacity-based selector; the
+    // profile-keyed AgentHostRepository lookup is gone.
+    private final HostSelectionService hostSelectionService;
     private final AgentRepository agentInstanceRepository;
     private final AgentConnectionManager connectionManager;
     private final AgentWebSocketHandler webSocketHandler;
@@ -155,17 +157,19 @@ public class TaskDispatcherService {
         }
 
         UUID profileId = task.getAgentProfile().getId();
-        
-        // Find agents with matching profile
-        List<AgentHost> matchingAgents = agentRepository.findActiveByProfileId(profileId);
-        
-        if (matchingAgents.isEmpty()) {
-            log.debug("No active agents found for profile {}", profileId);
+        UUID projectId = task.getRequest().getWorkflow().getProject().getId();
+
+        // §3.7: host selection is capacity-based and project-preferring,
+        // never profile-keyed. The task still owns its profile binding.
+        List<AgentHost> candidates = hostSelectionService.selectCandidatesForProject(projectId);
+
+        if (candidates.isEmpty()) {
+            log.debug("No live hosts available for project {} (task profile {})", projectId, profileId);
             return;
         }
-        
+
         // Find an available agent instance (online, idle)
-        for (AgentHost agent : matchingAgents) {
+        for (AgentHost agent : candidates) {
             Optional<Agent> availableInstance = findAvailableInstance(agent.getId());
             
             if (availableInstance.isPresent()) {
@@ -320,10 +324,14 @@ public class TaskDispatcherService {
         // Affinity (§16.4): the coordinator instance if already selected.
         java.util.Optional<UUID> coordinator = affinityResolver.coordinatorOf(requestId);
 
-        UUID profileId = task.getAgentProfile().getId();
-        List<AgentHost> matchingAgents = agentRepository.findActiveByProfileId(profileId);
+        // §3.7: host candidates are capacity-based and project-preferring,
+        // never profile-keyed. The run's pinned Profile version rides the
+        // assignment (§16.2); the pinned-coordinator lookup is instance-based
+        // (findByIdIfAlive), so affinity semantics are unchanged.
+        UUID projectId = task.getRequest().getWorkflow().getProject().getId();
+        List<AgentHost> matchingAgents = hostSelectionService.selectCandidatesForProject(projectId);
         if (matchingAgents.isEmpty()) {
-            log.debug("No active agents found for profile {}", profileId);
+            log.debug("No live hosts available for orchestration run {} (project {})", requestId, projectId);
             return;
         }
 

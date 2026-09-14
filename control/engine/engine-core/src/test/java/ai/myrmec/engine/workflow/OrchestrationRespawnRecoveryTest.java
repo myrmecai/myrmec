@@ -260,6 +260,13 @@ class OrchestrationRespawnRecoveryTest extends IntegrationTestBase {
 
     private Agent idleInstanceFor(AgentHost host, String hostname,
                                   BlockingQueue<String> outbound) throws Exception {
+        // §3.7: the dispatcher's host selector requires a live OPEN
+        // AgentHostInstance row on the host — open one like
+        // AgentHostInstanceTest does.
+        agentHostInstanceRepository.saveAndFlush(
+                ai.myrmec.engine.agent.AgentHostInstance.open(
+                        host, null, hostname, 4,
+                        java.util.Map.of("cpuCount", 8), "engine-node-1"));
         Agent instance = new Agent();
         instance.setAgentHostId(host.getId());
         instance.setHostname(hostname);
@@ -299,6 +306,9 @@ class OrchestrationRespawnRecoveryTest extends IntegrationTestBase {
 
     @Autowired
     private ai.myrmec.engine.agent.AgentRepository agentInstanceRepository;
+
+    @Autowired
+    private ai.myrmec.engine.agent.AgentHostInstanceRepository agentHostInstanceRepository;
 
     /** Small Awaitility wrapper for post-handler status reads. */
     static final class AwaitilityHelper {
