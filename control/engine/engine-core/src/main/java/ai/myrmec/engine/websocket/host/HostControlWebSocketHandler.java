@@ -20,7 +20,26 @@ import ai.myrmec.engine.websocket.host.payload.SessionClosedPayload;
 import ai.myrmec.engine.websocket.host.payload.SessionOfferPayload;
 import ai.myrmec.engine.websocket.host.payload.SessionOpenedPayload;
 import ai.myrmec.engine.websocket.host.payload.SessionRejectPayload;
+import ai.myrmec.engine.conversation.ConversationMessage;
+import ai.myrmec.engine.conversation.ConversationService;
+import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
+import ai.myrmec.engine.inference.execution.ExecutionRegistry;
+import ai.myrmec.engine.inference.execution.SessionExecution;
+import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
+import ai.myrmec.engine.websocket.host.payload.ExecutionAcceptPayload;
+import ai.myrmec.engine.websocket.host.payload.ExecutionCancelledPayload;
+import ai.myrmec.engine.websocket.host.payload.ExecutionCompletePayload;
+import ai.myrmec.engine.websocket.host.payload.ExecutionDeltaPayload;
+import ai.myrmec.engine.websocket.host.payload.ExecutionEventPayload;
+import ai.myrmec.engine.websocket.host.payload.ExecutionFailedPayload;
+import ai.myrmec.engine.websocket.host.payload.ExecutionPausedPayload;
+import ai.myrmec.engine.websocket.host.payload.ExecutionRejectPayload;
+import ai.myrmec.engine.websocket.host.payload.ProtocolAckPayload;
+import ai.myrmec.engine.websocket.message.MessageType;
+import ai.myrmec.engine.websocket.message.WebSocketMessage;
+import ai.myrmec.engine.websocket.message.payload.MessageDeltaPayload;
 import ai.myrmec.engine.websocket.message.payload.SessionOpenPayload;
+import ai.myrmec.engine.workflow.OrchestrationEventIngestionService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -58,6 +77,11 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     private final SessionAllocator sessionAllocator;
     private final SessionContextAssembler sessionAssembler;
     private final SessionRepository sessionRepository;
+    private final ExecutionRegistry executionRegistry;
+    private final ConversationStreamBroker conversationStreamBroker;
+    private final ConversationService conversationService;
+    private final SessionExecutionRepository executionRepository;
+    private final OrchestrationEventIngestionService eventIngestionService;
 
     @Value("${myrmec.host.heartbeat-interval-seconds:15}")
     private int heartbeatIntervalSeconds;
@@ -83,7 +107,12 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                                        NodeRegistryService nodeRegistryService,
                                        SessionAllocator sessionAllocator,
                                        SessionContextAssembler sessionAssembler,
-                                       SessionRepository sessionRepository) {
+                                       SessionRepository sessionRepository,
+                                       ExecutionRegistry executionRegistry,
+                                       ConversationStreamBroker conversationStreamBroker,
+                                       ConversationService conversationService,
+                                       SessionExecutionRepository executionRepository,
+                                       OrchestrationEventIngestionService eventIngestionService) {
         this.objectMapper = objectMapper;
         this.agentHostRepository = agentHostRepository;
         this.instanceRepository = instanceRepository;
@@ -92,6 +121,11 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         this.sessionAllocator = sessionAllocator;
         this.sessionAssembler = sessionAssembler;
         this.sessionRepository = sessionRepository;
+        this.executionRegistry = executionRegistry;
+        this.conversationStreamBroker = conversationStreamBroker;
+        this.conversationService = conversationService;
+        this.executionRepository = executionRepository;
+        this.eventIngestionService = eventIngestionService;
     }
 
     /** Exposed for handler tests to assert registration. */
@@ -133,6 +167,17 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             case HostProtocol.SESSION_OPENED -> handleSessionOpened(session, envelope);
             case HostProtocol.SESSION_CLOSED -> handleSessionClosed(session, envelope);
             case HostProtocol.SESSION_OFFER, HostProtocol.SESSION_OPEN, HostProtocol.SESSION_CLOSE ->
+                    logEngineToHostIgnored(session, envelope);
+            case HostProtocol.EXECUTION_ACCEPT -> handleExecutionAccept(session, envelope);
+            case HostProtocol.EXECUTION_REJECT -> handleExecutionReject(session, envelope);
+            case HostProtocol.EXECUTION_DELTA -> handleExecutionDelta(session, envelope);
+            case HostProtocol.EXECUTION_EVENT -> handleExecutionEvent(session, envelope);
+            case HostProtocol.EXECUTION_COMPLETE -> handleExecutionComplete(session, envelope);
+            case HostProtocol.EXECUTION_FAILED -> handleExecutionFailed(session, envelope);
+            case HostProtocol.EXECUTION_PAUSED -> handleExecutionPaused(session, envelope);
+            case HostProtocol.EXECUTION_CANCELLED -> handleExecutionCancelled(session, envelope);
+            case HostProtocol.EXECUTION_START, HostProtocol.EXECUTION_CANCEL,
+                 HostProtocol.EXECUTION_POLICY_UPDATE ->
                     logEngineToHostIgnored(session, envelope);
             default ->
                     sendError(session, correlationId, HostProtocol.UNSUPPORTED_MESSAGE,
@@ -406,6 +451,20 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    /** §9: send session.close to the serving instance (after terminal recording). */
+    public void sendSessionClose(UUID sessionId, String reasonCode) {
+        ai.myrmec.engine.inference.Session session = sessionRepository.findById(sessionId).orElse(null);
+        if (session == null) return;
+        var socket = connectionManager.getSession(session.getHostInstanceId());
+        if (socket.isEmpty()) return;
+        HostProtocolEnvelope envelope = HostProtocolEnvelope.reply(
+                HostProtocol.SESSION_CLOSE, null,
+                Map.of("sessionId", sessionId, "reasonCode", reasonCode, "gracePeriodSeconds", 5),
+                objectMapper);
+        envelope.setSessionId(sessionId);
+        send(socket.get(), envelope);
+    }
+
     /**
      * §7.3: send the fully assembled session.open to the host that accepted
      * the session. Public so Plan 5's dispatch path can call it after accept.
@@ -441,6 +500,279 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                         new SessionOfferPayload.Requirements(List.of(), List.of(), List.of()),
                         new SessionOfferPayload.Lease(session.getOfferExpiresAt(), idleTimeoutSeconds),
                         new SessionOfferPayload.Routing(nodeRegistryService.getSelfNodeId(), null)),
+                objectMapper));
+    }
+
+    /** §8.2: host durably admitted the execution — STARTING→RUNNING. */
+    private void handleExecutionAccept(WebSocketSession session, HostProtocolEnvelope envelope) {
+        UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
+        if (instanceId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                    "execution.accept before host.opened", false, "EXECUTION", null);
+            return;
+        }
+        if (envelope.getExecutionId() == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "executionId is required", false, "EXECUTION", null);
+            return;
+        }
+        try {
+            var accept = objectMapper.treeToValue(envelope.getPayload(), ExecutionAcceptPayload.class);
+            boolean ok = executionRegistry.accept(envelope.getExecutionId(),
+                    accept.startedAt(), accept.resolvedModelId(),
+                    accept.dispatchId(), accept.assignmentDigest());
+            if (!ok) {
+                sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                        "execution.accept for a non-STARTING execution", false, "EXECUTION", null);
+            }
+        } catch (Exception e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "execution.accept payload invalid: " + e.getMessage(), false, "EXECUTION", null);
+        }
+    }
+
+    /** §8.2: host refused — STARTING→REJECTED. */
+    private void handleExecutionReject(WebSocketSession session, HostProtocolEnvelope envelope) {
+        UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
+        if (instanceId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                    "execution.reject before host.opened", false, "EXECUTION", null);
+            return;
+        }
+        if (envelope.getExecutionId() == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "executionId is required", false, "EXECUTION", null);
+            return;
+        }
+        try {
+            var reject = objectMapper.treeToValue(envelope.getPayload(), ExecutionRejectPayload.class);
+            boolean ok = executionRegistry.reject(envelope.getExecutionId());
+            if (!ok) {
+                sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                        "execution.reject for a non-STARTING execution", false, "EXECUTION", null);
+            }
+        } catch (Exception e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "execution.reject payload invalid: " + e.getMessage(), false, "EXECUTION", null);
+        }
+    }
+
+    /** §8.3: ephemeral delta — bridge to conversation viewers, no state, no ack. */
+    private void handleExecutionDelta(WebSocketSession session, HostProtocolEnvelope envelope) {
+        UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
+        if (instanceId == null) return;
+        if (envelope.getExecutionId() == null) {
+            log.debug("Dropping execution.delta without executionId");
+            return;
+        }
+        try {
+            var payload = objectMapper.treeToValue(envelope.getPayload(), ExecutionDeltaPayload.class);
+            SessionExecution execution = executionRepository.findById(envelope.getExecutionId()).orElse(null);
+            if (execution == null) {
+                log.debug("Dropping execution.delta for unknown execution {}", envelope.getExecutionId());
+                return;
+            }
+            if (!"CONVERSATION".equals(execution.getServiceType())) {
+                log.debug("Dropping execution.delta for non-conversation execution {}", envelope.getExecutionId());
+                return;
+            }
+            ai.myrmec.engine.inference.Session sess = sessionRepository.findById(execution.getSessionId()).orElse(null);
+            if (sess == null) return;
+            MessageDeltaPayload legacy = new MessageDeltaPayload();
+            legacy.setConversationId(sess.getRefId());
+            legacy.setSequenceNo(execution.getSequenceNo() == null ? 0L : execution.getSequenceNo());
+            legacy.setDeltaIndex(payload.index());
+            legacy.setContent(payload.content());
+            String jsonFrame = objectMapper.writeValueAsString(
+                    WebSocketMessage.of(MessageType.MESSAGE_DELTA, legacy));
+            conversationStreamBroker.broadcast(sess.getRefId(), jsonFrame);
+        } catch (Exception e) {
+            log.debug("Dropping execution.delta on parse failure: {}", e.getMessage());
+        }
+    }
+
+    /** §8.4: durable event — advance cursor + bridge to orchestration event ingestion. */
+    private void handleExecutionEvent(WebSocketSession session, HostProtocolEnvelope envelope) {
+        UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
+        if (instanceId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                    "execution.event before host.opened", false, "EXECUTION", null);
+            return;
+        }
+        if (envelope.getExecutionId() == null || envelope.getSequence() == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "executionId and sequence are required", false, "EXECUTION", null);
+            return;
+        }
+        try {
+            var payload = objectMapper.treeToValue(envelope.getPayload(), ExecutionEventPayload.class);
+            SessionExecution execution = executionRepository.findById(envelope.getExecutionId()).orElse(null);
+            if (execution == null) {
+                sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                        "execution.event for unknown execution", false, "EXECUTION", null);
+                return;
+            }
+            if ("WORKFLOW".equals(execution.getServiceType()) && execution.getDispatchId() != null) {
+                eventIngestionService.ingest(
+                        execution.getDispatchId(), payload.eventId(),
+                        envelope.getSequence().longValue(), payload.eventType(), payload.data());
+            } else {
+                log.debug("Ignoring execution.event for conversation execution {}", envelope.getExecutionId());
+            }
+            acknowledge(session, envelope.getMessageId(), execution.getSessionId(), envelope.getSequence().longValue());
+        } catch (Exception e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "execution.event payload invalid: " + e.getMessage(), false, "EXECUTION", null);
+        }
+    }
+
+    /** §8.5: terminal success. */
+    private void handleExecutionComplete(WebSocketSession session, HostProtocolEnvelope envelope) {
+        handleTerminal(session, envelope, SessionExecution.State.COMPLETED,
+                this::onConversationComplete, this::onOrchestrationOutcome);
+    }
+
+    /** §8.5: terminal failure. */
+    private void handleExecutionFailed(WebSocketSession session, HostProtocolEnvelope envelope) {
+        // A failure frame carries error, not result — the conversation
+        // complete-bridge would be a no-op on it, but wiring it there is
+        // semantically wrong; Task 4's ExecutionBridge.onConversationFailure
+        // owns the viewer notification.
+        handleTerminal(session, envelope, SessionExecution.State.FAILED,
+                this::onConversationFailure, this::onOrchestrationOutcome);
+    }
+
+    /** §8.6: terminal pause. */
+    private void handleExecutionPaused(WebSocketSession session, HostProtocolEnvelope envelope) {
+        handleTerminal(session, envelope, SessionExecution.State.PAUSED,
+                this::onConversationPaused, this::onOrchestrationPaused);
+    }
+
+    /** §8.8: terminal cancellation. */
+    private void handleExecutionCancelled(WebSocketSession session, HostProtocolEnvelope envelope) {
+        handleTerminal(session, envelope, SessionExecution.State.CANCELLED,
+                this::onConversationCancelled, this::onOrchestrationOutcome);
+    }
+
+    private void handleTerminal(WebSocketSession session, HostProtocolEnvelope envelope,
+                                SessionExecution.State terminalState,
+                                java.util.function.BiConsumer<SessionExecution, JsonNode> conversationBridge,
+                                java.util.function.BiConsumer<SessionExecution, JsonNode> orchestrationBridge) {
+        UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
+        if (instanceId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                    "execution.terminal before host.opened", false, "EXECUTION", null);
+            return;
+        }
+        if (envelope.getExecutionId() == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "executionId is required", false, "EXECUTION", null);
+            return;
+        }
+        try {
+            JsonNode payloadNode = envelope.getPayload();
+            Map<String, Object> payloadMap = objectMapper.convertValue(payloadNode, java.util.LinkedHashMap.class);
+            // §11.2: cancellation requires the CANCELLING mark before the terminal frame.
+            if (terminalState == SessionExecution.State.CANCELLED) {
+                executionRegistry.requestCancel(envelope.getExecutionId());
+            }
+            // Detect idempotent replay before the lock so we skip downstream bridges.
+            boolean isReplay = executionRepository.findById(envelope.getExecutionId())
+                    .map(e -> envelope.getMessageId().equals(e.getTerminalMessageId()))
+                    .orElse(false);
+            boolean ok = executionRegistry.terminal(envelope.getExecutionId(), terminalState,
+                    envelope.getMessageId(), payloadMap);
+            if (!ok) {
+                sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                        "execution.terminal for a non-RUNNING execution or conflicting terminal messageId",
+                        false, "EXECUTION", null);
+                return;
+            }
+            SessionExecution execution = executionRepository.findById(envelope.getExecutionId()).orElseThrow();
+            if (!isReplay) {
+                if ("CONVERSATION".equals(execution.getServiceType())) {
+                    conversationBridge.accept(execution, payloadNode);
+                } else if ("WORKFLOW".equals(execution.getServiceType())) {
+                    orchestrationBridge.accept(execution, payloadNode);
+                }
+            }
+            acknowledge(session, envelope.getMessageId(), execution.getSessionId(), 0L);
+            if (terminalState == SessionExecution.State.PAUSED) {
+                sessionAllocator.close(execution.getSessionId(), "EXECUTION_PAUSED");
+                sendSessionClose(execution.getSessionId(), "EXECUTION_PAUSED");
+            }
+        } catch (Exception e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "execution.terminal payload invalid: " + e.getMessage(), false, "EXECUTION", null);
+        }
+    }
+
+    private void onConversationComplete(SessionExecution execution, JsonNode payloadNode) {
+        ExecutionCompletePayload complete = objectMapper.convertValue(payloadNode, ExecutionCompletePayload.class);
+        if (complete == null || complete.result() == null) return;
+        ai.myrmec.engine.inference.Session sess = sessionRepository.findById(execution.getSessionId()).orElse(null);
+        if (sess == null) return;
+        String text = complete.result().content();
+        if (text == null || text.isBlank()) return;
+        ConversationMessage saved = conversationService.appendMessage(
+                sess.getRefId(), ConversationMessage.Role.ASSISTANT, text, null, null);
+        if (complete.usage() != null && complete.usage().modelId() != null) {
+            saved.setModelCode(complete.usage().modelId());
+        }
+        log.debug("Persisted assistant message {} for conversation {} from execution.complete",
+                saved.getId(), sess.getRefId());
+    }
+
+    private void onConversationPaused(SessionExecution execution, JsonNode payloadNode) {
+        ExecutionPausedPayload paused = objectMapper.convertValue(payloadNode, ExecutionPausedPayload.class);
+        if (paused == null || paused.conversationContinuation() == null) return;
+        ai.myrmec.engine.inference.Session sess = sessionRepository.findById(execution.getSessionId()).orElse(null);
+        if (sess == null) return;
+        String approvalRequestId = paused.conversationContinuation().approvalRequestId();
+        String pendingActionId = paused.conversationContinuation().pendingActionId();
+        String digest = paused.conversationContinuation().pendingActionDigest();
+        Map<String, Object> marker = new java.util.LinkedHashMap<>();
+        marker.put("approvalRequestId", approvalRequestId);
+        marker.put("pendingActionId", pendingActionId);
+        marker.put("pendingActionDigest", digest);
+        String payloadJson;
+        try {
+            payloadJson = objectMapper.writeValueAsString(marker);
+        } catch (Exception e) {
+            payloadJson = "{}";
+        }
+        conversationService.appendApprovalRequest(
+                sess.getRefId(), null,
+                "Approval required before continuing execution: " + pendingActionId,
+                payloadJson, null);
+        log.debug("Persisted approval request for conversation {} from execution.paused", sess.getRefId());
+    }
+
+    private void onConversationCancelled(SessionExecution execution, JsonNode payloadNode) {
+        // No transcript row for a cancelled conversation turn; the session close handles cleanup.
+    }
+
+    private void onConversationFailure(SessionExecution execution, JsonNode payloadNode) {
+        // Task 4: delegate to ExecutionBridge.onConversationFailure for viewer
+        // notification; until then a no-op seam.
+        log.debug("Conversation failure bridge not wired for execution {}", execution.getId());
+    }
+
+    private void onOrchestrationOutcome(SessionExecution execution, JsonNode payloadNode) {
+        // Task 4: delegate to ExecutionBridge; until then a no-op seam.
+        log.debug("Orchestration outcome bridge not wired for execution {}", execution.getId());
+    }
+
+    private void onOrchestrationPaused(SessionExecution execution, JsonNode payloadNode) {
+        // Task 4: delegate to ExecutionBridge for approval persistence; until then a no-op seam.
+        log.debug("Orchestration paused bridge not wired for execution {}", execution.getId());
+    }
+
+    /** §12.3: acknowledge a durable host→engine frame after its state is recorded. */
+    private void acknowledge(WebSocketSession session, String messageId, UUID sessionId, long sequence) {
+        long highest = executionRegistry.acknowledgeEventSequence(sessionId, sequence);
+        send(session, HostProtocolEnvelope.reply(HostProtocol.PROTOCOL_ACK, messageId,
+                new ProtocolAckPayload(messageId, highest, ProtocolAckPayload.STATUS_DURABLY_RECORDED),
                 objectMapper));
     }
 
