@@ -23,6 +23,14 @@ public interface SessionExecutionRepository extends JpaRepository<SessionExecuti
 
     Optional<SessionExecution> findByIdAndTerminalMessageIdIsNull(UUID id);
 
+    /** Per-session execution history newest-first (§8.1 conversation sequence assignment). */
+    List<SessionExecution> findBySessionIdOrderBySequenceNoDesc(UUID sessionId);
+
+    /** Pessimistic-lock lookup for exactly-once terminal transitions (§11.3.6). */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT e FROM SessionExecution e WHERE e.id = :id")
+    Optional<SessionExecution> findWithLockById(@Param("id") UUID id);
+
     /** All executions ever started on a session (§11.3.5 orchestration exactly-one check). */
     List<SessionExecution> findBySessionId(UUID sessionId);
 
