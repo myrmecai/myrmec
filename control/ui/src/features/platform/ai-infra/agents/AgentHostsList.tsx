@@ -5,7 +5,6 @@ import { useState, useMemo } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
 import {
   agentHostsApi,
-  agentProfilesApi,
   projectsApi,
   type AgentHost,
   type AgentHostWithKey,
@@ -13,7 +12,6 @@ import {
   type AgentWorkerStatus,
   type CreateAgentHostRequest,
   type UpdateAgentHostRequest,
-  type AgentProfile,
   type Project,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -77,11 +75,6 @@ export function AgentHostsList() {
     queryFn: agentHostsApi.list,
   })
 
-  const { data: profiles } = useQuery({
-    queryKey: ['agent-profiles', true],
-    queryFn: () => agentProfilesApi.list(true),
-  })
-
   const { data: projects } = useQuery({
     queryKey: ['projects'],
     queryFn: projectsApi.list,
@@ -137,11 +130,6 @@ export function AgentHostsList() {
           </div>
         </div>
       ),
-    },
-    {
-      accessorKey: 'profileName',
-      header: 'Profile',
-      cell: ({ row }) => <Badge variant="outline">{row.original.profileName || 'Unknown'}</Badge>,
     },
     {
       accessorKey: 'projectName',
@@ -276,7 +264,6 @@ export function AgentHostsList() {
           </DialogTrigger>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <AgentHostForm
-              profiles={profiles || []}
               projects={projects || []}
               onSubmit={(data) => createMutation.mutate(data)}
               isLoading={createMutation.isPending}
@@ -310,7 +297,6 @@ export function AgentHostsList() {
           {editAgentHost && (
             <AgentHostEditForm
               agentHost={editAgentHost}
-              profiles={profiles || []}
               projects={projects || []}
               onSubmit={(data) => updateMutation.mutate({ id: editAgentHost.id, data })}
               isLoading={updateMutation.isPending}
@@ -492,17 +478,15 @@ function HealthStat({
 }
 
 interface AgentHostFormProps {
-  profiles: AgentProfile[]
   projects: Project[]
   onSubmit: (data: CreateAgentHostRequest) => void
   isLoading: boolean
   error?: string
 }
 
-function AgentHostForm({ profiles, projects, onSubmit, isLoading, error }: AgentHostFormProps) {
+function AgentHostForm({ projects, onSubmit, isLoading, error }: AgentHostFormProps) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [profileId, setProfileId] = useState('')
   const [projectId, setProjectId] = useState<string>('')
   const [maxInstances, setMaxInstances] = useState('1')
 
@@ -511,7 +495,6 @@ function AgentHostForm({ profiles, projects, onSubmit, isLoading, error }: Agent
     onSubmit({
       name,
       description: description || undefined,
-      profileId,
       projectId: projectId || undefined,
       maxAgents: parseInt(maxInstances) || 1,
     })
@@ -553,26 +536,6 @@ function AgentHostForm({ profiles, projects, onSubmit, isLoading, error }: Agent
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="profile">Profile<RequiredMark /></Label>
-          <select
-            id="profile"
-            value={profileId}
-            onChange={(e) => setProfileId(e.target.value)}
-            required
-            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <option value="">Select a profile</option>
-            {profiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.name}
-              </option>
-            ))}
-          </select>
-          <p className="text-xs text-muted-foreground">
-            Profile defines agent capabilities and tools
-          </p>
-        </div>
-        <div className="space-y-2">
           <Label htmlFor="project">Project (optional)</Label>
           <select
             id="project"
@@ -603,7 +566,7 @@ function AgentHostForm({ profiles, projects, onSubmit, isLoading, error }: Agent
         </div>
       </div>
       <DialogFooter>
-        <Button type="submit" disabled={isLoading || !profileId}>
+        <Button type="submit" disabled={isLoading}>
           {isLoading ? 'Creating...' : 'Create Agent Host'}
         </Button>
       </DialogFooter>
@@ -613,17 +576,15 @@ function AgentHostForm({ profiles, projects, onSubmit, isLoading, error }: Agent
 
 interface AgentHostEditFormProps {
   agentHost: AgentHost
-  profiles: AgentProfile[]
   projects: Project[]
   onSubmit: (data: UpdateAgentHostRequest) => void
   isLoading: boolean
   error?: string
 }
 
-function AgentHostEditForm({ agentHost, profiles, projects, onSubmit, isLoading, error }: AgentHostEditFormProps) {
+function AgentHostEditForm({ agentHost, projects, onSubmit, isLoading, error }: AgentHostEditFormProps) {
   const [name, setName] = useState(agentHost.name)
   const [description, setDescription] = useState(agentHost.description || '')
-  const [profileId, setProfileId] = useState(agentHost.profileId)
   const [projectId, setProjectId] = useState(agentHost.projectId || '')
   const [maxInstances, setMaxInstances] = useState(String(agentHost.maxAgents))
   const [status, setStatus] = useState(agentHost.status)
@@ -633,7 +594,6 @@ function AgentHostEditForm({ agentHost, profiles, projects, onSubmit, isLoading,
     onSubmit({
       name,
       description: description || undefined,
-      profileId,
       projectId: projectId || undefined,
       maxAgents: parseInt(maxInstances) || 1,
       status,
@@ -670,21 +630,6 @@ function AgentHostEditForm({ agentHost, profiles, projects, onSubmit, isLoading,
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="edit-profile">Profile</Label>
-          <select
-            id="edit-profile"
-            value={profileId}
-            onChange={(e) => setProfileId(e.target.value)}
-            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {profiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.name}
-              </option>
-            ))}
-          </select>
         </div>
         <div className="space-y-2">
           <Label htmlFor="edit-project">Project</Label>

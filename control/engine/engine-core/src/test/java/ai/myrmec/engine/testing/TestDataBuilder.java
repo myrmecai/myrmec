@@ -375,15 +375,20 @@ public class TestDataBuilder {
                                 + "withProfileId() before create()");
             }
             String effectiveName = autoSuffix ? unique(name) : name;
-            return agentService.createAgent(
+            AgentHostCreationResult result = agentService.createAgent(
                     effectiveName,
                     description,
-                    profileId,
                     projectId,
                     modelOverride,
                     null,
                     maxAgents
             );
+            // TODO Task 5: remove profileId from host entity; for Task 4 we
+            // still set it via reflection-equivalent assignment so existing
+            // profile-bound tests keep passing until the column is dropped.
+            result.agent().setProfileId(profileId);
+            return new AgentHostCreationResult(
+                    result.agent(), result.registrationKey(), result.pskKeyId(), result.pskBase64());
         }
     }
 

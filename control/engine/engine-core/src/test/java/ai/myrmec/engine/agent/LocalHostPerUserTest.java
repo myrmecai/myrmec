@@ -58,8 +58,8 @@ class LocalHostPerUserTest extends IntegrationTestBase {
         ai.myrmec.engine.project.Project projectA = data.project().named("lh-a").create();
         ai.myrmec.engine.project.Project projectB = data.project().named("lh-b").create();
 
-        AgentHost first = agentHostService.upsertLocalAgentHost(user, projectA.getId(), null, "laptop-a");
-        AgentHost second = agentHostService.upsertLocalAgentHost(user, projectB.getId(), null, "laptop-b");
+        AgentHost first = agentHostService.upsertLocalAgentHost(user, projectA.getId(), "laptop-a");
+        AgentHost second = agentHostService.upsertLocalAgentHost(user, projectB.getId(), "laptop-b");
 
         assertThat(second.getId()).isEqualTo(first.getId());
         assertThat(first.getHostType()).isEqualTo(AgentHostType.LOCAL);
@@ -69,8 +69,8 @@ class LocalHostPerUserTest extends IntegrationTestBase {
     @Test
     void distinctUsersGetDistinctLocalHosts() {
         seedLocalDefaultProfile();
-        AgentHost userOne = agentHostService.upsertLocalAgentHost(UUID.randomUUID(), null, null, "laptop");
-        AgentHost userTwo = agentHostService.upsertLocalAgentHost(UUID.randomUUID(), null, null, "laptop");
+        AgentHost userOne = agentHostService.upsertLocalAgentHost(UUID.randomUUID(), null, "laptop");
+        AgentHost userTwo = agentHostService.upsertLocalAgentHost(UUID.randomUUID(), null, "laptop");
 
         assertThat(userOne.getId()).isNotEqualTo(userTwo.getId());
         assertThat(userOne.getHostType()).isEqualTo(AgentHostType.LOCAL);

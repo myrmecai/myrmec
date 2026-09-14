@@ -18,8 +18,6 @@ public class AgentResponse {
     private UUID id;
     private String name;
     private String description;
-    private UUID profileId;
-    private String profileName;
     private UUID projectId;
     private String projectName;
     private String modelOverride;
@@ -35,19 +33,17 @@ public class AgentResponse {
      * Convert entity to response DTO.
      */
     public static AgentResponse from(AgentHost agent) {
-        return from(agent, null, null, 0);
+        return from(agent, null, 0);
     }
 
     /**
-     * Convert entity to response DTO with profile and project names.
+     * Convert entity to response DTO with project name.
      */
-    public static AgentResponse from(AgentHost agent, String profileName, String projectName, int activeInstanceCount) {
+    public static AgentResponse from(AgentHost agent, String projectName, int activeInstanceCount) {
         return AgentResponse.builder()
                 .id(agent.getId())
                 .name(agent.getName())
                 .description(agent.getDescription())
-                .profileId(agent.getProfileId())
-                .profileName(profileName)
                 .projectId(agent.getProjectId())
                 .projectName(projectName)
                 .modelOverride(agent.getModelOverride())

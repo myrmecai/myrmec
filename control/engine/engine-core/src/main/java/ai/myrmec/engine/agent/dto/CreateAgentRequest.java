@@ -22,9 +22,6 @@ public class CreateAgentRequest {
     @Size(max = 2000, message = "Description cannot exceed 2000 characters")
     private String description;
 
-    @NotNull(message = "Profile ID is required")
-    private UUID profileId;
-
     /**
      * Optional project scope. Null means system-wide agent.
      */

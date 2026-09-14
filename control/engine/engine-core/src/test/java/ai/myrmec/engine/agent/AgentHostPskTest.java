@@ -42,7 +42,7 @@ class AgentHostPskTest extends IntegrationTestBase {
 
         AgentHostCreationResult created = agentHostService.createAgent(
                 "psk-host-" + System.nanoTime(), "PSK test host",
-                profileId, null, null, null, 1);
+                null, null, null, 1);
 
         // The response carries the one-time PSK material.
         assertThat(created.pskKeyId()).startsWith("psk-");
@@ -63,7 +63,7 @@ class AgentHostPskTest extends IntegrationTestBase {
         // Two hosts never share a PSK.
         AgentHostCreationResult other = agentHostService.createAgent(
                 "psk-host2-" + System.nanoTime(), "Second host",
-                profileId, null, null, null, 1);
+                null, null, null, 1);
         assertThat(other.pskKeyId()).isNotEqualTo(created.pskKeyId());
         assertThat(other.pskBase64()).isNotEqualTo(created.pskBase64());
     }

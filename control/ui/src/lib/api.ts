@@ -802,8 +802,6 @@ export interface AgentHost {
   id: string
   name: string
   description: string | null
-  profileId: string
-  profileName: string | null
   projectId: string | null
   projectName: string | null
   modelOverride: string | null
@@ -823,7 +821,6 @@ export interface AgentHostWithKey {
 export interface CreateAgentHostRequest {
   name: string
   description?: string
-  profileId: string
   projectId?: string
   modelOverride?: string
   config?: Record<string, unknown>
@@ -833,7 +830,6 @@ export interface CreateAgentHostRequest {
 export interface UpdateAgentHostRequest {
   name?: string
   description?: string
-  profileId?: string
   projectId?: string
   modelOverride?: string
   config?: Record<string, unknown>

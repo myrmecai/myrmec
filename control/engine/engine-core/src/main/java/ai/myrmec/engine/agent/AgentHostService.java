@@ -65,17 +65,12 @@ public class AgentHostService {
      * Create a new agent host with auto-generated registration key.
      */
     @Transactional
-    public AgentHostCreationResult createAgent(String name, String description, UUID profileId,
+    public AgentHostCreationResult createAgent(String name, String description,
                                            UUID projectId, String modelOverride,
                                            Map<String, Object> config, Integer maxAgents) {
         // Validate name uniqueness
         if (agentHostRepository.existsByName(name)) {
             throw new BadRequestException("Agent with name '" + name + "' already exists");
-        }
-
-        // Validate profile exists
-        if (!agentProfileRepository.existsById(profileId)) {
-            throw ResourceNotFoundException.agentProfile(profileId);
         }
 
         // Generate registration key
@@ -91,7 +86,6 @@ public class AgentHostService {
         AgentHost agent = new AgentHost();
         agent.setName(name);
         agent.setDescription(description);
-        agent.setProfileId(profileId);
         agent.setProjectId(projectId);
         agent.setRegistrationKey(registrationKey);
         agent.setModelOverride(modelOverride);
@@ -111,7 +105,7 @@ public class AgentHostService {
      * Update an existing agent host.
      */
     @Transactional
-    public AgentHost updateAgent(UUID agentId, String name, String description, UUID profileId,
+    public AgentHost updateAgent(UUID agentId, String name, String description,
                              UUID projectId, String modelOverride,
                              Map<String, Object> config, Integer maxAgents, AgentHost.Status status) {
         AgentHost agent = agentHostRepository.findById(agentId)
@@ -126,13 +120,6 @@ public class AgentHostService {
 
         if (description != null) {
             agent.setDescription(description);
-        }
-
-        if (profileId != null && !profileId.equals(agent.getProfileId())) {
-            if (!agentProfileRepository.existsById(profileId)) {
-                throw ResourceNotFoundException.agentProfile(profileId);
-            }
-            agent.setProfileId(profileId);
         }
 
         if (projectId != null) {
@@ -231,15 +218,12 @@ public class AgentHostService {
      * @param projectId project scope recorded at creation for governance
      *                  display only; reuse is per-user, so it is not updated
      *                  on later registrations
-     * @param profileId requested agent profile, or null to keep the existing
-     *                  profile or to fall back to a system default
      * @param hostname  host identity reported by the IDE extension (e.g. the
      *                  machine name or VS Code session id)
      * @return the local agent host definition (existing or newly created)
      */
     @Transactional
-    public AgentHost upsertLocalAgentHost(UUID userId, UUID projectId,
-                                          UUID profileId, String hostname) {
+    public AgentHost upsertLocalAgentHost(UUID userId, UUID projectId, String hostname) {
         if (userId == null) {
             throw new BadRequestException("userId is required for a local agent host");
         }
@@ -249,12 +233,6 @@ public class AgentHostService {
                 agentHostRepository.findByHostTypeAndOwnerUserId(AgentHostType.LOCAL, userId);
         if (existing.isPresent()) {
             AgentHost host = existing.get();
-            if (profileId != null && !profileId.equals(host.getProfileId())) {
-                if (!agentProfileRepository.existsById(profileId)) {
-                    throw ResourceNotFoundException.agentProfile(profileId);
-                }
-                host.setProfileId(profileId);
-            }
             if (hostname != null) {
                 host.setName(buildLocalHostName(userId, hostname));
             }
@@ -264,10 +242,7 @@ public class AgentHostService {
             return agentHostRepository.save(host);
         }
 
-        UUID effectiveProfileId = profileId;
-        if (effectiveProfileId == null) {
-            effectiveProfileId = resolveDefaultLocalProfileId();
-        }
+        UUID effectiveProfileId = resolveDefaultLocalProfileId();
         if (!agentProfileRepository.existsById(effectiveProfileId)) {
             throw ResourceNotFoundException.agentProfile(effectiveProfileId);
         }
@@ -304,7 +279,7 @@ public class AgentHostService {
 
     private UUID resolveDefaultLocalProfileId() {
         if (!agentProfileRepository.existsById(DEFAULT_LOCAL_PROFILE_ID)) {
-            throw new BadRequestException("Default local agent profile is not seeded; supply an explicit profileId");
+            throw new BadRequestException("Default local agent profile is not seeded");
         }
         return DEFAULT_LOCAL_PROFILE_ID;
     }

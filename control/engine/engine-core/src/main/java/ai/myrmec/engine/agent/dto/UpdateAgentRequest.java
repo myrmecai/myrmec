@@ -21,11 +21,6 @@ public class UpdateAgentRequest {
     private String description;
 
     /**
-     * Profile ID can be changed (agent role reassignment).
-     */
-    private UUID profileId;
-
-    /**
      * Project scope can be changed.
      */
     private UUID projectId;

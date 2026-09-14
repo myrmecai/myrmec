@@ -66,7 +66,7 @@ public class HostAuthService {
         if (userId == null) {
             throw new InvalidRegistrationKeyException("userId is required for local host registration");
         }
-        AgentHost host = agentHostService.upsertLocalAgentHost(userId, request.getProjectId(), null, hostname);
+        AgentHost host = agentHostService.upsertLocalAgentHost(userId, request.getProjectId(), hostname);
         return mintPair(host, "local");
     }
 

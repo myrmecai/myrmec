@@ -3,12 +3,12 @@
 
 package ai.myrmec.engine.agent;
 
-import ai.myrmec.engine._system.exception.ErrorResponse;
 import ai.myrmec.engine.agent.dto.AgentResponse;
 import ai.myrmec.engine.agent.dto.AgentWithKeyResponse;
 import ai.myrmec.engine.agent.dto.AgentWorkerResponse;
 import ai.myrmec.engine.agent.dto.CreateAgentRequest;
 import ai.myrmec.engine.agent.dto.UpdateAgentRequest;
+import ai.myrmec.engine._system.exception.ErrorResponse;
 import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.project.ProjectRepository;
 import io.swagger.v3.oas.annotations.Operation;
@@ -41,7 +41,6 @@ import java.util.stream.Collectors;
 public class AgentHostAdminController {
 
     private final AgentHostService agentHostService;
-    private final AgentProfileService profileService;
     private final ProjectRepository projectRepository;
 
     @Operation(summary = "List all agent hosts")
@@ -54,10 +53,6 @@ public class AgentHostAdminController {
     public ResponseEntity<List<AgentResponse>> listAgents() {
         List<AgentHost> agents = agentHostService.findAll();
 
-        // Fetch profile names
-        Map<UUID, String> profileNames = profileService.getAllProfiles().stream()
-                .collect(Collectors.toMap(AgentProfile::getId, AgentProfile::getName));
-
         // Fetch project names
         Map<UUID, String> projectNames = projectRepository.findAll().stream()
                 .collect(Collectors.toMap(Project::getId, Project::getName));
@@ -65,7 +60,6 @@ public class AgentHostAdminController {
         List<AgentResponse> responses = agents.stream()
                 .map(agent -> AgentResponse.from(
                         agent,
-                        profileNames.get(agent.getProfileId()),
                         agent.getProjectId() != null ? projectNames.get(agent.getProjectId()) : null,
                         agentHostService.countOnlineInstances(agent.getId())
                 ))
@@ -83,7 +77,6 @@ public class AgentHostAdminController {
     @GetMapping("/{id}")
     public ResponseEntity<AgentResponse> getAgent(@PathVariable UUID id) {
         AgentHost agent = agentHostService.getAgent(id);
-        AgentProfile profile = profileService.getProfile(agent.getProfileId());
         String projectName = null;
         if (agent.getProjectId() != null) {
             projectName = projectRepository.findById(agent.getProjectId())
@@ -92,7 +85,6 @@ public class AgentHostAdminController {
         }
         return ResponseEntity.ok(AgentResponse.from(
                 agent,
-                profile.getName(),
                 projectName,
                 agentHostService.countOnlineInstances(agent.getId())
         ));
@@ -129,14 +121,12 @@ public class AgentHostAdminController {
         AgentHostCreationResult result = agentHostService.createAgent(
                 request.getName(),
                 request.getDescription(),
-                request.getProfileId(),
                 request.getProjectId(),
                 request.getModelOverride(),
                 request.getConfig(),
                 request.getMaxAgents()
         );
 
-        AgentProfile profile = profileService.getProfile(result.agent().getProfileId());
         String projectName = null;
         if (result.agent().getProjectId() != null) {
             projectName = projectRepository.findById(result.agent().getProjectId())
@@ -144,7 +134,7 @@ public class AgentHostAdminController {
                     .orElse(null);
         }
 
-        AgentResponse agentResponse = AgentResponse.from(result.agent(), profile.getName(), projectName, 0);
+        AgentResponse agentResponse = AgentResponse.from(result.agent(), projectName, 0);
 
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(AgentWithKeyResponse.builder()
@@ -170,7 +160,6 @@ public class AgentHostAdminController {
                 id,
                 request.getName(),
                 request.getDescription(),
-                request.getProfileId(),
                 request.getProjectId(),
                 request.getModelOverride(),
                 request.getConfig(),
@@ -178,7 +167,6 @@ public class AgentHostAdminController {
                 request.getStatus()
         );
 
-        AgentProfile profile = profileService.getProfile(agent.getProfileId());
         String projectName = null;
         if (agent.getProjectId() != null) {
             projectName = projectRepository.findById(agent.getProjectId())
@@ -188,7 +176,6 @@ public class AgentHostAdminController {
 
         return ResponseEntity.ok(AgentResponse.from(
                 agent,
-                profile.getName(),
                 projectName,
                 agentHostService.countOnlineInstances(agent.getId())
         ));
