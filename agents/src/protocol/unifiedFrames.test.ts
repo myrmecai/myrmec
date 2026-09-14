@@ -118,7 +118,7 @@ describe("unified envelope", () => {
       payload: { poolSize: 3 },
     };
     const parsed = unifiedEnvelopeSchema.parse(frame);
-    const encoded = JSON.parse(encodeUnifiedFrame({ ...parsed, payload: parsed.payload as never }));
+    const encoded = JSON.parse(encodeUnifiedFrame(parsed as unknown as Parameters<typeof encodeUnifiedFrame>[0]));
     expect(encoded.messageId).toBe("m-rt");
   });
 });

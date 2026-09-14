@@ -80,7 +80,7 @@ export const unifiedEnvelopeSchema = z
     hostInstanceId: uuid.nullish(),
     sessionId: uuid.nullish(),
     executionId: uuid.nullish(),
-    sequence: z.number().int().nullable().default(null),
+    sequence: z.number().int().nullish(),
     payload: z.unknown(),
   })
   .passthrough();
