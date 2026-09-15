@@ -2,12 +2,12 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.inference;
 
-import ai.myrmec.engine.websocket.message.payload.InferenceMessage;
+import ai.myrmec.engine.inference.InferenceMessage;
 
 import java.util.List;
 
 /**
- * Transcript composer — the seam where workflow ≠ conversation (§6.3).
+ * Transcript composer â€” the seam where workflow â‰  conversation (Â§6.3).
  *
  * <p>Each implementation ports the agent's assembly logic byte-for-byte
  * into the engine. The resulting {@link InferenceMessage} list is the

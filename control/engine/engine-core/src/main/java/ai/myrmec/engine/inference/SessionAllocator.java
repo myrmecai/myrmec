@@ -15,8 +15,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -203,6 +205,35 @@ public class SessionAllocator {
     }
 
     /**
+     * §9 (P6-T6): a host instance's control socket died — close every
+     * not-yet-closed session it was serving with the given reason
+     * (callers pass {@code HOST_LOST}). Dev-phase semantics: no
+     * RECOVERING state; the rows close for real and the affected
+     * conversation/workflow re-offers a fresh session on the next turn /
+     * progression pass. Idempotent per session.
+     */
+    @Transactional
+    public int closeAllOnHostInstance(UUID hostInstanceId, String reasonCode) {
+        List<Session> open = sessionRepository.findAll().stream()
+                .filter(s -> hostInstanceId.equals(s.getHostInstanceId())
+                        && !ALLOC_STATE_CLOSED.equals(s.getAllocationState()))
+                .toList();
+        for (Session session : open) {
+            close(session.getId(), reasonCode);
+            Session locked = sessionRepository.findWithLockById(session.getId()).orElse(null);
+            if (locked != null) {
+                locked.setCloseReason(reasonCode);
+                sessionRepository.save(locked);
+            }
+        }
+        if (!open.isEmpty()) {
+            log.info("Host-lost: closed {} open session(s) on instance {} ({})",
+                    open.size(), hostInstanceId, reasonCode);
+        }
+        return open.size();
+    }
+
+    /**
      * §7.1: how many of an instance's pool slots are consumed (OFFERED +
      * INITIALIZING + ACTIVE). The dispatcher's capacity probe for host
      * selection; {@link #offer} re-checks the same condition under the
@@ -255,6 +286,37 @@ public class SessionAllocator {
         return stale.size();
     }
 
+    /**
+     * §9 (P6-T6) sweep body: reconcile sessions still OPEN on host instances
+     * that no longer exist (the close-path may have missed them — crash
+     * before the socket close handler ran, replica kill -9, …). Closes them
+     * with HOST_LOST so capacity returns and the next turn re-offers.
+     */
+    @Transactional
+    public int expireHostLostSessions() {
+        // Live = a row that is still OPEN. A CLOSED instance (socket died,
+        // close-path ran) or a vanished row (crash) both mean the host is
+        // gone and its sessions are leaked.
+        Set<UUID> liveInstanceIds = new HashSet<>();
+        instanceRepository.findByStatus(ai.myrmec.engine.agent.AgentHostInstance.Status.OPEN)
+                .forEach(i -> liveInstanceIds.add(i.getId()));
+
+        List<Session> leaked = sessionRepository.findAll().stream()
+                .filter(s -> s.getHostInstanceId() != null
+                        && !liveInstanceIds.contains(s.getHostInstanceId())
+                        && !ALLOC_STATE_CLOSED.equals(s.getAllocationState()))
+                .toList();
+        for (Session session : leaked) {
+            close(session.getId(), "HOST_LOST");
+            Session locked = sessionRepository.findWithLockById(session.getId()).orElse(null);
+            if (locked != null) {
+                locked.setCloseReason("HOST_LOST");
+                sessionRepository.save(locked);
+            }
+        }
+        return leaked.size();
+    }
+
     /** §12.2 scheduled sweep — disabled in e2e like the reaper. */
     @Scheduled(fixedDelayString = "${myrmec.host.allocation-sweep.interval-ms:15000}")
     public void sweepAllocation() {
@@ -263,8 +325,10 @@ public class SessionAllocator {
         }
         int expiredOffers = expireOffers(Instant.now());
         int expiredLeases = expireIdleLeases(Instant.now());
-        if (expiredOffers + expiredLeases > 0) {
-            log.info("Allocation sweep: {} offers, {} leases expired", expiredOffers, expiredLeases);
+        int hostLost = expireHostLostSessions();
+        if (expiredOffers + expiredLeases + hostLost > 0) {
+            log.info("Allocation sweep: {} offers, {} leases, {} host-lost sessions expired",
+                    expiredOffers, expiredLeases, hostLost);
         }
     }
 

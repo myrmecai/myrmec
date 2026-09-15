@@ -10,49 +10,31 @@ import java.util.function.BiConsumer;
 /**
  * Unified cross-node transport SPI (agent-concurrency §9.8).
  *
- * <p>All inter-instance communication — both point-to-point control frames
- * and fan-out streaming frames — routes through this single seam. The OSS
- * implementation ({@link DirectRpcNodeTransport}) uses direct HTTP RPC for
- * both paths; EE deployments can provide a Redis-backed bean that handles
+ * <p>All inter-instance communication routes through this single seam.
+ * The OSS implementation ({@link DirectRpcNodeTransport}) uses direct
+ * HTTP RPC; EE deployments can provide a Redis-backed bean that handles
  * both patterns through a single integration point.</p>
  *
- * <h3>Two delivery patterns, one SPI</h3>
+ * <h3>Delivery pattern</h3>
  * <ul>
- *   <li><b>Point-to-point</b> ({@link #sendToNode}): deliver a control
- *       frame to a specific agent instance on a specific home node.
- *       Returns {@code true} if the frame was handed off for delivery.</li>
  *   <li><b>Fan-out</b> ({@link #publishToPeers}): deliver a streaming
  *       frame to all peer instances that have subscribers for a
- *       conversation. Fire-and-forget — local delivery already happened.</li>
+ *       conversation. Fire-and-forget — local delivery already
+ *       happened.</li>
  * </ul>
+ *
+ * <p><b>Unified protocol (P6-T6):</b> the legacy point-to-point control
+ * leg ({@code sendToNode}) died with the legacy agent wire — a replica
+ * that loses a host socket reconciles through durable session state, so
+ * there is no control-frame relay to re-implement.</p>
  *
  * <h3>EE integration</h3>
  * <p>EE provides a single {@code NodeTransport} bean (e.g. Redis pub/sub
- * for fan-out + Redis reliable queue for point-to-point). The
- * {@code @ConditionalOnMissingBean(NodeTransport.class)} guard on the OSS
- * {@link DirectRpcNodeTransport} yields when an EE bean is present.</p>
- *
- * <h3>Revert to old split SPIs</h3>
- * <p>To revert: restore {@code AgentTransport} + {@code ConversationStreamFanout}
- * as separate interfaces, restore their respective implementations, and
- * update the three call sites ({@code AgentWebSocketHandler.route()},
- * {@code ConversationStreamBroker.broadcast()},
- * {@code ConversationTurnDispatcher}) to use the split interfaces.</p>
+ * for fan-out). The {@code @ConditionalOnMissingBean(NodeTransport.class)}
+ * guard on the OSS {@link DirectRpcNodeTransport} yields when an EE
+ * bean is present.</p>
  */
 public interface NodeTransport {
-
-    /**
-     * Point-to-point: deliver a control message to {@code agentInstanceId},
-     * whose conversation socket is homed on {@code homeNodeId}.
-     *
-     * @param homeNodeId      replica that owns the worker's socket; {@code null}
-     *                        (unbound worker) or this replica's own id means
-     *                        deliver in-process
-     * @param agentInstanceId target worker
-     * @param message         control message to deliver
-     * @return {@code true} if the message was handed off for delivery
-     */
-    boolean sendToNode(String homeNodeId, UUID agentInstanceId, WebSocketMessage<?> message);
 
     /**
      * Fan-out: publish a streaming frame so peer instances can deliver it

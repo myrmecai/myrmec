@@ -35,6 +35,9 @@ public interface AgentHostInstanceRepository extends JpaRepository<AgentHostInst
     /** Instance history — newest run first (restart timeline, design §3.2a). */
     List<AgentHostInstance> findByAgentHostIdOrderByOpenedAtDesc(UUID agentHostId);
 
+    /** §9 (P6-T6): every OPEN instance across hosts — the host-lost sweep's liveness set. */
+    List<AgentHostInstance> findByStatus(AgentHostInstance.Status status);
+
     /** §7.1 atomic reservation: allocation locks the instance row. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT i FROM AgentHostInstance i WHERE i.id = :id")

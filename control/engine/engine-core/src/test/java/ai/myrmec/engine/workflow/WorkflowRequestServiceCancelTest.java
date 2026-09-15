@@ -5,7 +5,11 @@ package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine.agent.Agent;
 import ai.myrmec.engine.agent.AgentProfileRepository;
-import ai.myrmec.engine.websocket.AgentWebSocketHandler;
+import ai.myrmec.engine.inference.Session;
+import ai.myrmec.engine.inference.SessionRepository;
+import ai.myrmec.engine.inference.execution.ExecutionCommandSender;
+import ai.myrmec.engine.inference.execution.SessionExecution;
+import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -23,6 +27,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -50,7 +55,9 @@ class WorkflowRequestServiceCancelTest {
     @Mock private AgentProfileRepository agentProfileRepository;
     @Mock private ai.myrmec.engine.user.UserRepository userRepository;
     @Mock private ai.myrmec.engine.spi.quota.QuotaPolicyEngine quotaPolicyEngine;
-    @Mock private AgentWebSocketHandler webSocketHandler;
+    @Mock private SessionRepository sessionRepository;
+    @Mock private SessionExecutionRepository executionRepository;
+    @Mock private ExecutionCommandSender executionCommandSender;
     @Mock private TaskAttemptRepository taskAttemptRepository;
 
     @InjectMocks private WorkflowRequestService service;
@@ -101,11 +108,12 @@ class WorkflowRequestServiceCancelTest {
         assertThat(response.status()).isEqualTo(RequestStatus.CANCELLED);
         assertThat(task.getStatus()).isEqualTo(TaskStatus.CANCELLED);
         assertThat(task.getCompletedAt()).isNotNull();
-        verify(webSocketHandler, never()).cancelTask(any(), any(), any());
+        // Never dispatched → no session, no cancel frame.
+        verify(executionCommandSender, never()).cancel(any(), any(), any(), any(), anyInt());
     }
 
     @Test
-    void cancelRunningRequestCancelsRunningTaskAndSendsTaskCancel() {
+    void cancelRunningRequestCancelsRunningTaskAndRelaysExecutionCancel() {
         WorkflowTask task = createTask(TaskStatus.RUNNING);
         Agent agentInstance = new Agent();
         agentInstance.setId(UUID.randomUUID());
@@ -115,6 +123,16 @@ class WorkflowRequestServiceCancelTest {
         attempt.setId(UUID.randomUUID());
         attempt.setStatus(AttemptStatus.RUNNING);
 
+        // Unified protocol (P6-T6): the cancel relay resolves the task's
+        // WORKFLOW session by requestId, then the in-flight execution.
+        Session session = new Session();
+        session.setId(UUID.randomUUID());
+        SessionExecution inFlight = new SessionExecution();
+        inFlight.setId(UUID.randomUUID());
+        inFlight.setSessionId(session.getId());
+        inFlight.setServiceType("WORKFLOW");
+        inFlight.setState(SessionExecution.State.RUNNING);
+
         when(requestRepository.findById(requestId)).thenReturn(Optional.of(request));
         when(requestRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(taskRepository.findByRequestId(requestId)).thenReturn(List.of(task));
@@ -122,6 +140,11 @@ class WorkflowRequestServiceCancelTest {
         when(taskAttemptRepository.findFirstByTaskIdOrderByAttemptNumberDesc(task.getId()))
                 .thenReturn(Optional.of(attempt));
         when(taskAttemptRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(sessionRepository.findByRefIdAndServiceType(requestId, "WORKFLOW"))
+                .thenReturn(Optional.of(session));
+        when(executionRepository.findWithLockBySessionIdAndStateIn(
+                org.mockito.ArgumentMatchers.eq(session.getId()), any()))
+                .thenReturn(List.of(inFlight));
 
         service.cancel(requestId);
 
@@ -129,14 +152,14 @@ class WorkflowRequestServiceCancelTest {
         assertThat(task.getStatus()).isEqualTo(TaskStatus.CANCELLED);
         assertThat(attempt.getStatus()).isEqualTo(AttemptStatus.ABANDONED);
 
-        // Verify cancelTask was sent with the correct agent instance and task ID.
-        ArgumentCaptor<UUID> agentCaptor = ArgumentCaptor.forClass(UUID.class);
-        ArgumentCaptor<UUID> taskCaptor = ArgumentCaptor.forClass(UUID.class);
-        ArgumentCaptor<String> reasonCaptor = ArgumentCaptor.forClass(String.class);
-        verify(webSocketHandler).cancelTask(agentCaptor.capture(), taskCaptor.capture(), reasonCaptor.capture());
-        assertThat(agentCaptor.getValue()).isEqualTo(agentInstance.getId());
-        assertThat(taskCaptor.getValue()).isEqualTo(task.getId());
-        assertThat(reasonCaptor.getValue()).contains("cancelled");
+        // §8.8: execution.cancel relayed on the unified host socket with
+        // USER_CANCEL + grace period.
+        verify(executionCommandSender).cancel(
+                org.mockito.ArgumentMatchers.eq(inFlight.getId()),
+                org.mockito.ArgumentMatchers.eq(session),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.eq("USER_CANCEL"),
+                org.mockito.ArgumentMatchers.anyInt());
     }
 
     @Test
@@ -152,8 +175,8 @@ class WorkflowRequestServiceCancelTest {
 
         assertThat(request.getStatus()).isEqualTo(RequestStatus.CANCELLED);
         assertThat(task.getStatus()).isEqualTo(TaskStatus.CANCELLED);
-        // No agent to notify for a PAUSED task.
-        verify(webSocketHandler, never()).cancelTask(any(), any(), any());
+        // No in-flight execution to notify for a PAUSED task.
+        verify(executionCommandSender, never()).cancel(any(), any(), any(), any(), anyInt());
     }
 
     @Test

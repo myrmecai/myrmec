@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import type { TurnExecutor } from "../executor/TurnExecutor.js";
 import type { Tool } from "../executor/types.js";
 import type { ChatModelFactory } from "../executor/providers.js";
-import type { ModelInfoWire } from "../protocol/taskFrames.js";
+import type { ModelInfoWire } from "../protocol/sessionTypes.js";
 import type { Task, TaskResult } from "../models/index.js";
 import type {
   OrchestrationAssignment,

@@ -14,19 +14,11 @@
  */
 import { MessageType } from "../protocol/messages.js";
 import { makeEnvelope } from "../protocol/envelope.js";
-import {
-  agentBindPayloadSchema,
-  agentReleasePayloadSchema,
-} from "../protocol/agentFrames.js";
 import type { Logger } from "../models/index.js";
 import { InferenceExecutor } from "../executor/InferenceExecutor.js";
 import { SessionRegistry } from "../session/SessionRegistry.js";
 import { ApprovalCoordinator } from "../executor/ApprovalCoordinator.js";
-import type {
-  SessionOpenPayload,
-  InferenceAssignPayload,
-  InferenceCancelPayload,
-} from "../protocol/inferenceFrames.js";
+import type { SessionOpenPayload } from "../protocol/unifiedFrames.js";
 import type {
   ExecutionCancelPayload,
   ExecutionStartPayload,
@@ -175,25 +167,10 @@ export class AgentWorker {
       case "execution.cancel":
         this.handleExecutionCancel(frame.payload as ExecutionCancelPayload);
         return;
-      // Legacy inference frames are still accepted inbound until the
-      // engine cutover lands (Tasks 4–5), but outbound emissions are
-      // unified execution.* frames.
-      case MessageType.INFERENCE_ASSIGN:
-        await this.handleInferenceAssign(frame.payload as InferenceAssignPayload);
-        return;
-      case MessageType.INFERENCE_CANCEL:
-        this.handleInferenceCancel(frame.payload as InferenceCancelPayload);
-        return;
       case MessageType.APPROVAL_DECISION:
         // Approval decisions are routed to the InferenceExecutor's
         // internal ApprovalCoordinator.
         this.inference.handleApprovalDecision(frame.payload);
-        return;
-      case MessageType.AGENT_BIND:
-        this.handleBind(frame.payload);
-        return;
-      case MessageType.AGENT_RELEASE:
-        this.handleRelease(frame.payload);
         return;
       // ── Feature 10: orchestration (§16.3) ──
       case MessageType.ORCHESTRATION_RELEASE:
@@ -214,47 +191,10 @@ export class AgentWorker {
     }
   }
 
-  /** Map a legacy `inference.assign` payload to a unified `ExecutionStartPayload`. */
-  private legacyAssignToExecutionStart(payload: InferenceAssignPayload): ExecutionStartPayload {
-    return {
-      executionId: payload.requestId,
-      sessionId: payload.sessionId,
-      sequenceNo: payload.response.sequenceNo,
-      requestId: payload.requestId,
-      deadline: new Date(Date.now() + 300_000).toISOString(),
-      input: {
-        messages: payload.messages.map((m) => ({
-          role: m.role,
-          content: m.content ?? null,
-          parts: m.parts?.map((p) => ({
-            type: p.type,
-            text: p.text ?? null,
-            attachmentId: p.attachmentId ?? null,
-            mediaType: p.mediaType ?? null,
-            readContentPath: p.readContentPath ?? null,
-          })) ?? null,
-          toolCalls: m.toolCalls?.map((tc) => ({
-            id: tc.id,
-            name: tc.name,
-            args: tc.args,
-          })) ?? null,
-        })),
-        attachments: null,
-        conversationContinuation: null,
-      },
-      toolPolicy: {
-        activeToolNames: payload.activeToolNames,
-        approvalMode: null,
-      },
-      output: {
-        stream: payload.stream,
-        responseSequenceNo: payload.response.sequenceNo,
-        format: "TEXT",
-      },
-    };
-  }
-
-  /** `execution.start` — unified dispatch entry point. */
+  /**
+   * `session.open` (§5.2) — establish a session: instantiate the model once,
+   * register tools, store knowledge-source handles.
+   */
   private async handleExecutionStart(payload: ExecutionStartPayload): Promise<void> {
     const orchestration = (payload as unknown as { orchestration?: unknown }).orchestration;
     if (orchestration !== undefined && orchestration !== null) {
@@ -285,26 +225,6 @@ export class AgentWorker {
   }
 
   /**
-   * `inference.assign` — legacy dispatch. An orchestration payload routes to
-   * the orchestration executor (§16.3); ordinary inference is mapped onto
-   * the unified `execution.start` path.
-   */
-  private async handleInferenceAssign(payload: InferenceAssignPayload): Promise<void> {
-    await this.handleExecutionStart(this.legacyAssignToExecutionStart(payload));
-  }
-
-  /** `inference.cancel` — legacy cancellation mapped onto `execution.cancel`. */
-  private handleInferenceCancel(payload: InferenceCancelPayload): void {
-    this.handleExecutionCancel({
-      executionId: payload.requestId,
-      dispatchId: payload.requestId,
-      reasonCode: "USER_REQUEST",
-      requestedAt: new Date().toISOString(),
-      gracePeriodSeconds: 5,
-    });
-  }
-
-  /**
    * `session.open` (§5.2) — establish a session: instantiate the model once,
    * register tools, store knowledge-source handles.
    */
@@ -326,43 +246,5 @@ export class AgentWorker {
     if (p.sessionId) {
       this.sessions.close(p.sessionId);
     }
-  }
-
-  /**
-   * `agent.bind` — the engine reserved this worker for a conversation.
-   * Slice 3b validates + records the binding at the dispatch seam; acting
-   * on it (attaching the dedicated conversation socket) lands with node
-   * addressing in a later slice.
-   */
-  private handleBind(payload: unknown): void {
-    const parsed = agentBindPayloadSchema.safeParse(payload);
-    if (!parsed.success) {
-      this.log.warn("AgentWorker: invalid agent.bind payload", parsed.error.issues);
-      return;
-    }
-    this.log.debug(
-      "AgentWorker: bound to conversation",
-      parsed.data.conversationId,
-      "profileVersion",
-      parsed.data.profileVersionId,
-    );
-  }
-
-  /**
-   * `agent.release` — the engine tore this worker's binding down. Slice 3b
-   * validates + logs; dropping conversation state lands with the dedicated
-   * conversation socket in a later slice.
-   */
-  private handleRelease(payload: unknown): void {
-    const parsed = agentReleasePayloadSchema.safeParse(payload);
-    if (!parsed.success) {
-      this.log.warn("AgentWorker: invalid agent.release payload", parsed.error.issues);
-      return;
-    }
-    this.log.debug(
-      "AgentWorker: released from conversation",
-      parsed.data.conversationId,
-      parsed.data.reason ?? "",
-    );
   }
 }

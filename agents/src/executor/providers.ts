@@ -25,8 +25,8 @@
  * resolve the correct implementation from a {@link ProviderConfig}.
  */
 import type { ChatModel, SessionTool, Tool, RiskClass } from "./types.js";
-import type { ModelInfoWire } from "../protocol/taskFrames.js";
-import type { ToolDefinition } from "../protocol/inferenceFrames.js";
+import type { ModelInfoWire } from "../protocol/sessionTypes.js";
+import type { ToolDefinition } from "../protocol/sessionTypes.js";
 import { resolveChatModel } from "../models/resolveModel.js";
 
 // ── Interfaces ────────────────────────────────────────────────────────

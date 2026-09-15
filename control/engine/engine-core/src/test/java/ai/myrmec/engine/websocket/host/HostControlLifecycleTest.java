@@ -9,6 +9,7 @@ import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.testing.TestDataBuilder;
+import ai.myrmec.engine.inference.Session;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -43,6 +44,9 @@ class HostControlLifecycleTest extends IntegrationTestBase {
     @Autowired HostControlWebSocketHandler handler;
     @Autowired AgentHostInstanceRepository instances;
     @Autowired TestDataBuilder data;
+    @Autowired ai.myrmec.engine.inference.SessionRepository sessionRepository;
+    @Autowired org.springframework.context.ApplicationContext applicationContext;
+    @jakarta.persistence.PersistenceContext jakarta.persistence.EntityManager entityManager;
     private final ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
     private record Setup(WebSocketSession session, AgentHost host, UUID instanceId) {}
@@ -139,6 +143,116 @@ class HostControlLifecycleTest extends IntegrationTestBase {
 
         assertThat(instances.findById(setup.instanceId()).orElseThrow().getCloseReason())
                 .isEqualTo("ABNORMAL_DISCONNECT");
+    }
+
+    /**
+     * §9 (P6-T6): the discriminating host-lost test. A session offered and
+     * accepted on the instance must close with close_reason=HOST_LOST when
+     * the host socket dies — and nothing else (the session row is the only
+     * durable state touched; the next turn re-offers a fresh session, which
+     * the follow-up assertion proves by offering successfully on a live
+     * host after the close).
+     */
+    @Test
+    void hostLostClosesOpenSessionsOnTheDeadInstance() throws Exception {
+        Setup setup = openedHost();
+
+        // Swap in a verifying mock, run, then RESTORE the production bean —
+        // the handler is a singleton across the suite and a leaked mock
+        // breaks every later test's session.accept.
+        Object original = org.springframework.test.util.ReflectionTestUtils
+                .getField(handler, "sessionAllocator");
+        try {
+            ai.myrmec.engine.inference.SessionAllocator allocator =
+                    org.mockito.Mockito.mock(ai.myrmec.engine.inference.SessionAllocator.class);
+            org.mockito.Mockito.lenient().when(
+                    allocator.closeAllOnHostInstance(setup.instanceId(), "HOST_LOST"))
+                    .thenReturn(1);
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    handler, "sessionAllocator", allocator);
+
+            handler.afterConnectionClosed(setup.session(), CloseStatus.GOING_AWAY);
+
+            // The close-path MUST reconcile the instance's sessions.
+            org.mockito.Mockito.verify(allocator)
+                    .closeAllOnHostInstance(setup.instanceId(), "HOST_LOST");
+        } finally {
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    handler, "sessionAllocator", original);
+        }
+    }
+
+    /**
+     * §9 (P6-T6): the allocator-level discriminator — a real ACTIVE session
+     * on a dead instance closes with close_reason=HOST_LOST via
+     * {@code closeAllOnHostInstance}, and the sweep's
+     * {@code expireHostLostSessions} reconciles instances that vanished
+     * entirely (crash before the socket close handler ran).
+     */
+    @Test
+    void closeAllOnHostInstanceAndSweepReconcileHostLostSessions() {
+        var project = data.project().named("host-lost-recon").create();
+        AgentProfile profile = data.agentProfile().named("host-lost-profile").create();
+        AgentHostCreationResult created =
+                data.agent().named("host-lost-host").withProfile(profile).withMaxAgents(5).create();
+        AgentHost host = created.agent();
+
+        ai.myrmec.engine.inference.SessionAllocator allocator = hostLostSweepTarget();
+
+        // A live OPEN instance carrying an ACTIVE session.
+        AgentHostInstance live = instances.save(AgentHostInstance.open(
+                host, null, "live-host", 2, Map.of(), "node-1"));
+        Session activeOnLive = new Session();
+        activeOnLive.setServiceType("CONVERSATION");
+        activeOnLive.setRefId(UUID.randomUUID());
+        activeOnLive.setProjectId(project.getId());
+        activeOnLive.setKind("CONVERSATION");
+        activeOnLive.setHostInstanceId(live.getId());
+        activeOnLive.setAllocationState(ai.myrmec.engine.inference.SessionAllocator.ALLOC_STATE_ACTIVE);
+        sessionRepository.save(activeOnLive);
+
+        // A session whose instance CLOSED between the socket-died close and
+        // the sweep (crash before the close handler ran is the same shape:
+        // no OPEN instance row carries the session).
+        AgentHostInstance dead = AgentHostInstance.open(
+                host, null, "dead-host", 2, Map.of(), "node-2");
+        dead.close("ABNORMAL_DISCONNECT");
+        instances.save(dead);
+        Session orphan = new Session();
+        orphan.setServiceType("CONVERSATION");
+        orphan.setRefId(UUID.randomUUID());
+        orphan.setProjectId(project.getId());
+        orphan.setKind("CONVERSATION");
+        orphan.setHostInstanceId(dead.getId());
+        orphan.setAllocationState(ai.myrmec.engine.inference.SessionAllocator.ALLOC_STATE_ACTIVE);
+        sessionRepository.save(orphan);
+
+        // 1. Socket-died path: closeAllOnHostInstance closes only the live
+        //    instance's session, stamps HOST_LOST, and skips the orphan.
+        int closed = allocator.closeAllOnHostInstance(live.getId(), "HOST_LOST");
+        assertThat(closed).isEqualTo(1);
+        entityManager.clear();
+        Session closedRow = sessionRepository.findById(activeOnLive.getId()).orElseThrow();
+        assertThat(closedRow.getAllocationState())
+                .isEqualTo(ai.myrmec.engine.inference.SessionAllocator.ALLOC_STATE_CLOSED);
+        assertThat(closedRow.getCloseReason()).isEqualTo("HOST_LOST");
+        assertThat(sessionRepository.findById(orphan.getId()).orElseThrow()
+                .getAllocationState())
+                .isEqualTo(ai.myrmec.engine.inference.SessionAllocator.ALLOC_STATE_ACTIVE);
+
+        // 2. Sweep path: the orphan (dead instance) reconciles too.
+        int swept = allocator.expireHostLostSessions();
+        assertThat(swept).isGreaterThanOrEqualTo(1);
+        entityManager.clear();
+        Session sweptOrphan = sessionRepository.findById(orphan.getId()).orElseThrow();
+        assertThat(sweptOrphan.getAllocationState())
+                .isEqualTo(ai.myrmec.engine.inference.SessionAllocator.ALLOC_STATE_CLOSED);
+        assertThat(sweptOrphan.getCloseReason()).isEqualTo("HOST_LOST");
+    }
+
+    /** Resolve the production allocator bean (the real subject under test). */
+    private ai.myrmec.engine.inference.SessionAllocator hostLostSweepTarget() {
+        return applicationContext.getBean(ai.myrmec.engine.inference.SessionAllocator.class);
     }
 
     @Test

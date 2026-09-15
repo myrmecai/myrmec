@@ -20,14 +20,17 @@ import java.security.MessageDigest;
  * by a peer replica and delivers it to local SSE subscribers via the
  * {@link ConversationStreamBroker}.
  *
- * <p>This is an <b>internal</b> mesh endpoint, gated by the same shared
- * secret as {@link AgentRelayController}. It is inert unless
+ * <p>This is an <b>internal</b> mesh endpoint, gated by the peer mesh
+ * shared secret. It is inert unless
  * {@code myrmec.node.relay.enabled} is set with a non-blank secret.</p>
  */
 @RestController
 @RequestMapping("/api/v1/internal/stream-relay")
 @Slf4j
 public class StreamRelayController {
+
+    /** Header peers stamp with the shared mesh secret (was shared with the legacy AgentRelController). */
+    public static final String NODE_SECRET_HEADER = "X-Node-Secret";
 
     private final ConversationStreamBroker broker;
     private final boolean relayEnabled;
@@ -44,7 +47,7 @@ public class StreamRelayController {
 
     @PostMapping
     public ResponseEntity<Boolean> relay(
-            @RequestHeader(value = AgentRelayController.NODE_SECRET_HEADER, required = false) String presentedSecret,
+            @RequestHeader(value = NODE_SECRET_HEADER, required = false) String presentedSecret,
             @RequestBody StreamRelayRequest request) {
         if (!relayEnabled || relaySecret.length == 0) {
             log.warn("Rejected stream relay: relay is disabled on this replica");

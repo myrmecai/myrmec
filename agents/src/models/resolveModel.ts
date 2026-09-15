@@ -13,7 +13,7 @@
  */
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { ChatModel } from "../executor/types.js";
-import type { ModelInfoWire } from "../protocol/taskFrames.js";
+import type { ModelInfoWire } from "../protocol/sessionTypes.js";
 import { LangChainChatModel } from "./LangChainChatModel.js";
 
 /** OpenAI and every wire-compatible provider served by `ChatOpenAI`. */

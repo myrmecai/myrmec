@@ -7,9 +7,13 @@ import ai.myrmec.engine.spi.quota.QuotaDecision;
 import ai.myrmec.engine.spi.quota.QuotaPolicyEngine;
 import ai.myrmec.engine.spi.quota.QuotaResourceType;
 import ai.myrmec.engine.spi.quota.QuotaScope;
+import ai.myrmec.engine.inference.Session;
+import ai.myrmec.engine.inference.SessionRepository;
+import ai.myrmec.engine.inference.execution.ExecutionCommandSender;
+import ai.myrmec.engine.inference.execution.SessionExecution;
+import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
 import ai.myrmec.engine.user.User;
 import ai.myrmec.engine.user.UserRepository;
-import ai.myrmec.engine.websocket.AgentWebSocketHandler;
 import ai.myrmec.engine.workflow.dto.StartWorkflowRequest;
 import ai.myrmec.engine.workflow.dto.WorkflowRequestResponse;
 import lombok.RequiredArgsConstructor;
@@ -31,10 +35,19 @@ public class WorkflowRequestService {
     private final AgentProfileRepository agentProfileRepository;
     private final UserRepository userRepository;
     private final QuotaPolicyEngine quotaPolicyEngine;
-    private final AgentWebSocketHandler webSocketHandler;
+    private final SessionRepository sessionRepository;
+    private final SessionExecutionRepository executionRepository;
+    private final ExecutionCommandSender executionCommandSender;
     private final TaskAttemptRepository taskAttemptRepository;
     /** Feature 10 (§16.1): run pinning at request creation. */
     private final OrchestrationRunService orchestrationRunService;
+
+    /** §8.8 cancel reason/grace — mirrors ConversationTurnDispatcher. */
+    private static final String CANCEL_REASON_USER = "USER_CANCEL";
+    private static final int CANCEL_GRACE_SECONDS = 5;
+    private static final List<SessionExecution.State> IN_FLIGHT_STATES =
+            List.of(SessionExecution.State.STARTING, SessionExecution.State.RUNNING,
+                    SessionExecution.State.CANCELLING);
 
     @Transactional(readOnly = true)
     public List<WorkflowRequestResponse> findByWorkflow(UUID workflowId) {
@@ -232,8 +245,11 @@ public class WorkflowRequestService {
 
         // Cascade: cancel all non-terminal tasks.
         // - PENDING/READY: never dispatched, just mark CANCELLED.
-        // - RUNNING: mark CANCELLED, abandon the active attempt, and send
-        //   task.cancel to the assigned agent so it can clean up.
+        // - RUNNING: mark CANCELLED, abandon the active attempt, and relay
+        //   execution.cancel over the unified host socket (§8.8) so the host
+        //   can unwind the attempt. (P6-T6: the legacy task.cancel /
+        //   inference.cancel split is gone — both families cancel through
+        //   the same execution seam.)
         // - PAUSED: mark CANCELLED (the pause gate is moot once the request
         //   is cancelled; WorkflowTaskPauseService.continueTask will reject
         //   any subsequent continue because the task is no longer PAUSED).
@@ -244,54 +260,19 @@ public class WorkflowRequestService {
                     || task.getStatus() == TaskStatus.RUNNING
                     || task.getStatus() == TaskStatus.PAUSED) {
 
-                // For RUNNING tasks, abandon the active attempt and notify the agent.
+                // For RUNNING tasks, abandon the active attempt and notify the host.
                 if (task.getStatus() == TaskStatus.RUNNING) {
-                    // Feature 10 (§16.3/§16.6): an orchestration task's
-                    // dispatch cancels through the correlated
-                    // inference.cancel frame (attemptId == dispatchId);
-                    // ordinary inference keeps task.cancel.
-                    boolean orchestrationTask = isOrchestratorStep(
-                            task.getRequest().getWorkflow(), task.getStepId());
-                    if (orchestrationTask) {
-                        taskAttemptRepository
-                                .findFirstByTaskIdOrderByAttemptNumberDesc(task.getId())
-                                .ifPresent(attempt -> {
-                                    attempt.markAbandoned("Request cancelled by user");
-                                    taskAttemptRepository.save(attempt);
-                                    if (task.getAgentInstance() != null) {
-                                        try {
-                                            webSocketHandler.sendInferenceCancel(
-                                                    task.getAgentInstance().getId(),
-                                                    null,
-                                                    task.getId(),
-                                                    attempt.getId());
-                                        } catch (Exception e) {
-                                            log.warn("Failed to send inference.cancel to agent {}: {}",
-                                                    task.getAgentInstance().getId(), e.getMessage());
-                                        }
-                                    }
-                                });
-                    } else {
-                        taskAttemptRepository
-                                .findFirstByTaskIdOrderByAttemptNumberDesc(task.getId())
-                                .ifPresent(attempt -> {
-                                    attempt.markAbandoned("Request cancelled by user");
-                                    taskAttemptRepository.save(attempt);
-                                });
+                    taskAttemptRepository
+                            .findFirstByTaskIdOrderByAttemptNumberDesc(task.getId())
+                            .ifPresent(attempt -> {
+                                attempt.markAbandoned("Request cancelled by user");
+                                taskAttemptRepository.save(attempt);
+                            });
 
-                        // Send task.cancel to the assigned agent (if any).
-                        if (task.getAgentInstance() != null) {
-                            try {
-                                webSocketHandler.cancelTask(
-                                        task.getAgentInstance().getId(),
-                                        task.getId(),
-                                        "Request cancelled by user");
-                            } catch (Exception e) {
-                                log.warn("Failed to send task.cancel to agent {}: {}",
-                                        task.getAgentInstance().getId(), e.getMessage());
-                            }
-                        }
-                    }
+                    // Unified protocol: relay execution.cancel on the task's
+                    // in-flight WORKFLOW execution, if one exists. Sessions are
+                    // keyed by the dispatch requestId (TaskDispatcherService).
+                    relayExecutionCancel(task, "Request cancelled by user");
                 }
 
                 task.setStatus(TaskStatus.CANCELLED);
@@ -303,18 +284,45 @@ public class WorkflowRequestService {
         return toResponse(saved);
     }
 
-    /** Whether the workflow's stored step is an ORCHESTRATOR step (§16.1). */
-    @SuppressWarnings("unchecked")
-    private boolean isOrchestratorStep(Workflow workflow, String stepId) {
-        if (workflow.getSteps() == null) {
-            return false;
-        }
-        for (Map<String, Object> step : workflow.getSteps()) {
-            if (stepId.equals(step.get("id"))) {
-                return "ORCHESTRATOR".equals(step.get("taskType"));
+    /**
+     * Unified protocol (§8.8): relay {@code execution.cancel} for a RUNNING
+     * task's in-flight WORKFLOW execution. The task's session is keyed by the
+     * dispatch {@code requestId} (TaskDispatcherService allocates
+     * refId=requestId); an absent session (never dispatched) or absent
+     * in-flight execution (already terminal) is a clean no-op. The attempt row
+     * was already abandoned by the caller.
+     */
+    private void relayExecutionCancel(WorkflowTask task, String reason) {
+        try {
+            Session session = sessionRepository
+                    .findByRefIdAndServiceType(task.getRequest().getId(), "WORKFLOW")
+                    .orElse(null);
+            if (session == null) {
+                log.debug("No WORKFLOW session for request {} — task {} cancel is state-only",
+                        task.getRequest().getId(), task.getId());
+                return;
             }
+            SessionExecution inFlight = executionRepository
+                    .findWithLockBySessionIdAndStateIn(session.getId(), IN_FLIGHT_STATES)
+                    .stream().findFirst().orElse(null);
+            if (inFlight == null) {
+                log.debug("No in-flight execution on session {} — task {} cancel is state-only",
+                        session.getId(), task.getId());
+                return;
+            }
+            boolean delivered = executionCommandSender.cancel(
+                    inFlight.getId(), session, null, CANCEL_REASON_USER, CANCEL_GRACE_SECONDS);
+            if (delivered) {
+                log.info("Relayed execution.cancel for task {} (execution {})",
+                        task.getId(), inFlight.getId());
+            } else {
+                log.debug("Host socket gone for task {} — execution.cancel not delivered; "
+                        + "host-lost sweep reconciles", task.getId());
+            }
+        } catch (Exception e) {
+            log.warn("Failed to relay execution.cancel for task {}: {}",
+                    task.getId(), e.getMessage());
         }
-        return false;
     }
 
     /**

@@ -4,7 +4,6 @@ package ai.myrmec.engine.inference;
 
 import ai.myrmec.engine.context.ContextManifest;
 import ai.myrmec.engine.context.ContextManifestRepository;
-import ai.myrmec.engine.websocket.message.payload.InferenceAssignPayload;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -23,7 +22,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for {@link InferenceRequestAssembler} — verifies manifest
+ * Unit tests for {@link InferenceRequestAssembler} â€” verifies manifest
  * persistence (R1), sequenceNo propagation (R3), and stream flag (R7).
  */
 @DisplayName("InferenceRequestAssembler")
@@ -49,9 +48,9 @@ class InferenceRequestAssemblerTest {
         UUID requestId = UUID.randomUUID();
 
         when(conversationComposer.compose(any())).thenReturn(List.of(
-                new ai.myrmec.engine.websocket.message.payload.InferenceMessage(
+                new ai.myrmec.engine.inference.InferenceMessage(
                         "system", "Hello", null, null),
-                new ai.myrmec.engine.websocket.message.payload.InferenceMessage(
+                new ai.myrmec.engine.inference.InferenceMessage(
                         "user", "Hi", null, null)
         ));
         when(contextManifestRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -65,11 +64,13 @@ class InferenceRequestAssemblerTest {
                 .userMessage("Hi")
                 .build();
 
-        InferenceAssignPayload payload = assembler.assemble(spec);
+        InferenceRequestAssembler.AssembledInference assembled = assembler.assemble(spec);
 
-        assertThat(payload.stream()).isTrue();
-        assertThat(payload.response().sequenceNo()).isEqualTo(5);
-        assertThat(payload.messages()).hasSize(2);
+        // Unified protocol (P6-T6): stream/response routing live on the
+        // execution.start projection (ExecutionInputAssembler); the
+        // assembler's contract is transcript + tool policy.
+        assertThat(assembled.messages()).hasSize(2);
+        assertThat(assembled.activeToolNames()).isEmpty();
 
         // Verify manifest was persisted (R1)
         ArgumentCaptor<ContextManifest> captor = ArgumentCaptor.forClass(ContextManifest.class);
@@ -88,9 +89,9 @@ class InferenceRequestAssemblerTest {
         UUID taskId = UUID.randomUUID();
 
         when(workflowComposer.compose(any())).thenReturn(List.of(
-                new ai.myrmec.engine.websocket.message.payload.InferenceMessage(
+                new ai.myrmec.engine.inference.InferenceMessage(
                         "system", "Workflow system", null, null),
-                new ai.myrmec.engine.websocket.message.payload.InferenceMessage(
+                new ai.myrmec.engine.inference.InferenceMessage(
                         "user", "Do work", null, null)
         ));
         when(contextManifestRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -108,11 +109,9 @@ class InferenceRequestAssemblerTest {
                 ))
                 .build();
 
-        InferenceAssignPayload payload = assembler.assemble(spec);
+        InferenceRequestAssembler.AssembledInference assembled = assembler.assemble(spec);
 
-        assertThat(payload.stream()).isFalse();
-        assertThat(payload.response().sequenceNo()).isEqualTo(2);
-        assertThat(payload.activeToolNames()).isEmpty();
+        assertThat(assembled.activeToolNames()).isEmpty();
 
         // Verify manifest persisted with knowledge entries
         ArgumentCaptor<ContextManifest> captor = ArgumentCaptor.forClass(ContextManifest.class);
@@ -127,7 +126,7 @@ class InferenceRequestAssemblerTest {
     @DisplayName("manifest persistence failure does not abort dispatch")
     void testManifestPersistenceFailureIsBestEffort() {
         when(conversationComposer.compose(any())).thenReturn(List.of(
-                new ai.myrmec.engine.websocket.message.payload.InferenceMessage(
+                new ai.myrmec.engine.inference.InferenceMessage(
                         "system", "Hello", null, null)
         ));
         when(contextManifestRepository.save(any()))
@@ -142,9 +141,9 @@ class InferenceRequestAssemblerTest {
                 .userMessage("Hi")
                 .build();
 
-        // Should not throw — best-effort persistence
-        InferenceAssignPayload payload = assembler.assemble(spec);
-        assertThat(payload).isNotNull();
-        assertThat(payload.messages()).hasSize(1);
+        // Should not throw â€” best-effort persistence
+        InferenceRequestAssembler.AssembledInference assembled = assembler.assemble(spec);
+        assertThat(assembled).isNotNull();
+        assertThat(assembled.messages()).hasSize(1);
     }
 }

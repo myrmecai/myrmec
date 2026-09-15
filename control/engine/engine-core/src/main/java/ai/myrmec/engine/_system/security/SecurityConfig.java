@@ -54,11 +54,6 @@ public class SecurityConfig {
                         // Unified protocol §4.1 — host-auth endpoints: the
                         // registration key / refresh token is the bearer.
                         .requestMatchers("/api/v1/agent/auth/host/**").permitAll()
-                        // WebSocket endpoint - auth handled by handshake interceptor
-                        .requestMatchers("/api/v1/agent/ws").permitAll()
-                        // Slice 4c — conversation-scoped agent socket; auth is
-                        // performed in the WS handshake interceptor (agent JWT).
-                        .requestMatchers("/api/v1/agent/conversation").permitAll()
                         // Unified protocol §4.2 — host-control socket; auth is
                         // performed in the handshake interceptor (HOST_JWT).
                         .requestMatchers("/api/v1/agent/host/ws").permitAll()

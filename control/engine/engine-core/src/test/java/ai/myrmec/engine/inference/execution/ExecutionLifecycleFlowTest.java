@@ -43,8 +43,8 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
 /**
- * End-to-end execution lifecycle flow over the host control socket (§8):
- * execution.start (engine→host), execution.accept, execution.delta fan-out,
+ * End-to-end execution lifecycle flow over the host control socket (Â§8):
+ * execution.start (engineâ†’host), execution.accept, execution.delta fan-out,
  * execution.event ack, execution.complete with terminal dedup, and
  * execution.cancelled. Builds on {@link ai.myrmec.engine.inference.SessionAllocationFlowTest}.
  */
@@ -135,7 +135,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
                 ai.myrmec.engine.conversation.ConversationMessage.Role.USER,
                 "Hello, engine", TEST_ADMIN_ID, null);
         // Pin an assistant profile version: the assembler resolves the profile
-        // from the pin (§3.7), never from the host. Mirror the pinning-IT flow.
+        // from the pin (Â§3.7), never from the host. Mirror the pinning-IT flow.
         ai.myrmec.engine.assistant.Assistant pinAssistant =
                 assistantService.createAssistant(project.getId(),
                         "flow-assistant-" + System.nanoTime(), "flow",
@@ -146,12 +146,12 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
         conversation.setAssistantVersionId(pinnedVersion.getId());
         conversation.setAgentProfileVersionId(pinnedVersion.getAgentProfileVersionId());
         conversationRepository.save(conversation);
-        // Bind the conversation to the host — the assembler's cold path resolves
+        // Bind the conversation to the host â€” the assembler's cold path resolves
         // the profile from conversation.agentId's AgentHost, exactly as the
         // dispatcher does (ExecutionInputAssembler.buildLegacySpec reads
         // agent.getProfileId()). NOTE: no manual AgentProfileVersion fixture is
-        // needed — TestDataBuilder.agentProfile().create() publishes version 1
-        // via AgentProfileService.createProfile() → versionService.publishInitial(),
+        // needed â€” TestDataBuilder.agentProfile().create() publishes version 1
+        // via AgentProfileService.createProfile() â†’ versionService.publishInitial(),
         // so findPublished() already resolves.
         conversation.setAgentId(hostSetup.host().getId());
         conversationRepository.save(conversation);
@@ -194,7 +194,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
             @Override public void send(String jsonFrame) throws IOException { capturedDeltaFrames.add(jsonFrame); }
         });
 
-        // engine→host execution.start frame (captured on the mock socket).
+        // engineâ†’host execution.start frame (captured on the mock socket).
         boolean sent = executionCommandSender.startConversation(setup.executionId(),
                 sessionRepository.findById(setup.sessionId()).orElseThrow(),
                 buildStartPayload(setup.executionId(), setup.sessionId(), setup.conversation().getId()));
@@ -221,7 +221,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
         SessionExecution running = executionRepository.findById(setup.executionId()).orElseThrow();
         assertThat(running.getState()).isEqualTo(SessionExecution.State.RUNNING);
 
-        // execution.delta x2 — ephemeral, no ack.
+        // execution.delta x2 â€” ephemeral, no ack.
         for (int i = 0; i < 2; i++) {
             String delta = """
                     { "protocolVersion": 1, "messageId": "m-delta-%d", "type": "execution.delta",
@@ -279,7 +279,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
                 .anyMatch(m -> m.getRole() == ai.myrmec.engine.conversation.ConversationMessage.Role.ASSISTANT
                         && "done".equals(m.getContent()));
 
-        // REPLAY: same messageId "m-term" — row unchanged, second ack.
+        // REPLAY: same messageId "m-term" â€” row unchanged, second ack.
         String replay = """
                 { "protocolVersion": 1, "messageId": "m-term", "type": "execution.complete",
                   "sentAt": "%s", "hostInstanceId": "%s", "sessionId": "%s", "executionId": "%s",
@@ -300,7 +300,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
                 .stream().filter(m -> m.getRole() == ai.myrmec.engine.conversation.ConversationMessage.Role.ASSISTANT
                         && "done".equals(m.getContent())).count()).isEqualTo(1L);
 
-        // Conflicting terminal messageId — INVALID_STATE error.
+        // Conflicting terminal messageId â€” INVALID_STATE error.
         String conflicting = """
                 { "protocolVersion": 1, "messageId": "m-term2", "type": "execution.complete",
                   "sentAt": "%s", "hostInstanceId": "%s", "sessionId": "%s", "executionId": "%s",
@@ -323,7 +323,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
         Project project = data.project().named("f-proj2").create();
         UUID executionId = UUID.randomUUID();
 
-        // execution.complete before start — no execution row.
+        // execution.complete before start â€” no execution row.
         String complete = """
                 { "protocolVersion": 1, "messageId": "m-term", "type": "execution.complete",
                   "sentAt": "%s", "hostInstanceId": "%s", "sessionId": "%s", "executionId": "%s",
@@ -335,7 +335,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
         assertThat(error.path("type").asText()).isEqualTo("protocol.error");
         assertThat(error.path("payload").path("code").asText()).isEqualTo("INVALID_STATE");
 
-        // execution.accept with no executionId — INVALID_MESSAGE
+        // execution.accept with no executionId â€” INVALID_MESSAGE
         String acceptNoId = """
                 { "protocolVersion": 1, "messageId": "m-accept-bad", "type": "execution.accept",
                   "sentAt": "%s", "hostInstanceId": "%s",
@@ -346,9 +346,9 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
         assertThat(err2.path("type").asText()).isEqualTo("protocol.error");
         assertThat(err2.path("payload").path("code").asText()).isEqualTo("INVALID_MESSAGE");
 
-        // execution.start echoed from host — ignored. Snapshot the reply count
+        // execution.start echoed from host â€” ignored. Snapshot the reply count
         // first and assert the echo produced NO new protocol.error (count-based,
-        // not lastReply — the earlier discipline checks left errors in history).
+        // not lastReply â€” the earlier discipline checks left errors in history).
         int errorCountBefore = (int) replies(hostSetup.session()).stream()
                 .filter(n -> "protocol.error".equals(n.path("type").asText())).count();
         String echoedStart = """
@@ -361,7 +361,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
                 .filter(n -> "protocol.error".equals(n.path("type").asText())).count())
                 .isEqualTo(errorCountBefore);
 
-        // execution.delta without executionId — dropped silently (also count-based).
+        // execution.delta without executionId â€” dropped silently (also count-based).
         int errorCountBeforeDelta = (int) replies(hostSetup.session()).stream()
                 .filter(n -> "protocol.error".equals(n.path("type").asText())).count();
         String deltaNoId = """
@@ -388,7 +388,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
                 setup.executionId(), Instant.now(), UUID.randomUUID());
         ((WebSocketHandler) handler).handleMessage(setup.host().session(), new TextMessage(accept));
 
-        // execution.cancel is engine→host; echoed copies are ignored.
+        // execution.cancel is engineâ†’host; echoed copies are ignored.
         String echoedCancel = """
                 { "protocolVersion": 1, "messageId": "m-cancel-echo", "type": "execution.cancel",
                   "sentAt": "%s", "hostInstanceId": "%s", "sessionId": "%s", "executionId": "%s",
@@ -432,12 +432,12 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
         Map<String, Object> input = executionInputAssembler.assembleConversationInput(
                 conversationId, sessionId, session.getProjectId(), sequenceNo);
 
-        // assembleConversationInput's "messages" IS the legacy transcript — a
+        // assembleConversationInput's "messages" IS the legacy transcript â€” a
         // List<InferenceMessage> (the assembler returns assign.messages()
         // unchanged). Build the wire payload from it directly.
         @SuppressWarnings("unchecked")
-        List<ai.myrmec.engine.websocket.message.payload.InferenceMessage> wireMessages =
-                (List<ai.myrmec.engine.websocket.message.payload.InferenceMessage>) input.get("messages");
+        List<ai.myrmec.engine.inference.InferenceMessage> wireMessages =
+                (List<ai.myrmec.engine.inference.InferenceMessage>) input.get("messages");
         var toolPolicy = (Map<String, Object>) input.get("toolPolicy");
         @SuppressWarnings("unchecked")
         List<String> activeTools = toolPolicy.get("activeToolNames") instanceof List

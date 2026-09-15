@@ -57,44 +57,4 @@ class ConversationProtocolPayloadJsonTest {
         assertThat(parsed.getModelCode()).isEqualTo("github-gpt-4o");
         assertThat(parsed.getTokenCount()).isNull();
     }
-
-    @Test
-    void taskCancelledRoundTripWithOptionalConversationContext() throws Exception {
-        UUID taskId = UUID.randomUUID();
-        UUID conversationId = UUID.randomUUID();
-        TaskCancelledPayload cancelled = TaskCancelledPayload.builder()
-                .taskId(taskId)
-                .conversationId(conversationId)
-                .sequenceNo(12L)
-                .partialContent("Hello, w...")
-                .reason("user_request")
-                .build();
-
-        String json = mapper.writeValueAsString(cancelled);
-        TaskCancelledPayload parsed = mapper.readValue(json, TaskCancelledPayload.class);
-
-        assertThat(parsed.getTaskId()).isEqualTo(taskId);
-        assertThat(parsed.getConversationId()).isEqualTo(conversationId);
-        assertThat(parsed.getSequenceNo()).isEqualTo(12L);
-        assertThat(parsed.getPartialContent()).isEqualTo("Hello, w...");
-        assertThat(parsed.getReason()).isEqualTo("user_request");
-    }
-
-    @Test
-    void taskCancelledRoundTripForOneShotTaskOmitsConversationFields() throws Exception {
-        UUID taskId = UUID.randomUUID();
-        TaskCancelledPayload cancelled = TaskCancelledPayload.builder()
-                .taskId(taskId)
-                .reason("timeout")
-                .build();
-
-        String json = mapper.writeValueAsString(cancelled);
-        TaskCancelledPayload parsed = mapper.readValue(json, TaskCancelledPayload.class);
-
-        assertThat(parsed.getTaskId()).isEqualTo(taskId);
-        assertThat(parsed.getConversationId()).isNull();
-        assertThat(parsed.getSequenceNo()).isNull();
-        assertThat(parsed.getPartialContent()).isNull();
-        assertThat(parsed.getReason()).isEqualTo("timeout");
-    }
 }

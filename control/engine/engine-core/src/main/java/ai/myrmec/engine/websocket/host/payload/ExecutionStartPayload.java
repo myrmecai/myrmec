@@ -2,14 +2,14 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.websocket.host.payload;
 
-import ai.myrmec.engine.websocket.message.payload.InferenceMessage;
+import ai.myrmec.engine.inference.InferenceMessage;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** execution.start payload (§8.1): one turn (conversation) or one orchestration attempt. */
+/** execution.start payload (Â§8.1): one turn (conversation) or one orchestration attempt. */
 public record ExecutionStartPayload(
         UUID executionId,
         UUID sessionId,
@@ -21,7 +21,7 @@ public record ExecutionStartPayload(
         Output output) {               // null for orchestration
 
     public record Input(
-            List<InferenceMessage> messages,   // reuse the legacy §5.3 message record — same shape
+            List<InferenceMessage> messages,   // reuse the legacy Â§5.3 message record â€” same shape
             List<Attachment> attachments,
             ConversationContinuation conversationContinuation) {}
 

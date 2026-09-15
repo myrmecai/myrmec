@@ -28,7 +28,7 @@ import ai.myrmec.engine.spi.quota.QuotaResourceType;
 import ai.myrmec.engine.spi.quota.QuotaScope;
 import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
 import ai.myrmec.engine.websocket.host.payload.ExecutionStartPayload;
-import ai.myrmec.engine.websocket.message.payload.InferenceMessage;
+import ai.myrmec.engine.inference.InferenceMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -117,7 +117,7 @@ public class ConversationTurnDispatcher {
     private final ai.myrmec.engine.snapshot.SnapshotWriter snapshotWriter;
     private final ai.myrmec.engine.conversation.ConversationNoticeService conversationNoticeService;
 
-    // ---- unified protocol seams (§7/§8) ----
+    // ---- unified protocol seams (Â§7/Â§8) ----
     private final HostSelectionService hostSelectionService;
     private final AgentHostInstanceRepository hostInstanceRepository;
     private final SessionAllocator sessionAllocator;
@@ -199,7 +199,7 @@ public class ConversationTurnDispatcher {
         if (hostOpt.isEmpty()) {
             log.warn("No host with live capacity serves project {} \u2014 declining turn for conv {}",
                     conversation.getProjectId(), conversationId);
-            // #86 — don't silently drop the turn. Surface a one-time SYSTEM
+            // #86 â€” don't silently drop the turn. Surface a one-time SYSTEM
             // notice so the user knows their message was received and will be
             // answered once a host comes online; the #87 backlog drainer
             // re-dispatches this conversation on the next host connect.
@@ -208,7 +208,7 @@ public class ConversationTurnDispatcher {
         }
         UUID hostId = hostOpt.get().getId();
 
-        // §3.7/§16.1: the profile comes from the conversation's pinned version.
+        // Â§3.7/Â§16.1: the profile comes from the conversation's pinned version.
         if (pinnedProfileOf(conversation).isEmpty()) {
             log.warn("Cannot dispatch turn \u2014 conversation {} has no pinned profile version",
                     conversationId);

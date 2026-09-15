@@ -2,7 +2,7 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.inference;
 
-import ai.myrmec.engine.websocket.message.payload.InferenceMessage;
+import ai.myrmec.engine.inference.InferenceMessage;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Workflow transcript composer (§6.3).
+ * Workflow transcript composer (Â§6.3).
  *
  * <p>Ports {@code buildSystemPrompt()}, {@code compileKnowledgeSection()},
  * and {@code buildMessages()} from
@@ -20,10 +20,10 @@ import java.util.Map;
  * <ul>
  *   <li>system message = profile.systemPrompt + # Project Context block with
  *       knowledge compiled grouped by category in the fixed order
- *       STANDARD → REQUIREMENT → ARCHITECTURE → INSTRUCTION</li>
+ *       STANDARD â†’ REQUIREMENT â†’ ARCHITECTURE â†’ INSTRUCTION</li>
  *   <li>user message(s) = stepPrompt + input handling:
- *       if input.messages is an array → stepPrompt as leading user message,
- *       then each entry by role; else → stepPrompt + input.prompt + remaining
+ *       if input.messages is an array â†’ stepPrompt as leading user message,
+ *       then each entry by role; else â†’ stepPrompt + input.prompt + remaining
  *       input rendered as a ## Input Data JSON block</li>
  * </ul></p>
  */
@@ -73,7 +73,7 @@ public class WorkflowTranscriptComposer implements TranscriptComposer {
 
     /**
      * Compile knowledge entries into a system-prompt section, grouped by category
-     * in the fixed order STANDARD → REQUIREMENT → ARCHITECTURE → INSTRUCTION.
+     * in the fixed order STANDARD â†’ REQUIREMENT â†’ ARCHITECTURE â†’ INSTRUCTION.
      * Port of {@code compileKnowledgeSection} from assembleTask.ts.
      */
     private String compileKnowledgeSection(List<InferenceRequestSpec.KnowledgeEntry> knowledge) {
@@ -119,7 +119,7 @@ public class WorkflowTranscriptComposer implements TranscriptComposer {
         Object chatObj = input.get("messages");
 
         if (chatObj instanceof List<?> chat) {
-            // input.messages is an array — step prompt first, then each message by role
+            // input.messages is an array â€” step prompt first, then each message by role
             if (!userParts.isEmpty()) {
                 messages.add(new InferenceMessage("user", String.join("\n\n", userParts), null, null));
                 userParts.clear();
@@ -132,7 +132,7 @@ public class WorkflowTranscriptComposer implements TranscriptComposer {
                 }
             }
         } else if (!input.isEmpty()) {
-            // No messages array — stepPrompt + input.prompt + remaining input as JSON block
+            // No messages array â€” stepPrompt + input.prompt + remaining input as JSON block
             Object promptObj = input.get("prompt");
             if (promptObj instanceof String prompt) {
                 userParts.add(prompt);

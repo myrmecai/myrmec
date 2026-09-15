@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Plan 6 T6 (unified protocol §9): sessions.close_reason — write-once
+        operational forensics for why a session ended (IDLE_LEASE_EXPIRED,
+        HOST_LOST, ASSEMBLY_FAILED, …). The host-lost close writes HOST_LOST
+        when a host instance's control socket dies mid-session.
+    -->
+
+    <changeSet id="023-sessions-close-reason" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="sessions"/>
+                <not>
+                    <columnExists tableName="sessions" columnName="close_reason"/>
+                </not>
+            </and>
+        </preConditions>
+        <addColumn tableName="sessions">
+            <column name="close_reason" type="varchar(40)"/>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>

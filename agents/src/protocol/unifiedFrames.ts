@@ -233,6 +233,21 @@ export const modelConfigSchema = z.object({
 });
 export type ModelConfig = z.infer<typeof modelConfigSchema>;
 
+/**
+ * LLM model info attached to a session (was `taskFrames.modelInfoSchema`,
+ * retired with the legacy wire in P6-T6). Kept as its own export because
+ * resolvers + orchestration parse engine descriptors through it and rely
+ * on the `parameters` default.
+ */
+export const modelInfoSchema = z.object({
+  provider: z.string(),
+  modelId: z.string(),
+  apiEndpoint: z.string().nullish(),
+  apiKey: z.string().nullish(),
+  parameters: z.record(z.string(), z.unknown()).default({}),
+});
+export type ModelInfoWire = z.infer<typeof modelInfoSchema>;
+
 export const workspaceConfigSchema = z.object({
   repoUrl: z.string(),
   branch: z.string(),
@@ -266,6 +281,11 @@ export const sessionOpenPayloadSchema = z.object({
   tools: z.array(toolDefinitionSchema),
   knowledgeSources: z.array(knowledgeSourceHandleSchema),
   autoHitlOnDestructive: z.boolean(),
+  // §16.2/§16.3 (P6-T6): an ORCHESTRATOR step's complete self-contained
+  // assignment rides session.open as `orchestration` + its sha-256
+  // `assignmentDigest` — the assignment IS that session's context.
+  orchestration: z.record(z.string(), z.unknown()).nullish(),
+  assignmentDigest: z.string().nullish(),
 });
 export type SessionOpenPayload = z.infer<typeof sessionOpenPayloadSchema>;
 

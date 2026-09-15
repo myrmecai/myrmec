@@ -10,8 +10,9 @@ import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
 
 /**
- * WebSocket configuration for agent communication.
- * Registers the agent WebSocket handler at /api/v1/agent/ws
+ * WebSocket configuration for the unified host-control protocol. The legacy
+ * agent wire ({@code /api/v1/agent/ws}, the conversation socket) is deleted —
+ * hosts dial {@code /api/v1/agent/host/ws}.
  */
 @Configuration
 @EnableWebSocket
@@ -19,27 +20,11 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 @RequiredArgsConstructor
 public class WebSocketConfig implements WebSocketConfigurer {
 
-    private final AgentWebSocketHandler agentWebSocketHandler;
-    private final AgentWebSocketHandshakeInterceptor handshakeInterceptor;
-    private final AgentConversationWebSocketHandler agentConversationWebSocketHandler;
     private final HostControlWebSocketHandler hostControlWebSocketHandler;
     private final HostControlHandshakeInterceptor hostControlHandshakeInterceptor;
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        registry.addHandler(agentWebSocketHandler, "/api/v1/agent/ws")
-                .addInterceptors(handshakeInterceptor)
-                .setAllowedOrigins("*"); // Configure properly for production
-
-        // Slice 4c — conversation-scoped agent socket. A bound worker dials
-        // its home node directly and opens this socket for one conversation
-        // (agent-concurrency §9.4). Reuses the agent-control handshake
-        // interceptor (same agent JWT pins the worker's instance id); the
-        // conversation id arrives in the conversation.attach frame.
-        registry.addHandler(agentConversationWebSocketHandler, "/api/v1/agent/conversation")
-                .addInterceptors(handshakeInterceptor)
-                .setAllowedOrigins("*");
-
         // Unified protocol §4.2 — host-principal control socket; auth is the
         // HOST_JWT validated in the handshake interceptor. The live instance
         // is created by the first host.open, not by the connection.

@@ -118,7 +118,7 @@ public class TaskDispatchContinuation {
         }
         hostControlWebSocketHandler.sendSessionOpen(sessionId, open);
         log.info("Continued staged workflow dispatch for session {} (task {}, orchestration {}) "
-                + "— session.open sent", sessionId, context.taskId(), context.orchestration());
+                + "â€” session.open sent", sessionId, context.taskId(), context.orchestration());
     }
 
     /**
@@ -135,7 +135,7 @@ public class TaskDispatchContinuation {
         }
         Session session = sessionRepository.findById(sessionId).orElse(null);
         if (session == null) {
-            log.warn("Staged workflow dispatch for session {} has no session row — dropping", sessionId);
+            log.warn("Staged workflow dispatch for session {} has no session row â€” dropping", sessionId);
             return;
         }
 
@@ -143,12 +143,12 @@ public class TaskDispatchContinuation {
         Map<String, Object> input = context.orchestration()
                 ? Map.of()
                 : assembleOrdinaryInput(session, context);
-        // The dispatch identity is the orchestration discriminator (§16.2): only
+        // The dispatch identity is the orchestration discriminator (Â§16.2): only
         // an ORCHESTRATOR attempt stamps it, so the terminal bridge can tell an
         // ordinary step's task-attempt sink from the orchestration outcome sink.
-        // The execution's requestId keeps the legacy workflow contract — the
-        // task id, which is what the task-attempt sink resolves from — while an
-        // orchestration execution carries the §16.2 runId.
+        // The execution's requestId keeps the legacy workflow contract â€” the
+        // task id, which is what the task-attempt sink resolves from â€” while an
+        // orchestration execution carries the Â§16.2 runId.
         SessionExecution execution = executionRegistry.start(
                 sessionId,
                 context.orchestration()
@@ -171,7 +171,7 @@ public class TaskDispatchContinuation {
                 : executionCommandSender.startExecution(execution.getId(), session,
                         executionStartPayload(sessionId, execution, context, deadline));
         if (!sent) {
-            log.warn("Host socket gone for staged workflow session {} — execution.start not delivered",
+            log.warn("Host socket gone for staged workflow session {} â€” execution.start not delivered",
                     sessionId);
             abandon(context.attemptId(), "Host socket gone before execution.start");
             return;
@@ -193,12 +193,12 @@ public class TaskDispatchContinuation {
         Map<String, Object> input = execution.getInputPayload() == null
                 ? Map.of() : execution.getInputPayload();
         @SuppressWarnings("unchecked")
-        java.util.List<ai.myrmec.engine.websocket.message.payload.InferenceMessage> messages =
+        java.util.List<ai.myrmec.engine.inference.InferenceMessage> messages =
                 input.get("messages") instanceof java.util.List<?> list
                         ? list.stream()
-                            .filter(ai.myrmec.engine.websocket.message.payload.InferenceMessage.class
+                            .filter(ai.myrmec.engine.inference.InferenceMessage.class
                                     ::isInstance)
-                            .map(ai.myrmec.engine.websocket.message.payload.InferenceMessage.class
+                            .map(ai.myrmec.engine.inference.InferenceMessage.class
                                     ::cast)
                             .toList()
                         : java.util.List.of();
@@ -249,7 +249,7 @@ public class TaskDispatchContinuation {
                         .findFirst()
                         .orElse(null);
         if (worker == null) {
-            log.warn("No serving worker row for session {} (request {}) — attempt {} left unbound",
+            log.warn("No serving worker row for session {} (request {}) â€” attempt {} left unbound",
                     session.getId(), context.requestId(), context.attemptId());
             return;
         }

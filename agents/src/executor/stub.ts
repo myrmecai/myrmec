@@ -31,8 +31,8 @@ import type {
   RiskClass,
 } from "./types.js";
 import type { ChatModelFactory, SessionToolFactory } from "./providers.js";
-import type { ModelInfoWire } from "../protocol/taskFrames.js";
-import type { ToolDefinition } from "../protocol/inferenceFrames.js";
+import type { ModelInfoWire } from "../protocol/sessionTypes.js";
+import type { ToolDefinition } from "../protocol/sessionTypes.js";
 import { pathToFileURL } from "node:url";
 
 // ── Handler contract ──────────────────────────────────────────────────

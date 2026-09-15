@@ -23,8 +23,7 @@ import ai.myrmec.engine.inference.SessionContextAssembler;
 import ai.myrmec.engine.knowledge.TaskContextResolver;
 import ai.myrmec.engine.model.ModelService;
 import ai.myrmec.engine.setting.SystemSettingService;
-import ai.myrmec.engine.websocket.message.payload.ConversationTurnAssignPayload;
-import ai.myrmec.engine.websocket.message.payload.InferenceAssignPayload;
+import ai.myrmec.engine.inference.ConversationTurnContext;
 import ai.myrmec.engine.websocket.message.payload.SessionOpenPayload;
 import ai.myrmec.engine.websocket.message.payload.TaskContext;
 import ai.myrmec.engine.workflow.TaskStatus;
@@ -45,9 +44,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Builds the §8.1 conversation {@code execution.start} input block from the
- * assembled inference request — the same transcript the legacy
- * inference.assign path ships (§16 mapping), rewrapped into the
+ * Builds the Â§8.1 conversation {@code execution.start} input block from the
+ * assembled inference request â€” the same transcript the legacy
+ * inference.assign path ships (Â§16 mapping), rewrapped into the
  * execution-lifecycle shape. Orchestration sessions carry no input block
  * (the assignment was installed at session.open).
  */
@@ -81,7 +80,7 @@ public class ExecutionInputAssembler {
      * Setting key for the maximum aggregate fraction of the per-turn context
      * token budget that inline attachment text may occupy across all
      * attachments on the turn (#103 Slice B). Read forgivingly via
-     * {@link SystemSettingService#getRatio} and clamped to {@code (0,1]} — a
+     * {@link SystemSettingService#getRatio} and clamped to {@code (0,1]} â€” a
      * zero/out-of-range value falls back to the default.
      */
     private static final String INLINE_RATIO_MAX_KEY = "attachment_inline_ratio_max";
@@ -93,17 +92,17 @@ public class ExecutionInputAssembler {
 
     /**
      * Assemble the input payload for a conversation turn. Returns the
-     * §8.1 wire payload map (messages, attachments, toolPolicy, output)
+     * Â§8.1 wire payload map (messages, attachments, toolPolicy, output)
      * ready for ExecutionStartPayload conversion.
      */
     public java.util.Map<String, Object> assembleConversationInput(UUID conversationId, UUID sessionId,
                                                                     UUID projectId, long sequenceNo) {
         // Build the legacy spec exactly as ConversationTurnDispatcher does
         // (sliding window + system prompt + tools + attachments), then
-        // project it into the §8.1 shape. The legacy assembler's output
-        // (InferenceAssignPayload) is the single source of transcript truth.
+        // project it into the §8.1 shape. The assembler's composed output
+        // is the single source of transcript truth.
         InferenceRequestSpec spec = buildLegacySpec(conversationId, sessionId, projectId, sequenceNo);
-        InferenceAssignPayload assign = inferenceRequestAssembler.assemble(spec);
+        InferenceRequestAssembler.AssembledInference assign = inferenceRequestAssembler.assemble(spec);
 
         java.util.Map<String, Object> input = new java.util.LinkedHashMap<>();
         input.put("messages", assign.messages());
@@ -115,7 +114,7 @@ public class ExecutionInputAssembler {
                 "responseSequenceNo", sequenceNo,
                 "format", "TEXT"));
         // The attachments ride the messages' content parts (legacy shape);
-        // §8.1's separate attachments array is additive and left null.
+        // Â§8.1's separate attachments array is additive and left null.
         return input;
     }
 
@@ -133,7 +132,7 @@ public class ExecutionInputAssembler {
             WorkflowTask task, UUID sessionId, long stepIndex) {
         InferenceRequestSpec spec = buildWorkflowSpec(task, sessionId,
                 task.getRequest().getWorkflow().getProject().getId(), stepIndex);
-        InferenceAssignPayload assign = inferenceRequestAssembler.assemble(spec);
+        InferenceRequestAssembler.AssembledInference assign = inferenceRequestAssembler.assemble(spec);
 
         java.util.Map<String, Object> input = new java.util.LinkedHashMap<>();
         input.put("messages", assign.messages());
@@ -153,7 +152,7 @@ public class ExecutionInputAssembler {
         WorkflowRequest request = task.getRequest();
         Workflow workflow = request.getWorkflow();
         AgentProfile profile = task.getAgentProfile();
-        // §16.1: the behaviour contract lives on the published version row.
+        // Â§16.1: the behaviour contract lives on the published version row.
         AgentProfileVersion publishedVersion = agentProfileVersionService
                 .findPublished(profile.getId()).orElse(null);
 
@@ -218,8 +217,8 @@ public class ExecutionInputAssembler {
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Pinned agent profile version not found: " + pinnedVersionId));
 
-        // §3.7/§16.1: the pinned version carries the whole behaviour contract
-        // (profile id, system prompt, tools). No host lookup — the host is
+        // Â§3.7/Â§16.1: the pinned version carries the whole behaviour contract
+        // (profile id, system prompt, tools). No host lookup â€” the host is
         // needed at SEND time, not at input-assembly time, and a conversation
         // with a pin but no bound host still assembles valid input.
         // Assemble session.open to extract the active tool names.
@@ -233,7 +232,7 @@ public class ExecutionInputAssembler {
                 // must never be shipped to the agent that picks the turn up.
                 .filter(m -> !conversationNoticeService.isNoAgentNotice(m))
                 .toList();
-        List<ConversationTurnAssignPayload.HistoryEntry> historyEntries = buildSlidingWindow(active);
+        List<ConversationTurnContext.HistoryEntry> historyEntries = buildSlidingWindow(active);
         String userMessage = lastUserContent(active).orElse("");
         long assistantSequenceNo = all.isEmpty()
                 ? 0L
@@ -292,7 +291,7 @@ public class ExecutionInputAssembler {
      * context; the persisted row keeps its {@code CONTEXT_SUMMARY} role for
      * the transcript's transparency marker (#8a).</p>
      */
-    private List<ConversationTurnAssignPayload.HistoryEntry> buildSlidingWindow(
+    private List<ConversationTurnContext.HistoryEntry> buildSlidingWindow(
             List<ConversationMessage> all) {
         if (all == null || all.isEmpty()) {
             return Collections.emptyList();
@@ -334,17 +333,17 @@ public class ExecutionInputAssembler {
             windowed.add(0, latestSummary);
         }
 
-        List<ConversationTurnAssignPayload.HistoryEntry> out = new ArrayList<>(windowed.size());
+        List<ConversationTurnContext.HistoryEntry> out = new ArrayList<>(windowed.size());
         for (ConversationMessage m : windowed) {
             if (m.getRole() == ConversationMessage.Role.CONTEXT_SUMMARY) {
-                out.add(ConversationTurnAssignPayload.HistoryEntry.builder()
+                out.add(ConversationTurnContext.HistoryEntry.builder()
                         .role(ConversationMessage.Role.SYSTEM.name())
                         .content(SUMMARY_WIRE_PREFIX
                                 + (m.getContent() == null ? "" : m.getContent()))
                         .sequenceNo(m.getSequenceNo())
                         .build());
             } else {
-                out.add(ConversationTurnAssignPayload.HistoryEntry.builder()
+                out.add(ConversationTurnContext.HistoryEntry.builder()
                         .role(m.getRole().name())
                         .content(m.getContent())
                         .sequenceNo(m.getSequenceNo())
@@ -397,7 +396,7 @@ public class ExecutionInputAssembler {
      * are extracted inline (within the inline budget); images are flagged
      * for native vision parts only when the resolved model supports vision.
      */
-    private List<ConversationTurnAssignPayload.AttachmentDescriptor> buildAttachments(
+    private List<ConversationTurnContext.AttachmentDescriptor> buildAttachments(
             UUID conversationId, List<ConversationMessage> active, AgentProfileVersion version) {
         UUID userMessageId = null;
         for (int i = active.size() - 1; i >= 0; i--) {
@@ -426,7 +425,7 @@ public class ExecutionInputAssembler {
                 CONTEXT_TOKEN_BUDGET_KEY, CONTEXT_TOKEN_BUDGET_DEFAULT);
         long aggregateInlineBudget = (long) Math.floor(ratioMax * contextBudget);
         long runningInlineTokens = 0L;
-        List<ConversationTurnAssignPayload.AttachmentDescriptor> out = new ArrayList<>(rows.size());
+        List<ConversationTurnContext.AttachmentDescriptor> out = new ArrayList<>(rows.size());
         for (ConversationMessageAttachment row : rows) {
             boolean isImage = row.getMediaType() != null
                     && row.getMediaType().startsWith("image/");
@@ -447,7 +446,7 @@ public class ExecutionInputAssembler {
                 }
             }
 
-            out.add(ConversationTurnAssignPayload.AttachmentDescriptor.builder()
+            out.add(ConversationTurnContext.AttachmentDescriptor.builder()
                     .id(row.getId())
                     .filename(row.getFilename())
                     .mediaType(row.getMediaType())

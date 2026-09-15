@@ -21,7 +21,7 @@ import ai.myrmec.engine.inference.SessionContextAssembler;
 import ai.myrmec.engine.model.Model;
 import ai.myrmec.engine.model.ModelService;
 import ai.myrmec.engine.setting.SystemSettingService;
-import ai.myrmec.engine.websocket.message.payload.InferenceMessage;
+import ai.myrmec.engine.inference.InferenceMessage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -43,7 +43,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Transcript-assembly contract for {@link ExecutionInputAssembler} — the
+ * Transcript-assembly contract for {@link ExecutionInputAssembler} â€” the
  * unified path's owner of the logic the legacy {@code ConversationTurnDispatcher}
  * used to run inline.
  *
@@ -121,12 +121,9 @@ class ExecutionInputAssemblerTest {
         // the clamping decisions are made.
         when(inferenceRequestAssembler.assemble(any())).thenAnswer(inv -> {
             InferenceRequestSpec spec = inv.getArgument(0);
-            return new ai.myrmec.engine.websocket.message.payload.InferenceAssignPayload(
-                    spec.getRequestId(), spec.getSessionId(), spec.getServiceType(),
-                    List.of(), spec.getActiveToolNames(), null, null, true,
-                    new ai.myrmec.engine.websocket.message.payload.InferenceAssignPayload
-                            .ResponseRouting((int) spec.getSequenceNo(), null),
-                    null, null);
+            return new ai.myrmec.engine.inference.InferenceRequestAssembler.AssembledInference(
+                    List.of(), spec.getActiveToolNames() != null
+                            ? spec.getActiveToolNames() : List.of());
         });
     }
 
@@ -164,7 +161,7 @@ class ExecutionInputAssemblerTest {
         UUID messageId = UUID.randomUUID();
         UUID visionAttachmentId = UUID.randomUUID();
 
-        // Vision model → flagged.
+        // Vision model â†’ flagged.
         wireConversation("Profile prompt.", "gpt-4o");
         Model vision = new Model();
         vision.setSupportsVision(true);
@@ -182,7 +179,7 @@ class ExecutionInputAssemblerTest {
         assertThat(flagged.inlineText()).isNull();
         assertThat(flagged.readContentPath()).contains(visionAttachmentId.toString());
 
-        // Non-vision model → metadata only, never flagged.
+        // Non-vision model â†’ metadata only, never flagged.
         UUID textAttachmentId = UUID.randomUUID();
         wireConversation("Profile prompt.", "text-only");
         Model textOnly = new Model();
@@ -212,12 +209,12 @@ class ExecutionInputAssemblerTest {
                 attachment(firstId, messageId, "a.txt", "text/plain"),
                 attachment(secondId, messageId, "b.txt", "text/plain")));
 
-        // Both clear the per-attachment gate (1000 tokens each)…
+        // Both clear the per-attachment gate (1000 tokens each)â€¦
         when(systemSettingService.getInt(eq("attachment_inline_token_limit"), anyLong()))
                 .thenReturn(1000L);
         when(attachmentService.download(conversationId, firstId)).thenReturn(bytesOfLength(120));
         when(attachmentService.download(conversationId, secondId)).thenReturn(bytesOfLength(120));
-        // …but 120 bytes ≈ 31 tokens each against a 100 × 0.5 = 50-token aggregate
+        // â€¦but 120 bytes â‰ˆ 31 tokens each against a 100 Ã— 0.5 = 50-token aggregate
         // budget: the first fits, the second is demoted to read-on-demand.
         when(systemSettingService.getInt(eq("context_token_budget"), anyLong())).thenReturn(100L);
         when(systemSettingService.getRatio(eq("attachment_inline_ratio_max"), anyDouble()))
@@ -249,8 +246,8 @@ class ExecutionInputAssemblerTest {
 
         when(systemSettingService.getInt(eq("attachment_inline_token_limit"), anyLong()))
                 .thenReturn(1000L);
-        // 196 bytes → (196/4)+1 = 50 estimated tokens = exactly the 50-token
-        // budget → inlined. The 4-byte file adds 2 more → one over → demoted.
+        // 196 bytes â†’ (196/4)+1 = 50 estimated tokens = exactly the 50-token
+        // budget â†’ inlined. The 4-byte file adds 2 more â†’ one over â†’ demoted.
         when(attachmentService.download(conversationId, atBudgetId)).thenReturn(bytesOfLength(196));
         when(attachmentService.download(conversationId, overBudgetId)).thenReturn(bytesOfLength(4));
         when(systemSettingService.getInt(eq("context_token_budget"), anyLong())).thenReturn(100L);
@@ -317,7 +314,7 @@ class ExecutionInputAssemblerTest {
         assemble();
 
         List<InferenceRequestSpec.HistoryEntry> history = captureSpec().getHistory();
-        // Window = [summary(@3), asst(@4), user(@5)] — the folded turns 0..2 are gone.
+        // Window = [summary(@3), asst(@4), user(@5)] â€” the folded turns 0..2 are gone.
         assertThat(history).hasSize(3);
         assertThat(history.get(0).role()).isEqualTo("SYSTEM");
         assertThat(history.get(0).content())

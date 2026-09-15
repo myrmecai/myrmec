@@ -7,7 +7,7 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { resolveChatModel, resolveProviderModel } from "./resolveModel.js";
 import { LangChainChatModel } from "./LangChainChatModel.js";
-import { modelInfoSchema } from "../protocol/taskFrames.js";
+import { modelInfoSchema } from "../protocol/unifiedFrames.js";
 
 /** Build a ModelInfoWire through the schema so defaults apply. */
 function modelInfo(overrides: Record<string, unknown>) {

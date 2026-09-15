@@ -2,8 +2,6 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.node;
 
-import ai.myrmec.engine.websocket.AgentConnectionManager;
-import ai.myrmec.engine.websocket.message.WebSocketMessage;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -17,31 +15,23 @@ import java.util.UUID;
 import java.util.function.BiConsumer;
 
 /**
- * OSS {@link NodeTransport} implementation using direct HTTP RPC for both
- * point-to-point control relay and fan-out stream delivery.
+ * OSS {@link NodeTransport} implementation using direct HTTP RPC for
+ * fan-out stream delivery.
  *
- * <p><b>In-process short-circuit:</b> when the worker is homed on this
- * replica — {@code homeNodeId} is {@code null} (unbound) or equals this
- * node's id — the message is delivered straight to the local socket
- * registry.</p>
- *
- * <p><b>Direct-RPC relay:</b> otherwise the frame is serialized once and
- * POSTed to the owning peer replica's relay endpoint. The relay leg is
- * <i>opt-in</i>: it only activates when {@code myrmec.node.relay.enabled}
- * is set and a shared secret is configured, so a single-node OSS deployment
- * never attempts a network hop.</p>
- *
- * <p><b>Fan-out:</b> iterates all UP peer nodes and POSTs the frame to
- * each one's {@code /api/v1/internal/stream-relay} endpoint. The local
- * instance is skipped (local delivery already happened in the broker).
- * Fan-out is fire-and-forget — a single unreachable peer does not block
- * the turn.</p>
+ * <p><b>Unified protocol (P6-T6):</b> the legacy point-to-point leg
+ * ({@code sendToNode} → {@code AgentConnectionManager}) died with the legacy
+ * agent wire — the unified host socket is the only control channel, and a
+ * replica that loses a host's socket reconciles through session state, not
+ * by relaying frames to a peer. Only the SSE fan-out half remains: it iterates
+ * all UP peer nodes and POSTs the frame to each one's
+ * {@code /api/v1/internal/stream-relay} endpoint. The local instance is
+ * skipped (local delivery already happened in the broker). Fan-out is
+ * fire-and-forget — a single unreachable peer does not block the turn.</p>
  */
 @Component
 @Slf4j
 public class DirectRpcNodeTransport implements NodeTransport {
 
-    private final AgentConnectionManager connectionManager;
     private final EngineNodeRepository nodeRepository;
     private final NodeRegistryService nodeRegistry;
     private final ObjectMapper objectMapper;
@@ -53,60 +43,17 @@ public class DirectRpcNodeTransport implements NodeTransport {
     private volatile BiConsumer<UUID, String> fanoutHandler = (id, frame) -> { };
 
     public DirectRpcNodeTransport(
-            AgentConnectionManager connectionManager,
             EngineNodeRepository nodeRepository,
             NodeRegistryService nodeRegistry,
             ObjectMapper objectMapper,
             @Value("${myrmec.node.relay.enabled:false}") boolean relayEnabled,
             @Value("${myrmec.node.relay.secret:}") String relaySecret) {
-        this.connectionManager = connectionManager;
         this.nodeRepository = nodeRepository;
         this.nodeRegistry = nodeRegistry;
         this.objectMapper = objectMapper;
         this.relayEnabled = relayEnabled;
         this.relaySecret = relaySecret;
         this.restClient = RestClient.create();
-    }
-
-    // ── Point-to-point ──────────────────────────────────────────────
-
-    @Override
-    public boolean sendToNode(String homeNodeId, UUID agentInstanceId, WebSocketMessage<?> message) {
-        if (isLocal(homeNodeId)) {
-            return connectionManager.sendMessage(agentInstanceId, message);
-        }
-        return relayToPeer(homeNodeId, agentInstanceId, message);
-    }
-
-    private boolean isLocal(String homeNodeId) {
-        return homeNodeId == null
-                || homeNodeId.isBlank()
-                || homeNodeId.equals(nodeRegistry.getSelfNodeId());
-    }
-
-    private boolean relayToPeer(String homeNodeId, UUID agentInstanceId, WebSocketMessage<?> message) {
-        if (!relayEnabled || relaySecret.isBlank()) {
-            log.warn("Worker {} is homed on peer node {} but node relay is disabled; dropping {} frame",
-                    agentInstanceId, homeNodeId, message.getType());
-            return false;
-        }
-        EngineNode peer = nodeRepository.findById(homeNodeId).orElse(null);
-        if (peer == null || peer.getStatus() == EngineNode.Status.DOWN) {
-            log.warn("Cannot relay {} frame to worker {}: home node {} is unknown or DOWN",
-                    message.getType(), agentInstanceId, homeNodeId);
-            return false;
-        }
-        String frameJson;
-        try {
-            frameJson = objectMapper.writeValueAsString(message);
-        } catch (JsonProcessingException e) {
-            log.error("Failed to serialize {} frame for relay to node {}: {}",
-                    message.getType(), homeNodeId, e.getMessage());
-            return false;
-        }
-        return postToPeer(peer.getAddress(),
-                "/api/v1/internal/agent-relay",
-                new AgentRelayRequest(agentInstanceId, frameJson));
     }
 
     // ── Fan-out ─────────────────────────────────────────────────────
@@ -158,7 +105,7 @@ public class DirectRpcNodeTransport implements NodeTransport {
         try {
             Boolean delivered = restClient.post()
                     .uri("http://{addr}" + path, peerAddress)
-                    .header(AgentRelayController.NODE_SECRET_HEADER, relaySecret)
+                    .header(StreamRelayController.NODE_SECRET_HEADER, relaySecret)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(request)
                     .retrieve()

@@ -2,7 +2,7 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.inference;
 
-import ai.myrmec.engine.websocket.message.payload.InferenceMessage;
+import ai.myrmec.engine.inference.InferenceMessage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -12,8 +12,8 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Unit tests for {@link WorkflowTranscriptComposer} — verifies byte-for-byte
- * parity with the agent's {@code assembleTask.ts} logic (R2 / §10.1).
+ * Unit tests for {@link WorkflowTranscriptComposer} â€” verifies byte-for-byte
+ * parity with the agent's {@code assembleTask.ts} logic (R2 / Â§10.1).
  */
 @DisplayName("WorkflowTranscriptComposer")
 class WorkflowTranscriptComposerTest {
@@ -61,7 +61,7 @@ class WorkflowTranscriptComposerTest {
 
         assertThat(messages).hasSize(2);
         String system = messages.get(0).content();
-        // Order must be STANDARD → REQUIREMENT → ARCHITECTURE → INSTRUCTION
+        // Order must be STANDARD â†’ REQUIREMENT â†’ ARCHITECTURE â†’ INSTRUCTION
         int stdPos = system.indexOf("Standards & Conventions");
         int reqPos = system.indexOf("Requirements");
         int archPos = system.indexOf("Architecture");
@@ -97,7 +97,7 @@ class WorkflowTranscriptComposerTest {
     }
 
     @Test
-    @DisplayName("input.messages array — step prompt as leading user message, then each by role")
+    @DisplayName("input.messages array â€” step prompt as leading user message, then each by role")
     void testInputMessagesArray() {
         InferenceRequestSpec spec = InferenceRequestSpec.builder()
                 .serviceType("WORKFLOW")
@@ -128,7 +128,7 @@ class WorkflowTranscriptComposerTest {
     }
 
     @Test
-    @DisplayName("input.prompt + other fields — step prompt + prompt + JSON block")
+    @DisplayName("input.prompt + other fields â€” step prompt + prompt + JSON block")
     void testInputPromptAndData() {
         InferenceRequestSpec spec = InferenceRequestSpec.builder()
                 .serviceType("WORKFLOW")
@@ -154,7 +154,7 @@ class WorkflowTranscriptComposerTest {
     }
 
     @Test
-    @DisplayName("no step prompt, no input — empty user message list")
+    @DisplayName("no step prompt, no input â€” empty user message list")
     void testEmptyInput() {
         InferenceRequestSpec spec = InferenceRequestSpec.builder()
                 .serviceType("WORKFLOW")
@@ -169,7 +169,7 @@ class WorkflowTranscriptComposerTest {
     }
 
     @Test
-    @DisplayName("empty knowledge list — no project context section")
+    @DisplayName("empty knowledge list â€” no project context section")
     void testEmptyKnowledge() {
         InferenceRequestSpec spec = InferenceRequestSpec.builder()
                 .serviceType("WORKFLOW")

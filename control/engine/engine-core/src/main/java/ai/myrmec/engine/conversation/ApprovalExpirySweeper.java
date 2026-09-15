@@ -1,6 +1,5 @@
 package ai.myrmec.engine.conversation;
 
-import ai.myrmec.engine.websocket.ConversationSocketRegistry;
 import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
 import ai.myrmec.engine.websocket.message.MessageType;
 import ai.myrmec.engine.websocket.message.WebSocketMessage;
@@ -32,9 +31,15 @@ import java.util.UUID;
  * EXPIRED state; once a row has been swept the SDK can no longer be
  * surprised by a late human decision (the row is no longer PENDING).</p>
  *
+ * <p>Unified protocol (P6-T6): the agent-side {@code approval.decision}
+ * push is gone with the conversation wire — pause is terminal (§8.6);
+ * a swept row is durable EXPIRED and the next user turn re-offers a
+ * fresh session with {@code conversationContinuation}. Only the UI
+ * badge broadcast (SSE) survives here.</p>
+ *
  * <p>Each row is processed in its own {@link Propagation#REQUIRES_NEW}
- * transaction so a transient failure (DB hiccup, JSON serialisation
- * error during broadcast) on one row never aborts the whole sweep.</p>
+ * transaction so a transient failure (DB hiccup, serialisation error
+ * during broadcast) on one row never aborts the whole sweep.</p>
  */
 @Service
 @Slf4j
@@ -43,7 +48,6 @@ public class ApprovalExpirySweeper {
 
     private final ConversationMessageRepository messageRepository;
     private final ConversationStreamBroker streamBroker;
-    private final ConversationSocketRegistry conversationSocketRegistry;
     private final ObjectMapper objectMapper;
     // HITL slice B: the orchestration-review sweep (§17.4/§16.6).
     private final ai.myrmec.engine.workflow.WorkflowTaskRepository workflowTaskRepository;
@@ -130,9 +134,10 @@ public class ApprovalExpirySweeper {
     }
 
     /**
-     * Marks one approval row EXPIRED + broadcasts + pushes a decision
-     * frame to any ONLINE pinned agent. Each call runs in its own
-     * transaction so a single broken row never blocks the rest.
+     * Marks one approval row EXPIRED + broadcasts the decision envelope to
+     * the chat UI (SSE) so the badge flips without a manual refresh. Each
+     * call runs in its own transaction so a single broken row never blocks
+     * the rest.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void expireOne(UUID messageId) {
@@ -150,7 +155,10 @@ public class ApprovalExpirySweeper {
                 row.getId(), row.getConversationId());
 
         // Broadcast a decision envelope so the chat UI flips the badge
-        // without a manual refresh.
+        // without a manual refresh. The clientRequestId is recovered from
+        // the request row's payloadJson — the chat UI keys its pending-approval
+        // widget off it (engine→UI SSE only; the agent-side push is gone
+        // with the legacy wire, §8.6 pause-is-terminal).
         ApprovalDecisionPayload payload = ApprovalDecisionPayload.builder()
                 .conversationId(row.getConversationId())
                 .requestMessageId(row.getId())
@@ -164,18 +172,14 @@ public class ApprovalExpirySweeper {
         } catch (Exception e) {
             log.warn("Expiry broadcast for approval {} failed: {}", row.getId(), e.getMessage());
         }
-
-        // Wake the worker awaiting the request_approval() future by
-        // pushing the EXPIRED decision over its conversation socket.
-        conversationSocketRegistry.sendMessage(
-                row.getConversationId(),
-                WebSocketMessage.of(MessageType.APPROVAL_DECISION, payload));
     }
 
     /**
-     * Same extraction strategy as {@link ApprovalDecisionDispatcher} —
-     * the agent SDK stamps a top-level {@code "clientRequestId"} key
-     * into the payloadJson when it calls {@code ctx.request_approval}.
+     * UI-envelope helper: the agent SDK stamps a top-level
+     * {@code "clientRequestId"} key into the payloadJson when it calls
+     * {@code ctx.request_approval}; the chat UI's pending-approval widget
+     * keys off it on the SSE broadcast. (The agent-side push that also
+     * consumed this is gone with the legacy wire.)
      */
     private UUID extractClientRequestId(ConversationMessage row) {
         String json = row.getPayloadJson();
@@ -202,6 +206,8 @@ public class ApprovalExpirySweeper {
         try {
             return UUID.fromString(json.substring(firstQuote + 1, closingQuote));
         } catch (IllegalArgumentException e) {
+            log.debug("Approval request {} has clientRequestId that is not a UUID: {}",
+                    row.getId(), json.substring(firstQuote + 1, closingQuote));
             return null;
         }
     }

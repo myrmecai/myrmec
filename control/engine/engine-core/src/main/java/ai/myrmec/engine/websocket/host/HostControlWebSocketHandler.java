@@ -309,6 +309,19 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                 instanceRepository.save(instance);
                 log.info("Host instance {} closed ({})", id, status);
             });
+            // §9 (P6-T6): the host's control socket is the session's
+            // lifeline — when it dies, every session the instance was
+            // serving closes with HOST_LOST (dev-phase: no RECOVERING).
+            // The affected conversation re-offers a fresh session on the
+            // next turn; an ordinary workflow task's progression pass
+            // re-dispatches (attempt stays attempt-numbered).
+            try {
+                sessionAllocator.closeAllOnHostInstance(id, "HOST_LOST");
+            } catch (Exception e) {
+                // The allocation sweep reconciles leaked rows; never let a
+                // close-path failure break socket teardown.
+                log.warn("Host-lost session close for instance {} failed: {}", id, e.getMessage(), e);
+            }
             session.getAttributes().remove(ATTR_HOST_INSTANCE_ID);
         }
     }

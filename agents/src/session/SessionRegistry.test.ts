@@ -3,10 +3,10 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { SessionRegistry } from "./SessionRegistry.js";
-import type { SessionOpenPayload, ToolDefinition, KnowledgeSourceHandle } from "../protocol/inferenceFrames.js";
+import type { SessionOpenPayload } from "../protocol/unifiedFrames.js";
+import type { ToolDefinition, KnowledgeSourceHandle, ModelInfoWire } from "../protocol/sessionTypes.js";
 import type { ChatModel, ConversationMessage, ModelResponse, Tool, SessionTool } from "../executor/types.js";
 import type { ChatModelFactory, SessionToolFactory } from "../executor/providers.js";
-import type { ModelInfoWire } from "../protocol/taskFrames.js";
 
 // ── helpers ───────────────────────────────────────────────────────
 

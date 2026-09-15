@@ -85,6 +85,14 @@ public class Session {
     @Column(name = "closed_at")
     private Instant closedAt;
 
+    /**
+     * Protocol §9/P6-T6: why the session closed (IDLE_LEASE_EXPIRED,
+     * HOST_LOST, ASSEMBLY_FAILED, …). Write-once at close; the value is
+     * operational forensics for "why did this conversation stop?".
+     */
+    @Column(name = "close_reason", length = 40)
+    private String closeReason;
+
     @PrePersist
     void onCreate() {
         createdAt = Instant.now();

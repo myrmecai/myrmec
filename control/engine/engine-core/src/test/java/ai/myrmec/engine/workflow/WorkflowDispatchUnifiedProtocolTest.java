@@ -13,7 +13,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.mock.mockito.SpyBean;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -30,14 +29,12 @@ import static org.mockito.Mockito.verify;
  * Discriminating cutover test: a workflow task dispatches through the unified
  * host-control protocol and NEVER through the legacy task-delivery wire.
  *
- * <p>The discriminator is the frame sequence on the host socket plus the relay
- * spy: the legacy path emitted {@code session.open} + {@code inference.assign}
- * straight at an agent instance and left the dispatch's delivery to
- * {@code OrchestrationDispatchRelay.sendOnce}. The unified path offers a session
- * ({@code session.offer}), waits for the host's accept/opened answers, and ships
- * {@code session.open} then {@code execution.start} — so an assertion that the
- * relay's send was never called cannot be satisfied by the legacy
- * implementation, and vice versa.</p>
+ * <p>The discriminator is the frame sequence on the host socket plus the
+ * durable session/execution state (P6-T6: the legacy task-delivery wire is
+ * deleted, so "never through the legacy path" is enforced by the codebase,
+ * not by a spy). The unified path offers a session ({@code session.offer}),
+ * waits for the host's accept/opened answers, and ships {@code session.open}
+ * then {@code execution.start}.</p>
  */
 class WorkflowDispatchUnifiedProtocolTest extends WorkflowDispatchSupport {
 
@@ -50,8 +47,6 @@ class WorkflowDispatchUnifiedProtocolTest extends WorkflowDispatchSupport {
     @Autowired private WorkflowRequestRepository requestRepository;
     @Autowired private WorkflowTaskRepository taskRepository;
     @Autowired private TaskAttemptRepository attemptRepository;
-
-    @SpyBean private OrchestrationDispatchRelay legacyRelay;
 
     private Project project;
     private AgentProfile profile;
@@ -158,8 +153,8 @@ class WorkflowDispatchUnifiedProtocolTest extends WorkflowDispatchSupport {
                 .isEqualTo(host.host().getId());
 
         // ---- The discriminator: NO legacy delivery happened ----
-        verify(legacyRelay, never()).sendOnce(any(), any());
-        verify(legacyRelay, never()).recordDispatch(any(), any(), any(), any(), any());
+        // (P6-T6: the legacy wire is deleted from the engine; the unified
+        // frame sequence below is the only delivery path that exists.)
         for (JsonNode frame : framesOf(host)) {
             assertThat(frame.path("type").asText())
                     .as("no legacy task-delivery frame on the unified wire")
@@ -205,7 +200,6 @@ class WorkflowDispatchUnifiedProtocolTest extends WorkflowDispatchSupport {
         assertThat(runRepository.findById(request.getId()))
                 .as("an ordinary inference request never pins a run row")
                 .isEmpty();
-        verify(legacyRelay, never()).sendOnce(any(), any());
     }
 
     @Test

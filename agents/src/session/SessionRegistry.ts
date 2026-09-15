@@ -10,8 +10,8 @@
  * tears it down on `session.close`. The model is resolved ONCE at open time
  * and reused across every turn in the session.
  */
-import type { SessionOpenPayload } from "../protocol/inferenceFrames.js";
-import type { ModelInfoWire } from "../protocol/taskFrames.js";
+import type { SessionOpenPayload } from "../protocol/unifiedFrames.js";
+import type { ModelInfoWire } from "../protocol/sessionTypes.js";
 import type { ChatModel, SessionTool } from "../executor/types.js";
 import type { ChatModelFactory, SessionToolFactory } from "../executor/providers.js";
 import type { Logger } from "../models/index.js";
@@ -29,8 +29,12 @@ export interface Session {
   knowledgeSourceIds: Set<string>;
   /** Project HITL policy: when true, DESTRUCTIVE/IRREVERSIBLE tools require
    *  human approval before execution. */
-  autoHitlOnDestructive: boolean;
-}
+  autoHitlOnDestructive: boolean;  /** §16.2 (P6-T6): an ORCHESTRATOR session's complete self-contained
+   *  assignment as delivered on session.open — the assignment IS the
+   *  session's context. Null on ordinary sessions. */
+  orchestration?: Record<string, unknown> | null;
+  /** §16.3 sha-256 of the canonical assignment bytes. */
+  assignmentDigest?: string | null;}
 
 /** Constructor options for {@link SessionRegistry}. */
 export interface SessionRegistryOptions {
@@ -75,7 +79,14 @@ export class SessionRegistry {
   async open(payload: SessionOpenPayload): Promise<void> {
     const modelInfo = payload.model as unknown as ModelInfoWire;
     const model = await this.chatModelFactory.resolve(modelInfo, payload.sessionId);
-    const tools = await this.sessionToolFactory.resolve(payload.tools);
+    // zod's z.infer widens riskClass to string — re-narrow to the literal
+    // union the session-tool factory expects.
+    const tools = await this.sessionToolFactory.resolve(
+      payload.tools.map((t) => ({
+        ...t,
+        riskClass: (t.riskClass as "SAFE" | "DESTRUCTIVE" | "IRREVERSIBLE") ?? "SAFE",
+      })),
+    );
 
     const knowledgeSourceIds = new Set(
       payload.knowledgeSources.map((ks) => ks.knowledgeSourceId),
@@ -83,17 +94,23 @@ export class SessionRegistry {
 
     const session: Session = {
       sessionId: payload.sessionId,
-      serviceType: payload.serviceType,
+      serviceType: payload.serviceType === "WORKFLOW" ? "WORKFLOW" : "CONVERSATION",
       projectId: payload.projectId,
       model,
       tools,
       knowledgeSourceIds,
       autoHitlOnDestructive: payload.autoHitlOnDestructive ?? false,
+      // §16.2/§16.3: pass the orchestration assignment through — the
+      // orchestration executor reads it from the session, not from a
+      // legacy inference.assign wire.
+      orchestration: payload.orchestration ?? null,
+      assignmentDigest: payload.assignmentDigest ?? null,
     };
     this.sessions.set(payload.sessionId, session);
 
     this.logger.info(
-      `Session opened: ${payload.sessionId} (${payload.serviceType}) — ${tools.size} tools, ${knowledgeSourceIds.size} knowledge sources`,
+      `Session opened: ${payload.sessionId} (${payload.serviceType}) — ${tools.size} tools, ${knowledgeSourceIds.size} knowledge sources${
+        payload.orchestration ? ", orchestration assignment installed" : ""}`,
     );
   }
 

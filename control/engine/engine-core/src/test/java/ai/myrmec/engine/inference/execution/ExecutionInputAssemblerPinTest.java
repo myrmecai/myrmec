@@ -24,9 +24,9 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The decoupling cutover's core contract (§3.7/§16.1): a conversation's
+ * The decoupling cutover's core contract (Â§3.7/Â§16.1): a conversation's
  * profile comes from the ASSISTANT PIN, never from the host, and the pinned
- * version row is immutable for the life of the conversation — a profile
+ * version row is immutable for the life of the conversation â€” a profile
  * republish must not change what the next turn's assembled input carries.
  */
 class ExecutionInputAssemblerPinTest extends IntegrationTestBase {
@@ -59,7 +59,7 @@ class ExecutionInputAssemblerPinTest extends IntegrationTestBase {
         conversationService.appendMessage(conversation.getId(),
                 ConversationMessage.Role.USER, "hello", TEST_ADMIN_ID, null);
 
-        // Republish the profile AFTER the conversation pinned v1 (§16.1).
+        // Republish the profile AFTER the conversation pinned v1 (Â§16.1).
         String defaultModel = agentProfileVersionService
                 .requirePublished(profile.getId()).getDefaultModel();
         agentProfileService.updateProfile(profile.getId(), profile.getName(),
@@ -70,11 +70,11 @@ class ExecutionInputAssemblerPinTest extends IntegrationTestBase {
         Map<String, Object> input = assembler.assembleConversationInput(
                 conversation.getId(), UUID.randomUUID(), project.getId(), 1L);
 
-        // The assembled input's "messages" is the legacy transcript — a
+        // The assembled input's "messages" is the legacy transcript â€” a
         // List<InferenceMessage> (P5 lesson: never cast it to List<Map>).
         @SuppressWarnings("unchecked")
-        List<ai.myrmec.engine.websocket.message.payload.InferenceMessage> messages =
-                (List<ai.myrmec.engine.websocket.message.payload.InferenceMessage>)
+        List<ai.myrmec.engine.inference.InferenceMessage> messages =
+                (List<ai.myrmec.engine.inference.InferenceMessage>)
                         (Object) input.get("messages");
         String systemText = messages.stream()
                 .filter(m -> "system".equalsIgnoreCase(String.valueOf(m.role())))

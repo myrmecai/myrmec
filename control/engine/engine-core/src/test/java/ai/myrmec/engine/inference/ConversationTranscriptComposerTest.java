@@ -2,7 +2,7 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.inference;
 
-import ai.myrmec.engine.websocket.message.payload.InferenceMessage;
+import ai.myrmec.engine.inference.InferenceMessage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -11,8 +11,8 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Unit tests for {@link ConversationTranscriptComposer} — verifies parity
- * with the agent's {@code assembleConversationMessages()} logic (R2 / §10.1).
+ * Unit tests for {@link ConversationTranscriptComposer} â€” verifies parity
+ * with the agent's {@code assembleConversationMessages()} logic (R2 / Â§10.1).
  */
 @DisplayName("ConversationTranscriptComposer")
 class ConversationTranscriptComposerTest {
@@ -149,7 +149,7 @@ class ConversationTranscriptComposerTest {
     }
 
     @Test
-    @DisplayName("no system prompt, no history, no attachments — just user message")
+    @DisplayName("no system prompt, no history, no attachments â€” just user message")
     void testBareUserMessage() {
         InferenceRequestSpec spec = InferenceRequestSpec.builder()
                 .serviceType("CONVERSATION")
@@ -164,7 +164,7 @@ class ConversationTranscriptComposerTest {
     }
 
     @Test
-    @DisplayName("role normalization — unknown roles default to user")
+    @DisplayName("role normalization â€” unknown roles default to user")
     void testRoleNormalization() {
         InferenceRequestSpec spec = InferenceRequestSpec.builder()
                 .serviceType("CONVERSATION")
@@ -180,6 +180,6 @@ class ConversationTranscriptComposerTest {
 
         assertThat(messages).hasSize(4);
         assertThat(messages.get(1).role()).isEqualTo("user");
-        assertThat(messages.get(2).role()).isEqualTo("user"); // "random" → normalized to "user"
+        assertThat(messages.get(2).role()).isEqualTo("user"); // "random" â†’ normalized to "user"
     }
 }

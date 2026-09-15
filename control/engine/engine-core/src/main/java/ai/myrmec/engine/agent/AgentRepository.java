@@ -119,9 +119,11 @@ public interface AgentRepository extends JpaRepository<Agent, UUID> {
     /**
      * Find workers homed on a lost replica: any worker whose status is in
      * {@code statuses} ({@code BOUND}/{@code CONNECTING}) and whose
-     * {@code home_node_id} is one of the {@code DOWN} nodes. The
-     * {@code HomeNodeFailoverService} sweep re-homes the ones whose agent
-     * host is still alive (agent-concurrency §9.11).
+     * {@code home_node_id} is one of the {@code DOWN} nodes. Under the
+     * unified protocol (P6-T6) the legacy re-homing sweep is deleted: a
+     * worker whose home instance closed is superseded by the next
+     * dispatch's fresh session offer while its host is still alive
+     * (agent-concurrency §9.11).
      */
     @Query("SELECT a FROM Agent a WHERE a.status IN :statuses AND a.homeNodeId IN :homeNodeIds")
     List<Agent> findByStatusInAndHomeNodeIdIn(@Param("statuses") List<Agent.Status> statuses,

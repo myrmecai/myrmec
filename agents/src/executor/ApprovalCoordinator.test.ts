@@ -6,16 +6,18 @@ import {
   ApprovalCoordinator,
   ApprovalTimeoutError,
 } from "./ApprovalCoordinator.js";
-import type { Envelope } from "../protocol/envelope.js";
-import { MessageType } from "../protocol/messages.js";
+import type { ExecutionApprovalRequestedPayload } from "../protocol/unifiedFrames.js";
 
+/** Records the unified sender's frames. */
 function recorder() {
-  const frames: Envelope[] = [];
-  const send = (frame: Envelope) => {
-    frames.push(frame);
-    return Promise.resolve();
+  const payloads: ExecutionApprovalRequestedPayload[] = [];
+  const sender = {
+    sendExecutionApprovalRequested: (p: ExecutionApprovalRequestedPayload) => {
+      payloads.push(p);
+      return Promise.resolve();
+    },
   };
-  return { frames, send };
+  return { payloads, sender };
 }
 
 /** A deterministic id generator so tests can correlate request/decision. */
@@ -24,45 +26,39 @@ function fixedIds(...ids: string[]) {
   return () => ids[i++] ?? `extra_${i}`;
 }
 
-describe("ApprovalCoordinator", () => {
-  it("emits an approval.request stamping the client request id", async () => {
-    const { frames, send } = recorder();
-    const c = new ApprovalCoordinator({ send, generateId: fixedIds("r1") });
+describe("ApprovalCoordinator (unified wire, P6-T6)", () => {
+  it("emits execution.approval.requested stamping the client request id", async () => {
+    const { payloads, sender } = recorder();
+    const c = new ApprovalCoordinator({ sender, generateId: fixedIds("r1") });
 
     const pending = c.requestApproval({
-      conversationId: "c1",
+      executionId: "e1",
       content: "Delete file?",
       payload: { path: "/tmp/x" },
     });
 
-    // The request frame is sent synchronously before the await resolves.
-    await vi.waitFor(() => expect(frames.length).toBe(1));
-    const frame = frames[0];
-    expect(frame.type).toBe(MessageType.APPROVAL_REQUEST);
-    expect(frame.payload).toMatchObject({
-      conversationId: "c1",
-      clientRequestId: "r1",
-      content: "Delete file?",
-    });
-    const body = JSON.parse(
-      (frame.payload as { payloadJson: string }).payloadJson,
-    );
-    expect(body).toEqual({ path: "/tmp/x", clientRequestId: "r1" });
+    await vi.waitFor(() => expect(payloads.length).toBe(1));
+    const payload = payloads[0];
+    expect(payload.executionId).toBe("e1");
+    expect(payload.approvalRequestId).toBe("r1");
+    expect(payload.action.actionId).toBe("r1");
+    expect(payload.action.summary).toBe("Delete file?");
+    // The injected payload (incl. clientRequestId) survives in the digest.
+    expect(payload.action.digest).toContain('"clientRequestId":"r1"');
     expect(c.pendingCount).toBe(1);
 
-    c.resolve({ conversationId: "c1", clientRequestId: "r1", decision: "APPROVED" });
+    c.resolve({ clientRequestId: "r1", decision: "APPROVED" });
     const outcome = await pending;
     expect(outcome.approved).toBe(true);
     expect(c.pendingCount).toBe(0);
   });
 
   it("resolves a rejection with comment", async () => {
-    const { send } = recorder();
-    const c = new ApprovalCoordinator({ send, generateId: fixedIds("r1") });
+    const { sender } = recorder();
+    const c = new ApprovalCoordinator({ sender, generateId: fixedIds("r1") });
 
-    const pending = c.requestApproval({ conversationId: "c1" });
+    const pending = c.requestApproval({ executionId: "e1" });
     c.resolve({
-      conversationId: "c1",
       clientRequestId: "r1",
       decision: "REJECTED",
       comment: "nope",
@@ -79,10 +75,10 @@ describe("ApprovalCoordinator", () => {
 
   it("rejects with ApprovalTimeoutError when no decision arrives", async () => {
     vi.useFakeTimers();
-    const { send } = recorder();
-    const c = new ApprovalCoordinator({ send, generateId: fixedIds("r1") });
+    const { sender } = recorder();
+    const c = new ApprovalCoordinator({ sender, generateId: fixedIds("r1") });
 
-    const pending = c.requestApproval({ conversationId: "c1", timeoutMs: 1000 });
+    const pending = c.requestApproval({ executionId: "e1", timeoutMs: 1000 });
     const assertion = expect(pending).rejects.toBeInstanceOf(ApprovalTimeoutError);
 
     await vi.advanceTimersByTimeAsync(1000);
@@ -92,20 +88,44 @@ describe("ApprovalCoordinator", () => {
   });
 
   it("ignores a decision with no matching pending request", () => {
-    const { send } = recorder();
-    const c = new ApprovalCoordinator({ send });
+    const { sender } = recorder();
+    const c = new ApprovalCoordinator({ sender });
 
     expect(
-      c.resolve({ conversationId: "c1", clientRequestId: "ghost", decision: "APPROVED" }),
+      c.resolve({ clientRequestId: "ghost", decision: "APPROVED" }),
     ).toBe(false);
   });
 
   it("ignores a decision missing the client request id", () => {
-    const { send } = recorder();
-    const c = new ApprovalCoordinator({ send });
+    const { sender } = recorder();
+    const c = new ApprovalCoordinator({ sender });
 
+    expect(c.resolve({ decision: "APPROVED" })).toBe(false);
+  });
+
+  it("requires a sender (constructor guard)", () => {
     expect(
-      c.resolve({ conversationId: "c1", decision: "APPROVED" }),
-    ).toBe(false);
+      () =>
+        new ApprovalCoordinator({
+          // @ts-expect-error — missing sender must be rejected at runtime too.
+          sender: undefined,
+        }),
+    ).toThrow("ApprovalCoordinator requires a sender");
+  });
+
+  it("cleans up the pending wait when the send itself fails", async () => {
+    const sender = {
+      sendExecutionApprovalRequested: () =>
+        Promise.reject(new Error("socket gone")),
+    };
+    const c = new ApprovalCoordinator({
+      sender,
+      generateId: fixedIds("r1"),
+    });
+
+    await expect(
+      c.requestApproval({ executionId: "e1" }),
+    ).rejects.toThrow("socket gone");
+    expect(c.pendingCount).toBe(0);
   });
 });

@@ -2,7 +2,7 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.inference;
 
-import ai.myrmec.engine.websocket.message.payload.InferenceMessage;
+import ai.myrmec.engine.inference.InferenceMessage;
 import ai.myrmec.engine.inference.InferenceRequestSpec.AttachmentDescriptor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Conversation transcript composer (§6.3).
+ * Conversation transcript composer (Â§6.3).
  *
  * <p>Ports {@code assembleConversationMessages()} from
  * {@code agents/src/executor/ConversationDispatcher.ts} byte-for-byte:
@@ -95,7 +95,7 @@ public class ConversationTranscriptComposer implements TranscriptComposer {
     }
 
     /**
-     * Build multimodal content parts for image attachments (§5.4).
+     * Build multimodal content parts for image attachments (Â§5.4).
      * The agent fetches the actual bytes on demand via readContentPath.
      */
     private List<InferenceMessage.ContentPart> buildImageParts(List<AttachmentDescriptor> attachments) {

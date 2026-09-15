@@ -127,45 +127,7 @@ describe("AgentWorker", () => {
     expect(warn).toHaveBeenCalled();
   });
 
-  it("validates and records an agent.bind without emitting", () => {
-    const { post, frames } = sink();
-    const debug = vi.fn();
-    const warn = vi.fn();
-    const worker = new AgentWorker({
-      post,
-      chatModelFactory: noopChatModelFactory,
-      sessionToolFactory: noopSessionToolFactory,
-      logger: { debug, info: vi.fn(), warn, error: vi.fn() },
-    });
-
-    worker.handle(
-      inbound(MessageType.AGENT_BIND, {
-        conversationId: "c1",
-        profileVersionId: "pv1",
-      }),
-    );
-
-    expect(frames()).toHaveLength(0);
-    expect(warn).not.toHaveBeenCalled();
-    expect(debug).toHaveBeenCalled();
-  });
-
-  it("warns on an invalid agent.bind payload", () => {
-    const { post } = sink();
-    const warn = vi.fn();
-    const worker = new AgentWorker({
-      post,
-      chatModelFactory: noopChatModelFactory,
-      sessionToolFactory: noopSessionToolFactory,
-      logger: { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() },
-    });
-
-    worker.handle(inbound(MessageType.AGENT_BIND, { conversationId: "c1" }));
-
-    expect(warn).toHaveBeenCalled();
-  });
-
-  it("validates an agent.release without emitting", () => {
+  it("routes execution.cancel through the unified cancellation path", async () => {
     const { post, frames } = sink();
     const warn = vi.fn();
     const worker = new AgentWorker({
@@ -175,10 +137,15 @@ describe("AgentWorker", () => {
       logger: { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() },
     });
 
+    // §8.8: a cancel for a live execution is accepted without emission —
+    // the in-flight executor unwinds and posts execution.cancelled itself.
     worker.handle(
-      inbound(MessageType.AGENT_RELEASE, {
-        conversationId: "c1",
-        reason: "turn complete",
+      inbound(UnifiedMessageType.EXECUTION_CANCEL, {
+        executionId: EXECUTION_ID,
+        dispatchId: EXECUTION_ID,
+        reasonCode: "USER_CANCEL",
+        requestedAt: new Date().toISOString(),
+        gracePeriodSeconds: 5,
       }),
     );
 

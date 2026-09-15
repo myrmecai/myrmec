@@ -188,8 +188,10 @@ public class Agent {
      * §9.11): {@code BOUND → CONNECTING}, clearing {@code home_node_id} so the
      * cross-node router stops addressing the dead replica, and re-arming the
      * connect-timeout clock via {@link #touchState()} so a failed re-home is
-     * reclaimed by the existing {@code CONNECT_TIMEOUT} reaper. Driven by the
-     * {@code HomeNodeFailoverService} sweep when the worker's home replica is
+     * reclaimed by the existing {@code CONNECT_TIMEOUT} reaper. Under the
+     * unified protocol (P6-T6) the legacy re-homing sweep is deleted: a
+     * worker whose host instance is lost is closed, and a future dispatch
+     * re-offers a fresh session on a live host.
      * marked {@code DOWN} but its agent host is still alive.
      */
     public void markReHoming() {

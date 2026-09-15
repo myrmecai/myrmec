@@ -4,8 +4,6 @@ package ai.myrmec.engine.inference;
 
 import ai.myrmec.engine.context.ContextManifest;
 import ai.myrmec.engine.context.ContextManifestRepository;
-import ai.myrmec.engine.websocket.message.payload.InferenceAssignPayload;
-import ai.myrmec.engine.websocket.message.payload.InferenceMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -15,33 +13,38 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
- * Inference request assembler (§6.2).
+ * Inference request assembler (6.2) - unified protocol (P6-T6).
  *
- * <p>Builds an {@link InferenceAssignPayload} for a single turn/step by
- * delegating to the appropriate {@link TranscriptComposer} based on
- * service type, then wrapping the result with tool/generation/stream config.
- * Also persists a {@link ContextManifest} audit record (R1).</p>
+ * <p>Composes a turn/step transcript by delegating to the appropriate
+ * {@link TranscriptComposer} based on service type and persists a
+ * {@link ContextManifest} audit record (R1). Under the unified wire this
+ * is input assembly only: the legacy InferenceAssignPayload wire shape
+ * is gone - the execution package's ExecutionInputAssembler projects the
+ * {@link AssembledInference} into the 8.1 execution.start input block.</p>
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class InferenceRequestAssembler {
 
+    /** Composed transcript + tool policy - everything the 8.1 input needs. */
+    public record AssembledInference(List<InferenceMessage> messages,
+                                      List<String> activeToolNames) { }
+
     private final ConversationTranscriptComposer conversationComposer;
     private final WorkflowTranscriptComposer workflowComposer;
     private final ContextManifestRepository contextManifestRepository;
 
     /**
-     * Assemble an inference.assign payload and persist a ContextManifest.
+     * Compose the transcript for one turn/step and persist a ContextManifest.
      *
      * @param spec the request spec carrying service-specific inputs
-     * @return the assembled InferenceAssignPayload (ready to send over WebSocket)
+     * @return the assembled messages + active tool names
      */
     @Transactional
-    public InferenceAssignPayload assemble(InferenceRequestSpec spec) {
+    public AssembledInference assemble(InferenceRequestSpec spec) {
         // 1. Pick the composer by service type
         TranscriptComposer composer = "WORKFLOW".equals(spec.getServiceType())
                 ? workflowComposer
@@ -52,40 +55,15 @@ public class InferenceRequestAssembler {
         log.debug("Composed {} messages for {} session {}",
                 messages.size(), spec.getServiceType(), spec.getSessionId());
 
-        // 3. Active tool names — from spec for conversations, all for workflows
+        // 3. Active tool names - from spec for conversations, all for workflows
         List<String> activeToolNames = "WORKFLOW".equals(spec.getServiceType())
                 ? List.of()  // Wired by dispatcher from step config; empty = all
                 : spec.getActiveToolNames() != null ? spec.getActiveToolNames() : List.of();
 
-        // 4. Generation config — no overrides by default
-        InferenceAssignPayload.GenerationConfig generation = null;
-
-        // 5. Stream flag — false for workflow, true for conversation (D3).
-        //    When tools are active, disable streaming so the model returns
-        //    tool calls reliably (streaming tool calls are not yet supported
-        //    by all model adapters).
-        boolean stream = "CONVERSATION".equals(spec.getServiceType())
-                && (activeToolNames == null || activeToolNames.isEmpty());
-
-        // 6. Response routing — sequence no from spec (R3: no longer hardcoded 0)
-        int sequenceNo = (int) spec.getSequenceNo();
-        String stepId = spec.getStepId();  // null for conversation turns
-
-        // 7. Persist ContextManifest (R1 — audit trail for both paths)
+        // 4. Persist ContextManifest (R1 - audit trail for both paths)
         persistManifest(spec, messages);
 
-        return new InferenceAssignPayload(
-                spec.getRequestId(),
-                spec.getSessionId(),
-                spec.getServiceType(),
-                messages,
-                activeToolNames,
-                generation,
-                300,  // timeoutSeconds — default
-                stream,
-                new InferenceAssignPayload.ResponseRouting(sequenceNo, stepId),
-                spec.getOrchestrationAssignment(),
-                spec.getOrchestrationAssignmentDigest());
+        return new AssembledInference(messages, activeToolNames);
     }
 
     /**

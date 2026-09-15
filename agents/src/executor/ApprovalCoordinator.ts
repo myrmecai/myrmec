@@ -2,20 +2,20 @@
 // Copyright 2026 The Myrmec Authors
 
 /**
- * Human-in-the-loop approval coordinator.
+ * Human-in-the-loop approval coordinator (unified protocol, P6-T6).
  *
- * Sits between an in-flight conversational turn and the engine: a handler's
- * `requestApproval(...)` emits an `approval.request` frame, registers a pending
- * wait keyed by a client-generated request id, and the supervisor's inbound
- * router calls {@link ApprovalCoordinator.resolve} when the matching
- * `approval.decision` arrives. One coordinator is shared by every in-flight
- * turn; the per-id waits keep concurrent requests isolated (REQ-A-060/062).
+ * A handler's `requestApproval(...)` emits a durable
+ * `execution.approval.requested` frame via the unified sender and blocks
+ * until a decision returns. Under §8.6 the pause is terminal: a decided or
+ * expired request resumes via the NEXT turn's `conversationContinuation`
+ * (the host re-fetches decided requests from the engine rows), so this
+ * coordinator's inbound resolve() covers the live-execution case while the
+ * engine's durable rows are the recovery path. One coordinator is shared
+ * by every in-flight execution; per-id waits keep concurrent requests
+ * isolated (REQ-A-060/062).
  */
 import { randomUUID } from "node:crypto";
 import type { Logger } from "../models/index.js";
-import type { Envelope } from "../protocol/envelope.js";
-import { approvalRequest } from "../protocol/conversationFrames.js";
-import type { ApprovalDecisionWire } from "../protocol/conversationFrames.js";
 import type { ExecutionApprovalRequestedPayload } from "../protocol/unifiedFrames.js";
 import type { ExecutionFrameSender } from "./ExecutionFrameSender.js";
 
@@ -34,22 +34,17 @@ export interface ApprovalOutcome {
 
 /** Options for a single approval request. */
 export interface RequestApprovalOptions {
-  /** Legacy conversation correlation id; still used by the conversation
-   *  path until Task 6 deletes it. */
-  conversationId?: string;
-  /** Unified execution correlation id. When present, the coordinator emits
-   *  `execution.approval.requested` instead of the legacy `approval.request`. */
-  executionId?: string;
+  /** Unified execution correlation id — required. */
+  executionId: string;
   /** Short human-readable summary rendered on the approval card. */
   content?: string;
-  /** Free-form metadata serialised to `payloadJson` (legacy) or to
-   *  `action.summary` (unified); the coordinator always injects
-   *  `clientRequestId` so the engine can correlate via the persisted row
-   *  even if the live frame is missed. */
+  /** Free-form metadata serialised to `action.summary`; the coordinator
+   * always injects `clientRequestId` so the engine can correlate via the
+   * persisted row even if the live frame is missed. */
   payload?: Record<string, unknown>;
   /** Milliseconds to await a decision before rejecting with
    * {@link ApprovalTimeoutError}. Omit to wait indefinitely (rarely wise —
-   * pass a budget aligned with the turn timeout). */
+   * pass a budget aligned with the execution timeout). */
   timeoutMs?: number;
   /** Optional engine-side deadline (ISO-8601) recorded on the request. */
   expiresAt?: string;
@@ -73,14 +68,22 @@ const noopLogger: Logger = {
 
 /** Collaborators the coordinator needs, injected by the supervisor. */
 export interface ApprovalCoordinatorOptions {
-  /** Legacy envelope sink — used when a request has no `executionId`. */
-  send?: (frame: Envelope) => Promise<void>;
-  /** Unified execution-frame sender — used when a request carries an
-   *  `executionId`. One of `send` or `sender` must be provided. */
-  sender?: ExecutionFrameSender;
+  /** Unified execution-frame sender. Required. */
+  sender: ExecutionFrameSender;
   logger?: Logger;
   /** Override the client-request-id generator (tests). Defaults to a UUID. */
   generateId?: () => string;
+}
+
+/** A decided approval as the executor routes it in (engine row shape). */
+export interface ApprovalDecisionWire {
+  conversationId?: string;
+  clientRequestId?: string;
+  decision: string;
+  comment?: string | null;
+  approverUserId?: string | null;
+  requestMessageId?: string;
+  responseMessageId?: string;
 }
 
 interface PendingApproval {
@@ -90,34 +93,28 @@ interface PendingApproval {
 }
 
 export class ApprovalCoordinator {
-  private readonly legacySend?: (frame: Envelope) => Promise<void>;
-  private readonly sender?: ExecutionFrameSender;
+  private readonly sender: ExecutionFrameSender;
   private readonly log: Logger;
   private readonly generateId: () => string;
   private readonly pending = new Map<string, PendingApproval>();
 
   constructor(options: ApprovalCoordinatorOptions) {
-    if (!options.send && !options.sender) {
-      throw new Error("ApprovalCoordinator requires either send or sender");
+    if (!options.sender) {
+      throw new Error("ApprovalCoordinator requires a sender");
     }
-    this.legacySend = options.send;
     this.sender = options.sender;
     this.log = options.logger ?? noopLogger;
     this.generateId = options.generateId ?? randomUUID;
   }
 
   /**
-   * Emit an approval request and block until the decision returns.
-   *
-   * When `options.executionId` is present, sends a durable
-   * `execution.approval.requested` frame via the unified sender; otherwise
-   * falls back to the legacy `approval.request` envelope for the
-   * conversation path (deleted in Task 6).
+   * Emit `execution.approval.requested` and block until the decision
+   * returns. When no decision arrives within `timeoutMs` the wait rejects
+   * with {@link ApprovalTimeoutError}.
    */
   async requestApproval(options: RequestApprovalOptions): Promise<ApprovalOutcome> {
     const clientRequestId = this.generateId();
     const executionId = options.executionId;
-    const unified = executionId !== undefined && this.sender !== undefined;
 
     const body: Record<string, unknown> = { ...(options.payload ?? {}) };
     if (body.clientRequestId === undefined) {
@@ -132,7 +129,7 @@ export class ApprovalCoordinator {
             this.pending.delete(clientRequestId);
             reject(
               new ApprovalTimeoutError(
-                `No approval decision for ${unified ? executionId : options.conversationId} ` +
+                `No approval decision for execution ${executionId} ` +
                   `(clientRequestId ${clientRequestId}) within ${options.timeoutMs}ms`,
               ),
             );
@@ -143,37 +140,23 @@ export class ApprovalCoordinator {
     );
 
     try {
-      if (unified) {
-        const summary = options.content ?? "Approval requested";
-        const payload: ExecutionApprovalRequestedPayload = {
-          executionId,
-          dispatchId: executionId,
-          approvalRequestId: clientRequestId,
-          action: {
-            actionId: clientRequestId,
-            type: "TOOL_EXECUTION",
-            riskClass: (options.payload?.riskClass as string) ?? "DESTRUCTIVE",
-            summary,
-            digest: safeStringify(body),
-          },
-          snapshotTreeHash: null,
-          stateDigest: null,
-          expiresAt: options.expiresAt ?? new Date(Date.now() + 300_000).toISOString(),
-        };
-        await this.sender!.sendExecutionApprovalRequested(payload);
-      } else {
-        await this.legacySend!(
-          approvalRequest({
-            conversationId: options.conversationId ?? "unknown",
-            clientRequestId,
-            ...(options.content !== undefined ? { content: options.content } : {}),
-            payloadJson: safeStringify(body),
-            ...(options.expiresAt !== undefined
-              ? { expiresAt: options.expiresAt }
-              : {}),
-          }),
-        );
-      }
+      const summary = options.content ?? "Approval requested";
+      const payload: ExecutionApprovalRequestedPayload = {
+        executionId,
+        dispatchId: executionId,
+        approvalRequestId: clientRequestId,
+        action: {
+          actionId: clientRequestId,
+          type: "TOOL_EXECUTION",
+          riskClass: (options.payload?.riskClass as string) ?? "DESTRUCTIVE",
+          summary,
+          digest: safeStringify(body),
+        },
+        snapshotTreeHash: null,
+        stateDigest: null,
+        expiresAt: options.expiresAt ?? new Date(Date.now() + 300_000).toISOString(),
+      };
+      await this.sender.sendExecutionApprovalRequested(payload);
     } catch (err) {
       // Could not even send the request — clean up the pending wait.
       const entry = this.pending.get(clientRequestId);
@@ -185,7 +168,7 @@ export class ApprovalCoordinator {
     }
 
     this.log.info(
-      `Requested approval for ${unified ? executionId : options.conversationId} (clientRequestId ${clientRequestId})`,
+      `Requested approval for execution ${executionId} (clientRequestId ${clientRequestId})`,
     );
 
     const decision = await decisionPromise;
@@ -193,7 +176,8 @@ export class ApprovalCoordinator {
   }
 
   /**
-   * Resolve a pending approval from an inbound `approval.decision`. Returns
+   * Resolve a pending approval from an inbound decision (engine row routed
+   * by the host-control inbound, or re-fetched after resume). Returns
    * `true` if a matching wait was resolved, `false` for an unknown or
    * already-settled id (treated as a benign late delivery).
    */
@@ -201,14 +185,14 @@ export class ApprovalCoordinator {
     const clientRequestId = decision.clientRequestId;
     if (!clientRequestId) {
       this.log.warn(
-        `approval.decision without clientRequestId (conversation ${decision.conversationId}) — cannot route`,
+        `approval decision without clientRequestId — cannot route`,
       );
       return false;
     }
     const entry = this.pending.get(clientRequestId);
     if (!entry) {
       this.log.debug(
-        `approval.decision for unknown clientRequestId ${clientRequestId} — likely a late delivery`,
+        `approval decision for unknown clientRequestId ${clientRequestId} — likely a late delivery`,
       );
       return false;
     }
@@ -248,7 +232,7 @@ function toOutcome(decision: ApprovalDecisionWire): ApprovalOutcome {
 }
 
 /** Defensive JSON serialisation so a non-serialisable value in `payload`
- * cannot break the wire format mid-turn. */
+ * cannot break the wire format mid-execution. */
 function safeStringify(obj: Record<string, unknown>): string {
   try {
     return JSON.stringify(obj);

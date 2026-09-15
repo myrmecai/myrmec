@@ -40,9 +40,10 @@ public interface EngineNodeRepository extends JpaRepository<EngineNode, String> 
     int touchHeartbeat(@Param("nodeId") String nodeId, @Param("now") Instant now);
 
     /**
-     * Ids of every replica currently marked {@code DOWN}. The
-     * {@code HomeNodeFailoverService} sweep uses these to find workers homed
-     * on a lost replica that must be re-homed (agent-concurrency §9.11).
+     * Ids of every replica currently marked {@code DOWN}. Under the
+     * unified protocol (P6-T6) the legacy failover sweep is deleted;
+     * allocation state is the source of truth for where a worker's work
+     * lives.
      */
     @Query("""
             SELECT n.nodeId FROM EngineNode n

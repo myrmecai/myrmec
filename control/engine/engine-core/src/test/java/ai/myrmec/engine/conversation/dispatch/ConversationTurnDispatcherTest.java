@@ -25,7 +25,7 @@ import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
 import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
 import ai.myrmec.engine.websocket.host.payload.ExecutionStartPayload;
-import ai.myrmec.engine.websocket.message.payload.InferenceMessage;
+import ai.myrmec.engine.inference.InferenceMessage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -53,10 +53,10 @@ import static org.mockito.Mockito.when;
  * {@code inference.assign} seams are gone. These tests pin the two branches that
  * replace them:</p>
  * <ul>
- *   <li><b>Offer</b> — no ACTIVE session: the allocator mints one, the offer goes
+ *   <li><b>Offer</b> â€” no ACTIVE session: the allocator mints one, the offer goes
  *       on the wire, and the assembled turn is parked for the host's
  *       accept/opened continuation.</li>
- *   <li><b>Reuse</b> — an ACTIVE session pinned to the selected host: the SAME
+ *   <li><b>Reuse</b> â€” an ACTIVE session pinned to the selected host: the SAME
  *       session row serves the turn, with {@code execution.start} shipped
  *       immediately and NO second offer.</li>
  * </ul>
@@ -109,7 +109,7 @@ class ConversationTurnDispatcherTest {
 
         when(quotaPolicyEngine.check(any(), any(), any(), anyLong()))
                 .thenReturn(ai.myrmec.engine.spi.quota.QuotaDecision.unconstrained());
-        // The assembler's output is the §8.1 input block; a minimal transcript is
+        // The assembler's output is the Â§8.1 input block; a minimal transcript is
         // enough for the payload projection under test.
         when(executionInputAssembler.assembleConversationInput(any(), any(), any(), anyLong()))
                 .thenReturn(Map.of(
@@ -158,8 +158,8 @@ class ConversationTurnDispatcherTest {
         // The allocator minted the session and the OFFER went on the wire.
         verify(sessionAllocator).offer("CONVERSATION", conversationId, "CONVERSATION", projectId, hostId);
         verify(hostControlWebSocketHandler).sendSessionOffer(sessionId, "CONVERSATION", conversationId);
-        // §7.4: no execution.start may precede session.opened, so nothing is
-        // started or sent yet — the turn is parked instead.
+        // Â§7.4: no execution.start may precede session.opened, so nothing is
+        // started or sent yet â€” the turn is parked instead.
         verify(executionRegistry, never()).start(any(), any(), any(), any());
         verify(executionCommandSender, never()).startConversation(any(), any(), any());
 
@@ -190,7 +190,7 @@ class ConversationTurnDispatcherTest {
         Conversation conv = new Conversation();
         conv.setId(conversationId);
         conv.setProjectId(UUID.randomUUID());
-        // No agentProfileVersionId — an unpinned legacy conversation.
+        // No agentProfileVersionId â€” an unpinned legacy conversation.
 
         AgentHost host = new AgentHost();
         host.setId(hostId);
@@ -332,7 +332,7 @@ class ConversationTurnDispatcherTest {
         when(hostInstanceRepository.findById(instanceId)).thenReturn(Optional.of(instance));
 
         when(executionRepository.findBySessionIdOrderBySequenceNoDesc(sessionId)).thenReturn(List.of());
-        // §11.3.4 — the one-in-flight guard inside the registry refuses.
+        // Â§11.3.4 â€” the one-in-flight guard inside the registry refuses.
         when(executionRegistry.start(any(), any(), any(), any())).thenReturn(Optional.empty());
 
         assertThat(dispatcher.dispatch(conversationId)).isFalse();
@@ -441,7 +441,7 @@ class ConversationTurnDispatcherTest {
 
         assertThat(dispatcher.dispatchSummary(conversationId, null, List.of())).isFalse();
 
-        // A summary is an internal optimisation — it must never surface the
+        // A summary is an internal optimisation â€” it must never surface the
         // user-facing no-agent notice.
         verify(conversationNoticeService, never()).emitNoAgentNotice(any());
         verify(sessionAllocator, never()).offer(any(), any(), any(), any(), any());
