@@ -2,7 +2,6 @@ package ai.myrmec.engine.conversation;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.agent.AgentHost;
-import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
 import ai.myrmec.engine.conversation.stream.ConversationSubscriber;
 import ai.myrmec.engine.project.Project;
@@ -44,10 +43,8 @@ class ApprovalExpirySweeperTest extends IntegrationTestBase {
     @Test
     void sweepFlipsExpiredRowsToExpiredAndBroadcastsDecisionFrame() throws Exception {
         Project project = data.project().named("expiry-sweep").create();
-        AgentProfile profile = data.agentProfile()
-                .named("expiry-profile").withSystemPrompt("p").create();
         AgentHost agent = data.agent()
-                .named("expiry-agent").withProfile(profile).inProject(project)
+                .named("expiry-agent").inProject(project)
                 .create().agent();
         Conversation conv = conversationService.createConversation(
                 project.getId(), TEST_ADMIN_ID, "expiry-conv", agent.getId(), null);
@@ -99,10 +96,8 @@ class ApprovalExpirySweeperTest extends IntegrationTestBase {
     @Test
     void sweepIgnoresPendingRowsWithFutureExpiry() {
         Project project = data.project().named("expiry-future").create();
-        AgentProfile profile = data.agentProfile()
-                .named("expiry-future-profile").withSystemPrompt("p").create();
         AgentHost agent = data.agent()
-                .named("expiry-future-agent").withProfile(profile).inProject(project)
+                .named("expiry-future-agent").inProject(project)
                 .create().agent();
         Conversation conv = conversationService.createConversation(
                 project.getId(), TEST_ADMIN_ID, "future-conv", agent.getId(), null);

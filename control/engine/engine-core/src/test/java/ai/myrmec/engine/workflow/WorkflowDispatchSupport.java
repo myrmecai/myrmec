@@ -63,7 +63,7 @@ abstract class WorkflowDispatchSupport extends IntegrationTestBase {
         AgentHostCreationResult created = (project == null
                 ? data.agent().named(name)
                 : data.agent().named(name).inProject(project))
-                .withProfile(profile).withMaxAgents(Math.max(poolSize, 4)).create();
+                .withMaxAgents(Math.max(poolSize, 4)).create();
         AgentHost host = created.agent();
 
         BlockingQueue<String> outbound = new LinkedBlockingQueue<>();

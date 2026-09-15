@@ -4,7 +4,6 @@ package ai.myrmec.engine.agent;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.agent.AgentHostCreationResult;
-import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,8 +27,7 @@ class AgentHostInstanceTest extends IntegrationTestBase {
     @Autowired AgentHostInstanceRepository instances;
 
     private AgentHost host() {
-        AgentProfile profile = data.agentProfile().named("inst-profile").create();
-        return data.agent().named("inst-host").withProfile(profile).create().agent();
+        return data.agent().named("inst-host").create().agent();
     }
 
     private AgentHostInstance openInstance(AgentHost host, UUID owner) {

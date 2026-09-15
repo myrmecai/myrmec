@@ -7,7 +7,6 @@ import ai.myrmec.engine._system.security.AgentHostPrincipal;
 import ai.myrmec.engine._system.security.JwtAuthenticationFilter;
 import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentHostCreationResult;
-import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -35,9 +34,8 @@ class HostPrincipalAuthenticationTest extends IntegrationTestBase {
 
     @Test
     void hostJwtAuthenticatesAsRoleAgentHost() {
-        AgentProfile profile = data.agentProfile().named("p").create();
         AgentHostCreationResult result =
-                data.agent().named("filter-host").withProfile(profile).create();
+                data.agent().named("filter-host").create();
         String token = jwtTokenProvider.generateHostAccessToken(
                 result.agent().getId(), result.agent().getName());
 
@@ -54,9 +52,8 @@ class HostPrincipalAuthenticationTest extends IntegrationTestBase {
 
     @Test
     void inactiveHostTokenIsNotAuthenticated() {
-        AgentProfile profile = data.agentProfile().named("p").create();
         AgentHostCreationResult result =
-                data.agent().named("filter-inactive-host").withProfile(profile).create();
+                data.agent().named("filter-inactive-host").create();
 
         // Deactivate in a committed transaction so the filter (and any other
         // thread) sees the change.

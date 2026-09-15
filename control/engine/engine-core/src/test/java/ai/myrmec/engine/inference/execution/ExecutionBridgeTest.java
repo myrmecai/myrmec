@@ -114,8 +114,7 @@ class ExecutionBridgeTest extends IntegrationTestBase {
     @Test
     void conversationCompletePersistsAssistantRowBroadcastsAndRecordsQuota() {
         Project project = data.project().named("bridge-quota").create();
-        AgentProfile profile = data.agentProfile().named("bridge-profile").create();
-        AgentHostCreationResult hostResult = data.agent().named("bridge-host").withProfile(profile).withMaxAgents(10).create();
+        AgentHostCreationResult hostResult = data.agent().named("bridge-host").withMaxAgents(10).create();
         AgentHost host = hostResult.agent();
         Conversation conversation = data.conversation().inProject(project).create();
         conversation.setAgentId(host.getId());
@@ -165,8 +164,7 @@ class ExecutionBridgeTest extends IntegrationTestBase {
     @Test
     void conversationPausedPersistsApprovalAndPendingAction() {
         Project project = data.project().named("bridge-pause").create();
-        AgentProfile profile = data.agentProfile().named("bridge-pause-profile").create();
-        AgentHostCreationResult hostResult = data.agent().named("bridge-pause-host").withProfile(profile).withMaxAgents(10).create();
+        AgentHostCreationResult hostResult = data.agent().named("bridge-pause-host").withMaxAgents(10).create();
         AgentHost host = hostResult.agent();
         Conversation conversation = data.conversation().inProject(project).create();
         conversation.setAgentId(host.getId());

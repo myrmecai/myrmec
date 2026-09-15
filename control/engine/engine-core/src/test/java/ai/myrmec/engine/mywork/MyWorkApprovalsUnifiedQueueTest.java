@@ -66,10 +66,6 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
         // Create conversation with PENDING approval request (CONVERSATION source)
         var agent = data.agent()
                 .named("test-agent")
-                .withProfile(data.agentProfile()
-                        .named("test-profile")
-                        .withSystemPrompt("test")
-                        .create())
                 .inProject(project)
                 .create();
 
@@ -124,10 +120,6 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
         // Create approval in project1
         var agent1 = data.agent()
                 .named("test-agent-p1")
-                .withProfile(data.agentProfile()
-                        .named("test-profile-p1")
-                        .withSystemPrompt("test")
-                        .create())
                 .inProject(project1)
                 .create();
 
@@ -148,10 +140,6 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
         // Create approval in project2
         var agent2 = data.agent()
                 .named("test-agent-p2")
-                .withProfile(data.agentProfile()
-                        .named("test-profile-p2")
-                        .withSystemPrompt("test")
-                        .create())
                 .inProject(project2)
                 .create();
 
@@ -192,10 +180,6 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
 
         var agent = data.agent()
                 .named("test-agent-struct")
-                .withProfile(data.agentProfile()
-                        .named("test-profile-struct")
-                        .withSystemPrompt("test")
-                        .create())
                 .inProject(project)
                 .create();
 

@@ -50,7 +50,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   AgentProfile profile = data.agentProfile().named("solver").create();
  *   AgentHostCreationResult agent = data.agent()
  *           .named("agent-1")
- *           .withProfile(profile)
  *           .inProject(project)
  *           .create();
  * }</pre>
@@ -332,32 +331,6 @@ public class TestDataBuilder {
 
         public AgentBuilder withDescription(String description) {
             this.description = description;
-            return this;
-        }
-
-        /**
-         * Deprecated no-op: agent hosts are profile-free since the
-         * 2026-09-11 host-profile decoupling (D2). Kept one cycle so
-         * existing test files calling {@code .withProfile(...)} keep
-         * compiling; will be removed in the next cleanup plan.
-         *
-         * @param profile ignored
-         * @return this builder
-         */
-        @Deprecated
-        public AgentBuilder withProfile(AgentProfile profile) {
-            return this;
-        }
-
-        /**
-         * Deprecated no-op: agent hosts are profile-free since the
-         * 2026-09-11 host-profile decoupling (D2).
-         *
-         * @param profileId ignored
-         * @return this builder
-         */
-        @Deprecated
-        public AgentBuilder withProfileId(UUID profileId) {
             return this;
         }
 

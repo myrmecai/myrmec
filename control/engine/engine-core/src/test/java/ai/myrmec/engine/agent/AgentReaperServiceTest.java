@@ -104,14 +104,9 @@ class AgentReaperServiceTest extends IntegrationTestBase {
     }
 
     private Agent worker(Agent.Status status, Instant stateChangedAt, Instant lastHeartbeatAt) {
-        AgentProfile profile = data.agentProfile()
-                .named("reaper-profile-" + UUID.randomUUID())
-                .withSystemPrompt("test")
-                .create();
         var project = data.project().named("reaper-" + UUID.randomUUID()).create();
         AgentHost host = data.agent()
                 .named("reaper-host-" + UUID.randomUUID())
-                .withProfile(profile)
                 .inProject(project)
                 .create()
                 .agent();

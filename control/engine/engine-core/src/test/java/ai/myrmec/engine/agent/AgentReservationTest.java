@@ -168,14 +168,9 @@ class AgentReservationTest extends IntegrationTestBase {
     }
 
     private Agent idleWorker() {
-        AgentProfile profile = data.agentProfile()
-                .named("reservation-profile-" + UUID.randomUUID())
-                .withSystemPrompt("test")
-                .create();
         var project = data.project().named("reservation-" + UUID.randomUUID()).create();
         AgentHost host = data.agent()
                 .named("reservation-host-" + UUID.randomUUID())
-                .withProfile(profile)
                 .inProject(project)
                 .create()
                 .agent();

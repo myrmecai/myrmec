@@ -308,7 +308,7 @@ class ConversationTurnLoopProtocolTest extends IntegrationTestBase {
         AgentProfile profile = data.agentProfile().named("loop-profile")
                 .withSystemPrompt("You are a loop tester.").create();
         AgentHostCreationResult created = data.agent()
-                .named("loop-agent").withProfile(profile).withMaxAgents(10).create();
+                .named("loop-agent").withMaxAgents(10).create();
         AgentHost host = created.agent();
 
         BlockingQueue<String> outbound = new LinkedBlockingQueue<>();

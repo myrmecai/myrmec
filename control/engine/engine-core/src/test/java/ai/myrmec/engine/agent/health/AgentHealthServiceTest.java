@@ -8,7 +8,6 @@ import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentRepository;
-import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.testing.TestDataBuilder;
@@ -40,13 +39,8 @@ class AgentHealthServiceTest extends IntegrationTestBase {
     @Test
     void aggregatesInstanceStateAndQueueDepth() {
         var project = data.project().named("agent-health").create();
-        AgentProfile profile = data.agentProfile()
-                .named("agent-health-profile")
-                .withSystemPrompt("test")
-                .create();
         AgentHost agent = data.agent()
                 .named("agent-health-agent")
-                .withProfile(profile)
                 .inProject(project)
                 .create()
                 .agent();
@@ -96,13 +90,8 @@ class AgentHealthServiceTest extends IntegrationTestBase {
     @Test
     void openHostInstanceMarksWorkerOnlineIdleAndAllocationMarksItBusy() {
         var project = data.project().named("agent-health-2").create();
-        AgentProfile profile = data.agentProfile()
-                .named("agent-health-profile-2")
-                .withSystemPrompt("test")
-                .create();
         AgentHost agent = data.agent()
                 .named("agent-health-agent-2")
-                .withProfile(profile)
                 .inProject(project)
                 .create()
                 .agent();

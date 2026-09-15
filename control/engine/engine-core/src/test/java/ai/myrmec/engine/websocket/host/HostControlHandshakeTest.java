@@ -6,7 +6,6 @@ import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentHostCreationResult;
 import ai.myrmec.engine.agent.AgentHostRepository;
-import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -63,8 +62,7 @@ class HostControlHandshakeTest extends IntegrationTestBase {
     }
 
     private AgentHost activeHost() {
-        AgentProfile profile = data.agentProfile().named("hs-profile").create();
-        return data.agent().named("hs-host").withProfile(profile).create().agent();
+        return data.agent().named("hs-host").create().agent();
     }
 
     @Test

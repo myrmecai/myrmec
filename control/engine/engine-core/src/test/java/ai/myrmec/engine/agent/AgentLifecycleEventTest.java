@@ -124,14 +124,9 @@ class AgentLifecycleEventTest extends IntegrationTestBase {
     }
 
     private Agent idleWorker() {
-        AgentProfile profile = data.agentProfile()
-                .named("lifecycle-profile-" + UUID.randomUUID())
-                .withSystemPrompt("test")
-                .create();
         var project = data.project().named("lifecycle-host-" + UUID.randomUUID()).create();
         AgentHost host = data.agent()
                 .named("lifecycle-host-" + UUID.randomUUID())
-                .withProfile(profile)
                 .inProject(project)
                 .create()
                 .agent();

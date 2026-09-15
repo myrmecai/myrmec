@@ -178,10 +178,8 @@ class SnapshotWriterTest extends IntegrationTestBase {
     void everyDispatchedTurnWritesExactlyOneRow() {
         Project project = data.project().named("snapshot-snp01").create();
         // Create a real conversation so the FK on execution_snapshots.conversation_id is satisfied
-        ai.myrmec.engine.agent.AgentProfile profile = data.agentProfile()
-                .named("snp01-profile").withSystemPrompt("p").create();
         ai.myrmec.engine.agent.AgentHost agent = data.agent()
-                .named("snp01-agent").withProfile(profile).inProject(project)
+                .named("snp01-agent").inProject(project)
                 .create().agent();
         ai.myrmec.engine.conversation.Conversation conv = conversationService.createConversation(
                 project.getId(), TEST_ADMIN_ID, "snp01-conv", agent.getId(), null);

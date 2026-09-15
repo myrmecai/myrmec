@@ -4,7 +4,6 @@ package ai.myrmec.engine.agent;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.agent.AgentHostCreationResult;
-import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.project.Project;
@@ -37,8 +36,7 @@ class SchemaAdditiveColumnsTest extends IntegrationTestBase {
     }
 
     private AgentHostCreationResult host() {
-        AgentProfile profile = data.agentProfile().named("add-profile").create();
-        return data.agent().named("add-host").withProfile(profile).create();
+        return data.agent().named("add-host").create();
     }
 
     @Test

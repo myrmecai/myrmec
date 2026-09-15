@@ -7,7 +7,6 @@ import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentHostCreationResult;
 import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentHostInstanceRepository;
-import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.inference.Session;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -52,9 +51,8 @@ class HostControlLifecycleTest extends IntegrationTestBase {
     private record Setup(WebSocketSession session, AgentHost host, UUID instanceId) {}
 
     private Setup openedHost() throws Exception {
-        AgentProfile profile = data.agentProfile().named("lc-profile").create();
         AgentHostCreationResult created =
-                data.agent().named("lc-host").withProfile(profile).withMaxAgents(10).create();
+                data.agent().named("lc-host").withMaxAgents(10).create();
         AgentHost host = created.agent();
 
         WebSocketSession session = mock(WebSocketSession.class);
@@ -192,9 +190,8 @@ class HostControlLifecycleTest extends IntegrationTestBase {
     @Test
     void closeAllOnHostInstanceAndSweepReconcileHostLostSessions() {
         var project = data.project().named("host-lost-recon").create();
-        AgentProfile profile = data.agentProfile().named("host-lost-profile").create();
         AgentHostCreationResult created =
-                data.agent().named("host-lost-host").withProfile(profile).withMaxAgents(5).create();
+                data.agent().named("host-lost-host").withMaxAgents(5).create();
         AgentHost host = created.agent();
 
         ai.myrmec.engine.inference.SessionAllocator allocator = hostLostSweepTarget();
@@ -290,8 +287,7 @@ class HostControlLifecycleTest extends IntegrationTestBase {
 
     @Test
     void lifecycleFrameBeforeOpenIsInvalidState() throws Exception {
-        AgentProfile profile = data.agentProfile().named("ns-profile").create();
-        AgentHost host = data.agent().named("ns-host").withProfile(profile).create().agent();
+        AgentHost host = data.agent().named("ns-host").create().agent();
         WebSocketSession session = mock(WebSocketSession.class);
         lenient().when(session.getId()).thenReturn("ns-" + UUID.randomUUID());
         lenient().when(session.isOpen()).thenReturn(true);

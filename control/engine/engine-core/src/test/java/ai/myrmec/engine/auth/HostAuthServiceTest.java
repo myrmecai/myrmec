@@ -6,7 +6,6 @@ import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine._system.exception.InvalidRegistrationKeyException;
 import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentHostCreationResult;
-import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.auth.dto.HostLocalRegisterRequest;
 import ai.myrmec.engine.auth.dto.HostRegisterRequest;
@@ -39,9 +38,7 @@ class HostAuthServiceTest extends IntegrationTestBase {
 
     @Test
     void managedRegistrationReturnsHostTokensWithoutCreatingAgentSlot() {
-        AgentProfile profile = data.agentProfile().named("host-auth-managed").create();
-        AgentHostCreationResult result = data.agent().named("managed-host")
-                .withProfile(profile).create();
+        AgentHostCreationResult result = data.agent().named("managed-host").create();
 
         HostRegisterRequest request = new HostRegisterRequest();
         request.setRegistrationKey(result.registrationKey());
@@ -60,9 +57,7 @@ class HostAuthServiceTest extends IntegrationTestBase {
 
     @Test
     void managedRegistrationRejectsInactiveHost() {
-        AgentProfile profile = data.agentProfile().named("host-auth-inactive").create();
-        AgentHostCreationResult result = data.agent().named("inactive-host")
-                .withProfile(profile).create();
+        AgentHostCreationResult result = data.agent().named("inactive-host").create();
         result.agent().setStatus(AgentHost.Status.INACTIVE);
         agentHostRepository.save(result.agent());
 

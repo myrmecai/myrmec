@@ -6,7 +6,6 @@ import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine._system.exception.InvalidTokenException;
 import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentHostCreationResult;
-import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.auth.dto.HostRefreshRequest;
 import ai.myrmec.engine.auth.dto.HostRefreshResponse;
 import ai.myrmec.engine.auth.dto.HostRegisterRequest;
@@ -25,8 +24,7 @@ class HostRefreshRotationTest extends IntegrationTestBase {
 
     @Test
     void rotationReturnsNewPairAndRejectsReplayOfOldToken() {
-        AgentProfile profile = data.agentProfile().named("rot-profile").create();
-        AgentHostCreationResult result = data.agent().named("rot-host").withProfile(profile).create();
+        AgentHostCreationResult result = data.agent().named("rot-host").create();
         String first = firstRefreshTokenOf(result);
 
         HostRefreshResponse pair = rotate(first);
@@ -46,8 +44,7 @@ class HostRefreshRotationTest extends IntegrationTestBase {
 
     @Test
     void deactivatedHostRefreshIsRejected() {
-        AgentProfile profile = data.agentProfile().named("deact-profile").create();
-        AgentHostCreationResult result = data.agent().named("deact-host").withProfile(profile).create();
+        AgentHostCreationResult result = data.agent().named("deact-host").create();
         String refresh = firstRefreshTokenOf(result);
 
         result.agent().setStatus(AgentHost.Status.INACTIVE);
@@ -59,8 +56,7 @@ class HostRefreshRotationTest extends IntegrationTestBase {
 
     @Test
     void legacyAgentRefreshTokenIsRejectedOnHostEndpoint() {
-        AgentProfile profile = data.agentProfile().named("agent-token-profile").create();
-        AgentHostCreationResult result = data.agent().named("agent-token-host").withProfile(profile).create();
+        AgentHostCreationResult result = data.agent().named("agent-token-host").create();
         // A legacy AGENT-principal refresh token whose subject is (wrongly)
         // the host id — must be rejected because the principal claim is AGENT.
         String agentInstanceToken = jwtTokenProvider.generateAgentRefreshToken(result.agent().getId());

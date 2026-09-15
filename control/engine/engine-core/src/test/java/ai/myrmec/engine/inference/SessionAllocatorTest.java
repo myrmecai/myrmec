@@ -45,9 +45,8 @@ class SessionAllocatorTest extends IntegrationTestBase {
     @Autowired NodeRegistryService nodeRegistryService;
 
     private AgentHostInstance openInstance(int pool) {
-        AgentProfile profile = data.agentProfile().named("a-profile").create();
         AgentHostCreationResult created =
-                data.agent().named("a-host").withProfile(profile).withMaxAgents(10).create();
+                data.agent().named("a-host").withMaxAgents(10).create();
         return instances.saveAndFlush(AgentHostInstance.open(
                 created.agent(), null, UUID.randomUUID().toString(), "laptop", pool, Map.of(), "node-1"));
     }

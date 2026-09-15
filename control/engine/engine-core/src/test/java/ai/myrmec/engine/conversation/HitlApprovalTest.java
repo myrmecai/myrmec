@@ -2,7 +2,6 @@ package ai.myrmec.engine.conversation;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.agent.AgentHost;
-import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.conversation.dto.ApprovalDecisionRequest;
 import ai.myrmec.engine.conversation.dto.ConversationMessageResponse;
 import ai.myrmec.engine.project.Project;
@@ -46,13 +45,8 @@ class HitlApprovalTest extends IntegrationTestBase {
 
     private Setup arrange(String suffix, Instant expiresAt) {
         Project project = data.project().named("hitl-" + suffix).create();
-        AgentProfile profile = data.agentProfile()
-                .named("hitl-profile-" + suffix)
-                .withSystemPrompt("test")
-                .create();
         AgentHost agent = data.agent()
                 .named("hitl-agent-" + suffix)
-                .withProfile(profile)
                 .inProject(project)
                 .create()
                 .agent();

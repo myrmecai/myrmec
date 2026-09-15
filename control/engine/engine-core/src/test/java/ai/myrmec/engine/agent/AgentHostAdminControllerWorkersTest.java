@@ -83,14 +83,9 @@ class AgentHostAdminControllerWorkersTest extends IntegrationTestBase {
     }
 
     private AgentHost host() {
-        AgentProfile profile = data.agentProfile()
-                .named("workers-profile-" + UUID.randomUUID())
-                .withSystemPrompt("test")
-                .create();
         Project project = data.project().named("workers-" + UUID.randomUUID()).create();
         return data.agent()
                 .named("workers-host-" + UUID.randomUUID())
-                .withProfile(profile)
                 .inProject(project)
                 .create()
                 .agent();

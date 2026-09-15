@@ -35,9 +35,8 @@ class SessionAllocationQueriesTest extends IntegrationTestBase {
     @Autowired SessionRepository sessionRepository;
 
     private AgentHostInstance openInstance() {
-        AgentProfile profile = data.agentProfile().named("q-profile").create();
         AgentHostCreationResult created =
-                data.agent().named("q-host").withProfile(profile).withMaxAgents(10).create();
+                data.agent().named("q-host").withMaxAgents(10).create();
         AgentHost host = created.agent();
         return instances.saveAndFlush(AgentHostInstance.open(
                 host, null, UUID.randomUUID().toString(), "laptop", 4, Map.of(), "node-1"));

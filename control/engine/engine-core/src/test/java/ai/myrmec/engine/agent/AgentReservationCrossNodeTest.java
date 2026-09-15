@@ -158,14 +158,9 @@ class AgentReservationCrossNodeTest extends IntegrationTestBase {
     }
 
     private Agent idleWorker() {
-        AgentProfile profile = data.agentProfile()
-                .named("cross-node-profile-" + UUID.randomUUID())
-                .withSystemPrompt("test")
-                .create();
         var project = data.project().named("cross-node-" + UUID.randomUUID()).create();
         AgentHost host = data.agent()
                 .named("cross-node-host-" + UUID.randomUUID())
-                .withProfile(profile)
                 .inProject(project)
                 .create()
                 .agent();

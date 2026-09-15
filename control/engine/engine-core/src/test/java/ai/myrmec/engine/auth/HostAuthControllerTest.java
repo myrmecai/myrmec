@@ -4,7 +4,6 @@ package ai.myrmec.engine.auth;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.agent.AgentHostCreationResult;
-import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
@@ -23,8 +22,6 @@ class HostAuthControllerTest extends IntegrationTestBase {
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     // Fixtures discovered in Tasks 1–2 (both REQUIRED, tests fail without them):
-    // (a) TestDataBuilder.agent() requires .withProfile(...) — create a profile
-    //     first and chain it on every data.agent() builder.
     // (b) The local-register endpoint calls registerLocal with null profileId,
     //     which falls back to the Liquibase-017 seeded default local profile
     //     (fixed id 6d7b8c9d-0e1f-4a2b-8c3d-9e4f5a6b7c8d) — but the base class's
@@ -52,8 +49,7 @@ class HostAuthControllerTest extends IntegrationTestBase {
 
     @Test
     void managedHostRegistrationEndpointReturns200AndTokens() {
-        AgentProfile profile = data.agentProfile().named("ep-profile").create();
-        AgentHostCreationResult result = data.agent().named("ep-managed").withProfile(profile).create();
+        AgentHostCreationResult result = data.agent().named("ep-managed").create();
 
         String body = """
                 {

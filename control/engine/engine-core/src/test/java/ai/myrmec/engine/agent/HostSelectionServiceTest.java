@@ -38,8 +38,8 @@ class HostSelectionServiceTest extends IntegrationTestBase {
         AgentProfile profile = data.agentProfile().named("selector-profile").create();
         Project project = data.project().named("selector-project").create();
 
-        AgentHost scoped = data.agent().named("scoped-live").withProfile(profile).inProject(project).create().agent();
-        AgentHost unscoped = data.agent().named("unscoped-live").withProfile(profile).create().agent();
+        AgentHost scoped = data.agent().named("scoped-live").inProject(project).create().agent();
+        AgentHost unscoped = data.agent().named("unscoped-live").create().agent();
 
         openInstance(scoped);
         openInstance(unscoped);
@@ -54,7 +54,7 @@ class HostSelectionServiceTest extends IntegrationTestBase {
         AgentProfile profile = data.agentProfile().named("selector-profile").create();
         Project project = data.project().named("selector-project").create();
 
-        data.agent().named("dead-host").withProfile(profile).inProject(project).create();
+        data.agent().named("dead-host").inProject(project).create();
 
         assertThat(selector.selectForProject(project.getId())).isEmpty();
     }
@@ -64,8 +64,8 @@ class HostSelectionServiceTest extends IntegrationTestBase {
         AgentProfile profile = data.agentProfile().named("selector-profile").create();
         Project project = data.project().named("selector-project").create();
 
-        AgentHost scopedDead = data.agent().named("scoped-dead").withProfile(profile).inProject(project).create().agent();
-        AgentHost unscopedLive = data.agent().named("unscoped-live").withProfile(profile).create().agent();
+        AgentHost scopedDead = data.agent().named("scoped-dead").inProject(project).create().agent();
+        AgentHost unscopedLive = data.agent().named("unscoped-live").create().agent();
 
         openInstance(unscopedLive);
 
@@ -85,8 +85,8 @@ class HostSelectionServiceTest extends IntegrationTestBase {
     void selectForNullPrefersUnscopedLiveHost() {
         AgentProfile profile = data.agentProfile().named("selector-profile").create();
 
-        AgentHost scoped = data.agent().named("scoped-live").withProfile(profile).inProject(data.project().named("other-project").create()).create().agent();
-        AgentHost unscoped = data.agent().named("unscoped-live").withProfile(profile).create().agent();
+        AgentHost scoped = data.agent().named("scoped-live").inProject(data.project().named("other-project").create()).create().agent();
+        AgentHost unscoped = data.agent().named("unscoped-live").create().agent();
 
         openInstance(scoped);
         openInstance(unscoped);

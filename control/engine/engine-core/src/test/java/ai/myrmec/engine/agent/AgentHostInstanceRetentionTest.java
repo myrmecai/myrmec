@@ -29,8 +29,7 @@ class AgentHostInstanceRetentionTest extends IntegrationTestBase {
     @Autowired JdbcTemplate jdbcTemplate;
 
     private AgentHost host() {
-        AgentProfile profile = data.agentProfile().named("ret-profile").create();
-        return data.agent().named("ret-host").withProfile(profile).create().agent();
+        return data.agent().named("ret-host").create().agent();
     }
 
     private AgentHostInstance closedInstance(AgentHost host) {

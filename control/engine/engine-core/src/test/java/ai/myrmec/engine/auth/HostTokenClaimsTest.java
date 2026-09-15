@@ -6,7 +6,6 @@ import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine._system.security.AgentHostPrincipal;
 import ai.myrmec.engine._system.security.JwtTokenProvider;
 import ai.myrmec.engine.agent.AgentHost;
-import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,8 +19,7 @@ class HostTokenClaimsTest extends IntegrationTestBase {
 
     @Test
     void hostAccessTokenCarriesAgentHostPrincipalAndSubject() {
-        AgentProfile profile = data.agentProfile().named("host-claims-profile").create();
-        AgentHost host = data.agent().named("host-claims").withProfile(profile).create().agent();
+        AgentHost host = data.agent().named("host-claims").create().agent();
 
         String token = jwtTokenProvider.generateHostAccessToken(host.getId(), host.getName());
 
@@ -35,8 +33,7 @@ class HostTokenClaimsTest extends IntegrationTestBase {
 
     @Test
     void hostRefreshTokenIsSeparateTypeAndSubject() {
-        AgentProfile profile = data.agentProfile().named("host-claims-refresh-profile").create();
-        AgentHost host = data.agent().named("host-claims-refresh").withProfile(profile).create().agent();
+        AgentHost host = data.agent().named("host-claims-refresh").create().agent();
 
         String token = jwtTokenProvider.generateHostRefreshToken(host.getId());
 
@@ -47,8 +44,7 @@ class HostTokenClaimsTest extends IntegrationTestBase {
 
     @Test
     void principalWrapsDurableHostEntity() {
-        AgentProfile profile = data.agentProfile().named("host-claims-principal-profile").create();
-        AgentHost host = data.agent().named("host-claims-principal").withProfile(profile).create().agent();
+        AgentHost host = data.agent().named("host-claims-principal").create().agent();
         AgentHostPrincipal principal = new AgentHostPrincipal(host, host.getName());
 
         assertThat(principal.getHostId()).isEqualTo(host.getId());

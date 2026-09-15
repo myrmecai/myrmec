@@ -38,9 +38,8 @@ class ExecutionRegistryTest extends IntegrationTestBase {
     @Autowired ConversationService conversationService;
 
     private AgentHostInstance openInstance(int pool) {
-        AgentProfile profile = data.agentProfile().named("x-profile").create();
         AgentHostCreationResult created =
-                data.agent().named("x-host").withProfile(profile).withMaxAgents(10).create();
+                data.agent().named("x-host").withMaxAgents(10).create();
         return instances.saveAndFlush(AgentHostInstance.open(
                 created.agent(), null, UUID.randomUUID().toString(), "laptop", pool, Map.of(), "node-1"));
     }

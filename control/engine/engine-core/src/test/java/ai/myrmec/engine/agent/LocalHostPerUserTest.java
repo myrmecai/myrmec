@@ -4,7 +4,6 @@ package ai.myrmec.engine.agent;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.agent.AgentHostCreationResult;
-import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,8 +38,7 @@ class LocalHostPerUserTest extends IntegrationTestBase {
 
     @Test
     void builderCreatedHostsDefaultToManaged() {
-        AgentProfile profile = data.agentProfile().named("m-profile").create();
-        AgentHostCreationResult result = data.agent().named("m-host").withProfile(profile).create();
+        AgentHostCreationResult result = data.agent().named("m-host").create();
 
         AgentHost host = agentHostRepository.findById(result.agent().getId()).orElseThrow();
         assertThat(host.getHostType()).isEqualTo(AgentHostType.MANAGED);

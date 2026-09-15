@@ -109,19 +109,16 @@ class ConversationAssistantPinningIT extends IntegrationTestBase {
     void createConversationResolvesHostByCapacityNotProfile() {
         Project project = data.project().named("conv-host").create();
 
-        // Two unrelated profiles so that a profile-bound selector cannot
-        // accidentally return the in-project host.
-        AgentProfile unrelatedProfile = data.agentProfile().named("conv-host-unrelated").create();
+        // A second profile the host does NOT carry, so the assistant's pin
+        // is independent of the host fixture.
         AgentProfile assistantProfile = data.agentProfile().named("conv-host-assistant").create();
 
-        // An unrelated, live but unscoped host — must NOT be chosen just
-        // because it shares a profile with the assistant.
+        // An unrelated, live but unscoped host — must NOT be chosen over the
+        // in-project live host (selection is capacity + project scope based).
         AgentHost unrelatedHost = data.agent().named("conv-host-unrelated-agent")
-                .withProfile(unrelatedProfile).create().agent();
-        // The in-project host shares the assistant's profile only by
-        // coincidence; selection depends on capacity and project scope.
+                .create().agent();
         AgentHostCreationResult inProjectResult = data.agent().named("conv-host-inproject-agent")
-                .withProfile(assistantProfile).inProject(project).create();
+                .inProject(project).create();
         AgentHost inProjectHost = inProjectResult.agent();
 
         openInstance(unrelatedHost);

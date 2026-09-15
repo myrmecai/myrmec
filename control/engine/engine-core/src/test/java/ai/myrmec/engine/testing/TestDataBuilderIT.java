@@ -51,7 +51,6 @@ class TestDataBuilderIT extends IntegrationTestBase {
 
         AgentHostCreationResult result = data.agent()
                 .named("td-build-agent")
-                .withProfile(profile)
                 .inProject(project)
                 .create();
 

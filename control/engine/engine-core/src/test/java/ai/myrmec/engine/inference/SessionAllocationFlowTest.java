@@ -53,7 +53,7 @@ class SessionAllocationFlowTest extends IntegrationTestBase {
     private Host openedHost() throws Exception {
         AgentProfile profile = data.agentProfile().named("f-profile").create();
         AgentHostCreationResult created =
-                data.agent().named("f-host").withProfile(profile).withMaxAgents(10).create();
+                data.agent().named("f-host").withMaxAgents(10).create();
         AgentHost host = created.agent();
 
         WebSocketSession session = mock(WebSocketSession.class);
