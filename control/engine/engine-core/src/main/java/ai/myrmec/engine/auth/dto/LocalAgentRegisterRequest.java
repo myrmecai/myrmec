@@ -21,10 +21,4 @@ public class LocalAgentRegisterRequest {
      * and can only be dispatched to assistants/workflows without project scope.
      */
     private UUID projectId;
-
-    /**
-     * ID of the agent profile the local agent should adopt. If null, a default
-     * local-agent profile is selected by the engine.
-     */
-    private UUID profileId;
 }

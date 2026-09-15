@@ -96,10 +96,6 @@ public class AuthService {
     @Transactional
     public LocalAgentRegisterResponse registerLocalAgent(UUID userId, LocalAgentRegisterRequest request,
                                                          String hostname) {
-        if (request.getProfileId() != null) {
-            log.debug("Local agent registration received ignored profileId {} for user {}",
-                    request.getProfileId(), userId);
-        }
         AgentHost host = agentService.upsertLocalAgentHost(
                 userId, request.getProjectId(), hostname);
 
