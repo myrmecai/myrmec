@@ -2,24 +2,16 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.workflow;
 
-import ai.myrmec.engine.IntegrationTestBase;
-import ai.myrmec.engine.agent.Agent;
 import ai.myrmec.engine.agent.AgentHost;
+import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.User;
-import ai.myrmec.engine.websocket.AgentConnectionManager;
-import ai.myrmec.engine.websocket.AgentWebSocketHandler;
-import ai.myrmec.engine.websocket.InboundOrchestrationHandler;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.socket.TextMessage;
-import org.springframework.web.socket.WebSocketSession;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -29,24 +21,31 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.mock;
 
 /**
- * Design §16.4 (6) respawn/restart recovery: a crashed/restarted worker
- * reconnects, the engine retransmits the unaccepted dispatch's exact
- * stored bytes, and re-admission is idempotent — the same attempt
- * resumes, no new attempt, duplicate results replay the stored outcome.
+ * Design §16.4 (6) respawn/restart recovery, re-pointed to the unified
+ * protocol. The legacy resend-until-accept relay is gone, so a crashed worker
+ * no longer receives a retransmission of the exact stored bytes. What survives
+ * is the property that mattered:
+ *
+ * <ol>
+ *   <li><b>the durable record survives the crash</b> — the dispatch's canonical
+ *       bytes + digest stay in {@code orchestration_dispatches}, committed
+ *       before any send, so nothing is lost with the socket;</li>
+ *   <li><b>the resumed run is re-offered, not resumed half-open</b> — the
+ *       orphaned session closes, the coordinator host's fresh instance takes a
+ *       new offer, and the resumed attempt's assignment is again recorded
+ *       durably before it is installed at {@code session.open};</li>
+ *   <li><b>re-admission and terminals stay idempotent</b> — the §16.3 digest
+ *       seam still fails closed on conflicting bytes and replays on a matching
+ *       digest, and a duplicate terminal result replays the stored outcome
+ *       without creating another attempt.</li>
+ * </ol>
  */
-class OrchestrationRespawnRecoveryTest extends IntegrationTestBase {
+class OrchestrationRespawnRecoveryTest extends WorkflowDispatchSupport {
 
-    @Autowired private TestDataBuilder data;
     @Autowired private TaskDispatcherService dispatcher;
     @Autowired private OrchestrationRunService runService;
     @Autowired private OrchestrationRunRepository runRepository;
@@ -56,10 +55,7 @@ class OrchestrationRespawnRecoveryTest extends IntegrationTestBase {
     @Autowired private WorkflowRequestRepository requestRepository;
     @Autowired private WorkflowTaskRepository taskRepository;
     @Autowired private TaskAttemptRepository attemptRepository;
-    @Autowired private AgentConnectionManager connectionManager;
-    @Autowired private AgentWebSocketHandler agentWebSocketHandler;
-    @Autowired private InboundOrchestrationHandler inboundHandler;
-    @Autowired private ObjectMapper objectMapper;
+    @Autowired private ai.myrmec.engine.websocket.InboundOrchestrationHandler inboundHandler;
 
     private Project project;
     private AgentProfile profile;
@@ -67,10 +63,10 @@ class OrchestrationRespawnRecoveryTest extends IntegrationTestBase {
 
     @BeforeEach
     void setUp() throws Exception {
-        java.nio.file.Path origin = java.nio.file.Files.createTempDirectory("resp-origin-");
+        Path origin = Files.createTempDirectory("resp-origin-");
         origin = origin.resolve("origin.git");
         git(origin.getParent(), "init", "--bare", "-b", "main", origin.toString());
-        java.nio.file.Path seed = java.nio.file.Files.createTempDirectory("resp-seed-");
+        Path seed = Files.createTempDirectory("resp-seed-");
         git(seed, "init", "-b", "main");
         git(seed, "-c", "user.email=t@t", "-c", "user.name=t",
                 "commit", "--allow-empty", "-m", "seed");
@@ -83,100 +79,147 @@ class OrchestrationRespawnRecoveryTest extends IntegrationTestBase {
     }
 
     @Test
-    @DisplayName("worker crash mid-dispatch: reconnect retransmits the exact stored bytes; re-admission is idempotent; no new attempt")
-    void respawnRetransmitsAndReadmitsIdempotently() throws Exception {
-        // One host + one idle instance.
-        AgentHost host = data.agent().named("resp-host").withProfile(profile)
-                .inProject(project).create().agent();
-        BlockingQueue<String> outbound = new LinkedBlockingQueue<>();
-        Agent instance = idleInstanceFor(host, "resp-agent", outbound);
+    @DisplayName("worker crash mid-dispatch: the durable dispatch survives, the respawn gets exactly one fresh attempt, and a duplicate result never spawns another")
+    void respawnReadmitsIdempotentlyFromTheStoredBytes() throws Exception {
+        SocketHost host = openHost("resp-host", profile, project, 4);
 
-        // Request + run + PENDING orchestrator task.
         Workflow wf = workflowWithOrchestratorStep();
         WorkflowRequest request = runningRequest(wf, "resp");
         runService.pinRun(request.getId(), wf.getId(), project.getId(), profile.getId());
         WorkflowTask task = pendingTask(request);
 
-        // Dispatch #1: the frame goes out on the wire...
+        // ---- Dispatch #1: offered, assignment recorded BEFORE any send ----
         dispatcher.dispatchPendingTasks();
-        TaskAttempt attempt = attemptRepository
+        UUID sessionId = offeredSessionId(host);
+        TaskAttempt firstAttempt = attemptRepository
                 .findByTaskIdOrderByAttemptNumberAsc(task.getId()).get(0);
-        OrchestrationDispatch dispatch = dispatchRepository
-                .findById(attempt.getId()).orElseThrow();
-        String firstFrame = outbound.poll(3, java.util.concurrent.TimeUnit.SECONDS);
-        assertThat(firstFrame).as("the dispatch frame reached the wire").isNotNull();
+        OrchestrationDispatch firstDispatch = dispatchRepository
+                .findById(firstAttempt.getId()).orElseThrow();
+        String firstDigest = firstDispatch.getAssignmentDigest();
+        assertThat(firstDigest).hasSize(64);
+        assertThat(firstDispatch.getDeliveryState())
+                .as("nothing is delivered until the host has taken the slot")
+                .isEqualTo("PENDING");
 
-        // ...the worker CRASHES before inference.accept. The frame was
-        // SENT but never ACCEPTED; the attempt stays RUNNING.
-        assertThat(dispatch.getDeliveryState())
-                .as("sent on the wire, never accepted — the crash-before-ack case")
-                .isEqualTo("SENT");
-        connectionManager.unregisterByAgentInstanceId(instance.getId());
-        assertThat(connectionManager.isConnected(instance.getId())).isFalse();
+        // ---- The worker CRASHES before the handshake completes ----
+        closeLiveInstances(host.host().getId());
 
-        // Respawn: the same logical instance reconnects.
-        BlockingQueue<String> respawnOutbound = new LinkedBlockingQueue<>();
-        WebSocketSession respawn = mock(WebSocketSession.class);
-        Map<String, Object> attrs = new java.util.HashMap<>();
-        attrs.put("agentInstanceId", instance.getId());
-        attrs.put("agentName", "resp-agent");
-        lenient().when(respawn.getId()).thenReturn("respawn-" + instance.getId());
-        lenient().when(respawn.isOpen()).thenReturn(true);
-        lenient().when(respawn.getAttributes()).thenReturn(attrs);
-        doAnswer(inv -> {
-            TextMessage msg = inv.getArgument(0);
-            respawnOutbound.add(msg.getPayload());
-            return null;
-        }).when(respawn).sendMessage(any(TextMessage.class));
-        agentWebSocketHandler.afterConnectionEstablished(respawn);
-
-        // The engine retransmitted the EXACT stored bytes (§16.4 (6)) —
-        // same canonical assignment, same digest, same attempt.
-        String retransmitted = respawnOutbound.poll(3, java.util.concurrent.TimeUnit.SECONDS);
-        assertThat(retransmitted).as("reconnect retransmits the unaccepted dispatch").isNotNull();
-        assertThat(extractOrchestrationAssignment(retransmitted).toString())
-                .isEqualTo(extractOrchestrationAssignment(firstFrame).toString());
+        // The dispatch row — canonical bytes and digest — survives untouched:
+        // that is the durable recovery substrate now.
+        OrchestrationDispatch afterCrash = dispatchRepository
+                .findById(firstAttempt.getId()).orElseThrow();
+        assertThat(afterCrash.getAssignment()).isEqualTo(firstDispatch.getAssignment());
+        assertThat(afterCrash.getAssignmentDigest()).isEqualTo(firstDigest);
         assertThat(attemptRepository.findByTaskIdOrderByAttemptNumberAsc(task.getId()))
-                .as("respawn never creates a second attempt — the same one resumes")
+                .as("the crash itself never spawns another attempt")
                 .hasSize(1);
 
-        // The respawned worker re-admits: inference.accept (a replay of the
-        // pre-crash admission if it happened, or a fresh one) — idempotent.
-        boolean admitted = dispatchRelay.accept(attempt.getId(), dispatch.getAssignmentDigest());
-        assertThat(admitted).isTrue();
-        boolean replay = dispatchRelay.accept(attempt.getId(), dispatch.getAssignmentDigest());
-        assertThat(replay).as("duplicate accept replays the stored acknowledgement").isTrue();
-        assertThat(dispatchRepository.findById(attempt.getId()).orElseThrow()
+        // ---- Respawn: the host returns and the run re-offers ----
+        closeSession(sessionId, "HOST_LOST");
+        UUID respawnedInstance = reopenHost(host, 4);
+        OrchestrationRun run = runRepository.findById(request.getId()).orElseThrow();
+        run.setAvailabilityState("AVAILABLE");
+        runRepository.save(run);
+
+        // A respawned run resumes through the §16.6 retry re-dispatch (task back
+        // to PENDING with a bumped attempt) — task_id + attempt_number is unique,
+        // so a fresh attempt row is the only legal way to dispatch again.
+        WorkflowTask reset = taskRepository.findById(task.getId()).orElseThrow();
+        reset.setStatus(TaskStatus.PENDING);
+        reset.setAttempt(reset.getAttempt() + 1);
+        reset.setStartedAt(null);
+        reset.setAgentInstance(null);
+        taskRepository.save(reset);
+
+        dispatcher.dispatchPendingTasks();
+
+        // The run re-offered to the SAME coordinator host, and the resumed
+        // attempt's assignment was recorded durably before the wire send.
+        UUID reoffered = latestOfferedSessionId(host);
+        assertThat(sessionRepository.findById(reoffered).orElseThrow().getHostInstanceId())
+                .as("the respawn is re-offered onto the coordinator host's fresh instance")
+                .isEqualTo(respawnedInstance);
+        assertThat(agentHostInstanceRepository.findById(respawnedInstance).orElseThrow()
+                .getAgentHostId())
+                .as("and that instance belongs to the pinned coordinator HOST"
+                        + " (§16.4 pin is host-level; the worker row is minted at session.opened)")
+                .isEqualTo(host.host().getId());
+        List<TaskAttempt> attempts =
+                attemptRepository.findByTaskIdOrderByAttemptNumberAsc(task.getId());
+        assertThat(attempts)
+                .as("a respawn creates exactly one fresh attempt, not a duplicate")
+                .hasSize(2);
+        TaskAttempt resumed = attempts.get(1);
+        OrchestrationDispatch resumedDispatch = dispatchRepository
+                .findById(resumed.getId()).orElseThrow();
+        assertThat(resumedDispatch.getAssignmentDigest()).hasSize(64);
+        assertThat(resumedDispatch.getAssignmentDigest())
+                .as("the resumed attempt is a genuinely new dispatch identity "
+                        + "(§16.2: dispatchId is the attempt)")
+                .isNotEqualTo(firstDigest);
+
+        // session.open installs that attempt's STORED bytes — the digest the
+        // engine recorded, never a re-serialised variant.
+        acceptSession(host, reoffered);
+        JsonNode sessionOpen = framesOf(host).stream()
+                .filter(f -> "session.open".equals(f.path("type").asText()))
+                .reduce((first, second) -> second).orElseThrow();
+        assertThat(sessionOpen.path("payload").path("assignmentDigest").asText())
+                .as("the digest installed at session.open is the one the engine stored")
+                .isEqualTo(resumedDispatch.getAssignmentDigest());
+        assertThat(sessionOpen.path("payload").path("orchestration").path("dispatch")
+                .path("dispatchId").asText())
+                .isEqualTo(resumed.getId().toString());
+        openSession(host, reoffered);
+
+        // ---- Re-admission stays idempotent at the §16.3 digest seam ----
+        assertThat(dispatchRelay.accept(resumed.getId(), resumedDispatch.getAssignmentDigest()))
+                .isTrue();
+        assertThat(dispatchRelay.accept(resumed.getId(), resumedDispatch.getAssignmentDigest()))
+                .as("duplicate accept replays the stored acknowledgement")
+                .isTrue();
+        assertThat(dispatchRelay.accept(resumed.getId(), "digest-forged"))
+                .as("a conflicting digest still fails closed")
+                .isFalse();
+        assertThat(dispatchRepository.findById(resumed.getId()).orElseThrow()
                 .getDeliveryState()).isEqualTo("ACCEPTED");
         assertThat(attemptRepository.findByTaskIdOrderByAttemptNumberAsc(task.getId()))
-                .hasSize(1);
+                .hasSize(2);
 
-        // A duplicate terminal result for the resumed dispatch replays
-        // the stored outcome — the engine never applies a second state
-        // change (§7.3/§16.3 idempotence across the restart).
+        // ---- A duplicate terminal result replays; no third attempt ----
         UUID resultId = UUID.randomUUID();
-        inboundHandler.onOrchestrationResult(instance.getId(),
-                objectMapper.readTree(resultFrame(request.getId(), task.getId(),
-                        attempt.getId(), resultId, "COMPLETED", "respawned")));
-        // Wait for the outcome to apply.
-        AwaitilityHelper.awaitStatus(attemptRepository, attempt.getId(),
-                AttemptStatus.COMPLETED);
-        inboundHandler.onOrchestrationResult(instance.getId(),
-                objectMapper.readTree(resultFrame(request.getId(), task.getId(),
-                        attempt.getId(), resultId, "COMPLETED", "respawned")));
-        assertThat(attemptRepository.findById(attempt.getId()).orElseThrow()
+        JsonNode result = MAPPER.readTree(resultFrame(request.getId(), task.getId(),
+                resumed.getId(), resultId, "COMPLETED", "respawned"));
+        inboundHandler.onOrchestrationResult(host.host().getId(), result);
+        org.awaitility.Awaitility.await()
+                .atMost(java.time.Duration.ofSeconds(5))
+                .untilAsserted(() -> assertThat(
+                        attemptRepository.findById(resumed.getId()).orElseThrow().getStatus())
+                        .isEqualTo(AttemptStatus.COMPLETED));
+        inboundHandler.onOrchestrationResult(host.host().getId(), result);
+        assertThat(attemptRepository.findById(resumed.getId()).orElseThrow()
                 .getOrchestrationResultId()).isEqualTo(resultId);
         assertThat(attemptRepository.findByTaskIdOrderByAttemptNumberAsc(task.getId()))
                 .as("a duplicate result never spawns another attempt")
-                .hasSize(1);
+                .hasSize(2);
     }
 
-    // ── frame helpers ──────────────────────────────────────────
+    // ── helpers ────────────────────────────────────────────────
 
-    /** The orchestration assignment block of an inference.assign frame. */
-    private JsonNode extractOrchestrationAssignment(String frame) throws Exception {
-        JsonNode json = objectMapper.readTree(frame);
-        return json.path("payload").path("orchestration");
+    private UUID latestOfferedSessionId(SocketHost host) {
+        return framesOf(host).stream()
+                .filter(f -> "session.offer".equals(f.path("type").asText()))
+                .reduce((first, second) -> second)
+                .map(f -> UUID.fromString(f.path("payload").path("sessionId").asText()))
+                .orElseThrow();
+    }
+
+    private void closeSession(UUID sessionId, String reason) {
+        sessionRepository.findById(sessionId).ifPresent(session -> {
+            session.setAllocationState("CLOSED");
+            session.setClosedAt(Instant.now());
+            sessionRepository.save(session);
+        });
     }
 
     private String resultFrame(UUID runId, UUID taskId, UUID dispatchId,
@@ -258,38 +301,6 @@ class OrchestrationRespawnRecoveryTest extends IntegrationTestBase {
         return workflowRepository.save(wf);
     }
 
-    private Agent idleInstanceFor(AgentHost host, String hostname,
-                                  BlockingQueue<String> outbound) throws Exception {
-        // §3.7: the dispatcher's host selector requires a live OPEN
-        // AgentHostInstance row on the host — open one like
-        // AgentHostInstanceTest does.
-        agentHostInstanceRepository.saveAndFlush(
-                ai.myrmec.engine.agent.AgentHostInstance.open(
-                        host, null, hostname, 4,
-                        java.util.Map.of("cpuCount", 8), "engine-node-1"));
-        Agent instance = new Agent();
-        instance.setAgentHostId(host.getId());
-        instance.setHostname(hostname);
-        instance.setRuntimeVersion("0.0.0");
-        instance.setStatus(Agent.Status.IDLE);
-        instance.setRegisteredAt(Instant.now());
-        instance = agentInstanceRepository.save(instance);
-        WebSocketSession session = mock(WebSocketSession.class);
-        Map<String, Object> attrs = new java.util.HashMap<>();
-        attrs.put("agentInstanceId", instance.getId());
-        attrs.put("agentName", hostname);
-        lenient().when(session.getId()).thenReturn("stub-" + instance.getId());
-        lenient().when(session.isOpen()).thenReturn(true);
-        lenient().when(session.getAttributes()).thenReturn(attrs);
-        doAnswer(inv -> {
-            TextMessage msg = inv.getArgument(0);
-            outbound.add(msg.getPayload());
-            return null;
-        }).when(session).sendMessage(any(TextMessage.class));
-        connectionManager.register(instance.getId(), hostname, session);
-        return instance;
-    }
-
     private static void git(Path cwd, String... args) throws Exception {
         List<String> command = new ArrayList<>();
         command.add("git");
@@ -301,24 +312,6 @@ class OrchestrationRespawnRecoveryTest extends IntegrationTestBase {
         if (p.waitFor() != 0) {
             throw new IllegalStateException("git " + args[0] + " failed: "
                     + new String(p.getInputStream().readAllBytes()));
-        }
-    }
-
-    @Autowired
-    private ai.myrmec.engine.agent.AgentRepository agentInstanceRepository;
-
-    @Autowired
-    private ai.myrmec.engine.agent.AgentHostInstanceRepository agentHostInstanceRepository;
-
-    /** Small Awaitility wrapper for post-handler status reads. */
-    static final class AwaitilityHelper {
-        static void awaitStatus(TaskAttemptRepository repo, UUID attemptId,
-                                AttemptStatus expected) {
-            org.awaitility.Awaitility.await()
-                    .atMost(java.time.Duration.ofSeconds(5))
-                    .untilAsserted(() -> assertThat(
-                            repo.findById(attemptId).orElseThrow().getStatus())
-                            .isEqualTo(expected));
         }
     }
 }

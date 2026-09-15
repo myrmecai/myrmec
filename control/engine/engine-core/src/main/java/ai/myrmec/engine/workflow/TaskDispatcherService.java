@@ -4,22 +4,8 @@
 package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine.agent.*;
-import ai.myrmec.engine.model.Model;
-import ai.myrmec.engine.model.ModelService;
-import ai.myrmec.engine.tool.ToolService;
-import ai.myrmec.engine.tool.dto.ToolResponse;
-import ai.myrmec.engine.websocket.AgentConnectionManager;
-import ai.myrmec.engine.websocket.AgentWebSocketHandler;
-import ai.myrmec.engine.websocket.message.payload.TaskAssignPayload;
-import ai.myrmec.engine.websocket.message.payload.TaskContext;
-import ai.myrmec.engine.websocket.message.payload.InferenceAssignPayload;
-import ai.myrmec.engine.websocket.message.payload.SessionOpenPayload;
-import ai.myrmec.engine.websocket.message.MessageType;
-import ai.myrmec.engine.websocket.message.WebSocketMessage;
-import ai.myrmec.engine.inference.InferenceRequestAssembler;
-import ai.myrmec.engine.inference.InferenceRequestSpec;
-import ai.myrmec.engine.inference.SessionContextAssembler;
-import ai.myrmec.engine.knowledge.TaskContextResolver;
+import ai.myrmec.engine.inference.SessionAllocator;
+import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -32,11 +18,37 @@ import java.util.*;
 /**
  * Service responsible for dispatching pending tasks to available agents.
  * Runs on a scheduled interval to match tasks with agents.
+ *
+ * <p><b>One-way unified path.</b> Every dispatch &mdash; an ordinary INFERENCE
+ * step and an ORCHESTRATOR step alike &mdash; allocates a session on the
+ * capacity-selected host ({@link SessionAllocator#offer}), offers it
+ * ({@code session.offer}) and parks the assembled dispatch in
+ * {@link PendingTaskDispatches}. The host's {@code session.accept} answer ships
+ * {@code session.open} and its {@code session.opened} answer ships
+ * {@code execution.start} (protocol &sect;7.3/&sect;7.4: no execution may start
+ * before the session is ACTIVE). The legacy {@code session.open} +
+ * {@code inference.assign} frames from this service are gone.</p>
+ *
+ * <p>The two families differ only in what they carry: an ORCHESTRATOR step
+ * installs its complete &sect;16.2 self-contained assignment at
+ * {@code session.open} (the assignment IS that session's context) and
+ * {@code execution.start} references the stored bytes by
+ * {@code dispatchId/attemptId/assignmentDigest}; an ordinary step ships its
+ * &sect;8.1 transcript on {@code execution.start}.</p>
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class TaskDispatcherService {
+
+    /** Protocol &sect;3.1 session kind for every workflow task session. */
+    public static final String SESSION_KIND_TASK = "ORCHESTRATION_TASK";
+
+    /** Workflow task sessions are WORKFLOW-service sessions. */
+    public static final String SERVICE_TYPE_WORKFLOW = "WORKFLOW";
+
+    /** Default per-attempt timeout when the step declares none. */
+    private static final int DEFAULT_TIMEOUT_SECONDS = 300;
 
     private final WorkflowTaskRepository taskRepository;
     private final WorkflowRequestRepository requestRepository;
@@ -44,25 +56,21 @@ public class TaskDispatcherService {
     // profile-keyed AgentHostRepository lookup is gone.
     private final HostSelectionService hostSelectionService;
     private final AgentRepository agentInstanceRepository;
-    private final AgentConnectionManager connectionManager;
-    private final AgentWebSocketHandler webSocketHandler;
-    private final ToolService toolService;
-    private final ModelService modelService;
+    private final AgentHostRepository agentHostRepository;
+    private final AgentHostInstanceRepository hostInstanceRepository;
+    private final SessionAllocator sessionAllocator;
+    private final HostControlWebSocketHandler hostControlWebSocketHandler;
+    private final PendingTaskDispatches pendingTaskDispatches;
     private final TaskAttemptService taskAttemptService;
     private final TaskAttemptRepository attemptRepository;
-    private final TaskContextResolver contextResolver;
-    private final SessionContextAssembler sessionContextAssembler;
-    private final ai.myrmec.engine.agent.AgentProfileVersionService agentProfileVersionService;
-    private final InferenceRequestAssembler inferenceRequestAssembler;
-    private final ai.myrmec.engine.governance.GovernancePolicyResolver governancePolicyResolver;
     // Feature 10 (§16.2/§16.3/§16.4): the orchestration dispatch pipeline.
     private final OrchestrationAffinityResolver affinityResolver;
     private final OrchestrationRunService orchestrationRunService;
     private final OrchestrationAssignmentAssembler assignmentAssembler;
-    private final OrchestrationDispatchRelay dispatchRelay;
     // §16.4(4-8): availability throttling + terminal loss persistence.
     private final OrchestrationRunRepository orchestrationRunRepository;
     private final ExecutionEventRepository executionEventRepository;
+    private final OrchestrationDispatchRepository dispatchRepository;
 
     /**
      * Dispatch pending tasks to available agents.
@@ -139,101 +147,266 @@ public class TaskDispatcherService {
     }
 
     /**
-     * Dispatch a single task to an available agent.
-     *
-     * Feature 10: an ORCHESTRATOR step dispatches through the durable
-     * orchestration pipeline (§16.2/§16.3) — assemble the complete
-     * self-contained assignment, record it in {@code orchestration_dispatches}
-     * inside the attempt-creating transaction, then send the exact stored
-     * bytes through the resend-until-accept relay. Ordinary inference steps
-     * keep the existing session.open + inference.assign path unchanged.
+     * Dispatch a single task onto the unified host-control path. An
+     * ORCHESTRATOR step and an ordinary INFERENCE step take the same
+     * allocation/session/execution path; they differ only in what
+     * {@code session.open}/{@code execution.start} carry (§16.2's assignment
+     * versus §8.1's transcript).
      */
     private void dispatchTask(WorkflowTask task) {
         Workflow workflow = task.getRequest().getWorkflow();
         boolean orchestrator = isOrchestratorStep(workflow, task.getStepId());
         if (orchestrator) {
-            dispatchOrchestrationTask(task);
+            dispatchWorkflowTask(task, true);
             return;
         }
-
-        UUID profileId = task.getAgentProfile().getId();
-        UUID projectId = task.getRequest().getWorkflow().getProject().getId();
-
-        // §3.7: host selection is capacity-based and project-preferring,
-        // never profile-keyed. The task still owns its profile binding.
-        List<AgentHost> candidates = hostSelectionService.selectCandidatesForProject(projectId);
-
-        if (candidates.isEmpty()) {
-            log.debug("No live hosts available for project {} (task profile {})", projectId, profileId);
-            return;
-        }
-
-        // Find an available agent instance (online, idle)
-        for (AgentHost agent : candidates) {
-            Optional<Agent> availableInstance = findAvailableInstance(agent.getId());
-            
-            if (availableInstance.isPresent()) {
-                Agent instance = availableInstance.get();
-                
-                // Create attempt record
-                TaskAttempt attempt = taskAttemptService.createAttempt(task, instance);
-                
-                // Build session.open + inference.assign via the unified
-                // inference dispatch pipeline (§6.1 + §6.2).
-                SessionOpenPayload sessionOpen = buildSessionOpen(task, attempt);
-                InferenceAssignPayload payload = buildInferenceAssign(task, attempt, sessionOpen);
-                
-                // Send session.open first, then inference.assign
-                boolean sent = webSocketHandler.sendSessionOpen(instance.getId(), sessionOpen)
-                        && webSocketHandler.sendInferenceAssign(instance.getId(), payload);
-                
-                if (sent) {
-                    // Update task status
-                    Instant now = Instant.now();
-                    task.setStatus(TaskStatus.RUNNING);
-                    task.setAgentInstance(instance);
-                    task.setStartedAt(now);
-                    taskRepository.save(task);
-
-                    // Transition the parent request to RUNNING the first time
-                    // any of its tasks is actually picked up by an agent.
-                    WorkflowRequest request = task.getRequest();
-                    if (request.getStatus() == RequestStatus.PENDING) {
-                        request.setStatus(RequestStatus.RUNNING);
-                        if (request.getStartedAt() == null) {
-                            request.setStartedAt(now);
-                        }
-                        requestRepository.save(request);
-                    }
-
-                    log.info("Dispatched task {} (attempt {}) to agent instance {}",
-                            task.getId(), attempt.getAttemptNumber(), instance.getId());
-                    return;
-                } else {
-                    // Failed to send - mark attempt as abandoned
-                    taskAttemptService.markAbandoned(attempt.getId(), "Failed to send to agent");
-                }
-            }
-        }
-        
-        log.debug("No available agent instances for task {}", task.getId());
+        dispatchWorkflowTask(task, false);
     }
 
     /**
-     * Find an available agent instance (online and idle).
+     * The single dispatch path for both task families.
+     *
+     * <ol>
+     *   <li><b>Select a host.</b> §3.7: capacity-based and project-preferring,
+     *       never profile-keyed. For an orchestration run the §16.4 coordinator
+     *       binding is honoured: a pinned coordinator's host is the only
+     *       eligible one (no substitute), and its absence throttles with bounded
+     *       backoff instead of picking another host.</li>
+     *   <li><b>Reserve the slot.</b> {@link SessionAllocator#offer} mints the
+     *       session row (OFFERED) under the instance row lock — capacity is
+     *       structural, not advisory.</li>
+     *   <li><b>Create the attempt</b> (engine-authored, so it exists before the
+     *       host answers) and assemble the payloads. For an ORCHESTRATOR step
+     *       the §16.2 canonical assignment is assembled and recorded durably in
+     *       {@code orchestration_dispatches} inside this transaction, BEFORE any
+     *       send — the exact bytes and digest the session will install.</li>
+     *   <li><b>Offer + park.</b> {@code session.offer} goes on the wire and the
+     *       assembled dispatch is parked in {@link PendingTaskDispatches}; the
+     *       host's {@code session.accept}/{@code session.opened} answers resume
+     *       it as {@code session.open} then {@code execution.start}.</li>
+     * </ol>
      */
-    private Optional<Agent> findAvailableInstance(UUID agentId) {
-        List<Agent> instances = agentInstanceRepository.findByAgentHostIdAndStatus(
-                agentId, Agent.Status.IDLE);
-        
-        for (Agent instance : instances) {
-            // Check if instance is idle (not working on a task)
-            if (connectionManager.isAgentIdle(instance.getId())) {
-                return Optional.of(instance);
+    private void dispatchWorkflowTask(WorkflowTask task, boolean orchestrator) {
+        Workflow workflow = task.getRequest().getWorkflow();
+        UUID requestId = task.getRequest().getId();
+        UUID projectId = workflow.getProject().getId();
+        UUID profileId = task.getAgentProfile().getId();
+
+        List<AgentHost> candidates = hostSelectionService.selectCandidatesForProject(projectId);
+
+        HostPick pick = orchestrator
+                ? selectOrchestrationHost(task, requestId, candidates)
+                : selectOrdinaryHost(task, requestId, candidates);
+        if (pick == null) {
+            return; // throttled/unavailable, or no capacity anywhere
+        }
+        AgentHost host = pick.host();
+        // §16.4: record the pin with the attempt-creating transaction so a
+        // concurrent pass under the run lock sees the same coordinator.
+        if (pick.coordinatorPin() != null) {
+            affinityResolver.recordCoordinator(requestId, null, host.getId());
+        }
+
+        UUID sessionId = sessionAllocator.offer(
+                SESSION_KIND_TASK, requestId, SERVICE_TYPE_WORKFLOW, projectId, host.getId())
+                .orElse(null);
+        if (sessionId == null) {
+            log.debug("No allocation capacity on host {} for task {}", host.getId(), task.getId());
+            return;
+        }
+
+        TaskAttempt attempt = taskAttemptService.createAttempt(task, null);
+        TaskDispatchContext context;
+        try {
+            context = orchestrator
+                    ? assembleOrchestrationContext(task, requestId, projectId, profileId, attempt)
+                    : assembleOrdinaryContext(task, requestId, projectId, profileId, attempt);
+        } catch (Exception e) {
+            log.error("Dispatch assembly for task {} failed: {}", task.getId(), e.getMessage(), e);
+            taskAttemptService.markAbandoned(attempt.getId(),
+                    "Dispatch assembly failed: " + e.getMessage());
+            sessionAllocator.close(sessionId, "ASSEMBLY_FAILED");
+            return;
+        }
+
+        boolean offered = hostControlWebSocketHandler.sendSessionOffer(
+                sessionId, SESSION_KIND_TASK, requestId);
+        if (!offered) {
+            // The host socket vanished between selection and send: give the
+            // slot back and let the next pass re-select.
+            log.info("Session.offer undeliverable for task {} (host socket gone) — releasing slot",
+                    task.getId());
+            taskAttemptService.markAbandoned(attempt.getId(), "Host socket gone before session.offer");
+            sessionAllocator.close(sessionId, "OFFER_UNDELIVERABLE");
+            return;
+        }
+
+        pendingTaskDispatches.stage(sessionId, context);
+        markRunning(task, host);
+        log.info("Offered session {} to host {} for task {} (attempt {}, orchestration {})",
+                sessionId, host.getId(), task.getId(), attempt.getId(), orchestrator);
+    }
+
+    /** A selected host plus the coordinator pin to record (null when unpinned). */
+    private record HostPick(AgentHost host, UUID coordinatorPin) {}
+
+    /**
+     * §16.4 for an orchestration task: a pinned coordinator's host is the only
+     * eligible one — no substitute while pinned. The pinned host is resolved
+     * directly rather than from the candidate list, because a pinned host whose
+     * instance just died is exactly the case the throttling path exists for (it
+     * would otherwise simply vanish from the candidates and the task would be
+     * dispatched elsewhere).
+     */
+    private HostPick selectOrchestrationHost(WorkflowTask task, UUID requestId,
+                                             List<AgentHost> candidates) {
+        Optional<UUID> coordinator = affinityResolver.coordinatorOf(requestId);
+        Optional<UUID> pinnedHostId = orchestrationRunRepository.findById(requestId)
+                .map(OrchestrationRun::getCoordinatorHostId)
+                .filter(java.util.Objects::nonNull);
+
+        if (pinnedHostId.isPresent()) {
+            AgentHost host = agentHostRepository.findById(pinnedHostId.get()).orElse(null);
+            if (host != null && hasCapacity(host.getId())) {
+                return new HostPick(host, null); // already pinned
+            }
+            handlePinnedCoordinatorUnavailable(task, requestId, coordinator.orElse(null));
+            return null;
+        }
+
+        if (candidates.isEmpty()) {
+            log.debug("No live hosts available for orchestration run {} (project {})",
+                    requestId, task.getRequest().getWorkflow().getProject().getId());
+            return null;
+        }
+
+        // No host pin yet. §16.4 (2)-(4): while an orchestration attempt is
+        // mid-handshake on a host, that host is the effective coordinator — a
+        // second task of the same run must not start a handshake elsewhere.
+        Optional<AgentHost> inFlight = inFlightOrchestrationHost(requestId, candidates);
+        if (inFlight.isPresent()) {
+            if (hasCapacity(inFlight.get().getId())) {
+                return new HostPick(inFlight.get(), null);
+            }
+            handlePinnedCoordinatorUnavailable(task, requestId, coordinator.orElse(null));
+            return null;
+        }
+
+        for (AgentHost candidate : candidates) {
+            if (hasCapacity(candidate.getId())) {
+                return new HostPick(candidate, candidate.getId());
             }
         }
-        
+        log.debug("No host with free capacity for orchestration task {}", task.getId());
+        return null;
+    }
+
+    /** §3.7 for an ordinary step: the first capacity-bearing candidate wins. */
+    private HostPick selectOrdinaryHost(WorkflowTask task, UUID requestId,
+                                        List<AgentHost> candidates) {
+        for (AgentHost candidate : candidates) {
+            if (hasCapacity(candidate.getId())) {
+                return new HostPick(candidate, null);
+            }
+        }
+        log.debug("No host with free capacity for task {}", task.getId());
+        return null;
+    }
+
+    /** §7.1: a host can take a new session when a live instance has a free slot. */
+    private boolean hasCapacity(UUID hostId) {
+        for (AgentHostInstance instance : hostInstanceRepository
+                .findByAgentHostIdAndStatus(hostId, AgentHostInstance.Status.OPEN)) {
+            long consuming = sessionAllocator.countConsuming(instance.getId());
+            if (consuming < instance.getPoolSize()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The host already running an in-flight orchestration handshake for this
+     * run (an OFFERED/INITIALIZING session), if any — the effective coordinator
+     * binding while the pin has not been recorded yet.
+     */
+    private Optional<AgentHost> inFlightOrchestrationHost(UUID requestId,
+                                                          List<AgentHost> candidates) {
+        for (AgentHost candidate : candidates) {
+            for (AgentHostInstance instance : hostInstanceRepository
+                    .findByAgentHostIdAndStatus(candidate.getId(), AgentHostInstance.Status.OPEN)) {
+                if (sessionAllocator.hasInFlightTasks(instance.getId(), requestId)) {
+                    return Optional.of(candidate);
+                }
+            }
+        }
         return Optional.empty();
+    }
+
+    /** Assemble the §8.1 ordinary-inference dispatch context. */
+    private TaskDispatchContext assembleOrdinaryContext(WorkflowTask task, UUID requestId,
+                                                        UUID projectId, UUID profileId,
+                                                        TaskAttempt attempt) {
+        return new TaskDispatchContext(
+                task.getId(), attempt.getId(), requestId, projectId, profileId,
+                task.getStepId(), false, null, null,
+                findStepIndex(task.getRequest().getWorkflow(), task.getStepId()),
+                timeoutSecondsOf(task), null);
+    }
+
+    /**
+     * Assemble the §16.2 orchestration dispatch context: the complete
+     * self-contained assignment from the run's pinned Profile version, recorded
+     * durably in {@code orchestration_dispatches} inside this transaction, before
+     * any send (§16.3).
+     */
+    private TaskDispatchContext assembleOrchestrationContext(WorkflowTask task, UUID requestId,
+                                                             UUID projectId, UUID profileId,
+                                                             TaskAttempt attempt) {
+        var pinnedVersion = orchestrationRunService.pinnedVersionOf(requestId);
+        var continuation = continuationOf(task);
+        var assembled = assignmentAssembler.assemble(task, attempt, pinnedVersion, continuation);
+        dispatchRepository.save(OrchestrationDispatch.builder()
+                .dispatchId(attempt.getId())
+                .runId(requestId)
+                .taskId(task.getId())
+                .assignment(assembled.canonicalJson())
+                .assignmentDigest(assembled.assignmentDigest())
+                .deliveryState("PENDING")
+                .sendCount(0)
+                .build());
+        return new TaskDispatchContext(
+                task.getId(), attempt.getId(), requestId, projectId, profileId,
+                task.getStepId(), true, assembled.assignment(),
+                assembled.assignmentDigest(),
+                findStepIndex(task.getRequest().getWorkflow(), task.getStepId()),
+                timeoutSecondsOf(task), continuation);
+    }
+
+    /** The step's declared timeout, or the default. */
+    private int timeoutSecondsOf(WorkflowTask task) {
+        Map<String, Object> step = stepDefOf(task);
+        if (step != null && step.get("timeoutSeconds") instanceof Number n) {
+            return n.intValue();
+        }
+        return DEFAULT_TIMEOUT_SECONDS;
+    }
+
+    /** Task + request to RUNNING the first time any task is picked up. */
+    private void markRunning(WorkflowTask task, AgentHost host) {
+        Instant now = Instant.now();
+        task.setStatus(TaskStatus.RUNNING);
+        task.setStartedAt(now);
+        taskRepository.save(task);
+
+        WorkflowRequest request = task.getRequest();
+        if (request.getStatus() == RequestStatus.PENDING) {
+            request.setStatus(RequestStatus.RUNNING);
+            if (request.getStartedAt() == null) {
+                request.setStartedAt(now);
+            }
+            requestRepository.save(request);
+        }
     }
 
     /**
@@ -304,149 +477,8 @@ public class TaskDispatcherService {
     }
 
     /**
-     * Dispatch one orchestration task (§16.3 Engine→Agent delivery):
-     *
-     * <ol>
-     *   <li>Affinity (§16.4): prefer the run's pinned coordinator instance;
-     *       the first dispatch selects it.</li>
-     *   <li>Create the attempt (dispatchId = attempt UUID in V1).</li>
-     *   <li>Assemble the complete self-contained assignment from the run's
-     *       pinned Profile version (§16.2).</li>
-     *   <li>Record the dispatch durably — canonical bytes + digest +
-     *       PENDING — inside this transaction, BEFORE any send.</li>
-     *   <li>Send the exact stored bytes through the resend-until-accept
-     *       relay; a send failure leaves the row PENDING for the relay.</li>
-     * </ol>
-     */
-    private void dispatchOrchestrationTask(WorkflowTask task) {
-        UUID requestId = task.getRequest().getId();
-
-        // Affinity (§16.4): the coordinator instance if already selected.
-        java.util.Optional<UUID> coordinator = affinityResolver.coordinatorOf(requestId);
-
-        // §3.7: host candidates are capacity-based and project-preferring,
-        // never profile-keyed. The run's pinned Profile version rides the
-        // assignment (§16.2); the pinned-coordinator lookup is instance-based
-        // (findByIdIfAlive), so affinity semantics are unchanged.
-        UUID projectId = task.getRequest().getWorkflow().getProject().getId();
-        List<AgentHost> matchingAgents = hostSelectionService.selectCandidatesForProject(projectId);
-        if (matchingAgents.isEmpty()) {
-            log.debug("No live hosts available for orchestration run {} (project {})", requestId, projectId);
-            return;
-        }
-
-        // §16.4 (2)-(4): a PINNED coordinator is the only eligible instance —
-        // no substitute while pinned. When it is not connected/idle, the
-        // task stays PENDING (throttled events + backoff; terminal loss
-        // after the pinned recovery deadline) — handled exactly once.
-        if (coordinator.isPresent()) {
-            for (AgentHost agent : matchingAgents) {
-                java.util.Optional<Agent> pinned = findByIdIfAlive(agent, coordinator.get());
-                if (pinned.isPresent()) {
-                    dispatchToInstance(task, requestId, pinned.get());
-                    return;
-                }
-            }
-            handlePinnedCoordinatorUnavailable(task, requestId, coordinator.get());
-            return;
-        }
-
-        // No coordinator yet: the first available eligible instance wins
-        // and is pinned by the dispatch (§16.4 (1)-(2)).
-        for (AgentHost agent : matchingAgents) {
-            java.util.Optional<Agent> instance = findAvailableInstance(agent.getId());
-            if (instance.isPresent()) {
-                dispatchToInstance(task, requestId, instance.get());
-                return;
-            }
-        }
-
-        log.debug("No available agent instances for orchestration task {}", task.getId());
-    }
-
-    /**
-     * The attempt-creating dispatch: record the attempt + dispatch row,
-     * pin the coordinator (first dispatch wins), assemble from the run's
-     * pinned Profile version, send the exact stored bytes.
-     */
-    private void dispatchToInstance(WorkflowTask task, UUID requestId, Agent selected) {
-        // The attempt-creating transaction commits the dispatch row
-        // before any send (§16.3 durable delivery).
-        TaskAttempt attempt = taskAttemptService.createAttempt(task, selected);
-
-        // §16.4 (2): the first dispatch pins the coordinator.
-        affinityResolver.recordCoordinator(
-                requestId, selected.getId(), selected.getAgentHostId());
-
-        try {
-            var pinnedVersion = orchestrationRunService.pinnedVersionOf(requestId);
-            // §16.2/§17.4: a resume attempt carries the typed
-            // continuation from the stored approval payload — the
-            // suspended continuation + prior dispatch. Fresh
-            // attempts omit it.
-            var continuation = continuationOf(task);
-            var assembled = assignmentAssembler.assemble(task, attempt, pinnedVersion, continuation);
-            // §16.2: dispatchId == the attempt UUID in V1.
-            var dispatch = dispatchRelay.recordDispatch(
-                    attempt.getId(),
-                    requestId,
-                    task.getId(),
-                    assembled.canonicalJson(),
-                    assembled.assignmentDigest());
-
-            boolean sent = dispatchRelay.sendOnce(dispatch, selected.getId());
-            if (!sent) {
-                // Row stays PENDING — the relay retransmits on the
-                // next dispatch pass (or after reconnect).
-                log.info("Orchestration dispatch {} for task {} not sent yet; relay pending",
-                        attempt.getId(), task.getId());
-            }
-
-            Instant now = Instant.now();
-            task.setStatus(TaskStatus.RUNNING);
-            task.setAgentInstance(selected);
-            task.setStartedAt(now);
-            taskRepository.save(task);
-
-            WorkflowRequest request = task.getRequest();
-            if (request.getStatus() == RequestStatus.PENDING) {
-                request.setStatus(RequestStatus.RUNNING);
-                if (request.getStartedAt() == null) {
-                    request.setStartedAt(now);
-                }
-                requestRepository.save(request);
-            }
-
-            log.info("Dispatched orchestration task {} (attempt {}, dispatch {}) to agent {}",
-                    task.getId(), attempt.getAttemptNumber(), attempt.getId(), selected.getId());
-        } catch (Exception e) {
-            log.error("Orchestration dispatch for task {} failed: {}",
-                    task.getId(), e.getMessage(), e);
-            taskAttemptService.markAbandoned(attempt.getId(),
-                    "Orchestration assembly/dispatch failed: " + e.getMessage());
-        }
-    }
-
-    /** The coordinator instance when it belongs to this host and is idle. */
-    private java.util.Optional<Agent> findByIdIfAlive(AgentHost agent, UUID instanceId) {
-        try {
-            List<Agent> instances = agentInstanceRepository
-                    .findByAgentHostIdAndStatus(agent.getId(), Agent.Status.IDLE);
-            for (Agent instance : instances) {
-                if (instance.getId().equals(instanceId)
-                        && connectionManager.isAgentIdle(instance.getId())) {
-                    return java.util.Optional.of(instance);
-                }
-            }
-        } catch (Exception e) {
-            log.debug("Coordinator lookup failed: {}", e.getMessage());
-        }
-        return java.util.Optional.empty();
-    }
-
-    /**
-     * §16.4 (4): while the coordinator is pinned but not connected/idle,
-     * the task stays PENDING without consuming an attempt. An eligible
+     * §16.4 (4): while the coordinator is pinned but has no free slot on its
+     * host, the task stays PENDING without consuming an attempt. An eligible
      * scheduler pass (past persisted nextEligibleAt) observes the
      * unavailability durably, inserts the deterministic throttled
      * AGENT_UNAVAILABLE scheduling event, and advances nextEligibleAt
@@ -572,87 +604,6 @@ public class TaskDispatcherService {
         event.setSequenceNumber(null);
         event.setCreatedAt(Instant.now());
         executionEventRepository.save(event);
-    }
-
-    /**
-     * Build the task assignment payload.
-     */
-    /**
-     * Build the session.open payload for a workflow task (§6.1).
-     * Delegates to {@link SessionContextAssembler} which creates the
-     * Session row and resolves model/workspace/tools/KB handles.
-     */
-    private SessionOpenPayload buildSessionOpen(WorkflowTask task, TaskAttempt attempt) {
-        WorkflowRequest request = task.getRequest();
-        Workflow workflow = request.getWorkflow();
-        AgentProfile profile = task.getAgentProfile();
-        return sessionContextAssembler.assemble(
-                "WORKFLOW",
-                request.getId(),          // refId = workflow_request_id
-                workflow.getProject().getId(),
-                profile.getId());
-    }
-
-    /**
-     * Build the inference.assign payload for a workflow task (§6.2).
-     * Assembles the transcript via {@link InferenceRequestAssembler}
-     * using the workflow composer.
-     */
-    private InferenceAssignPayload buildInferenceAssign(WorkflowTask task, TaskAttempt attempt,
-                                                        SessionOpenPayload sessionOpen) {
-        WorkflowRequest request = task.getRequest();
-        Workflow workflow = request.getWorkflow();
-        AgentProfile profile = task.getAgentProfile();
-        // §16.1: the behaviour contract (system prompt) lives on the
-        // published version row, not on the profile.
-        ai.myrmec.engine.agent.AgentProfileVersion publishedVersion = agentProfileVersionService
-                .findPublished(profile.getId()).orElse(null);
-
-        // Resolve task context (instruction assets + knowledge)
-        TaskContext context = contextResolver.resolve(
-                workflow.getProject().getId(),
-                task.getStepId(),
-                null);
-        // Override workspace branch with execution-specific feature branch
-        if (request.getBranch() != null && context.getWorkspace() != null) {
-            context.getWorkspace().setBranch(request.getBranch());
-        }
-
-        // Map TaskContext.KnowledgeEntry → InferenceRequestSpec.KnowledgeEntry
-        List<InferenceRequestSpec.KnowledgeEntry> knowledge = List.of();
-        if (context.getKnowledge() != null) {
-            knowledge = context.getKnowledge().stream()
-                    .map(k -> new InferenceRequestSpec.KnowledgeEntry(
-                            k.getName(), k.getContent(), k.getCategory()))
-                    .toList();
-        }
-
-        String stepPrompt = findStepPrompt(workflow, task.getStepId());
-        int stepIndex = findStepIndex(workflow, task.getStepId());
-
-        InferenceRequestSpec spec = InferenceRequestSpec.builder()
-                .serviceType("WORKFLOW")
-                .sessionId(sessionOpen.sessionId())
-                .requestId(task.getId())              // requestId = task id
-                .projectId(workflow.getProject().getId())
-                .sequenceNo(stepIndex)
-                .stepId(task.getStepId())              // step id for routing (nullable for conversation)
-                .governanceProfileCode(governancePolicyResolver.resolveOrgDefault().code())
-                .systemPrompt(publishedVersion != null ? publishedVersion.getSystemPrompt() : null)
-                .stepPrompt(stepPrompt)
-                .input(task.getInput())
-                .knowledge(knowledge)
-                .build();
-
-        return inferenceRequestAssembler.assemble(spec);
-    }
-
-    private TaskAssignPayload.ToolDefinition toToolDefinition(ToolResponse tool) {
-        return TaskAssignPayload.ToolDefinition.builder()
-                .name(tool.code())  // Use code for agent registry matching
-                .description(tool.description())
-                .parameters(tool.configSchema())
-                .build();
     }
 
     @SuppressWarnings("unchecked")

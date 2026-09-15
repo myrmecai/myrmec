@@ -57,6 +57,8 @@ public class ExecutionBridge {
     private final OrchestrationOutcomeService outcomeService;
     private final ExecutionApprovalService executionApprovalService;
     private final TaskAttemptRepository attemptRepository;
+    private final ai.myrmec.engine.workflow.TaskAttemptService taskAttemptService;
+    private final ai.myrmec.engine.workflow.WorkflowTaskRepository workflowTaskRepository;
     private final ConversationRepository conversationRepository;
     private final ObjectMapper objectMapper;
 
@@ -194,6 +196,92 @@ public class ExecutionBridge {
         } catch (Exception e) {
             log.warn("Failed to build message.complete bridge for approval conv {}: {}", conversationId, e.getMessage());
         }
+    }
+
+    /**
+     * Ordinary (non-orchestration) workflow completion: mirror
+     * InboundInferenceHandler.handleWorkflowComplete — the attempt's content /
+     * usage output folds into the task-attempt sink, which completes the task
+     * row and drives workflow progression.
+     */
+    @Transactional
+    public void onWorkflowComplete(UUID attemptId, ExecutionCompletePayload payload) {
+        if (payload == null || payload.result() == null) {
+            return;
+        }
+        if (payload.result().content() == null || payload.result().content().isBlank()) {
+            return;
+        }
+        Map<String, Object> output = new HashMap<>();
+        output.put("content", payload.result().content());
+        if (payload.result().structured() != null) {
+            output.put("structured", payload.result().structured());
+        }
+        if (payload.usage() != null) {
+            if (payload.usage().modelId() != null) output.put("modelCode", payload.usage().modelId());
+            Long tokens = longTokenCount(payload.usage().inputTokens())
+                    + longTokenCount(payload.usage().outputTokens());
+            if (tokens > 0) output.put("tokenCount", tokens);
+        }
+        try {
+            taskAttemptService.completeSuccess(attemptId, output);
+        } catch (Exception e) {
+            log.error("Failed to complete task attempt {}: {}", attemptId, e.getMessage(), e);
+            try {
+                taskAttemptService.completeFailed(attemptId,
+                        "Inference completed but result could not be saved: " + e.getMessage(),
+                        "RESULT_PERSIST_ERROR");
+            } catch (Exception e2) {
+                log.error("Failed to mark attempt {} as failed after completion error: {}",
+                        attemptId, e2.getMessage(), e2);
+            }
+        }
+    }
+
+    /**
+     * Ordinary workflow failure: mirror InboundInferenceHandler.onInferenceFailed
+     * — the attempt fails with the agent's error code, honouring a retry hint.
+     */
+    @Transactional
+    public void onWorkflowFailure(UUID attemptId, Map<String, Object> payload) {
+        if (payload == null) {
+            return;
+        }
+        Object error = payload.get("error");
+        String code = "WORKFLOW_EXECUTION_FAILED";
+        String message = "Workflow execution failed";
+        Integer retryAfterSeconds = null;
+        if (error instanceof Map<?, ?> errorMap) {
+            if (errorMap.get("code") != null) code = String.valueOf(errorMap.get("code"));
+            if (errorMap.get("message") != null) message = String.valueOf(errorMap.get("message"));
+            Object retryAfter = errorMap.get("retryAfterSeconds");
+            if (retryAfter instanceof Number n) {
+                retryAfterSeconds = n.intValue();
+            }
+        }
+        try {
+            taskAttemptService.completeFailed(attemptId, message, code, retryAfterSeconds);
+        } catch (Exception e) {
+            log.error("Failed to record task failure for attempt {}: {}", attemptId, e.getMessage(), e);
+        }
+    }
+
+    /** Ordinary workflow cancellation: the attempt is abandoned, the task cancelled. */
+    @Transactional
+    public void onWorkflowCancelled(UUID attemptId) {
+        try {
+            taskAttemptService.markAbandoned(attemptId, "Cancelled");
+        } catch (Exception e) {
+            log.warn("Failed to abandon attempt {} on cancellation: {}", attemptId, e.getMessage());
+        }
+        attemptRepository.findById(attemptId).ifPresent(attempt -> {
+            var task = attempt.getTask();
+            if (task != null && task.getStatus() != ai.myrmec.engine.workflow.TaskStatus.CANCELLED) {
+                task.setStatus(ai.myrmec.engine.workflow.TaskStatus.CANCELLED);
+                task.setCompletedAt(Instant.now());
+                workflowTaskRepository.save(task);
+            }
+        });
     }
 
     /**

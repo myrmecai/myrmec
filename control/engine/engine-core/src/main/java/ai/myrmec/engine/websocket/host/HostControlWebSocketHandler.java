@@ -87,10 +87,12 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     private final SessionExecutionRepository executionRepository;
     private final OrchestrationEventIngestionService eventIngestionService;
     private final ExecutionBridge executionBridge;
+    private final ai.myrmec.engine.workflow.TaskAttemptService taskAttemptService;
     private final PendingConversationTurns pendingConversationTurns;
     private final ExecutionCommandSender executionCommandSender;
     private final ai.myrmec.engine.conversation.ConversationRepository conversationRepository;
     private final ai.myrmec.engine.agent.AgentProfileVersionRepository agentProfileVersionRepository;
+    private final ai.myrmec.engine.workflow.TaskDispatchContinuation taskDispatchContinuation;
 
     @Value("${myrmec.host.heartbeat-interval-seconds:15}")
     private int heartbeatIntervalSeconds;
@@ -123,10 +125,13 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                                        SessionExecutionRepository executionRepository,
                                        OrchestrationEventIngestionService eventIngestionService,
                                        ExecutionBridge executionBridge,
+                                       ai.myrmec.engine.workflow.TaskAttemptService taskAttemptService,
                                        PendingConversationTurns pendingConversationTurns,
                                        ExecutionCommandSender executionCommandSender,
                                        ai.myrmec.engine.conversation.ConversationRepository conversationRepository,
-                                       ai.myrmec.engine.agent.AgentProfileVersionRepository agentProfileVersionRepository) {
+                                       ai.myrmec.engine.agent.AgentProfileVersionRepository agentProfileVersionRepository,
+                                       @org.springframework.context.annotation.Lazy
+                                       ai.myrmec.engine.workflow.TaskDispatchContinuation taskDispatchContinuation) {
         this.objectMapper = objectMapper;
         this.agentHostRepository = agentHostRepository;
         this.instanceRepository = instanceRepository;
@@ -141,8 +146,10 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         this.executionRepository = executionRepository;
         this.eventIngestionService = eventIngestionService;
         this.executionBridge = executionBridge;
+        this.taskAttemptService = taskAttemptService;
         this.pendingConversationTurns = pendingConversationTurns;
         this.executionCommandSender = executionCommandSender;
+        this.taskDispatchContinuation = taskDispatchContinuation;
         this.conversationRepository = conversationRepository;
         this.agentProfileVersionRepository = agentProfileVersionRepository;
     }
@@ -389,9 +396,10 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                 return;
             }
             log.info("Session {} accepted by instance {}", sessionId, instanceId);
-            // §7.3: continue a staged conversation turn — send the assembled
+            // §7.3: continue a staged turn/dispatch — send the assembled
             // session.open now that the host committed its slot.
             continueStagedTurnOnAccept(sessionId);
+            taskDispatchContinuation.onSessionAccepted(sessionId);
         } catch (Exception e) {
             sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
                     "session.accept payload invalid: " + e.getMessage(), false, "SESSION", null);
@@ -417,6 +425,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             sessionAllocator.reject(sessionId, reject.reasonCode(), reject.message(), reject.retryable());
             // The refusal ends this turn's staged work; the next USER turn re-offers.
             pendingConversationTurns.discard(sessionId);
+            taskDispatchContinuation.onSessionEnded(sessionId);
         } catch (Exception e) {
             sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
                     "session.reject payload invalid: " + e.getMessage(), false, "SESSION", null);
@@ -447,8 +456,10 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             }
             log.info("Session {} opened on instance {}", sessionId, instanceId);
             // §7.4/§8.1: the session is ACTIVE — ship the staged conversation
-            // turn. No execution.start is legal before this point.
+            // turn and/or workflow dispatch. No execution.start is legal before
+            // this point.
             shipStagedTurnOnOpened(sessionId);
+            taskDispatchContinuation.onSessionOpened(sessionId);
         } catch (Exception e) {
             sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
                     "session.opened payload invalid: " + e.getMessage(), false, "SESSION", null);
@@ -527,6 +538,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         try {
             var closed = objectMapper.treeToValue(envelope.getPayload(), SessionClosedPayload.class);
             sessionAllocator.close(sessionId, closed.reasonCode());
+            taskDispatchContinuation.onSessionEnded(sessionId);
             // A closed session can never resume its staged turn; drop it so the
             // next USER turn offers cleanly.
             pendingConversationTurns.discard(sessionId);
@@ -563,14 +575,21 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         if (socket == null) {
             return;
         }
-        SessionOpenPayload context = sessionAssembler.assembleContext(
-                sessionId, session.getServiceType(), session.getRefId(),
-                session.getProjectId(), agentProfileId);
-        send(socket, HostProtocolEnvelope.reply(HostProtocol.SESSION_OPEN, null, context, objectMapper));
+        send(socket, HostProtocolEnvelope.reply(HostProtocol.SESSION_OPEN, null,
+                sessionAssembler.assembleContext(
+                        sessionId, session.getServiceType(), session.getRefId(),
+                        session.getProjectId(), agentProfileId),
+                objectMapper));
     }
 
-    /** §7.1: send the offer for a reserved session (Plan 5's dispatcher calls this). */
-    public void sendSessionOffer(UUID sessionId, String kind, UUID refId) {
+    /**
+     * §7.3/§16.2: send the fully assembled session.open from an already-resolved
+     * payload. When an ORCHESTRATOR step's assignment was installed by the
+     * caller it rides this frame (§8.1's orchestration shape: the assignment is
+     * installed here, and {@code execution.start} references the stored bytes by
+     * dispatchId/attemptId/digest only).
+     */
+    public void sendSessionOpen(UUID sessionId, SessionOpenPayload context) {
         ai.myrmec.engine.inference.Session session = sessionRepository.findById(sessionId).orElse(null);
         if (session == null) {
             return;
@@ -579,6 +598,19 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         if (socket == null) {
             return;
         }
+        send(socket, HostProtocolEnvelope.reply(HostProtocol.SESSION_OPEN, null, context, objectMapper));
+    }
+
+    /** §7.1: send the offer for a reserved session (Plan 5's dispatcher calls this). */
+    public boolean sendSessionOffer(UUID sessionId, String kind, UUID refId) {
+        ai.myrmec.engine.inference.Session session = sessionRepository.findById(sessionId).orElse(null);
+        if (session == null) {
+            return false;
+        }
+        WebSocketSession socket = connectionManager.getSession(session.getHostInstanceId()).orElse(null);
+        if (socket == null) {
+            return false;
+        }
         send(socket, HostProtocolEnvelope.reply(HostProtocol.SESSION_OFFER, null,
                 new SessionOfferPayload(sessionId, sessionId, kind,
                         new SessionOfferPayload.Ref(kind, refId),
@@ -586,6 +618,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                         new SessionOfferPayload.Lease(session.getOfferExpiresAt(), idleTimeoutSeconds),
                         new SessionOfferPayload.Routing(nodeRegistryService.getSelfNodeId(), null)),
                 objectMapper));
+        return true;
     }
 
     /** §8.2: host durably admitted the execution — STARTING→RUNNING. */
@@ -775,13 +808,21 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                 if ("CONVERSATION".equals(execution.getServiceType())) {
                     bridgeConversationTerminal(execution, sess, terminalState, payloadNode);
                 } else if ("WORKFLOW".equals(execution.getServiceType())) {
-                    bridgeOrchestrationTerminal(execution, terminalState, payloadNode, payloadMap, conversationId, projectId);
+                    bridgeWorkflowTerminal(execution, terminalState, payloadNode, payloadMap,
+                            conversationId, projectId);
                 }
             }
             acknowledge(session, envelope.getMessageId(), execution.getSessionId(), 0L);
             if (terminalState == SessionExecution.State.PAUSED) {
                 sessionAllocator.close(execution.getSessionId(), "EXECUTION_PAUSED");
                 sendSessionClose(execution.getSessionId(), "EXECUTION_PAUSED");
+            } else if ("WORKFLOW".equals(execution.getServiceType())) {
+                // §9 legacy workflow parity: a workflow session is one-shot —
+                // the task attempt is the unit of work, so the slot returns to
+                // the pool as soon as the execution is terminal. Conversations
+                // stay ACTIVE for the next turn (the sticky reuse path).
+                sessionAllocator.close(execution.getSessionId(), "EXECUTION_TERMINAL");
+                sendSessionClose(execution.getSessionId(), "EXECUTION_TERMINAL");
             }
         } catch (Exception e) {
             sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
@@ -827,6 +868,54 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         return instanceRepository.findById(session.getHostInstanceId())
                 .map(AgentHostInstance::getAgentHostId)
                 .orElse(null);
+    }
+
+    /**
+     * Workflow terminal. An engine-authored {@code dispatchId} marks an
+     * ORCHESTRATOR attempt (§16.2) — its outcome flows through the
+     * orchestration bridge. An ordinary INFERENCE step has no dispatch identity
+     * and completes through the task-attempt sink the legacy
+     * {@code inference.complete} path used.
+     */
+    private void bridgeWorkflowTerminal(SessionExecution execution,
+                                        SessionExecution.State terminalState,
+                                        JsonNode payloadNode,
+                                        Map<String, Object> payloadMap,
+                                        UUID conversationId,
+                                        UUID projectId) {
+        if (execution.getDispatchId() != null) {
+            bridgeOrchestrationTerminal(execution, terminalState, payloadNode, payloadMap,
+                    conversationId, projectId);
+            return;
+        }
+        UUID attemptId = attemptIdOf(execution);
+        if (attemptId == null) {
+            log.debug("No task/attempt for ordinary workflow execution {} — skipping bridge",
+                    execution.getId());
+            return;
+        }
+        switch (terminalState) {
+            case COMPLETED -> executionBridge.onWorkflowComplete(attemptId,
+                    objectMapper.convertValue(payloadNode, ExecutionCompletePayload.class));
+            case FAILED -> executionBridge.onWorkflowFailure(attemptId, payloadMap);
+            case CANCELLED -> executionBridge.onWorkflowCancelled(attemptId);
+            case PAUSED -> log.debug(
+                    "Ordinary workflow execution {} paused — no task-attempt sink",
+                    execution.getId());
+        }
+    }
+
+    /** The task attempt a workflow execution serves (requestId = the task id). */
+    private UUID attemptIdOf(SessionExecution execution) {
+        if (execution.getRequestId() == null) {
+            return null;
+        }
+        try {
+            return taskAttemptService.findCurrentAttemptId(
+                    UUID.fromString(execution.getRequestId())).orElse(null);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private void bridgeOrchestrationTerminal(SessionExecution execution,

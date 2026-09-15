@@ -2,55 +2,46 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.workflow;
 
-import ai.myrmec.engine.IntegrationTestBase;
-import ai.myrmec.engine.agent.Agent;
-import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.User;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.socket.TextMessage;
-import org.springframework.web.socket.WebSocketSession;
 
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.mock;
 
 /**
  * Design §19.3 "ordinary inference compatibility": after the Feature-10
- * orchestration pipeline, an INFERENCE workflow task still dispatches
- * through the ordinary session.open + inference.assign path — no run
- * rows, no orchestration frames, no coordinator pinning — while the
- * same dispatcher pass routes ORCHESTRATOR steps through the new
- * pipeline. The two families coexist on one dispatcher.
+ * orchestration pipeline, an INFERENCE workflow task still dispatches as
+ * ordinary inference — no assignment block, no run rows, no dispatch rows, no
+ * coordinator pinning — while the same dispatcher pass routes ORCHESTRATOR
+ * steps through the orchestration shape. The two families coexist on one
+ * dispatcher.
+ *
+ * <p>Both families now ride the same unified host-control wire
+ * ({@code session.offer} → {@code session.open} → {@code execution.start}); the
+ * ordinary/orchestration discriminator is the execution's engine-authored
+ * {@code dispatchId} plus the presence of an assignment, exactly as the
+ * terminal bridge reads it.</p>
  */
-class OrdinaryInferenceCompatibilityTest extends IntegrationTestBase {
+class OrdinaryInferenceCompatibilityTest extends WorkflowDispatchSupport {
 
-    @Autowired private TestDataBuilder data;
     @Autowired private TaskDispatcherService dispatcher;
     @Autowired private OrchestrationRunRepository runRepository;
+    @Autowired private OrchestrationDispatchRepository dispatchRepository;
     @Autowired private WorkflowRepository workflowRepository;
     @Autowired private WorkflowRequestRepository requestRepository;
     @Autowired private WorkflowTaskRepository taskRepository;
     @Autowired private TaskAttemptRepository attemptRepository;
-    @Autowired private ObjectMapper objectMapper;
 
     private Project project;
     private AgentProfile profile;
@@ -64,57 +55,56 @@ class OrdinaryInferenceCompatibilityTest extends IntegrationTestBase {
     }
 
     @Test
-    @DisplayName("an INFERENCE task dispatches session.open + inference.assign with NO orchestration frames or run rows")
+    @DisplayName("an INFERENCE task dispatches session.offer → session.open → execution.start with NO assignment, run rows or dispatch rows")
     void ordinaryInferenceDispatchUnchanged() throws Exception {
-        AgentHost host = data.agent().named("compat-host").withProfile(profile)
-                .inProject(project).create().agent();
-        BlockingQueue<String> outbound = new LinkedBlockingQueue<>();
-        Agent instance = idleInstanceFor(host, "compat-agent", outbound);
+        SocketHost host = openHost("compat-host", profile, project, 4);
 
-        // A plain INFERENCE workflow (no taskType, no orchestration map).
         Workflow wf = plainInferenceWorkflow("compat");
         WorkflowRequest request = runningRequest(wf, "compat");
         WorkflowTask task = pendingTask(request);
 
         dispatcher.dispatchPendingTasks();
 
-        // The scheduled dispatcher pass may race the direct call (both found
-        // the PENDING task; at-least-once is the §16.3 delivery discipline —
-        // the orchestration pipeline deduplicates by digest). The ORDINARY
-        // contract: session.open precedes inference.assign, NO assign ever
-        // carries an orchestration block, and no run row is pinned.
-        List<JsonNode> frames = new ArrayList<>();
-        String raw;
-        while ((raw = outbound.poll(1, java.util.concurrent.TimeUnit.SECONDS)) != null) {
-            frames.add(objectMapper.readTree(raw));
-        }
-        assertThat(frames).isNotEmpty();
-        assertThat(frames.get(0).path("type").asText())
-                .as("session.open is the first frame on the wire")
-                .isEqualTo("session.open");
+        // §7.1: the offer went out; nothing was assigned directly to a worker.
+        UUID sessionId = offeredSessionId(host);
 
-        List<JsonNode> assigns = frames.stream()
-                .filter(f -> "inference.assign".equals(f.path("type").asText()))
-                .toList();
-        assertThat(assigns).as("inference.assign follows session.open").isNotEmpty();
-        for (JsonNode assign : assigns) {
-            JsonNode orchestration = assign.path("payload").path("orchestration");
-            assertThat(orchestration.isMissingNode() || orchestration.isNull())
-                    .as("ordinary inference never carries an orchestration assignment "
-                            + "(null/absent both mean ordinary — the discriminator is "
-                            + "the payload's dispatchId, §16.3)")
-                    .isTrue();
-        }
+        // session.open first (§7.3) — the assembled §6.1 context, no assignment.
+        acceptSession(host, sessionId);
+        JsonNode sessionOpen = awaitFrame(host.outbound(), "session.open");
+        assertThat(sessionOpen.path("payload").path("serviceType").asText()).isEqualTo("WORKFLOW");
+        JsonNode orchestration = sessionOpen.path("payload").path("orchestration");
+        assertThat(orchestration.isMissingNode() || orchestration.isNull())
+                .as("ordinary inference never installs an orchestration assignment "
+                        + "(the §16.3 discriminator is the execution's dispatchId)")
+                .isTrue();
 
-        // Task RUNNING on the ordinary path; and NO orchestration run
-        // rows exist for this request (no pinRun).
+        // §7.4/§8.1: opened → the §8.1 execution.start carries the transcript.
+        openSession(host, sessionId);
+        JsonNode start = awaitFrame(host.outbound(), "execution.start");
+        JsonNode startPayload = start.path("payload");
+        assertThat(startPayload.path("input").path("messages").isArray()).isTrue();
+        assertThat(startPayload.path("output").path("stream").asBoolean())
+                .as("workflow steps are single-shot — no streaming")
+                .isFalse();
+
+        // Task RUNNING on the ordinary path; attempt bound to the serving worker.
         WorkflowTask stored = taskRepository.findById(task.getId()).orElseThrow();
         assertThat(stored.getStatus()).isEqualTo(TaskStatus.RUNNING);
         assertThat(stored.getAgentInstance()).isNotNull();
         assertThat(attemptRepository.findByTaskId(task.getId())).isNotEmpty();
+
+        // The ordinary path creates no orchestration artifacts at all.
         assertThat(runRepository.findById(request.getId()))
                 .as("an ordinary inference request never pins a run row")
                 .isEmpty();
+        assertThat(dispatchRepository.findAll())
+                .as("an ordinary inference step records no durable dispatch row")
+                .isEmpty();
+        UUID executionId = UUID.fromString(start.path("executionId").asText());
+        assertThat(sessionExecutionRepository.findById(executionId).orElseThrow()
+                .getDispatchId())
+                .as("no engine-authored dispatch identity on an ordinary execution")
+                .isNull();
     }
 
     // ── fixtures ───────────────────────────────────────────────
@@ -166,44 +156,4 @@ class OrdinaryInferenceCompatibilityTest extends IntegrationTestBase {
         wf.setCreatedBy(admin);
         return workflowRepository.save(wf);
     }
-
-    private Agent idleInstanceFor(AgentHost host, String hostname,
-                                  BlockingQueue<String> outbound) throws Exception {
-        // §3.7: the dispatcher's host selector requires a live OPEN
-        // AgentHostInstance row on the host (capacity is real, not
-        // registered) — open one like AgentHostInstanceTest does.
-        ai.myrmec.engine.agent.AgentHostInstance hostInstance =
-                agentHostInstanceRepository.saveAndFlush(
-                        ai.myrmec.engine.agent.AgentHostInstance.open(
-                                host, null, hostname, 4,
-                                java.util.Map.of("cpuCount", 8), "engine-node-1"));
-        Agent instance = new Agent();
-        instance.setAgentHostId(host.getId());
-        instance.setHostname(hostname);
-        instance.setRuntimeVersion("0.0.0");
-        instance.setStatus(Agent.Status.IDLE);
-        instance.setRegisteredAt(Instant.now());
-        instance = agentInstanceRepository.save(instance);
-        WebSocketSession session = mock(WebSocketSession.class);
-        Map<String, Object> attrs = new java.util.HashMap<>();
-        attrs.put("agentInstanceId", instance.getId());
-        attrs.put("agentName", hostname);
-        lenient().when(session.getId()).thenReturn("stub-" + instance.getId());
-        lenient().when(session.isOpen()).thenReturn(true);
-        lenient().when(session.getAttributes()).thenReturn(attrs);
-        doAnswer(inv -> {
-            TextMessage msg = inv.getArgument(0);
-            outbound.add(msg.getPayload());
-            return null;
-        }).when(session).sendMessage(any(TextMessage.class));
-        connectionManager.register(instance.getId(), hostname, session);
-        return instance;
-    }
-
-    @Autowired
-    private ai.myrmec.engine.agent.AgentRepository agentInstanceRepository;
-    @Autowired
-    private ai.myrmec.engine.agent.AgentHostInstanceRepository agentHostInstanceRepository;
-    @Autowired
-    private ai.myrmec.engine.websocket.AgentConnectionManager connectionManager;
 }

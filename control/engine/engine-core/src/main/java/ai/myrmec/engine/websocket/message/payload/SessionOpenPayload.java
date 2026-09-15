@@ -9,6 +9,14 @@ import java.util.UUID;
 /**
  * Payload for the {@code session.open} frame (§5.2).
  * Sent once when a worker binds to a conversation or is assigned a workflow execution.
+ *
+ * <p>Feature 10 (§16.2/§16.3, unified protocol §8.1): an ORCHESTRATOR step's
+ * complete self-contained {@code OrchestrationAssignment} is installed at
+ * {@code session.open} — the assignment IS the orchestration session's context,
+ * so it rides this frame as {@code orchestration} plus its canonical
+ * {@code assignmentDigest}. {@code execution.start} then references the stored
+ * bytes by {@code dispatchId/attemptId/assignmentDigest} only. Both fields are
+ * null for conversation sessions and for ordinary INFERENCE steps.</p>
  */
 public record SessionOpenPayload(
         UUID sessionId,
@@ -19,7 +27,16 @@ public record SessionOpenPayload(
         WorkspaceConfig workspace,  // nullable
         List<ToolDefinition> tools,
         List<KnowledgeSourceHandle> knowledgeSources,
-        boolean autoHitlOnDestructive) {  // project HITL policy
+        boolean autoHitlOnDestructive,  // project HITL policy
+        Map<String, Object> orchestration,  // §16.2 assignment; null for non-orchestration
+        String assignmentDigest) {          // §16.3 sha-256 of the canonical assignment bytes
+
+    /** Copy the context with the §16.2 assignment installed (orchestration only). */
+    public SessionOpenPayload withAssignment(Map<String, Object> assignment, String digest) {
+        return new SessionOpenPayload(sessionId, serviceType, projectId, profileVersionId,
+                model, workspace, tools, knowledgeSources, autoHitlOnDestructive,
+                assignment, digest);
+    }
 
     public record ModelConfig(
             String provider,

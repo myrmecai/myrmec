@@ -107,7 +107,9 @@ class ExecutionInputAssemblerTest {
                 conversationRepository, conversationService, agentHostRepository,
                 agentProfileVersionService, agentInstanceRepository, attachmentService,
                 systemSettingService, conversationNoticeService, sessionContextAssembler,
-                inferenceRequestAssembler, governancePolicyResolver, modelService);
+                inferenceRequestAssembler, governancePolicyResolver, modelService,
+                mock(ai.myrmec.engine.knowledge.TaskContextResolver.class),
+                mock(ai.myrmec.engine.workflow.WorkflowTaskRepository.class));
 
         conversationId = UUID.randomUUID();
         projectId = UUID.randomUUID();
@@ -379,7 +381,8 @@ class ExecutionInputAssemblerTest {
 
         when(sessionContextAssembler.assemble(any(), any(), any(), any()))
                 .thenReturn(new ai.myrmec.engine.websocket.message.payload.SessionOpenPayload(
-                        null, "CONVERSATION", projectId, null, null, null, List.of(), List.of(), false));
+                        null, "CONVERSATION", projectId, null, null, null,
+                        List.of(), List.of(), false, null, null));
     }
 
     private void assemble() {

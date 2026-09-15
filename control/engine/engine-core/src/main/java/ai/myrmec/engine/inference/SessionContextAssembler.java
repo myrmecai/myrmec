@@ -97,7 +97,9 @@ public class SessionContextAssembler {
                 ctx.workspace(),
                 ctx.tools(),
                 ctx.kbHandles(),
-                ctx.autoHitl());
+                ctx.autoHitl(),
+                null,
+                null);
     }
 
     /**
@@ -131,7 +133,9 @@ public class SessionContextAssembler {
                 ctx.workspace(),
                 ctx.tools(),
                 ctx.kbHandles(),
-                ctx.autoHitl());
+                ctx.autoHitl(),
+                null,
+                null);
     }
 
     /**

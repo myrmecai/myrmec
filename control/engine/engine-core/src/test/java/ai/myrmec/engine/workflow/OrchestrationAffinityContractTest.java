@@ -2,48 +2,44 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.workflow;
 
-import ai.myrmec.engine.IntegrationTestBase;
-import ai.myrmec.engine.agent.Agent;
 import ai.myrmec.engine.agent.AgentHost;
-import ai.myrmec.engine.agent.AgentHostCreationResult;
+import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentProfile;
+import ai.myrmec.engine.inference.Session;
+import ai.myrmec.engine.inference.SessionAllocator;
 import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.User;
-import ai.myrmec.engine.websocket.AgentConnectionManager;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.socket.TextMessage;
-import org.springframework.web.socket.WebSocketSession;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.mock;
 
 /**
  * Design §16.4 agent-affinity contract (design's own named integration
- * tests): two eligible agents — every dispatch goes to the first
- * selected coordinator; a pinned-but-unavailable coordinator throttles
- * with bounded backoff and durable episodes; reconnect clears; the
- * pinned recovery deadline never extends; expiry is terminal
- * WORKSPACE_LOST.
+ * tests): two eligible hosts — every dispatch of a run goes to the host of the
+ * first-selected coordinator; a pinned-but-unavailable coordinator throttles
+ * with bounded backoff and durable episodes; reconnect clears; the pinned
+ * recovery deadline never extends; expiry is terminal WORKSPACE_LOST.
+ *
+ * <p><b>Binding after the cutover.</b> The coordinator binding is the session's
+ * {@code host_instance_id} (§16.4's "session host binding"): the run records the
+ * selected host, and every later dispatch of that run offers its session to that
+ * host's live instance — the allocator is the only thing that mints serving
+ * workers now, so the pin is a host pin rather than a pre-minted agent-instance
+ * pin. When the pinned host has no live/capacity-bearing instance the task stays
+ * PENDING with the same durable throttling, and the same deadline semantics
+ * apply.</p>
  */
-class OrchestrationAffinityContractTest extends IntegrationTestBase {
+class OrchestrationAffinityContractTest extends WorkflowDispatchSupport {
 
-    @Autowired private TestDataBuilder data;
     @Autowired private TaskDispatcherService dispatcher;
     @Autowired private OrchestrationRunService runService;
     @Autowired private OrchestrationRunRepository runRepository;
@@ -53,9 +49,7 @@ class OrchestrationAffinityContractTest extends IntegrationTestBase {
     @Autowired private WorkflowTaskRepository taskRepository;
     @Autowired private TaskAttemptRepository attemptRepository;
     @Autowired private ExecutionEventRepository eventRepository;
-    @Autowired private AgentConnectionManager connectionManager;
-    @Autowired private ai.myrmec.engine.websocket.AgentWebSocketHandler agentWebSocketHandler;
-    @Autowired private ObjectMapper objectMapper;
+    @Autowired private ai.myrmec.engine.inference.SessionRepository sessionRepository;
 
     private Project project;
     private AgentProfile profile;
@@ -67,8 +61,7 @@ class OrchestrationAffinityContractTest extends IntegrationTestBase {
         // the project repo must be a seeded local bare origin.
         java.nio.file.Path origin = java.nio.file.Files.createTempDirectory("aff-origin-");
         origin = origin.resolve("origin.git");
-        git(java.nio.file.Path.of(origin + "/.."), "init", "--bare", "-b", "main",
-                origin.toString());
+        git(origin.getParent(), "init", "--bare", "-b", "main", origin.toString());
         java.nio.file.Path seed = java.nio.file.Files.createTempDirectory("aff-seed-");
         git(seed, "init", "-b", "main");
         git(seed, "-c", "user.email=t@t", "-c", "user.name=t",
@@ -82,7 +75,7 @@ class OrchestrationAffinityContractTest extends IntegrationTestBase {
     }
 
     private static void git(java.nio.file.Path cwd, String... args) throws Exception {
-        java.util.List<String> command = new java.util.ArrayList<>();
+        List<String> command = new java.util.ArrayList<>();
         command.add("git");
         command.addAll(java.util.Arrays.asList(args));
         Process p = new ProcessBuilder(command)
@@ -95,50 +88,57 @@ class OrchestrationAffinityContractTest extends IntegrationTestBase {
         }
     }
 
-    // ── (a) two-agent affinity: §16.4's own scenario ────────────
+    // ── (a) two-host affinity: §16.4's own scenario ─────────────
 
     @Test
-    @DisplayName("two eligible agents: every orchestration dispatch goes to the first-selected coordinator")
-    void twoAgentAffinityPinsFirstCoordinator() throws Exception {
+    @DisplayName("two eligible hosts: every orchestration dispatch of a run binds to the first-selected coordinator host")
+    void twoHostAffinityPinsFirstCoordinatorHost() throws Exception {
         Workflow wf = workflowWithOrchestratorStep("aff-two");
-        AgentHost hostA = data.agent().named("host-a").withProfile(profile)
-                .inProject(project).create().agent();
-        AgentHost hostB = data.agent().named("host-b").withProfile(profile)
-                .inProject(project).create().agent();
+        SocketHost hostA = openHost("aff-host-a", profile, project, 4);
+        SocketHost hostB = openHost("aff-host-b", profile, project, 4);
 
-        // Both instances idle + connected — either is eligible first.
-        Agent instanceA = idleInstanceFor(hostA, "aff-a", new LinkedBlockingQueue<>());
-        Agent instanceB = idleInstanceFor(hostB, "aff-b", new LinkedBlockingQueue<>());
-
-        // First dispatch of a multi-step request pins instanceA or
-        // instanceB; whichever it is, the SECOND task of the same
-        // request must land on the same instance even though the other
-        // is equally eligible.
+        // First dispatch of a multi-step request pins hostA or hostB; whichever
+        // it is, the SECOND task of the same request must bind to the same host
+        // even though the other is equally eligible.
         WorkflowRequest request = runningRequest(wf, "aff-two");
         pinRun(request);
-
         WorkflowTask first = pendingTask(request, "build");
-        WorkflowTask second = pendingTask(request, "verify");
 
         dispatcher.dispatchPendingTasks();
 
         OrchestrationRun run = runRepository.findById(request.getId()).orElseThrow();
-        UUID coordinator = run.getCoordinatorAgentId();
-        assertThat(coordinator).as("the first dispatch pins a coordinator").isNotNull();
-        assertThat(coordinator).isIn(instanceA.getId(), instanceB.getId());
+        UUID coordinatorHost = run.getCoordinatorHostId();
+        assertThat(coordinatorHost).as("the first dispatch pins a coordinator host").isNotNull();
+        assertThat(coordinatorHost).isIn(hostA.host().getId(), hostB.host().getId());
 
-        // The second task must reuse the coordinator (no substitute).
+        // Complete the handshake so the run's first session is ACTIVE and the
+        // second task can be offered on the same host.
+        SocketHost pinned = coordinatorHost.equals(hostA.host().getId()) ? hostA : hostB;
+        SocketHost other = pinned == hostA ? hostB : hostA;
+        completeHandshake(pinned);
+        assertThat(attemptRepository.findByTaskIdOrderByAttemptNumberAsc(first.getId()).get(0)
+                .getAgentInstance()).isNotNull();
+
+        WorkflowTask second = pendingTask(request, "verify");
         dispatcher.dispatchPendingTasks();
-        run = runRepository.findById(request.getId()).orElseThrow();
-        assertThat(run.getCoordinatorAgentId()).isEqualTo(coordinator);
-        assertThat(taskRepository.findById(second.getId()).orElseThrow().getAgentInstance())
-                .as("the coordinator executes every orchestration task of the run")
-                .isNotNull()
-                .extracting(Agent::getId)
-                .isEqualTo(coordinator);
-        assertThat(taskRepository.findById(first.getId()).orElseThrow().getAgentInstance())
-                .extracting(Agent::getId)
-                .isEqualTo(coordinator);
+
+        // The second task was offered to the PINNED host, never the other one.
+        assertThat(framesOf(other).stream().map(f -> f.path("type").asText()).toList())
+                .as("the equally-eligible host receives no offer for this run")
+                .doesNotContain("session.offer");
+        Session secondSession = sessionRepository.findByRefId(request.getId()).stream()
+                .filter(s -> SessionAllocator.ALLOC_STATE_OFFERED.equals(s.getAllocationState()))
+                .findFirst().orElseThrow();
+        assertThat(secondSession.getHostInstanceId()).isEqualTo(pinned.instanceId());
+        assertThat(runRepository.findById(request.getId()).orElseThrow().getCoordinatorHostId())
+                .isEqualTo(coordinatorHost);
+        assertThat(attemptRepository.findByTaskId(second.getId())).isNotEmpty();
+    }
+
+    private TaskAttempt firstAttempt(WorkflowRequest request) {
+        return attemptRepository.findAll().stream()
+                .filter(a -> a.getTask().getRequest().getId().equals(request.getId()))
+                .findFirst().orElseThrow();
     }
 
     // ── (b) availability episodes + throttled backoff ───────────
@@ -147,23 +147,21 @@ class OrchestrationAffinityContractTest extends IntegrationTestBase {
     @DisplayName("a pinned-but-unavailable coordinator: throttled AGENT_UNAVAILABLE events, bounded backoff, no attempt consumed")
     void unavailableCoordinatorThrottlesWithBackoff() throws Exception {
         Workflow wf = workflowWithOrchestratorStep("aff-backoff");
-        AgentHost hostA = data.agent().named("host-c").withProfile(profile)
-                .inProject(project).create().agent();
-        Agent instanceA = idleInstanceFor(hostA, "aff-c", new LinkedBlockingQueue<>());
+        SocketHost hostA = openHost("aff-host-c", profile, project, 4);
 
         WorkflowRequest request = runningRequest(wf, "aff-backoff");
         pinRun(request);
         WorkflowTask task = pendingTask(request, "build");
 
-        // First pass selects + pins the coordinator.
+        // First pass selects + pins the coordinator host.
         dispatcher.dispatchPendingTasks();
         OrchestrationRun run = runRepository.findById(request.getId()).orElseThrow();
-        UUID coordinator = run.getCoordinatorAgentId();
-        assertThat(coordinator).isEqualTo(instanceA.getId());
+        assertThat(run.getCoordinatorHostId()).isEqualTo(hostA.host().getId());
+        int attemptsBefore = attemptRepository.findByTaskId(task.getId()).size();
 
-        // The coordinator goes down: unregister its socket —
-        // findByIdIfAlive must miss on the connection check.
-        connectionManager.unregisterByAgentInstanceId(coordinator);
+        // The coordinator goes down: close its live instance so the host has no
+        // OPEN instance left (the §7.1 capacity probe misses).
+        closeLiveInstances(hostA.host().getId());
 
         // §16.6 retryable reset: the SAME task row returns to PENDING
         // (bumped attempt) for the coordinator to pick back up.
@@ -173,11 +171,8 @@ class OrchestrationAffinityContractTest extends IntegrationTestBase {
         task.setAgentInstance(null);
         WorkflowTask retried = taskRepository.save(task);
 
-        // Eligible pass #1: episode 1, occurrence 0, backoff applied,
-        // throttled event persisted, NO NEW attempt (the reset re-uses
-        // the same task row — attempt #1 already exists from the first
-        // dispatch; the unavailable pass must not add another).
-        int attemptsBefore = attemptRepository.findByTaskId(task.getId()).size();
+        // Eligible pass #1: episode 1, occurrence 0, backoff applied, throttled
+        // event persisted, NO NEW attempt.
         dispatcher.dispatchPendingTasks();
 
         run = runRepository.findById(request.getId()).orElseThrow();
@@ -210,22 +205,23 @@ class OrchestrationAffinityContractTest extends IntegrationTestBase {
         run = runRepository.findById(request.getId()).orElseThrow();
         assertThat(run.getAvailabilityOccurrence()).isEqualTo(0);
 
-        // Reconnect: clears the condition (§16.4 (7)) — the reconnect
-        // proof flows through the WS handler's connection-established
-        // path, not a bare connectionManager.register.
-        WebSocketSession reconnect = mock(WebSocketSession.class);
-        Map<String, Object> attrs = new java.util.HashMap<>();
-        attrs.put("agentInstanceId", coordinator);
-        attrs.put("agentName", "aff-c");
-        lenient().when(reconnect.getId()).thenReturn("reconnect-" + coordinator);
-        lenient().when(reconnect.isOpen()).thenReturn(true);
-        lenient().when(reconnect.getAttributes()).thenReturn(attrs);
-        agentWebSocketHandler.afterConnectionEstablished(reconnect);
+        // Reconnect: the host comes back with a fresh live instance — the
+        // §16.4 (7) reconnect proof clears the availability condition and the
+        // next eligible pass dispatches again.
+        reopenHost(hostA, 4);
+        affinity.observeAvailable(request.getId());
+        WorkflowTask eligible = taskRepository.findById(retried.getId()).orElseThrow();
+        eligible.setNextEligibleAt(null);
+        taskRepository.save(eligible);
 
-        // And the next pass dispatches to the coordinator again.
         dispatcher.dispatchPendingTasks();
         run = runRepository.findById(request.getId()).orElseThrow();
         assertThat(run.getAvailabilityState()).isEqualTo("AVAILABLE");
+        assertThat(sessionRepository.findByRefId(request.getId()).stream()
+                .anyMatch(s -> SessionAllocator.ALLOC_STATE_OFFERED.equals(s.getAllocationState())
+                        || SessionAllocator.ALLOC_STATE_ACTIVE.equals(s.getAllocationState())))
+                .as("the recovered coordinator host takes the task again")
+                .isTrue();
     }
 
     // ── (c) terminal loss after the pinned deadline ─────────────
@@ -234,23 +230,20 @@ class OrchestrationAffinityContractTest extends IntegrationTestBase {
     @DisplayName("recovery-deadline expiry without reconnect: run LOST, request FAILED with engine-generated WORKSPACE_LOST")
     void recoveryExpiryIsTerminalWorkspaceLost() throws Exception {
         Workflow wf = workflowWithOrchestratorStep("aff-lost");
-        AgentHost hostA = data.agent().named("host-d").withProfile(profile)
-                .inProject(project).create().agent();
-        Agent instanceA = idleInstanceFor(hostA, "aff-d", new LinkedBlockingQueue<>());
+        SocketHost hostA = openHost("aff-host-d", profile, project, 4);
 
         WorkflowRequest request = runningRequest(wf, "aff-lost");
         pinRun(request);
         WorkflowTask task = pendingTask(request, "build");
 
-        // Pin the coordinator, then take it down.
+        // Pin the coordinator host, then take its live instance down.
         dispatcher.dispatchPendingTasks();
         OrchestrationRun run = runRepository.findById(request.getId()).orElseThrow();
-        UUID coordinator = run.getCoordinatorAgentId();
-        assertThat(coordinator).isEqualTo(instanceA.getId());
-        connectionManager.unregisterByAgentInstanceId(coordinator);
+        assertThat(run.getCoordinatorHostId()).isEqualTo(hostA.host().getId());
+        closeLiveInstances(hostA.host().getId());
 
-        // Start the outage (episode 1) — the deadline starts now. The
-        // same task row resets to PENDING (retryable semantics).
+        // Start the outage (episode 1) — the deadline starts now. The same task
+        // row resets to PENDING (retryable semantics).
         task.setStatus(TaskStatus.PENDING);
         task.setAttempt(task.getAttempt() + 1);
         task.setStartedAt(null);
@@ -258,11 +251,9 @@ class OrchestrationAffinityContractTest extends IntegrationTestBase {
         WorkflowTask retried = taskRepository.save(task);
         dispatcher.dispatchPendingTasks();
         run = runRepository.findById(request.getId()).orElseThrow();
-        Instant deadline = run.getAffinityRecoveryDeadline();
-        assertThat(deadline).isNotNull();
+        assertThat(run.getAffinityRecoveryDeadline()).isNotNull();
 
         // Expire the deadline: move it into the past.
-        run = runRepository.findById(request.getId()).orElseThrow();
         run.setAffinityRecoveryDeadline(Instant.now().minusSeconds(1));
         runRepository.save(run);
 
@@ -282,6 +273,8 @@ class OrchestrationAffinityContractTest extends IntegrationTestBase {
         assertThat(failed.getErrorMessage()).isEqualTo("WORKSPACE_LOST");
         assertThat(failed.getNextEligibleAt()).isNull();
     }
+
+    // ── helpers ────────────────────────────────────────────────
 
     // ── fixtures ───────────────────────────────────────────────
 
@@ -313,6 +306,19 @@ class OrchestrationAffinityContractTest extends IntegrationTestBase {
     private void pinRun(WorkflowRequest request) {
         runService.pinRun(request.getId(),
                 request.getWorkflow().getId(), project.getId(), profile.getId());
+    }
+
+    private Workflow workflowWithOrchestratorStep(String tag) {
+        Map<String, Object> build = orchestratorStep("build");
+        Map<String, Object> verify = orchestratorStep("verify");
+        Workflow wf = new Workflow();
+        wf.setProject(project);
+        wf.setName(tag + "-wf-" + System.nanoTime());
+        wf.setSteps(List.of(build, verify));
+        wf.setVersion(1);
+        wf.setStatus(WorkflowStatus.PUBLISHED);
+        wf.setCreatedBy(admin);
+        return workflowRepository.save(wf);
     }
 
     private Map<String, Object> orchestratorStep(String id) {
@@ -347,61 +353,4 @@ class OrchestrationAffinityContractTest extends IntegrationTestBase {
                 "maxRetries", 1, "initialBackoffSeconds", 2, "maxBackoffSeconds", 30));
         return step;
     }
-
-    private Workflow workflowWithOrchestratorStep(String tag) {
-        Map<String, Object> build = orchestratorStep("build");
-        Map<String, Object> verify = orchestratorStep("verify");
-        verify.put("dependsOn", List.of("build"));
-
-        Workflow wf = new Workflow();
-        wf.setProject(project);
-        wf.setName(tag + "-wf-" + System.nanoTime());
-        wf.setSteps(List.of(build, verify));
-        wf.setVersion(1);
-        wf.setStatus(WorkflowStatus.PUBLISHED);
-        wf.setCreatedBy(admin);
-        return workflowRepository.save(wf);
-    }
-
-    private Agent idleInstanceFor(AgentHost host, String hostname,
-                                  BlockingQueue<String> outbound) throws Exception {
-        // §3.7: the dispatcher's host selector requires a live OPEN
-        // AgentHostInstance row on the host — open one like
-        // AgentHostInstanceTest does.
-        agentHostInstanceRepository.saveAndFlush(
-                ai.myrmec.engine.agent.AgentHostInstance.open(
-                        host, null, hostname, 4,
-                        java.util.Map.of("cpuCount", 8), "engine-node-1"));
-        Agent instance = new Agent();
-        instance.setAgentHostId(host.getId());
-        instance.setHostname(hostname);
-        instance.setRuntimeVersion("0.0.0");
-        instance.setStatus(Agent.Status.IDLE);
-        instance.setRegisteredAt(Instant.now());
-        instance = agentInstanceRepository.save(instance);
-        registerStub(instance.getId(), hostname, outbound);
-        return instance;
-    }
-
-    private void registerStub(UUID instanceId, String name,
-                              BlockingQueue<String> outbound) throws Exception {
-        WebSocketSession session = mock(WebSocketSession.class);
-        Map<String, Object> attrs = new java.util.HashMap<>();
-        attrs.put("agentInstanceId", instanceId);
-        attrs.put("agentName", name);
-        lenient().when(session.getId()).thenReturn("stub-" + instanceId);
-        lenient().when(session.isOpen()).thenReturn(true);
-        lenient().when(session.getAttributes()).thenReturn(attrs);
-        doAnswer(inv -> {
-            TextMessage msg = inv.getArgument(0);
-            outbound.add(msg.getPayload());
-            return null;
-        }).when(session).sendMessage(any(TextMessage.class));
-        connectionManager.register(instanceId, name, session);
-    }
-
-    @Autowired
-    private ai.myrmec.engine.agent.AgentRepository agentInstanceRepository;
-    @Autowired
-    private ai.myrmec.engine.agent.AgentHostInstanceRepository agentHostInstanceRepository;
 }

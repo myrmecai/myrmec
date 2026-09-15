@@ -20,11 +20,19 @@ import ai.myrmec.engine.governance.GovernancePolicyResolver;
 import ai.myrmec.engine.inference.InferenceRequestAssembler;
 import ai.myrmec.engine.inference.InferenceRequestSpec;
 import ai.myrmec.engine.inference.SessionContextAssembler;
+import ai.myrmec.engine.knowledge.TaskContextResolver;
 import ai.myrmec.engine.model.ModelService;
 import ai.myrmec.engine.setting.SystemSettingService;
 import ai.myrmec.engine.websocket.message.payload.ConversationTurnAssignPayload;
 import ai.myrmec.engine.websocket.message.payload.InferenceAssignPayload;
 import ai.myrmec.engine.websocket.message.payload.SessionOpenPayload;
+import ai.myrmec.engine.websocket.message.payload.TaskContext;
+import ai.myrmec.engine.workflow.TaskStatus;
+import ai.myrmec.engine.workflow.Workflow;
+import ai.myrmec.engine.workflow.WorkflowRepository;
+import ai.myrmec.engine.workflow.WorkflowRequest;
+import ai.myrmec.engine.workflow.WorkflowTask;
+import ai.myrmec.engine.workflow.WorkflowTaskRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -60,6 +68,8 @@ public class ExecutionInputAssembler {
     private final InferenceRequestAssembler inferenceRequestAssembler;
     private final GovernancePolicyResolver governancePolicyResolver;
     private final ModelService modelService;
+    private final TaskContextResolver contextResolver;
+    private final WorkflowTaskRepository workflowTaskRepository;
 
     private static final int HISTORY_LIMIT = 20;
 
@@ -107,6 +117,91 @@ public class ExecutionInputAssembler {
         // The attachments ride the messages' content parts (legacy shape);
         // §8.1's separate attachments array is additive and left null.
         return input;
+    }
+
+    /**
+     * Assemble the &sect;8.1 input block for an ordinary workflow step: the same
+     * per-step transcript the legacy {@code inference.assign} shipped &mdash; the
+     * pinned profile version's system prompt, the step prompt, the task's input
+     * block and resolved knowledge &mdash; rewrapped into the execution shape.
+     *
+     * <p>Model/tool policy is resolved from the pinned published version, never
+     * the host: the workflow step's profile binding is the behaviour contract
+     * (&sect;3.7).</p>
+     */
+    public java.util.Map<String, Object> assembleWorkflowInput(
+            WorkflowTask task, UUID sessionId, long stepIndex) {
+        InferenceRequestSpec spec = buildWorkflowSpec(task, sessionId,
+                task.getRequest().getWorkflow().getProject().getId(), stepIndex);
+        InferenceAssignPayload assign = inferenceRequestAssembler.assemble(spec);
+
+        java.util.Map<String, Object> input = new java.util.LinkedHashMap<>();
+        input.put("messages", assign.messages());
+        input.put("toolPolicy", java.util.Map.of(
+                "activeToolNames", assign.activeToolNames() == null
+                        ? java.util.List.of() : assign.activeToolNames(),
+                "approvalMode", "ENGINE"));
+        input.put("output", java.util.Map.of(
+                "stream", false,          // workflow steps are single-shot
+                "responseSequenceNo", stepIndex,
+                "format", "TEXT"));
+        return input;
+    }
+
+    private InferenceRequestSpec buildWorkflowSpec(WorkflowTask task, UUID sessionId,
+                                                   UUID projectId, long stepIndex) {
+        WorkflowRequest request = task.getRequest();
+        Workflow workflow = request.getWorkflow();
+        AgentProfile profile = task.getAgentProfile();
+        // §16.1: the behaviour contract lives on the published version row.
+        AgentProfileVersion publishedVersion = agentProfileVersionService
+                .findPublished(profile.getId()).orElse(null);
+
+        TaskContext context = contextResolver.resolve(projectId, task.getStepId(), null);
+        if (request.getBranch() != null && context.getWorkspace() != null) {
+            context.getWorkspace().setBranch(request.getBranch());
+        }
+        List<InferenceRequestSpec.KnowledgeEntry> knowledge = List.of();
+        if (context.getKnowledge() != null) {
+            knowledge = context.getKnowledge().stream()
+                    .map(k -> new InferenceRequestSpec.KnowledgeEntry(
+                            k.getName(), k.getContent(), k.getCategory()))
+                    .toList();
+        }
+
+        List<String> activeToolNames = publishedVersion == null ? List.of()
+                : publishedVersion.getTools().stream()
+                        .map(t -> t.getCode() == null ? t.getName() : t.getCode())
+                        .toList();
+
+        return InferenceRequestSpec.builder()
+                .serviceType("WORKFLOW")
+                .sessionId(sessionId)
+                .requestId(task.getId())
+                .projectId(projectId)
+                .sequenceNo(stepIndex)
+                .stepId(task.getStepId())
+                .governanceProfileCode(governancePolicyResolver.resolveOrgDefault().code())
+                .systemPrompt(publishedVersion != null ? publishedVersion.getSystemPrompt() : null)
+                .stepPrompt(findStepPrompt(workflow, task.getStepId()))
+                .input(task.getInput())
+                .knowledge(knowledge)
+                .activeToolNames(activeToolNames)
+                .build();
+    }
+
+    @SuppressWarnings("unchecked")
+    private String findStepPrompt(Workflow workflow, String stepId) {
+        if (workflow.getSteps() == null) {
+            return null;
+        }
+        for (java.util.Map<String, Object> step : workflow.getSteps()) {
+            if (stepId.equals(step.get("id"))) {
+                Object prompt = step.get("prompt");
+                return prompt != null ? prompt.toString() : null;
+            }
+        }
+        return null;
     }
 
     private InferenceRequestSpec buildLegacySpec(UUID conversationId, UUID sessionId,

@@ -49,6 +49,20 @@ public class ExecutionRegistry {
     @Transactional
     public Optional<SessionExecution> start(UUID sessionId, String requestId, Instant deadline,
                                             Map<String, Object> inputPayload) {
+        return start(sessionId, requestId, null, deadline, inputPayload);
+    }
+
+    /**
+     * &sect;8.1 with an engine-authored dispatch identity: an orchestration
+     * attempt stamps its {@code dispatchId} (= the attempt UUID in V1) at start,
+     * so the execution row is correlated with the durable dispatch before the
+     * host has answered {@code execution.accept}. The host's accept carries the
+     * same dispatchId; a mismatch is recorded, never silently overwritten.
+     */
+    @Transactional
+    public Optional<SessionExecution> start(UUID sessionId, String requestId, UUID dispatchId,
+                                            Instant deadline,
+                                            Map<String, Object> inputPayload) {
         Session session = sessionRepository.findWithLockById(sessionId).orElse(null);
         if (session == null) {
             return Optional.empty();
@@ -72,6 +86,7 @@ public class ExecutionRegistry {
         execution.setRequestId(requestId);
         execution.setDeadline(deadline);
         execution.setInputPayload(inputPayload);
+        execution.setDispatchId(dispatchId);
         execution.setState(SessionExecution.State.STARTING);
         if (conversation) {
             int maxSeq = executionRepository.findBySessionIdOrderBySequenceNoDesc(sessionId)
@@ -101,7 +116,16 @@ public class ExecutionRegistry {
         execution.setState(SessionExecution.State.RUNNING);
         execution.setStartedAt(startedAt != null ? startedAt : Instant.now());
         execution.setResolvedModelId(resolvedModelId);
-        execution.setDispatchId(dispatchId);
+        // The dispatch identity is engine-authored at start, and only for an
+        // orchestration attempt (§16.2): it is the discriminator the terminal
+        // bridge uses to route an outcome to the orchestration sink. The host
+        // echoes the same id on accept; a mismatch is audited, never applied.
+        if (execution.getDispatchId() != null && dispatchId != null
+                && !dispatchId.equals(execution.getDispatchId())) {
+            log.warn("execution.accept for {} reports dispatchId {} but the execution was started "
+                    + "with {} — keeping the engine-authored identity",
+                    executionId, dispatchId, execution.getDispatchId());
+        }
         execution.setAssignmentDigest(assignmentDigest);
         executionRepository.save(execution);
         return true;

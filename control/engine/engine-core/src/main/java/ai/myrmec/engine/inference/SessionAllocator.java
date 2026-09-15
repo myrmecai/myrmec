@@ -202,9 +202,38 @@ public class SessionAllocator {
         log.info("Session {} closed ({})", sessionId, reasonCode);
     }
 
-    /** §12.2 offer-expiry sweep body. */
+    /**
+     * §7.1: how many of an instance's pool slots are consumed (OFFERED +
+     * INITIALIZING + ACTIVE). The dispatcher's capacity probe for host
+     * selection; {@link #offer} re-checks the same condition under the
+     * instance row lock, so this is an advisory pre-check only.
+     */
+    @Transactional(readOnly = true)
+    public long countConsuming(UUID hostInstanceId) {
+        return sessionRepository.countByHostInstanceIdAndAllocationStateIn(
+                hostInstanceId, List.of(ALLOC_STATE_OFFERED, ALLOC_STATE_INITIALIZING,
+                        ALLOC_STATE_ACTIVE));
+    }
+
+    /**
+     * §16.4: whether an instance is already mid-handshake for this run — an
+     * OFFERED/INITIALIZING task session on its way to ACTIVE. That handshake is
+     * the effective coordinator binding until the host answers, so a second task
+     * of the same run must not open one elsewhere.
+     */
+    @Transactional(readOnly = true)
+    public boolean hasInFlightTasks(UUID hostInstanceId, UUID requestId) {
+        return sessionRepository.findAll().stream()
+                .anyMatch(s -> hostInstanceId.equals(s.getHostInstanceId())
+                        && requestId.equals(s.getRefId())
+                        && (ALLOC_STATE_OFFERED.equals(s.getAllocationState())
+                            || ALLOC_STATE_INITIALIZING.equals(s.getAllocationState())));
+    }
+
+    /** §7.1 offer-expiry sweep body. */
     @Transactional
     public int expireOffers(Instant now) {
+
         List<Session> stale = sessionRepository.findByAllocationStateAndOfferExpiresAtBefore(
                 ALLOC_STATE_OFFERED, now);
         for (Session session : stale) {

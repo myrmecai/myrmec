@@ -41,6 +41,17 @@ public class ExecutionCommandSender {
                 null, payload, executionId, session.getId());
     }
 
+    /**
+     * §8.1: send execution.start for an ordinary (non-orchestration) workflow
+     * step — the same §8.1 input-block shape as a conversation turn, shipped on
+     * the WORKFLOW session the allocator gave the task.
+     */
+    public boolean startExecution(UUID executionId, Session session,
+                                  ExecutionStartPayload payload) {
+        return send(session.getHostInstanceId(), HostProtocol.EXECUTION_START,
+                null, payload, executionId, session.getId());
+    }
+
     /** §8.1: send execution.start for an orchestration attempt (§16.2 shape). */
     public boolean startOrchestration(UUID executionId, Session session,
                                       OrchestrationExecutionStartPayload payload) {
