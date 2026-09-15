@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Plan 9 T4 (unified-agent-protocol): drop the orphaned default
+        local-agent profile seed from 017. The host-profile decoupling
+        (Plan 8 T5, 022-host-profile-drop) removed the engine's
+        auto-stamping of local hosts with a default profile —
+        registerLocal no longer resolves it, so the seeded row is dead
+        weight. A manual-extension workflow wanting a named profile
+        creates a user profile; that is not a seed concern.
+
+        Child-first: agent_profile_versions rows FK-reference the profile
+        (fk_agent_profile_versions_profile), so they are deleted before
+        the agent_profiles row.
+    -->
+
+    <changeSet id="024-drop-default-local-profile-seed" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="agent_profile_versions"/>
+                <tableExists tableName="agent_profiles"/>
+                <sqlCheck expectedResult="1">SELECT COUNT(*) FROM agent_profiles WHERE id = '6d7b8c9d-0e1f-4a2b-8c3d-9e4f5a6b7c8d'</sqlCheck>
+            </and>
+        </preConditions>
+
+        <comment>Drop the 017-seeded default local agent profile and its published version row</comment>
+
+        <sql>DELETE FROM agent_profile_versions WHERE profile_id = '6d7b8c9d-0e1f-4a2b-8c3d-9e4f5a6b7c8d'</sql>
+        <sql>DELETE FROM agent_profiles WHERE id = '6d7b8c9d-0e1f-4a2b-8c3d-9e4f5a6b7c8d'</sql>
+    </changeSet>
+
+</databaseChangeLog>

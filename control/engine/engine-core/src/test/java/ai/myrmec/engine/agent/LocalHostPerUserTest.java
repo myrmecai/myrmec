@@ -7,7 +7,6 @@ import ai.myrmec.engine.agent.AgentHostCreationResult;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.UUID;
 
@@ -24,17 +23,6 @@ class LocalHostPerUserTest extends IntegrationTestBase {
     @Autowired TestDataBuilder data;
     @Autowired AgentHostService agentHostService;
     @Autowired AgentHostRepository agentHostRepository;
-    @Autowired JdbcTemplate jdbcTemplate;
-
-    private static final UUID LOCAL_DEFAULT_PROFILE_ID =
-            UUID.fromString("6d7b8c9d-0e1f-4a2b-8c3d-9e4f5a6b7c8d");
-
-    private void seedLocalDefaultProfile() {
-        jdbcTemplate.update(
-                "INSERT INTO agent_profiles (id, name, description, is_system, addendum_allowed, status) "
-                + "VALUES (?, ?, ?, TRUE, TRUE, 'ACTIVE')",
-                LOCAL_DEFAULT_PROFILE_ID, "local-default", "Seeded default local agent profile (test re-seed)");
-    }
 
     @Test
     void builderCreatedHostsDefaultToManaged() {
@@ -47,7 +35,6 @@ class LocalHostPerUserTest extends IntegrationTestBase {
 
     @Test
     void localHostIsPerUserNotPerProject() {
-        seedLocalDefaultProfile();
         UUID user = UUID.randomUUID();
         // Real projects (fk_agent_hosts_project rejects random UUIDs); two
         // DISTINCT projects prove the lookup is user-scoped, not
@@ -66,7 +53,6 @@ class LocalHostPerUserTest extends IntegrationTestBase {
 
     @Test
     void distinctUsersGetDistinctLocalHosts() {
-        seedLocalDefaultProfile();
         AgentHost userOne = agentHostService.upsertLocalAgentHost(UUID.randomUUID(), null, "laptop");
         AgentHost userTwo = agentHostService.upsertLocalAgentHost(UUID.randomUUID(), null, "laptop");
 

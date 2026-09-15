@@ -28,10 +28,11 @@ class HostAuthServiceTest extends IntegrationTestBase {
     @Autowired JdbcTemplate jdbcTemplate;
 
     /**
-     * The fixed id AgentHostService falls back to when registerLocal passes
-     * a null profileId (Liquibase 017 seed; AgentProfile uses
-     * @GeneratedValue so the row cannot be seeded via the repository — the
-     * assigned id would be regenerated). Native insert preserves the id.
+     * The 017 default-local-profile seed is dropped (changeset 024) and
+     * Plan 8 T5 removed the engine's fallback to it — registerLocal never
+     * touches agent_profiles. Assert no seeded default remains and create
+     * the standard TestDataBuilder profile so the test exercises the
+     * post-decoupling semantics with a real profile fixture present.
      */
     private static final UUID DEFAULT_LOCAL_PROFILE_ID =
             UUID.fromString("6d7b8c9d-0e1f-4a2b-8c3d-9e4f5a6b7c8d");
@@ -72,16 +73,13 @@ class HostAuthServiceTest extends IntegrationTestBase {
 
     @Test
     void localRegistrationResolvesOrCreatesTheUsersHost() {
-        // Fixture: reproduce the Liquibase 017 seed — the default local agent
-        // profile with the fixed id AgentHostService falls back to — because
-        // IntegrationTestBase's per-test cleanup wipes all agent_profiles.
-        jdbcTemplate.update(
-                "INSERT INTO agent_profiles (id, name, description, is_system, "
-                        + "addendum_allowed, status, created_at) "
-                        + "VALUES (?, ?, ?, TRUE, TRUE, 'ACTIVE', CURRENT_TIMESTAMP)",
-                DEFAULT_LOCAL_PROFILE_ID,
-                "Myrmec Local Agent",
-                "Built-in profile for the local IDE agent");
+        // Changeset 024 dropped the 017 seed: no default local profile exists.
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM agent_profiles WHERE id = ?",
+                Long.class, DEFAULT_LOCAL_PROFILE_ID)).isZero();
+        // Standard fixture profile proves registration is independent of any
+        // seeded default (host-profile decoupling, Plan 8 T5).
+        data.agentProfile().named("local-reg-profile").create();
 
         HostLocalRegisterRequest request = new HostLocalRegisterRequest();
         request.setHostname("developer-laptop");
