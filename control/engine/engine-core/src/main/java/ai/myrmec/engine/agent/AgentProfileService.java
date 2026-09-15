@@ -37,7 +37,6 @@ import java.util.stream.Collectors;
 public class AgentProfileService {
 
     private final AgentProfileRepository profileRepository;
-    private final AgentHostRepository agentRepository;
     private final AgentProfileVersionService versionService;
 
     /**
@@ -227,17 +226,6 @@ public class AgentProfileService {
 
         profileRepository.delete(profile);
         log.info("Deleted agent profile: {} ({})", profile.getName(), id);
-    }
-
-    /**
-     * Get agents using a profile.
-     *
-     * @deprecated Hosts no longer bind to a profile; kept for API compatibility.
-     */
-    @Deprecated
-    @Transactional(readOnly = true)
-    public List<AgentHost> getAgentsForProfile(UUID profileId) {
-        return java.util.List.of();
     }
 
     private Set<String> toolCodesOf(AgentProfileVersion version) {

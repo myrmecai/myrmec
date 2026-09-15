@@ -766,7 +766,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     private void handleExecutionFailed(WebSocketSession session, HostProtocolEnvelope envelope) {
         // A failure frame carries error, not result — the conversation
         // complete-bridge would be a no-op on it, but wiring it there is
-        // semantically wrong; Task 4's ExecutionBridge.onConversationFailure
+        // semantically wrong; ExecutionBridge.onConversationFailure
         // owns the viewer notification.
         handleTerminal(session, envelope, SessionExecution.State.FAILED);
     }

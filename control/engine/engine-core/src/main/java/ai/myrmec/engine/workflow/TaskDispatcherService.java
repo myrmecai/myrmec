@@ -52,8 +52,7 @@ public class TaskDispatcherService {
 
     private final WorkflowTaskRepository taskRepository;
     private final WorkflowRequestRepository requestRepository;
-    // §3.7: host candidates come from the capacity-based selector; the
-    // profile-keyed AgentHostRepository lookup is gone.
+    // §3.7: host candidates come from the capacity-based selector.
     private final HostSelectionService hostSelectionService;
     private final AgentRepository agentInstanceRepository;
     private final AgentHostRepository agentHostRepository;

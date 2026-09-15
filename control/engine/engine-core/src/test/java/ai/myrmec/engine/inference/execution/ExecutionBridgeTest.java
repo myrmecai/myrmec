@@ -44,7 +44,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Task 4: ExecutionBridge downstream behaviour.
+ * ExecutionBridge downstream behaviour.
  *
  * <p>Tests the new bridge's conversation and orchestration arms in isolation,
  * using real repositories and the production broker. Orchestration fixtures

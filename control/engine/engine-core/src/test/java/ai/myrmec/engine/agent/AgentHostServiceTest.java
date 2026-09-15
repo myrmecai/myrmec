@@ -30,7 +30,6 @@ class AgentHostServiceTest {
 
     @Mock private AgentHostRepository agentHostRepository;
     @Mock private AgentRepository agentInstanceRepository;
-    @Mock private AgentProfileRepository agentProfileRepository;
     @Mock private ConversationRepository conversationRepository;
     @Mock private ConversationEventService conversationEventService;
     @Mock private NodeRegistryService nodeRegistryService;
