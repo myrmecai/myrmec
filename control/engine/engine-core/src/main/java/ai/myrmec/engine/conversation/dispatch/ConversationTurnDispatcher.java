@@ -4,55 +4,47 @@
 package ai.myrmec.engine.conversation.dispatch;
 
 import ai.myrmec.engine.agent.AgentHost;
-import ai.myrmec.engine.agent.Agent;
-import ai.myrmec.engine.agent.AgentRepository;
+import ai.myrmec.engine.agent.AgentHostInstance;
+import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileRepository;
-import ai.myrmec.engine.agent.AgentProfileVersion;
 import ai.myrmec.engine.agent.AgentProfileVersionRepository;
-import ai.myrmec.engine.agent.AgentProfileVersionService;
-import ai.myrmec.engine.agent.AgentHostRepository;
-import ai.myrmec.engine.agent.AgentHostService;
+import ai.myrmec.engine.agent.HostSelectionService;
 import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.conversation.ConversationMessage;
 import ai.myrmec.engine.conversation.ConversationRepository;
 import ai.myrmec.engine.conversation.ConversationService;
-import ai.myrmec.engine.model.Model;
-import ai.myrmec.engine.model.ModelService;
-import ai.myrmec.engine.node.NodeRegistryService;
+import ai.myrmec.engine.inference.Session;
+import ai.myrmec.engine.inference.SessionAllocator;
+import ai.myrmec.engine.inference.SessionRepository;
+import ai.myrmec.engine.inference.execution.ExecutionCommandSender;
+import ai.myrmec.engine.inference.execution.ExecutionInputAssembler;
+import ai.myrmec.engine.inference.execution.ExecutionRegistry;
+import ai.myrmec.engine.inference.execution.SessionExecution;
+import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
 import ai.myrmec.engine.spi.quota.QuotaDecision;
 import ai.myrmec.engine.spi.quota.QuotaPolicyEngine;
 import ai.myrmec.engine.spi.quota.QuotaResourceType;
 import ai.myrmec.engine.spi.quota.QuotaScope;
-import ai.myrmec.engine.websocket.AgentConnectionManager;
-import ai.myrmec.engine.websocket.AgentWebSocketHandler;
-import ai.myrmec.engine.websocket.ConversationSocketRegistry;
-import ai.myrmec.engine.websocket.message.MessageType;
-import ai.myrmec.engine.websocket.message.WebSocketMessage;
-import ai.myrmec.engine.websocket.message.payload.AgentBindPayload;
-import ai.myrmec.engine.websocket.message.payload.ConversationTurnAssignPayload;
-import ai.myrmec.engine.websocket.message.payload.InferenceAssignPayload;
-import ai.myrmec.engine.websocket.message.payload.InferenceCancelPayload;
-import ai.myrmec.engine.websocket.message.payload.SessionClosePayload;
-import ai.myrmec.engine.websocket.message.payload.SessionOpenPayload;
-import ai.myrmec.engine.websocket.message.payload.TaskAssignPayload;
-import ai.myrmec.engine.inference.InferenceRequestAssembler;
-import ai.myrmec.engine.inference.InferenceRequestSpec;
-import ai.myrmec.engine.inference.SessionContextAssembler;
-import ai.myrmec.engine.inference.Session;
+import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
+import ai.myrmec.engine.websocket.host.payload.ExecutionStartPayload;
+import ai.myrmec.engine.websocket.message.payload.InferenceMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.LongFunction;
 
 /**
- * Routes a freshly-arrived USER message to an idle agent instance as a
- * {@code conversation.turn.assign} frame (Phase 6d).
+ * Routes a freshly-arrived USER message onto the unified host-control socket
+ * as a session&nbsp;&rarr;&nbsp;execution turn (protocol &sect;7/&sect;8).
  *
  * <p>This dispatcher deliberately bypasses {@code WorkflowTask} and the
  * scheduled {@code TaskDispatcherService} poller: a chat turn is not a
@@ -62,97 +54,121 @@ import java.util.UUID;
  * turns into a foreign data model (workflow / step / attempt) that
  * doesn't fit them.</p>
  *
- * <p>Context assembly here is intentionally simple for Phase 6d
- * (sliding window of the most-recent {@value #HISTORY_LIMIT} messages,
- * pinned facts pass-through, no summarisation). A summariser running
- * against a cheap-model handle is the natural Phase 6d follow-up but
- * shipping that without first proving the end-to-end dispatch path is
- * premature.</p>
+ * <p><b>One-way unified path.</b> The legacy {@code agent.bind} +
+ * {@code conversation.attach} + {@code inference.assign} wire is gone. A turn
+ * is staged one of two ways:</p>
+ * <ol>
+ *   <li><b>Reuse</b> &mdash; an ACTIVE {@code CONVERSATION} session already
+ *       exists for this conversation and is pinned to the live host this
+ *       dispatch selected: the SAME session row serves the next turn.
+ *       {@link ExecutionRegistry#start} creates the execution row and
+ *       {@link ExecutionCommandSender#startConversation} ships it. No wire
+ *       handshake, no re-allocation.</li>
+ *   <li><b>Offer</b> &mdash; no usable ACTIVE session:
+ *       {@link SessionAllocator#offer} mints the session row (OFFERED) on the
+ *       host selected by capacity, and
+ *       {@link HostControlWebSocketHandler#sendSessionOffer} puts it on the
+ *       wire. The assembled turn is parked in {@link PendingConversationTurns}
+ *       because the host's {@code session.accept}/{@code session.opened}
+ *       answers arrive <em>after</em> this method returns, and &sect;7.4
+ *       forbids {@code execution.start} before {@code session.opened}.</li>
+ * </ol>
  *
- * <p><b>Best-effort.</b> When no idle agent instance is available the
- * dispatcher logs a warning and returns {@code false} \u2014 it does not
- * queue. The conversation row still carries the USER message, and a
- * later turn (or an agent coming online) will pick the thread back up
- * once we add a backlog drainer. Failing loud here is the right call:
- * the user-WS replay surface (Phase 6c-2) shows them the un-answered
- * USER row.</p>
+ * <p><b>Best-effort.</b> When no host with live capacity serves the project the
+ * dispatcher logs a warning, emits the one-time #86 no-agent notice, and
+ * returns {@code false} &mdash; it does not queue. The conversation row still
+ * carries the USER message, and the #87 backlog drainer re-dispatches the
+ * thread when a host comes online.</p>
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ConversationTurnDispatcher {
 
+    /** Service type / session kind for conversational sessions. */
+    public static final String SERVICE_TYPE_CONVERSATION = "CONVERSATION";
+
     /**
-     * How many recent messages to ship as context (oldest first). Chosen
-     * small for Phase 6d so token cost stays bounded; the future
-     * summariser pass collapses anything older into a single SYSTEM
-     * entry.
+     * How many recent messages the transcript composer ships as context
+     * (oldest first). Kept small so token cost stays bounded; the summary pass
+     * collapses anything older into a single SYSTEM entry.
      */
     public static final int HISTORY_LIMIT = 20;
 
     /** Per-turn timeout shipped to the agent. Mirrors workflow tasks. */
     public static final int DEFAULT_TIMEOUT_SECONDS = 300;
 
+    /** Cancellation reason code shipped on {@code execution.cancel} (&sect;8.8). */
+    private static final String CANCEL_REASON_USER = "USER_CANCEL";
+
+    /** Grace period the host gets to unwind a cancelled turn, in seconds. */
+    private static final int CANCEL_GRACE_SECONDS = 5;
+
+    /** Execution states that mean "a turn is currently in flight on this session". */
+    private static final List<SessionExecution.State> IN_FLIGHT_STATES =
+            List.of(SessionExecution.State.STARTING, SessionExecution.State.RUNNING,
+                    SessionExecution.State.CANCELLING);
+
     private final ConversationRepository conversationRepository;
     private final ConversationService conversationService;
-    private final AgentHostRepository agentRepository;
     private final AgentProfileRepository agentProfileRepository;
     private final AgentProfileVersionRepository agentProfileVersionRepository;
-    private final AgentProfileVersionService agentProfileVersionService;
-    private final AgentRepository agentInstanceRepository;
-    private final AgentConnectionManager connectionManager;
-    private final AgentWebSocketHandler webSocketHandler;
-    private final ModelService modelService;
-    private final ai.myrmec.engine.snapshot.SnapshotWriter snapshotWriter;
     private final QuotaPolicyEngine quotaPolicyEngine;
-    private final AgentHostService agentService;
-    private final NodeRegistryService nodeRegistry;
-    private final PendingTurnRegistry pendingTurnRegistry;
-    private final ConversationSocketRegistry conversationSocketRegistry;
-    private final ai.myrmec.engine.attachment.AttachmentService attachmentService;
-    private final ai.myrmec.engine.setting.SystemSettingService systemSettingService;
-    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private final ai.myrmec.engine.snapshot.SnapshotWriter snapshotWriter;
     private final ai.myrmec.engine.conversation.ConversationNoticeService conversationNoticeService;
-    private final SessionContextAssembler sessionContextAssembler;
-    private final InferenceRequestAssembler inferenceRequestAssembler;
-    private final ai.myrmec.engine.governance.GovernancePolicyResolver governancePolicyResolver;
+
+    // ---- unified protocol seams (§7/§8) ----
+    private final HostSelectionService hostSelectionService;
+    private final AgentHostInstanceRepository hostInstanceRepository;
+    private final SessionAllocator sessionAllocator;
+    private final SessionRepository sessionRepository;
+    private final SessionExecutionRepository executionRepository;
+    private final ExecutionRegistry executionRegistry;
+    private final ExecutionCommandSender executionCommandSender;
+    private final ExecutionInputAssembler executionInputAssembler;
+    private final HostControlWebSocketHandler hostControlWebSocketHandler;
+    private final PendingConversationTurns pendingConversationTurns;
 
     /**
-     * Relay a cancel for the in-flight turn of a conversation to its bound
-     * worker over the conversation socket. The worker breaks out of its
-     * streaming / tool loop and acknowledges with {@code task.cancelled}
-     * (handled by {@code ConversationInboundService.onTaskCancelled}, which
-     * persists any partial assistant text and releases the worker).
+     * Relay a cancel for the in-flight turn of a conversation to the host that
+     * serves it, as an {@code execution.cancel} frame (&sect;8.8).
      *
-     * <p>Best-effort and node-local: the conversation socket lives only on
-     * the replica the worker dialed, so this returns {@code false} when no
-     * socket is attached on this replica (no in-flight turn to cancel, or
-     * the turn is bound to a different node).</p>
+     * <p>The turn is identified by the ACTIVE conversation session plus its
+     * in-flight execution ({@code STARTING|RUNNING|CANCELLING}). The host breaks
+     * out of its streaming / tool loop and answers with
+     * {@code execution.cancelled}, which the host-control handler records
+     * through {@link ExecutionRegistry}.</p>
      *
-     * @return {@code true} if a cancel frame was delivered to a worker
+     * @return {@code true} if a cancel frame was delivered to the host
      */
     public boolean cancel(UUID conversationId) {
-        // Find the active session for this conversation
-        Session session = sessionContextAssembler.findActiveSession(conversationId, "CONVERSATION");
-        UUID sessionId = session != null ? session.getId() : conversationId;
-        InferenceCancelPayload payload = new InferenceCancelPayload(
-                conversationId,  // requestId — the turn being cancelled
-                sessionId);
-        boolean delivered = conversationSocketRegistry.sendMessage(
-                conversationId,
-                WebSocketMessage.of(MessageType.INFERENCE_CANCEL, payload));
+        Session session = activeSessionOf(conversationId).orElse(null);
+        if (session == null) {
+            log.debug("No ACTIVE session for conv {} \u2014 nothing to cancel", conversationId);
+            return false;
+        }
+        SessionExecution inFlight = executionRepository
+                .findWithLockBySessionIdAndStateIn(session.getId(), IN_FLIGHT_STATES)
+                .stream().findFirst().orElse(null);
+        if (inFlight == null) {
+            log.debug("No in-flight execution on session {} \u2014 nothing to cancel", session.getId());
+            return false;
+        }
+        boolean delivered = executionCommandSender.cancel(
+                inFlight.getId(), session, null, CANCEL_REASON_USER, CANCEL_GRACE_SECONDS);
         if (delivered) {
-            log.info("Relayed conversation.turn.cancel for conv {}", conversationId);
+            log.info("Relayed execution.cancel for conv {} (execution {})",
+                    conversationId, inFlight.getId());
         } else {
-            log.debug("No conversation socket attached for conv {} \u2014 nothing to cancel", conversationId);
+            log.debug("Host socket gone for conv {} \u2014 execution.cancel not delivered", conversationId);
         }
         return delivered;
     }
 
     /**
-     * §3.7: the profile comes from the conversation's pinned version (the
-     * assistant pin), never from the host. Legacy conversations without a
-     * pin cannot dispatch (graceful no-agent decline).
+     * &sect;3.7: the profile comes from the conversation's pinned version (the
+     * assistant pin), never from the host. Conversations without a pin cannot
+     * dispatch (graceful no-agent decline).
      */
     private Optional<AgentProfile> pinnedProfileOf(Conversation conversation) {
         UUID pinnedVersionId = conversation.getAgentProfileVersionId();
@@ -164,8 +180,10 @@ public class ConversationTurnDispatcher {
     }
 
     /**
-     * Assemble + dispatch one turn. Returns {@code true} if a frame was
-     * actually sent to an agent.
+     * Assemble + dispatch one turn onto the unified path. Returns {@code true}
+     * when the turn was shipped to a host &mdash; either synchronously on an
+     * existing ACTIVE session, or staged behind a fresh offer whose
+     * accept/opened continuation will ship it.
      */
     public boolean dispatch(UUID conversationId) {
         Optional<Conversation> convOpt = conversationRepository.findById(conversationId);
@@ -175,340 +193,334 @@ public class ConversationTurnDispatcher {
         }
         Conversation conversation = convOpt.get();
 
-        if (conversation.getAgentId() == null) {
-            log.warn("Cannot dispatch turn \u2014 conversation {} has no agentId pinned", conversationId);
+        checkQuota(conversation);
+
+        Optional<AgentHost> hostOpt = hostSelectionService.selectForProject(conversation.getProjectId());
+        if (hostOpt.isEmpty()) {
+            log.warn("No host with live capacity serves project {} \u2014 declining turn for conv {}",
+                    conversation.getProjectId(), conversationId);
+            // #86 — don't silently drop the turn. Surface a one-time SYSTEM
+            // notice so the user knows their message was received and will be
+            // answered once a host comes online; the #87 backlog drainer
+            // re-dispatches this conversation on the next host connect.
+            conversationNoticeService.emitNoAgentNotice(conversationId);
             return false;
         }
-
-        // Phase 8c: pre-flight quota check. We charge 0 tokens (the LLM
-        // hasn't run yet) and rely on prior consumption to drive the block.
-        // A hard block raises QuotaExceededException which the REST layer
-        // translates to 429; for WS we just refuse to dispatch and let the
-        // client surface the error.
-        //
-        // When the conversation has a pinned assistant, check at SERVICE
-        // scope (scopeId = assistantId). check(SERVICE, assistantId, ...)
-        // internally walks SERVICE -> PROJECT -> GROUP -> ORG via
-        // buildScopeChain and returns the most restrictive decision. This
-        // means a SERVICE RESERVATION block takes priority over the GROUP
-        // ceiling -- the 429 will carry scopeHit=SERVICE.
-        //
-        // For legacy conversations with no assistant, fall back to PROJECT
-        // scope (scopeId = projectId).
-        UUID dispatchProjectId = conversation.getProjectId();
-        UUID assistantId = conversation.getAssistantId();
-        if (dispatchProjectId != null || assistantId != null) {
-            QuotaDecision decision;
-            UUID effectiveScopeId;
-            if (assistantId != null) {
-                decision = quotaPolicyEngine.check(
-                        QuotaScope.SERVICE, assistantId,
-                        QuotaResourceType.TOKENS, 0L);
-                effectiveScopeId = assistantId;
-            } else {
-                decision = quotaPolicyEngine.check(
-                        QuotaScope.PROJECT, dispatchProjectId,
-                        QuotaResourceType.TOKENS, 0L);
-                effectiveScopeId = dispatchProjectId;
-            }
-            if (decision.isBlocked()) {
-                log.warn("Conversation turn blocked by quota -- conv {} scopeId {} (used {} of {})",
-                        conversationId, effectiveScopeId,
-                        decision.getConsumedAmount(), decision.getLimitAmount());
-                throw new ai.myrmec.engine._system.exception.QuotaExceededException(
-                        decision.getScopeHit() != null ? decision.getScopeHit() : QuotaScope.PROJECT,
-                        effectiveScopeId,
-                        QuotaResourceType.TOKENS,
-                        decision.getLimitAmount(),
-                        decision.getConsumedAmount());
-            }
-        }
-
-        Optional<AgentHost> agentOpt = agentRepository.findById(conversation.getAgentId());
-        if (agentOpt.isEmpty()) {
-            log.warn("Cannot dispatch turn \u2014 agent {} not found for conv {}",
-                    conversation.getAgentId(), conversationId);
-            return false;
-        }
-        AgentHost agent = agentOpt.get();
+        UUID hostId = hostOpt.get().getId();
 
         // §3.7/§16.1: the profile comes from the conversation's pinned version.
-        Optional<AgentProfile> profileOpt = pinnedProfileOf(conversation);
-        if (profileOpt.isEmpty()) {
-            log.warn("Cannot dispatch turn — conversation {} has no pinned profile version",
+        if (pinnedProfileOf(conversation).isEmpty()) {
+            log.warn("Cannot dispatch turn \u2014 conversation {} has no pinned profile version",
                     conversationId);
             conversationNoticeService.emitNoAgentNotice(conversationId);
             return false;
         }
-        AgentProfile profile = profileOpt.get();
-        UUID pinnedVersionId = conversation.getAgentProfileVersionId();
-        AgentProfileVersion profileVersion = agentProfileVersionRepository.findByIdWithTools(pinnedVersionId)
-                .orElse(null);
 
-        // §9.5 sticky binding — if a worker is already BOUND to this
-        // conversation (the previous turn kept it alive), skip the
-        // reserve/bind/attach dance and flush the turn directly over the
-        // existing conversation socket. This is the hot path between turns
-        // in an active session: no socket churn, no re-attach, no H2
-        // contention.
-        Optional<Agent> boundOpt = agentInstanceRepository
-                .findByConversationIdAndStatus(conversationId, Agent.Status.BOUND);
-        if (boundOpt.isPresent()) {
-            Agent boundInstance = boundOpt.get();
-            if (conversationSocketRegistry.isAttached(conversationId)) {
-                log.debug("Reusing BOUND worker {} for conv {} (sticky dispatch)",
-                        boundInstance.getId(), conversationId);
-                return dispatchOverBoundSocket(conversation, agent, profile,
-                        boundInstance, conversationId);
-            }
-            // Worker is BOUND but the socket dropped — release it and fall
-            // through to the cold-reserve path so a fresh socket is opened.
-            log.info("BOUND worker {} for conv {} has no live socket — releasing for re-reserve",
-                    boundInstance.getId(), conversationId);
-            agentService.releaseInstance(boundInstance.getId());
+        long preRowSequence = nextAssistantSequence(conversationId);
+        boolean staged = stageTurn(conversation, hostId, preRowSequence,
+                seq -> buildTurn(conversation, seq), "CONVERSATION_TURN_DISPATCHED");
+        if (staged) {
+            log.info("Dispatched conversation turn for conv {} via the unified host-control path",
+                    conversationId);
+        }
+        return staged;
+    }
+
+    /**
+     * Dispatch an engine-orchestrated summarisation turn (#8) onto the unified
+     * path. The summary rides the SAME conversation session as a turn on it, so
+     * the producing worker keeps its context; the only differences are the
+     * summariser system prompt and that the history is the block of older turns
+     * being folded (plus any earlier summary) rather than the live window.
+     *
+     * <p>Caller ({@code ConversationSummaryService}) records the in-flight
+     * marker <em>before</em> calling so the eventual completion is routed into a
+     * {@code CONTEXT_SUMMARY} row; this method returns {@code false} when no
+     * host could take the turn so the caller can release that marker and retry
+     * later.</p>
+     *
+     * @param previousSummaryContent the prior summary's body to carry forward, or null
+     * @param olderBlock             the older turns to fold, oldest first (non-empty)
+     * @return {@code true} if a summary turn was shipped or staged
+     */
+    public boolean dispatchSummary(UUID conversationId,
+                                   String previousSummaryContent,
+                                   List<ConversationMessage> olderBlock) {
+        Optional<Conversation> convOpt = conversationRepository.findById(conversationId);
+        if (convOpt.isEmpty()) {
+            log.warn("Cannot dispatch summary \u2014 conversation {} not found", conversationId);
+            return false;
+        }
+        Conversation conversation = convOpt.get();
+
+        Optional<AgentHost> hostOpt = hostSelectionService.selectForProject(conversation.getProjectId());
+        if (hostOpt.isEmpty()) {
+            log.info("No host with live capacity serves project {} \u2014 deferring summary of conv {}",
+                    conversation.getProjectId(), conversationId);
+            return false;
+        }
+        UUID hostId = hostOpt.get().getId();
+
+        if (pinnedProfileOf(conversation).isEmpty()) {
+            log.warn("Cannot dispatch summary \u2014 conversation {} has no pinned profile version",
+                    conversationId);
+            return false;
         }
 
-        // Slice 3b — atomically reserve a warm worker (IDLE → RESERVED),
-        // pinning the conversation + profile version at reserve-time
-        // (agent-concurrency §9.5). The compare-and-set inside
-        // reserveIdleInstance prevents two turns from double-booking the
-        // same worker; a lost race is indistinguishable from "no capacity".
-        // §16.1: the pin is the real published version row ID.
-        UUID profileVersionId = profileVersion != null
-                ? profileVersion.getId() : profile.getId();
-        Agent idleInstance = reserveIdleInstance(agent.getId(), conversationId, profileVersionId)
-                .orElse(null);
-        if (idleInstance == null) {
-            log.warn("No idle agent instance available for agent {} (conv {})",
-                    agent.getId(), conversationId);
-            // #86 — don't silently drop the turn. Surface a one-time SYSTEM
-            // notice so the user knows their message was received and will be
-            // answered once a worker comes online; the #87 backlog drainer
-            // re-dispatches this conversation on the next agent connect.
+        long preRowSequence = nextAssistantSequence(conversationId);
+        boolean staged = stageTurn(conversation, hostId, preRowSequence,
+                seq -> buildSummaryTurn(conversation, seq, previousSummaryContent, olderBlock),
+                "CONVERSATION_SUMMARY_DISPATCHED");
+        if (staged) {
+            log.info("Dispatched summarisation turn for conv {} (folding {} msg(s))",
+                    conversationId, olderBlock == null ? 0 : olderBlock.size());
+        }
+        return staged;
+    }
+
+    // ====================================================================
+    // Unified staging: reuse an ACTIVE session, otherwise offer a new one
+    // ====================================================================
+
+    /**
+     * Stage one turn on the unified path.
+     *
+     * <p><b>Reuse</b> (an ACTIVE session pinned to {@code hostId} exists): the
+     * same session row serves the turn. {@link ExecutionRegistry#start} creates
+     * the execution row (&sect;11.3.4 one-in-flight guard, per-session sequence
+     * assignment) and {@link ExecutionCommandSender#startConversation} ships
+     * {@code execution.start} immediately.</p>
+     *
+     * <p><b>Offer</b> (no usable ACTIVE session): the session row is minted
+     * OFFERED by the allocator and the offer goes on the wire. Because
+     * {@code session.accept}/{@code session.opened} arrive asynchronously, the
+     * assembled turn is parked in {@link PendingConversationTurns} and resumed
+     * by the host-control handler once the session is ACTIVE.</p>
+     *
+     * @param preRowSequence the sequence the caller pre-minted before any
+     *                       execution row existed (used on the offer path and as
+     *                       the first-turn fallback on the reuse path)
+     * @param bundleFactory  builds the wire turn for a given sequence number
+     * @param snapshotEvent  the execution_snapshots event type for this turn
+     */
+    private boolean stageTurn(Conversation conversation, UUID hostId, long preRowSequence,
+                             LongFunction<ConversationTurnBundle> bundleFactory,
+                             String snapshotEvent) {
+        UUID conversationId = conversation.getId();
+
+        Session existing = activeSessionOf(conversationId).orElse(null);
+        if (existing != null && !hostId.equals(hostOfSessionInstance(existing))) {
+            // The live session is pinned to a different host instance: it cannot
+            // serve a turn on the host this dispatch selected. Close it so the
+            // offer below can mint a fresh session on the live host.
+            log.info("Closing ACTIVE session {} for conv {} (pinned to instance {}, host {} selected)",
+                    existing.getId(), conversationId, existing.getHostInstanceId(), hostId);
+            sessionAllocator.close(existing.getId(), "HOST_RESELECTED");
+            existing = null;
+        }
+
+        if (existing != null) {
+            return shipOnExistingSession(conversation, existing, preRowSequence,
+                    bundleFactory, snapshotEvent);
+        }
+
+        UUID sessionId = sessionAllocator.offer(
+                SERVICE_TYPE_CONVERSATION, conversationId, SERVICE_TYPE_CONVERSATION,
+                conversation.getProjectId(), hostId).orElse(null);
+        if (sessionId == null) {
+            log.warn("No allocation capacity on host {} for conv {}", hostId, conversationId);
             conversationNoticeService.emitNoAgentNotice(conversationId);
             return false;
         }
 
-        // Tell the worker which conversation + profile version it now serves,
-        // and which home node (this replica) to open its conversation socket
-        // to. The worker acts on the binding by dialing homeNodeAddr and
-        // sending conversation.attach (agent-concurrency §9.4); on a single
-        // node the home node resolves to self.
-        webSocketHandler.sendAgentBind(idleInstance.getId(),
-                AgentBindPayload.builder()
-                        .conversationId(conversationId)
-                        .profileVersionId(profileVersionId)
-                        .homeNodeId(nodeRegistry.getSelfNodeId())
-                        .homeNodeAddr(nodeRegistry.getSelfAddress())
-                        .build());
+        ConversationTurnBundle bundle = bundleFactory.apply(preRowSequence);
+        // Park the assembled turn until the host answers session.accept/session.opened.
+        pendingConversationTurns.stage(sessionId, conversationId, bundle.input(),
+                bundle.toStartPayload(null));
+        hostControlWebSocketHandler.sendSessionOffer(
+                sessionId, SERVICE_TYPE_CONVERSATION, conversationId);
+        log.info("Offered session {} to host {} for conv {} (turn parked until session.opened)",
+                sessionId, hostId, conversationId);
+        writeSnapshot(conversation, bundle.toStartPayload(null), snapshotEvent);
+        return true;
+    }
 
-        List<ConversationMessage> all = conversationService.listMessages(conversationId);
-        // #104b — assemble context from the active branch only; edit-resend /
-        // regenerate soft-supersede the replaced rows, which must not feed the
-        // next turn. The assistant sequence number still advances past the
-        // global max (superseded rows keep their slots) so it never collides.
-        List<ConversationMessage> active = all.stream()
-                .filter(m -> !m.isSuperseded())
-                // #86 — drop engine no-agent notices: a "no agent online" line
-                // must never be shipped to the agent that picks the turn up.
-                .filter(m -> !conversationNoticeService.isNoAgentNotice(m))
-                .toList();
-        List<ConversationTurnAssignPayload.HistoryEntry> historyEntries = buildSlidingWindow(active);
-        String userMessage = lastUserContent(active).orElse("");
-        long assistantSequenceNo = all.isEmpty()
-                ? 0L
-                : all.get(all.size() - 1).getSequenceNo() + 1;
-
-        String systemPrompt = conversation.getSystemPromptOverride() != null
-                ? conversation.getSystemPromptOverride()
-                : (profileVersion != null ? profileVersion.getSystemPrompt() : null);
-
-        // Assemble session.open (sent once when worker binds)
-        SessionOpenPayload sessionOpen = sessionContextAssembler.assemble(
-                "CONVERSATION", conversationId, conversation.getProjectId(),
-                profileVersion != null ? profileVersion.getProfileId() : profile.getId());
-
-        // Build the inference request spec for the conversation transcript composer
-        List<InferenceRequestSpec.HistoryEntry> history = historyEntries.stream()
-                .map(h -> new InferenceRequestSpec.HistoryEntry(h.getRole(), h.getContent()))
-                .toList();
-        List<InferenceRequestSpec.AttachmentDescriptor> attachments =
-                buildAttachments(conversationId, active, profileVersion).stream()
-                        .map(a -> new InferenceRequestSpec.AttachmentDescriptor(
-                                a.getId().toString(), a.getFilename(), a.getMediaType(), a.getSizeBytes(),
-                                a.getInlineText(), a.isImage(), a.getReadContentPath()))
-                        .toList();
-
-        // Extract tool names from the session for this turn
-        List<String> activeToolNames = sessionOpen.tools() != null
-                ? sessionOpen.tools().stream()
-                        .map(SessionOpenPayload.ToolDefinition::name)
-                        .toList()
-                : List.of();
-
-        InferenceRequestSpec spec = InferenceRequestSpec.builder()
-                .serviceType("CONVERSATION")
-                .sessionId(sessionOpen.sessionId())
-                .requestId(conversationId)  // conversation turn = conversationId for now
-                .projectId(conversation.getProjectId())
-                .sequenceNo(assistantSequenceNo)
-                .governanceProfileCode(governancePolicyResolver.resolveOrgDefault().code())
-                .contextSnapshot(conversation.getContextSnapshot())
-                .contextPinning(conversation.getContextSnapshot() != null ? "PINNED_AT_START" : null)
-                .conversationSystemPrompt(systemPrompt)
-                .pinnedFacts(conversation.getPinnedFacts())
-                .history(history)
-                .userMessage(userMessage)
-                .attachments(attachments)
-                .activeToolNames(activeToolNames)
-                .build();
-
-        InferenceAssignPayload payload = inferenceRequestAssembler.assemble(spec);
-
-        // Buffer both session.open and inference.assign until the worker
-        // opens + attaches its conversation socket (agent-concurrency §9.4).
-        // The conversation-socket handler flushes them on attach.
-        // CRITICAL: enqueue session.open BEFORE inference.assign. The
-        // handleAttach handler runs on a different thread and calls
-        // takeSessionOpen() before take(). If enqueue(inference.assign)
-        // runs first, a concurrent handleAttach can observe the
-        // inference.assign but miss the session.open, causing the agent
-        // to receive inference.assign without session.open first.
-        pendingTurnRegistry.enqueueSessionOpen(conversationId, sessionOpen);
-        pendingTurnRegistry.enqueue(conversationId, payload);
-        log.info("Buffered inference turn for agent instance {} (conv {} seq {}) — awaiting conversation socket attach",
-                idleInstance.getId(), conversationId, assistantSequenceNo);
-
-        // Race-condition fix: if the conversation socket already attached
-        // (handleAttach ran before this dispatch), the buffered frames would
-        // sit in the registry forever. Flush them now if the socket is open.
-        if (conversationSocketRegistry.isAttached(conversationId)) {
-            pendingTurnRegistry.takeSessionOpen(conversationId).ifPresent(so -> {
-                conversationSocketRegistry.sendMessage(conversationId,
-                        WebSocketMessage.of(MessageType.SESSION_OPEN, so));
-                log.info("Flushed session.open (late) to agent {} over conversation socket (conv {} session {})",
-                        idleInstance.getId(), conversationId, so.sessionId());
-            });
-            pendingTurnRegistry.take(conversationId).ifPresent(turn -> {
-                boolean delivered = conversationSocketRegistry.sendMessage(conversationId,
-                        WebSocketMessage.of(MessageType.INFERENCE_ASSIGN, turn));
-                if (delivered) {
-                    log.info("Flushed inference.assign (late) to agent {} over conversation socket (conv {})",
-                            idleInstance.getId(), conversationId);
-                }
-            });
+    /** Ship a turn on an already-ACTIVE session (the sticky reuse hot path). */
+    private boolean shipOnExistingSession(Conversation conversation, Session session,
+                                          long preRowSequence,
+                                          LongFunction<ConversationTurnBundle> bundleFactory,
+                                          String snapshotEvent) {
+        UUID conversationId = conversation.getId();
+        long sequenceNo = resolveSequenceNo(session.getId(), preRowSequence);
+        ConversationTurnBundle bundle = bundleFactory.apply(sequenceNo);
+        SessionExecution execution = executionRegistry.start(
+                session.getId(), conversationId.toString(),
+                Instant.now().plusSeconds(DEFAULT_TIMEOUT_SECONDS), bundle.input()).orElse(null);
+        if (execution == null) {
+            log.warn("execution.start refused for session {} (conv {}) \u2014 a turn is already in flight",
+                    session.getId(), conversationId);
+            return false;
         }
+        boolean sent = executionCommandSender.startConversation(
+                execution.getId(), session, bundle.toStartPayload(execution.getId()));
+        if (!sent) {
+            log.warn("Host socket gone for session {} (conv {}) \u2014 execution.start not delivered",
+                    session.getId(), conversationId);
+            return false;
+        }
+        writeSnapshot(conversation, bundle.toStartPayload(execution.getId()), snapshotEvent);
+        return true;
+    }
 
-        // Phase 9a — archive the dispatched payload so V2 replay has
-        // the same inputs the agent saw. Best-effort: never abort
-        // the caller on a snapshot failure.
+    /**
+     * Assemble the &sect;8.1 input block for a normal conversation turn: the same
+     * transcript the legacy {@code inference.assign} shipped, rewrapped into the
+     * execution-lifecycle shape.
+     *
+     * <p>The input assembler takes the conversation id as its session id (it
+     * uses it for the context-manifest row and the spec's correlation only); the
+     * authoritative session identity on the wire comes from the allocator-owned
+     * {@link Session} row, which the command sender stamps onto the envelope.</p>
+     */
+    private ConversationTurnBundle buildTurn(Conversation conversation, long sequenceNo) {
+        UUID conversationId = conversation.getId();
+        Map<String, Object> input = executionInputAssembler.assembleConversationInput(
+                conversationId, conversationId, conversation.getProjectId(), sequenceNo);
+        return new ConversationTurnBundle(conversationId, input, sequenceNo);
+    }
+
+    /**
+     * Assemble the &sect;8.1 input block for an engine-orchestrated
+     * summarisation turn (#8): the summariser system prompt, the block of older
+     * turns being folded, and the carry-forward summary, shipped as one more
+     * execution on the conversation's session.
+     */
+    private ConversationTurnBundle buildSummaryTurn(Conversation conversation, long sequenceNo,
+                                                    String previousSummaryContent,
+                                                    List<ConversationMessage> olderBlock) {
+        List<InferenceMessage> messages = new ArrayList<>();
+        messages.add(new InferenceMessage("system", SUMMARISER_SYSTEM_PROMPT, null, null));
+        if (previousSummaryContent != null && !previousSummaryContent.isBlank()) {
+            messages.add(new InferenceMessage("system",
+                    SUMMARY_WIRE_PREFIX + previousSummaryContent, null, null));
+        }
+        if (olderBlock != null) {
+            for (ConversationMessage m : olderBlock) {
+                messages.add(new InferenceMessage(
+                        m.getRole() == null ? "user" : m.getRole().name().toLowerCase(),
+                        m.getContent(), null, null));
+            }
+        }
+        messages.add(new InferenceMessage("user", SUMMARISER_USER_INSTRUCTION, null, null));
+
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("messages", messages);
+        input.put("toolPolicy", Map.of("activeToolNames", List.of(), "approvalMode", "ENGINE"));
+        input.put("output", Map.of(
+                "stream", true,
+                "responseSequenceNo", sequenceNo,
+                "format", "TEXT"));
+        return new ConversationTurnBundle(conversation.getId(), input, sequenceNo);
+    }
+
+    /**
+     * The next sequence for a turn on an already-ACTIVE session: one past the
+     * highest sequence the session's execution history already carries, falling
+     * back to the caller's pre-minted value when the session has no executions
+     * yet (the first turn on a session offered by an earlier dispatch).
+     */
+    private long resolveSequenceNo(UUID sessionId, long fallback) {
+        return executionRepository.findBySessionIdOrderBySequenceNoDesc(sessionId).stream()
+                .findFirst()
+                .map(e -> e.getSequenceNo() == null ? fallback : (long) e.getSequenceNo() + 1L)
+                .orElse(fallback);
+    }
+
+    /** The conversation's ACTIVE conversation session, if any. */
+    private Optional<Session> activeSessionOf(UUID conversationId) {
+        return sessionRepository.findByRefIdAndServiceTypeAndAllocationStateIn(
+                conversationId, SERVICE_TYPE_CONVERSATION, List.of(SessionAllocator.ALLOC_STATE_ACTIVE));
+    }
+
+    /** The durable host a session's instance belongs to (null when unresolvable). */
+    private UUID hostOfSessionInstance(Session session) {
+        if (session.getHostInstanceId() == null) {
+            return null;
+        }
+        return hostInstanceRepository.findById(session.getHostInstanceId())
+                .map(AgentHostInstance::getAgentHostId)
+                .orElse(null);
+    }
+
+    /** The next assistant sequence for the conversation (max persisted + 1). */
+    private long nextAssistantSequence(UUID conversationId) {
+        List<ConversationMessage> all = conversationService.listMessages(conversationId);
+        return all.isEmpty() ? 0L : all.get(all.size() - 1).getSequenceNo() + 1;
+    }
+
+    /**
+     * Phase 8c pre-flight quota check. We charge 0 tokens (the LLM hasn't run
+     * yet) and rely on prior consumption to drive the block. A hard block raises
+     * {@code QuotaExceededException} which the REST layer translates to 429; for
+     * WS we refuse to dispatch and let the client surface the error.
+     *
+     * <p>When the conversation has a pinned assistant, check at SERVICE scope
+     * (scopeId = assistantId). {@code check(SERVICE, assistantId, ...)}
+     * internally walks SERVICE&nbsp;&rarr;&nbsp;PROJECT&nbsp;&rarr;&nbsp;GROUP&nbsp;&rarr;&nbsp;ORG
+     * via {@code buildScopeChain} and returns the most restrictive decision, so
+     * a SERVICE RESERVATION block takes priority over the GROUP ceiling &mdash;
+     * the 429 will carry {@code scopeHit=SERVICE}. For conversations with no
+     * assistant, fall back to PROJECT scope (scopeId = projectId).</p>
+     */
+    private void checkQuota(Conversation conversation) {
+        UUID dispatchProjectId = conversation.getProjectId();
+        UUID assistantId = conversation.getAssistantId();
+        if (dispatchProjectId == null && assistantId == null) {
+            return;
+        }
+        QuotaDecision decision;
+        UUID effectiveScopeId;
+        if (assistantId != null) {
+            decision = quotaPolicyEngine.check(
+                    QuotaScope.SERVICE, assistantId, QuotaResourceType.TOKENS, 0L);
+            effectiveScopeId = assistantId;
+        } else {
+            decision = quotaPolicyEngine.check(
+                    QuotaScope.PROJECT, dispatchProjectId, QuotaResourceType.TOKENS, 0L);
+            effectiveScopeId = dispatchProjectId;
+        }
+        if (decision.isBlocked()) {
+            log.warn("Conversation turn blocked by quota -- conv {} scopeId {} (used {} of {})",
+                    conversation.getId(), effectiveScopeId,
+                    decision.getConsumedAmount(), decision.getLimitAmount());
+            throw new ai.myrmec.engine._system.exception.QuotaExceededException(
+                    decision.getScopeHit() != null ? decision.getScopeHit() : QuotaScope.PROJECT,
+                    effectiveScopeId,
+                    QuotaResourceType.TOKENS,
+                    decision.getLimitAmount(),
+                    decision.getConsumedAmount());
+        }
+    }
+
+    /**
+     * Phase 9a &mdash; archive the dispatched payload so V2 replay has the same
+     * inputs the agent saw. Best-effort: never abort the caller on a snapshot
+     * failure.
+     */
+    private void writeSnapshot(Conversation conversation, ExecutionStartPayload payload,
+                               String eventType) {
         snapshotWriter.write(ai.myrmec.engine.snapshot.SnapshotWriter.SnapshotRequest.builder()
                 .projectId(conversation.getProjectId())
-                .eventType("CONVERSATION_TURN_DISPATCHED")
-                .agentId(agent.getId())
-                .conversationId(conversationId)
+                .eventType(eventType)
+                .agentId(conversation.getAgentId())
+                .conversationId(conversation.getId())
                 .source(conversation.getSource() == null ? null : conversation.getSource().name())
                 .serviceAccountId(conversation.getServiceAccountId())
                 .externalUserRef(conversation.getExternalUserRef())
                 .userId(conversation.getCreatedBy())
                 .payload(payload)
                 .build());
-        return true;
     }
-
-    /**
-     * Flush a turn directly over an already-BOUND worker's conversation
-     * socket (§9.5 sticky binding hot path). Builds the same payload as the
-     * cold-reserve path but sends it immediately — no reserve, no bind,
-     * no attach, no PendingTurnRegistry.
-     */
-    private boolean dispatchOverBoundSocket(Conversation conversation, AgentHost agent,
-                                             AgentProfile profile, Agent boundInstance,
-                                             UUID conversationId) {
-        // §3.7/§16.1: the pinned version row carries the behaviour contract.
-        // Use the eager-tools variant because the sticky path runs outside
-        // the original transaction and must read the tool collection before
-        // it closes.
-        AgentProfileVersion profileVersion = conversation.getAgentProfileVersionId() != null
-                ? agentProfileVersionService.findByIdWithTools(conversation.getAgentProfileVersionId())
-                        .orElse(null)
-                : null;
-        List<ConversationMessage> all = conversationService.listMessages(conversationId);
-        List<ConversationMessage> active = all.stream()
-                .filter(m -> !m.isSuperseded())
-                .filter(m -> !conversationNoticeService.isNoAgentNotice(m))
-                .toList();
-        List<ConversationTurnAssignPayload.HistoryEntry> historyEntries = buildSlidingWindow(active);
-        String userMessage = lastUserContent(active).orElse("");
-        long assistantSequenceNo = all.isEmpty() ? 0L : all.get(all.size() - 1).getSequenceNo() + 1;
-        String systemPrompt = conversation.getSystemPromptOverride() != null
-                ? conversation.getSystemPromptOverride()
-                : (profileVersion != null ? profileVersion.getSystemPrompt() : null);
-
-        // Find existing session for this conversation (sticky path — session already open)
-        Session session = sessionContextAssembler.findActiveSession(conversationId, "CONVERSATION");
-        UUID sessionId = session != null ? session.getId() : conversationId;
-
-        // Resolve tool names from the published version (sticky path — no session.open)
-        List<String> activeToolNames = resolveToolNames(profileVersion);
-
-        // Build the inference request spec
-        List<InferenceRequestSpec.HistoryEntry> history = historyEntries.stream()
-                .map(h -> new InferenceRequestSpec.HistoryEntry(h.getRole(), h.getContent()))
-                .toList();
-        List<InferenceRequestSpec.AttachmentDescriptor> attachments =
-                buildAttachments(conversationId, active, profileVersion).stream()
-                        .map(a -> new InferenceRequestSpec.AttachmentDescriptor(
-                                a.getId().toString(), a.getFilename(), a.getMediaType(), a.getSizeBytes(),
-                                a.getInlineText(), a.isImage(), a.getReadContentPath()))
-                        .toList();
-
-        InferenceRequestSpec spec = InferenceRequestSpec.builder()
-                .serviceType("CONVERSATION")
-                .sessionId(sessionId)
-                .requestId(conversationId)
-                .projectId(conversation.getProjectId())
-                .sequenceNo(assistantSequenceNo)
-                .governanceProfileCode(governancePolicyResolver.resolveOrgDefault().code())
-                .contextSnapshot(conversation.getContextSnapshot())
-                .contextPinning(conversation.getContextSnapshot() != null ? "PINNED_AT_START" : null)
-                .conversationSystemPrompt(systemPrompt)
-                .pinnedFacts(conversation.getPinnedFacts())
-                .history(history)
-                .userMessage(userMessage)
-                .attachments(attachments)
-                .activeToolNames(activeToolNames)
-                .build();
-
-        InferenceAssignPayload payload = inferenceRequestAssembler.assemble(spec);
-
-        boolean delivered = conversationSocketRegistry.sendMessage(conversationId,
-                WebSocketMessage.of(MessageType.INFERENCE_ASSIGN, payload));
-        if (delivered) {
-            log.info("Flushed sticky turn to BOUND worker {} over conversation socket (conv {} seq {})",
-                    boundInstance.getId(), conversationId, assistantSequenceNo);
-            // Best-effort snapshot.
-            snapshotWriter.write(ai.myrmec.engine.snapshot.SnapshotWriter.SnapshotRequest.builder()
-                    .projectId(conversation.getProjectId())
-                    .eventType("CONVERSATION_TURN_DISPATCHED")
-                    .agentId(agent.getId())
-                    .conversationId(conversationId)
-                    .source(conversation.getSource() == null ? null : conversation.getSource().name())
-                    .serviceAccountId(conversation.getServiceAccountId())
-                    .externalUserRef(conversation.getExternalUserRef())
-                    .userId(conversation.getCreatedBy())
-                    .payload(payload)
-                    .build());
-        } else {
-            log.warn("Sticky dispatch failed — conversation socket vanished for conv {}; releasing worker",
-                    conversationId);
-            agentService.releaseInstance(boundInstance.getId());
-        }
-        return delivered;
-    }
-
-    /** Setting key for the summariser model code (empty = fall back to the conversation's model). */
-    private static final String SUMMARIZER_MODEL_CODE_KEY = "summarizer_model_code";
 
     /** System prompt that puts the agent into faithful-summariser mode for a SUMMARY turn. */
     private static final String SUMMARISER_SYSTEM_PROMPT =
@@ -522,509 +534,45 @@ public class ConversationTurnDispatcher {
             "Summarise the conversation so far into a single concise running summary, incorporating any "
             + "earlier summary and the messages above.";
 
-    /**
-     * Dispatch an engine-orchestrated summarisation turn (#8). Reuses the
-     * normal reserve&nbsp;&rarr;&nbsp;bind&nbsp;&rarr;&nbsp;enqueue path so the
-     * summary is produced by the conversation's agent over the same conversation
-     * socket; the only differences are the {@code purpose = "SUMMARY"} marker,
-     * the summariser system prompt + model, and that the history is the block of
-     * older turns being folded (plus any earlier summary) rather than the live
-     * window.
-     *
-     * <p>Caller ({@code ConversationSummaryService}) records the in-flight marker
-     * <em>before</em> calling so the eventual completion is routed into a
-     * {@code CONTEXT_SUMMARY} row; this method returns {@code false} when no warm
-     * worker could be reserved so the caller can release that marker and retry
-     * later.</p>
-     *
-     * @param previousSummaryContent the prior summary's body to carry forward, or null
-     * @param olderBlock             the older turns to fold, oldest first (non-empty)
-     * @return {@code true} if a summary turn was buffered for a reserved worker
-     */
-    public boolean dispatchSummary(UUID conversationId,
-                                   String previousSummaryContent,
-                                   List<ConversationMessage> olderBlock) {
-        Optional<Conversation> convOpt = conversationRepository.findById(conversationId);
-        if (convOpt.isEmpty()) {
-            log.warn("Cannot dispatch summary \u2014 conversation {} not found", conversationId);
-            return false;
-        }
-        Conversation conversation = convOpt.get();
-        if (conversation.getAgentId() == null) {
-            log.warn("Cannot dispatch summary \u2014 conversation {} has no agentId pinned", conversationId);
-            return false;
-        }
-
-        Optional<AgentHost> agentOpt = agentRepository.findById(conversation.getAgentId());
-        if (agentOpt.isEmpty()) {
-            log.warn("Cannot dispatch summary \u2014 agent {} not found for conv {}",
-                    conversation.getAgentId(), conversationId);
-            return false;
-        }
-        AgentHost agent = agentOpt.get();
-
-        // §3.7/§16.1: the profile comes from the conversation's pinned version.
-        Optional<AgentProfile> profileOpt = pinnedProfileOf(conversation);
-        if (profileOpt.isEmpty()) {
-            log.warn("Cannot dispatch summary — conversation {} has no pinned profile version",
-                    conversationId);
-            return false;
-        }
-        AgentProfile profile = profileOpt.get();
-        UUID pinnedVersionId = conversation.getAgentProfileVersionId();
-        AgentProfileVersion profileVersion = agentProfileVersionRepository.findByIdWithTools(pinnedVersionId)
-                .orElse(null);
-
-        UUID profileVersionId = profileVersion != null
-                ? profileVersion.getId() : profile.getId();
-        Agent idleInstance = reserveIdleInstance(agent.getId(), conversationId, profileVersionId)
-                .orElse(null);
-        if (idleInstance == null) {
-            log.info("No idle agent instance available to summarise conv {} \u2014 deferring", conversationId);
-            return false;
-        }
-
-        webSocketHandler.sendAgentBind(idleInstance.getId(),
-                AgentBindPayload.builder()
-                        .conversationId(conversationId)
-                        .profileVersionId(profileVersionId)
-                        .homeNodeId(nodeRegistry.getSelfNodeId())
-                        .homeNodeAddr(nodeRegistry.getSelfAddress())
-                        .build());
-
-        List<ConversationMessage> all = conversationService.listMessages(conversationId);
-        long assistantSequenceNo = all.isEmpty()
-                ? 0L
-                : all.get(all.size() - 1).getSequenceNo() + 1;
-
-        List<InferenceRequestSpec.HistoryEntry> history = new ArrayList<>();
-        if (previousSummaryContent != null && !previousSummaryContent.isBlank()) {
-            history.add(new InferenceRequestSpec.HistoryEntry(
-                    ConversationMessage.Role.SYSTEM.name(),
-                    SUMMARY_WIRE_PREFIX + previousSummaryContent));
-        }
-        for (ConversationMessage m : olderBlock) {
-            history.add(new InferenceRequestSpec.HistoryEntry(
-                    m.getRole().name(),
-                    m.getContent()));
-        }
-
-        InferenceRequestSpec spec = InferenceRequestSpec.builder()
-                .serviceType("CONVERSATION")
-                .sessionId(conversationId)
-                .requestId(conversationId)
-                .projectId(conversation.getProjectId())
-                .sequenceNo(assistantSequenceNo)
-                .governanceProfileCode(governancePolicyResolver.resolveOrgDefault().code())
-                .contextSnapshot(conversation.getContextSnapshot())
-                .contextPinning(conversation.getContextSnapshot() != null ? "PINNED_AT_START" : null)
-                .conversationSystemPrompt(SUMMARISER_SYSTEM_PROMPT)
-                .pinnedFacts(null)
-                .history(history)
-                .userMessage(SUMMARISER_USER_INSTRUCTION)
-                .attachments(Collections.emptyList())
-                .build();
-
-        InferenceAssignPayload payload = inferenceRequestAssembler.assemble(spec);
-
-        pendingTurnRegistry.enqueue(conversationId, payload);
-        log.info("Buffered summarisation turn for agent instance {} (conv {} folding {} msg(s))",
-                idleInstance.getId(), conversationId, olderBlock.size());
-
-        snapshotWriter.write(ai.myrmec.engine.snapshot.SnapshotWriter.SnapshotRequest.builder()
-                .projectId(conversation.getProjectId())
-                .eventType("CONVERSATION_SUMMARY_DISPATCHED")
-                .agentId(agent.getId())
-                .conversationId(conversationId)
-                .source(conversation.getSource() == null ? null : conversation.getSource().name())
-                .serviceAccountId(conversation.getServiceAccountId())
-                .externalUserRef(conversation.getExternalUserRef())
-                .userId(conversation.getCreatedBy())
-                .payload(payload)
-                .build());
-        return true;
-    }
-
-    /**
-     * Pick the first warm worker that is both connection-idle and wins the
-     * atomic {@code IDLE → RESERVED} claim, pinning the conversation and
-     * profile version. A worker that loses the compare-and-set (claimed by a
-     * racing dispatch between the {@code findBy…} read and the update) is
-     * skipped. Returns empty when no worker could be reserved.
-     */
-    private Optional<Agent> reserveIdleInstance(UUID agentId, UUID conversationId,
-                                                UUID profileVersionId) {
-        List<Agent> instances = agentInstanceRepository.findByAgentHostIdAndStatus(
-                agentId, Agent.Status.IDLE);
-        for (Agent instance : instances) {
-            if (!connectionManager.isAgentIdle(instance.getId())) {
-                continue;
-            }
-            // reserveInstance runs the atomic IDLE → RESERVED compare-and-set
-            // inside its own short transaction (the @Modifying update needs one).
-            if (agentService.reserveInstance(instance.getId(), conversationId, profileVersionId)) {
-                return Optional.of(instance);
-            }
-        }
-        return Optional.empty();
-    }
-
-    /**
-     * Resolve tool names from the profile's published version (§16.1).
-     * Returns the tool codes of all ACTIVE tools assigned to the version.
-     */
-    private List<String> resolveToolNames(AgentProfileVersion version) {
-        if (version == null) {
-            return List.of();
-        }
-        var profileTools = version.getTools();
-        if (profileTools == null || profileTools.isEmpty()) {
-            return List.of();
-        }
-        return profileTools.stream()
-                .filter(t -> t.getStatus() == ai.myrmec.engine.tool.ToolStatus.ACTIVE)
-                .map(ai.myrmec.engine.tool.Tool::getCode)
-                .toList();
-    }
-
-    /**
-     * Returns the most-recent {@link #HISTORY_LIMIT} messages, oldest
-     * first. Always copies into an {@code ArrayList} so callers (and
-     * Jackson) can iterate without surprises.
-     *
-     * <p>#8 — when the active branch carries a {@link
-     * ConversationMessage.Role#CONTEXT_SUMMARY}, the messages it folded are
-     * dropped and the summary itself anchors the window in their place. The
-     * most-recent summary wins; older (superseded) summaries and the raw
-     * turns they compacted never reach the agent. The summary ships on the
-     * wire as a {@code SYSTEM} entry (the SDK only understands USER /
-     * ASSISTANT / SYSTEM) with a short label so the model reads it as prior
-     * context; the persisted row keeps its {@code CONTEXT_SUMMARY} role for
-     * the transcript's transparency marker (#8a).</p>
-     */
-    private List<ConversationTurnAssignPayload.HistoryEntry> buildSlidingWindow(
-            List<ConversationMessage> all) {
-        if (all == null || all.isEmpty()) {
-            return Collections.emptyList();
-        }
-
-        ConversationMessage latestSummary = null;
-        for (ConversationMessage m : all) {
-            if (m.getRole() == ConversationMessage.Role.CONTEXT_SUMMARY
-                    && (latestSummary == null
-                        || m.getSequenceNo() > latestSummary.getSequenceNo())) {
-                latestSummary = m;
-            }
-        }
-
-        List<ConversationMessage> effective;
-        if (latestSummary == null) {
-            effective = all;
-        } else {
-            long coversUpTo = summaryCoverage(latestSummary);
-            effective = new ArrayList<>(all.size());
-            effective.add(latestSummary);
-            for (ConversationMessage m : all) {
-                if (m.getRole() == ConversationMessage.Role.CONTEXT_SUMMARY) {
-                    continue; // latest already anchored; drop superseded summaries
-                }
-                if (m.getSequenceNo() <= coversUpTo) {
-                    continue; // folded into the summary
-                }
-                effective.add(m);
-            }
-        }
-
-        int from = Math.max(0, effective.size() - HISTORY_LIMIT);
-        List<ConversationMessage> windowed =
-                new ArrayList<>(effective.subList(from, effective.size()));
-        // Always keep the summary anchor at the front, even if a large
-        // post-summary tail would otherwise trim it out of the window.
-        if (latestSummary != null && !windowed.contains(latestSummary)) {
-            windowed.add(0, latestSummary);
-        }
-
-        List<ConversationTurnAssignPayload.HistoryEntry> out = new ArrayList<>(windowed.size());
-        for (ConversationMessage m : windowed) {
-            if (m.getRole() == ConversationMessage.Role.CONTEXT_SUMMARY) {
-                out.add(ConversationTurnAssignPayload.HistoryEntry.builder()
-                        .role(ConversationMessage.Role.SYSTEM.name())
-                        .content(SUMMARY_WIRE_PREFIX
-                                + (m.getContent() == null ? "" : m.getContent()))
-                        .sequenceNo(m.getSequenceNo())
-                        .build());
-            } else {
-                out.add(ConversationTurnAssignPayload.HistoryEntry.builder()
-                        .role(m.getRole().name())
-                        .content(m.getContent())
-                        .sequenceNo(m.getSequenceNo())
-                        .build());
-            }
-        }
-        return out;
-    }
-
     /** Label prefixed to a context summary's body on the wire so the model
      * reads it as prior context rather than a fresh instruction. */
     private static final String SUMMARY_WIRE_PREFIX = "[Summary of earlier conversation]\n";
 
     /**
-     * The highest sequence number folded into the given summary. Reads the
-     * authoritative {@code coversUpToSequenceNo} from the row's marker;
-     * falls back to "everything strictly before the summary row" when the
-     * marker is absent or unparseable.
+     * One assembled conversation turn: the &sect;8.1 input block plus the
+     * routing/sequence metadata the wire payload needs.
+     *
+     * <p>The {@code executionId} is minted by {@link ExecutionRegistry#start},
+     * which is only legal once the session is allocation-ACTIVE (&sect;7.4: no
+     * {@code execution.start} before {@code session.opened}). The wire payload is
+     * therefore built lazily &mdash; once with a null id for the dispatch
+     * snapshot, and once with the real id for the send.</p>
+     *
+     * <p>The payload's own {@code sessionId} is the conversation id, mirroring
+     * the {@code requestId} convention (&sect;8.1): the transport-level session
+     * identity rides the envelope, stamped by the command sender from the
+     * allocator-owned session row.</p>
      */
-    private long summaryCoverage(ConversationMessage summary) {
-        String json = summary.getPayloadJson();
-        if (json != null && !json.isBlank()) {
-            try {
-                ai.myrmec.engine.conversation.ContextSummaryMarker marker =
-                        objectMapper.readValue(json,
-                                ai.myrmec.engine.conversation.ContextSummaryMarker.class);
-                if (marker != null && marker.coversUpToSequenceNo() != null) {
-                    return marker.coversUpToSequenceNo();
-                }
-            } catch (Exception e) {
-                log.warn("Unparseable CONTEXT_SUMMARY marker on message {} (conv {}): {}",
-                        summary.getId(), summary.getConversationId(), e.getMessage());
+    private record ConversationTurnBundle(UUID conversationId, Map<String, Object> input, long sequenceNo) {
+
+        ExecutionStartPayload toStartPayload(UUID executionId) {
+            @SuppressWarnings("unchecked")
+            List<InferenceMessage> messages = input.get("messages") instanceof List<?> list
+                    ? (List<InferenceMessage>) list : List.of();
+            List<String> activeTools = List.of();
+            if (input.get("toolPolicy") instanceof Map<?, ?> policy
+                    && policy.get("activeToolNames") instanceof List<?> tools) {
+                activeTools = tools.stream().map(String::valueOf).toList();
             }
-        }
-        return summary.getSequenceNo() - 1;
-    }
-
-    private Optional<String> lastUserContent(List<ConversationMessage> all) {
-        for (int i = all.size() - 1; i >= 0; i--) {
-            ConversationMessage m = all.get(i);
-            if (m.getRole() == ConversationMessage.Role.USER) {
-                return Optional.ofNullable(m.getContent());
-            }
-        }
-        return Optional.empty();
-    }
-
-    /** Setting key for the max inline-injected text size, in estimated tokens. */
-    private static final String INLINE_TOKEN_LIMIT_KEY = "attachment_inline_token_limit";
-    private static final long INLINE_TOKEN_LIMIT_DEFAULT = 4000L;
-
-    /**
-     * Setting key for the maximum aggregate fraction of the per-turn context
-     * token budget that inline attachment text may occupy across all
-     * attachments on the turn (#103 Slice B). Read forgivingly via
-     * {@link ai.myrmec.engine.setting.SystemSettingService#getRatio} and clamped
-     * to {@code (0,1]} — a zero/out-of-range value falls back to the default.
-     */
-    private static final String INLINE_RATIO_MAX_KEY = "attachment_inline_ratio_max";
-    private static final double INLINE_RATIO_MAX_DEFAULT = 0.5;
-
-    /**
-     * Setting key for the resolved per-turn context token budget that the
-     * inline-ratio guard multiplies by {@link #INLINE_RATIO_MAX_KEY}. The
-     * platform has no per-model {@code contextWindow} column today, so the
-     * budget is a single tunable read forgivingly with a sensible default; the
-     * default pairs with {@link #INLINE_RATIO_MAX_DEFAULT} to yield an aggregate
-     * inline budget equal to one full {@link #INLINE_TOKEN_LIMIT_KEY} cap.
-     */
-    private static final String CONTEXT_TOKEN_BUDGET_KEY = "context_token_budget";
-    private static final long CONTEXT_TOKEN_BUDGET_DEFAULT = 8000L;
-
-
-    /**
-     * Build the attachment descriptors for the turn from the clean rows
-     * bound to the most-recent active USER message. Small text documents
-     * are extracted inline (within the {@value #INLINE_TOKEN_LIMIT_KEY}
-     * budget); images are flagged for native vision parts only when the
-     * resolved model supports vision. Best-effort: any per-attachment
-     * failure (e.g. a missing blob) is logged and that row is skipped so a
-     * single bad file never blocks the turn.
-     */
-    private List<ConversationTurnAssignPayload.AttachmentDescriptor> buildAttachments(
-            UUID conversationId, List<ConversationMessage> active, AgentProfileVersion version) {
-        UUID userMessageId = null;
-        for (int i = active.size() - 1; i >= 0; i--) {
-            ConversationMessage m = active.get(i);
-            if (m.getRole() == ConversationMessage.Role.USER) {
-                userMessageId = m.getId();
-                break;
-            }
-        }
-        if (userMessageId == null) {
-            return Collections.emptyList();
-        }
-        List<ai.myrmec.engine.attachment.ConversationMessageAttachment> rows =
-                attachmentService.listForMessage(userMessageId);
-        if (rows.isEmpty()) {
-            return Collections.emptyList();
-        }
-        boolean supportsVision = resolveSupportsVision(version);
-        long inlineTokenLimit = systemSettingService.getInt(
-                INLINE_TOKEN_LIMIT_KEY, INLINE_TOKEN_LIMIT_DEFAULT);
-        // Slice B — aggregate inline-budget guard. The per-attachment size cap
-        // above applies first; this second gate caps the *sum* of inlined text
-        // across the turn at ratioMax × contextBudget so several within-cap
-        // attachments cannot collectively crowd out conversation history.
-        double ratioMax = systemSettingService.getRatio(
-                INLINE_RATIO_MAX_KEY, INLINE_RATIO_MAX_DEFAULT);
-        if (ratioMax <= 0.0 || ratioMax > 1.0) {
-            // getRatio already rejects values outside [0,1]; this additionally
-            // clamps the policy to (0,1] (a zero share would demote everything).
-            ratioMax = INLINE_RATIO_MAX_DEFAULT;
-        }
-        long contextBudget = systemSettingService.getInt(
-                CONTEXT_TOKEN_BUDGET_KEY, CONTEXT_TOKEN_BUDGET_DEFAULT);
-        long aggregateInlineBudget = (long) Math.floor(ratioMax * contextBudget);
-        long runningInlineTokens = 0L;
-        List<ConversationTurnAssignPayload.AttachmentDescriptor> out = new ArrayList<>(rows.size());
-        for (ai.myrmec.engine.attachment.ConversationMessageAttachment row : rows) {
-            boolean isImage = row.getMediaType() != null
-                    && row.getMediaType().startsWith("image/");
-            InlineExtractionResult inline = InlineExtractionResult.none();
-            if (!isImage && isTextLike(row.getMediaType())) {
-                inline = extractInlineText(conversationId, row, inlineTokenLimit);
-            }
-
-            String inlineText = inline.inlineText();
-            boolean omittedBySize = inline.omittedBySize();
-            boolean omittedByBudget = false;
-            // Ratio-budget gate runs only on text that already cleared the
-            // per-attachment size cap. Greedy by upload order: once the running
-            // inline-token total would exceed the aggregate budget, this and
-            // every later attachment is demoted to read-on-demand.
-            if (inlineText != null) {
-                if (runningInlineTokens + inline.estimatedTokens() > aggregateInlineBudget) {
-                    inlineText = null;
-                    omittedByBudget = true;
-                } else {
-                    runningInlineTokens += inline.estimatedTokens();
-                }
-            }
-
-            out.add(ConversationTurnAssignPayload.AttachmentDescriptor.builder()
-                    .id(row.getId())
-                    .filename(row.getFilename())
-                    .mediaType(row.getMediaType())
-                    .sizeBytes(row.getSizeBytes())
-                    .sha256(row.getSha256())
-                    .image(isImage && supportsVision)
-                    .inlineText(inlineText)
-                    .inlineTextOmittedBySize(omittedBySize)
-                    .inlineTextOmittedByBudget(omittedByBudget)
-                    .readContentPath(buildAgentAttachmentContentPath(conversationId, row.getId()))
-                    .build());
-        }
-        return out;
-    }
-
-    private static String buildAgentAttachmentContentPath(UUID conversationId, UUID attachmentId) {
-        return "/api/v1/agent/conversations/" + conversationId
-                + "/attachments/" + attachmentId + "/content";
-    }
-
-    /** Whether the version's default model is flagged vision-capable. */
-    private boolean resolveSupportsVision(AgentProfileVersion version) {
-        if (version == null || version.getDefaultModel() == null) {
-            return false;
-        }
-        try {
-            return modelService.findByCode(version.getDefaultModel()).isSupportsVision();
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private static boolean isTextLike(String mediaType) {
-        return mediaType != null
-                && (mediaType.startsWith("text/")
-                || mediaType.equals("application/json")
-                || mediaType.equals("application/xml"));
-    }
-
-    /**
-     * Decode a text attachment's bytes as UTF-8 and return them when the
-     * estimated token count (~chars/4) fits the inline budget; otherwise
-     * null so the agent fetches it on demand instead.
-     */
-    private InlineExtractionResult extractInlineText(
-            UUID conversationId,
-            ai.myrmec.engine.attachment.ConversationMessageAttachment row,
-            long inlineTokenLimit) {
-        try {
-            byte[] bytes = attachmentService.download(conversationId, row.getId());
-            long estimatedTokens = (bytes.length / 4L) + 1L;
-            if (estimatedTokens > inlineTokenLimit) {
-                return InlineExtractionResult.omittedBySizeLimit();
-            }
-            return InlineExtractionResult.inline(
-                    new String(bytes, java.nio.charset.StandardCharsets.UTF_8),
-                    estimatedTokens);
-        } catch (Exception e) {
-            log.warn("Could not extract inline text for attachment {} (conv {}): {}",
-                    row.getId(), conversationId, e.getMessage());
-            return InlineExtractionResult.none();
-        }
-    }
-
-    /**
-     * Outcome of a per-attachment inline extraction: the text (when it cleared
-     * the per-attachment size cap), the reason it was withheld, and the
-     * estimated token count the aggregate ratio guard sums against the turn's
-     * inline budget.
-     */
-    private record InlineExtractionResult(String inlineText, boolean omittedBySize, long estimatedTokens) {
-        static InlineExtractionResult inline(String inlineText, long estimatedTokens) {
-            return new InlineExtractionResult(inlineText, false, estimatedTokens);
-        }
-
-        static InlineExtractionResult omittedBySizeLimit() {
-            return new InlineExtractionResult(null, true, 0L);
-        }
-
-        static InlineExtractionResult none() {
-            return new InlineExtractionResult(null, false, 0L);
-        }
-    }
-
-    /**
-     * Look up the model assigned to the published version and decrypt its
-     * API key. Mirrors {@code TaskDispatcherService.buildTaskPayload} so
-     * behaviour stays consistent between workflow tasks and conversational
-     * turns.
-     */
-    private TaskAssignPayload.ModelInfo resolveModel(AgentProfileVersion version) {
-        if (version == null || version.getDefaultModel() == null) {
-            log.warn("Agent profile version has no default model configured \u2014 dispatch without modelInfo");
-            return null;
-        }
-        return resolveModelByCode(version.getDefaultModel());
-    }
-
-    /**
-     * Build a {@link TaskAssignPayload.ModelInfo} for an explicit model code,
-     * decrypting its API key. Mirrors {@code TaskDispatcherService.buildTaskPayload}
-     * so behaviour stays consistent between workflow tasks and conversational
-     * turns. Returns {@code null} (caller ships no modelInfo) when the code is
-     * blank or cannot be resolved.
-     */
-    private TaskAssignPayload.ModelInfo resolveModelByCode(String modelCode) {
-        if (modelCode == null || modelCode.isBlank()) {
-            return null;
-        }
-        try {
-            Model model = modelService.findByCode(modelCode);
-            String apiKey = modelService.getApiKey(model.getCode());
-            String apiEndpoint = model.getApiEndpoint();
-            if (apiEndpoint == null && model.getProviderConfig() != null) {
-                apiEndpoint = model.getProviderConfig().getBaseUrl();
-            }
-            return TaskAssignPayload.ModelInfo.builder()
-                    .provider(model.getProvider())
-                    .modelId(model.getModelId())
-                    .apiEndpoint(apiEndpoint)
-                    .apiKey(apiKey)
-                    .parameters(model.getDefaultParams())
-                    .build();
-        } catch (Exception e) {
-            log.warn("Could not resolve model '{}': {}", modelCode, e.getMessage());
-            return null;
+            return new ExecutionStartPayload(
+                    executionId,
+                    conversationId,
+                    (int) sequenceNo,
+                    conversationId.toString(),
+                    Instant.now().plusSeconds(DEFAULT_TIMEOUT_SECONDS),
+                    new ExecutionStartPayload.Input(messages, null, null),
+                    new ExecutionStartPayload.ToolPolicy(activeTools, "ENGINE"),
+                    new ExecutionStartPayload.Output(true, (int) sequenceNo, "TEXT"));
         }
     }
 }

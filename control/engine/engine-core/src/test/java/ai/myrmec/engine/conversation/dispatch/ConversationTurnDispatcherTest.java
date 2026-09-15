@@ -1,39 +1,44 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+
 package ai.myrmec.engine.conversation.dispatch;
 
 import ai.myrmec.engine.agent.AgentHost;
-import ai.myrmec.engine.agent.Agent;
-import ai.myrmec.engine.agent.AgentRepository;
+import ai.myrmec.engine.agent.AgentHostInstance;
+import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileRepository;
 import ai.myrmec.engine.agent.AgentProfileVersion;
 import ai.myrmec.engine.agent.AgentProfileVersionRepository;
-import ai.myrmec.engine.agent.AgentProfileVersionService;
-import ai.myrmec.engine.agent.AgentHostRepository;
-import ai.myrmec.engine.agent.AgentHostService;
-import ai.myrmec.engine.attachment.ConversationMessageAttachment;
+import ai.myrmec.engine.agent.HostSelectionService;
 import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.conversation.ConversationMessage;
 import ai.myrmec.engine.conversation.ConversationRepository;
 import ai.myrmec.engine.conversation.ConversationService;
-import ai.myrmec.engine.model.Model;
-import ai.myrmec.engine.model.ModelService;
-import ai.myrmec.engine.websocket.AgentConnectionManager;
-import ai.myrmec.engine.websocket.AgentWebSocketHandler;
-import ai.myrmec.engine.inference.InferenceRequestSpec;
-import ai.myrmec.engine.inference.SessionContextAssembler;
-import ai.myrmec.engine.inference.InferenceRequestAssembler;
+import ai.myrmec.engine.inference.Session;
+import ai.myrmec.engine.inference.SessionAllocator;
+import ai.myrmec.engine.inference.SessionRepository;
+import ai.myrmec.engine.inference.execution.ExecutionCommandSender;
+import ai.myrmec.engine.inference.execution.ExecutionInputAssembler;
+import ai.myrmec.engine.inference.execution.ExecutionRegistry;
+import ai.myrmec.engine.inference.execution.SessionExecution;
+import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
+import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
+import ai.myrmec.engine.websocket.host.payload.ExecutionStartPayload;
+import ai.myrmec.engine.websocket.message.payload.InferenceMessage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -42,38 +47,43 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Phase 6d \u2014 verifies the {@link ConversationTurnDispatcher} assembles
- * the right context window and routes it to an idle agent instance
- * through {@link AgentWebSocketHandler#sendConversationTurn}.
+ * Unified-path contract for {@link ConversationTurnDispatcher} (Plan 6 Task 4).
  *
- * <p>Kept as a pure Mockito test (no Spring boot) to stay cheap. The
- * dispatcher has no JPA / transactional behaviour worth booting a
- * context for; the wiring is exercised end-to-end by the controller
- * test in {@code ConversationControllerTest}.</p>
+ * <p>The legacy {@code agent.bind}/{@code conversation.attach}/
+ * {@code inference.assign} seams are gone. These tests pin the two branches that
+ * replace them:</p>
+ * <ul>
+ *   <li><b>Offer</b> — no ACTIVE session: the allocator mints one, the offer goes
+ *       on the wire, and the assembled turn is parked for the host's
+ *       accept/opened continuation.</li>
+ *   <li><b>Reuse</b> — an ACTIVE session pinned to the selected host: the SAME
+ *       session row serves the turn, with {@code execution.start} shipped
+ *       immediately and NO second offer.</li>
+ * </ul>
+ *
+ * <p>Kept as a pure Mockito test (no Spring boot): the discriminating behaviour
+ * is which seam each branch calls, and the handler's own flow tests already cover
+ * the wire shapes.</p>
  */
 class ConversationTurnDispatcherTest {
 
     private ConversationRepository conversationRepository;
     private ConversationService conversationService;
-    private AgentHostRepository agentRepository;
     private AgentProfileRepository agentProfileRepository;
-    private AgentProfileVersionService agentProfileVersionService;
     private AgentProfileVersionRepository agentProfileVersionRepository;
-    private AgentRepository agentInstanceRepository;
-    private AgentConnectionManager connectionManager;
-    private AgentWebSocketHandler webSocketHandler;
-    private ModelService modelService;
+    private ai.myrmec.engine.spi.quota.QuotaPolicyEngine quotaPolicyEngine;
     private ai.myrmec.engine.snapshot.SnapshotWriter snapshotWriter;
-    private AgentHostService agentService;
-    private ai.myrmec.engine.node.NodeRegistryService nodeRegistry;
-    private PendingTurnRegistry pendingTurnRegistry;
-    private ai.myrmec.engine.websocket.ConversationSocketRegistry conversationSocketRegistry;
-    private ai.myrmec.engine.attachment.AttachmentService attachmentService;
-    private ai.myrmec.engine.setting.SystemSettingService systemSettingService;
     private ai.myrmec.engine.conversation.ConversationNoticeService conversationNoticeService;
-    private SessionContextAssembler sessionContextAssembler;
-    private InferenceRequestAssembler inferenceRequestAssembler;
-    private ai.myrmec.engine.governance.GovernancePolicyResolver governancePolicyResolver;
+    private HostSelectionService hostSelectionService;
+    private AgentHostInstanceRepository hostInstanceRepository;
+    private SessionAllocator sessionAllocator;
+    private SessionRepository sessionRepository;
+    private SessionExecutionRepository executionRepository;
+    private ExecutionRegistry executionRegistry;
+    private ExecutionCommandSender executionCommandSender;
+    private ExecutionInputAssembler executionInputAssembler;
+    private HostControlWebSocketHandler hostControlWebSocketHandler;
+    private PendingConversationTurns pendingConversationTurns;
 
     private ConversationTurnDispatcher dispatcher;
 
@@ -81,707 +91,417 @@ class ConversationTurnDispatcherTest {
     void setUp() {
         conversationRepository = mock(ConversationRepository.class);
         conversationService = mock(ConversationService.class);
-        agentRepository = mock(AgentHostRepository.class);
         agentProfileRepository = mock(AgentProfileRepository.class);
-        agentProfileVersionService = mock(AgentProfileVersionService.class);
         agentProfileVersionRepository = mock(AgentProfileVersionRepository.class);
-        agentInstanceRepository = mock(AgentRepository.class);
-        connectionManager = mock(AgentConnectionManager.class);
-        webSocketHandler = mock(AgentWebSocketHandler.class);
-        modelService = mock(ModelService.class);
+        quotaPolicyEngine = mock(ai.myrmec.engine.spi.quota.QuotaPolicyEngine.class);
         snapshotWriter = mock(ai.myrmec.engine.snapshot.SnapshotWriter.class);
-        agentService = mock(AgentHostService.class);
-        nodeRegistry = mock(ai.myrmec.engine.node.NodeRegistryService.class);
-        pendingTurnRegistry = mock(PendingTurnRegistry.class);
-        conversationSocketRegistry = mock(ai.myrmec.engine.websocket.ConversationSocketRegistry.class);
-        attachmentService = mock(ai.myrmec.engine.attachment.AttachmentService.class);
-        systemSettingService = mock(ai.myrmec.engine.setting.SystemSettingService.class);
         conversationNoticeService = mock(ai.myrmec.engine.conversation.ConversationNoticeService.class);
-        sessionContextAssembler = mock(SessionContextAssembler.class);
-        inferenceRequestAssembler = mock(InferenceRequestAssembler.class);
-        governancePolicyResolver = mock(ai.myrmec.engine.governance.GovernancePolicyResolver.class);
-        when(governancePolicyResolver.resolveOrgDefault())
-                .thenReturn(new ai.myrmec.engine.governance.EffectivePolicy(
-                        ai.myrmec.engine.governance.BuiltInGovernanceProfile.STANDARD));
-        // The dispatcher always calls sessionContextAssembler.assemble(...) to
-        // build the session.open frame; stub it with a non-null payload so the
-        // assemble path that reads sessionOpen.sessionId() doesn't NPE.
-        when(sessionContextAssembler.assemble(any(), any(), any(), any()))
-                .thenReturn(new ai.myrmec.engine.websocket.message.payload.SessionOpenPayload(
-                        UUID.randomUUID(), "CONVERSATION", null, null,
-                        null, null, java.util.List.of(), java.util.List.of(), false));
-        when(attachmentService.listForMessage(any()))
-                .thenReturn(java.util.List.of());
-        when(systemSettingService.getInt(any(), anyLong()))
-                .thenAnswer(inv -> inv.getArgument(1));
-        ai.myrmec.engine.spi.quota.QuotaPolicyEngine quotaPolicyEngine =
-                mock(ai.myrmec.engine.spi.quota.QuotaPolicyEngine.class);
+        hostSelectionService = mock(HostSelectionService.class);
+        hostInstanceRepository = mock(AgentHostInstanceRepository.class);
+        sessionAllocator = mock(SessionAllocator.class);
+        sessionRepository = mock(SessionRepository.class);
+        executionRepository = mock(SessionExecutionRepository.class);
+        executionRegistry = mock(ExecutionRegistry.class);
+        executionCommandSender = mock(ExecutionCommandSender.class);
+        executionInputAssembler = mock(ExecutionInputAssembler.class);
+        hostControlWebSocketHandler = mock(HostControlWebSocketHandler.class);
+        pendingConversationTurns = mock(PendingConversationTurns.class);
+
         when(quotaPolicyEngine.check(any(), any(), any(), anyLong()))
                 .thenReturn(ai.myrmec.engine.spi.quota.QuotaDecision.unconstrained());
+        // The assembler's output is the §8.1 input block; a minimal transcript is
+        // enough for the payload projection under test.
+        when(executionInputAssembler.assembleConversationInput(any(), any(), any(), anyLong()))
+                .thenReturn(Map.of(
+                        "messages", List.of(new InferenceMessage("user", "hello", null, null)),
+                        "toolPolicy", Map.of("activeToolNames", List.of("search"), "approvalMode", "ENGINE"),
+                        "output", Map.of("stream", true, "responseSequenceNo", 1, "format", "TEXT")));
 
         dispatcher = new ConversationTurnDispatcher(
                 conversationRepository,
                 conversationService,
-                agentRepository,
                 agentProfileRepository,
                 agentProfileVersionRepository,
-                agentProfileVersionService,
-                agentInstanceRepository,
-                connectionManager,
-                webSocketHandler,
-                modelService,
-                snapshotWriter,
                 quotaPolicyEngine,
-                agentService,
-                nodeRegistry,
-                pendingTurnRegistry,
-                conversationSocketRegistry,
-                attachmentService,
-                systemSettingService,
-                new com.fasterxml.jackson.databind.ObjectMapper(),
+                snapshotWriter,
                 conversationNoticeService,
-                sessionContextAssembler,
-                inferenceRequestAssembler,
-                governancePolicyResolver);
+                hostSelectionService,
+                hostInstanceRepository,
+                sessionAllocator,
+                sessionRepository,
+                executionRepository,
+                executionRegistry,
+                executionCommandSender,
+                executionInputAssembler,
+                hostControlWebSocketHandler,
+                pendingConversationTurns);
     }
 
+    // ---------------------------------------------------------------- offer
+
     @Test
-    void dispatchesTurnToIdleAgentWithAssembledContext() {
+    void offersASessionAndParksTheTurnWhenNoActiveSessionExists() {
         UUID conversationId = UUID.randomUUID();
         UUID projectId = UUID.randomUUID();
-        UUID agentId = UUID.randomUUID();
-        UUID profileId = UUID.randomUUID();
-        UUID instanceId = UUID.randomUUID();
+        UUID hostId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
 
-        Conversation conv = new Conversation();
-        conv.setId(conversationId);
-        conv.setProjectId(projectId);
-        conv.setAgentId(agentId);
-        conv.setSystemPromptOverride("Custom override.");
-        conv.setPinnedFacts("Pin one fact.");
+        Conversation conv = pinnedConversation(conversationId, projectId);
+        wireHost(conv, hostId);
+        when(sessionRepository.findByRefIdAndServiceTypeAndAllocationStateIn(
+                eq(conversationId), eq("CONVERSATION"), any())).thenReturn(Optional.empty());
+        when(sessionAllocator.offer("CONVERSATION", conversationId, "CONVERSATION", projectId, hostId))
+                .thenReturn(Optional.of(sessionId));
 
-        AgentHost agent = new AgentHost();
-        agent.setId(agentId);
+        assertThat(dispatcher.dispatch(conversationId)).isTrue();
 
-        AgentProfile profile = new AgentProfile();
-        profile.setId(profileId);
-        // Â§16.1: behaviour contract lives on the published version row.
-        UUID profileVersionId = UUID.randomUUID();
-        pinConversation(conv, profileVersionId, profileId);
-        AgentProfileVersion published = pinnedVersion("Profile default prompt.", null, profileVersionId, profileId);
-        // No defaultModel â€” dispatcher skips model resolution and ships null modelInfo.
+        // The allocator minted the session and the OFFER went on the wire.
+        verify(sessionAllocator).offer("CONVERSATION", conversationId, "CONVERSATION", projectId, hostId);
+        verify(hostControlWebSocketHandler).sendSessionOffer(sessionId, "CONVERSATION", conversationId);
+        // §7.4: no execution.start may precede session.opened, so nothing is
+        // started or sent yet — the turn is parked instead.
+        verify(executionRegistry, never()).start(any(), any(), any(), any());
+        verify(executionCommandSender, never()).startConversation(any(), any(), any());
 
-        Agent instance = new Agent();
-        instance.setId(instanceId);
-        instance.setAgentHostId(agentId);
-        instance.setStatus(Agent.Status.IDLE);
-
-        ConversationMessage user0 = newMessage(conversationId, 0L, ConversationMessage.Role.USER, "Hi");
-        ConversationMessage asst1 = newMessage(conversationId, 1L, ConversationMessage.Role.ASSISTANT, "Hello!");
-        ConversationMessage user2 = newMessage(conversationId, 2L, ConversationMessage.Role.USER, "How are you?");
-
-        when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
-        when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findById(profileId)).thenReturn(Optional.of(profile));
-        when(agentProfileVersionRepository.findByIdWithTools(profileVersionId)).thenReturn(Optional.of(published));
-        when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
-                .thenReturn(List.of(instance));
-        when(connectionManager.isAgentIdle(instanceId)).thenReturn(true);
-        when(agentService.reserveInstance(eq(instanceId), any(), any()))
-                .thenReturn(true);
-        when(conversationService.listMessages(conversationId))
-                .thenReturn(List.of(user0, asst1, user2));
-
-        boolean dispatched = dispatcher.dispatch(conversationId);
-
-        assertThat(dispatched).isTrue();
-
-        ArgumentCaptor<InferenceRequestSpec> captor =
-                ArgumentCaptor.forClass(InferenceRequestSpec.class);
-        verify(inferenceRequestAssembler).assemble(captor.capture());
-
-        InferenceRequestSpec spec = captor.getValue();
-        assertThat(spec.getRequestId()).isEqualTo(conversationId);
-        assertThat(spec.getProjectId()).isEqualTo(projectId);
-        // System-prompt override wins over the profile default.
-        assertThat(spec.getConversationSystemPrompt()).isEqualTo("Custom override.");
-        assertThat(spec.getPinnedFacts()).isEqualTo("Pin one fact.");
-        // userMessage convenience field carries the most-recent USER content.
-        assertThat(spec.getUserMessage()).isEqualTo("How are you?");
-        // History preserves order + role + content.
-        assertThat(spec.getHistory()).hasSize(3);
-        assertThat(spec.getHistory().get(0).role()).isEqualTo("USER");
-        assertThat(spec.getHistory().get(2).content()).isEqualTo("How are you?");
+        ArgumentCaptor<Map<String, Object>> input = ArgumentCaptor.forClass(Map.class);
+        verify(pendingConversationTurns).stage(eq(sessionId), eq(conversationId),
+                input.capture(), any(ExecutionStartPayload.class));
+        assertThat(input.getValue()).containsKeys("messages", "toolPolicy", "output");
     }
 
     @Test
-    void fallsBackToProfileSystemPromptWhenOverrideNotSet() {
+    void declinesWithTheNoAgentNoticeWhenNoHostHasCapacity() {
         UUID conversationId = UUID.randomUUID();
-        UUID agentId = UUID.randomUUID();
-        UUID profileId = UUID.randomUUID();
-        UUID instanceId = UUID.randomUUID();
-
-        Conversation conv = new Conversation();
-        conv.setId(conversationId);
-        conv.setProjectId(UUID.randomUUID());
-        conv.setAgentId(agentId);
-        // No override.
-        conv.setSystemPromptOverride(null);
-
-        AgentHost agent = new AgentHost();
-        agent.setId(agentId);
-
-        AgentProfile profile = new AgentProfile();
-        profile.setId(profileId);
-        UUID profileVersionId = UUID.randomUUID();
-        pinConversation(conv, profileVersionId, profileId);
-        AgentProfileVersion published = pinnedVersion("Profile default prompt.", null, profileVersionId, profileId);
-
-        Agent instance = new Agent();
-        instance.setId(instanceId);
-        instance.setAgentHostId(agentId);
-        instance.setStatus(Agent.Status.IDLE);
-
+        Conversation conv = pinnedConversation(conversationId, UUID.randomUUID());
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
-        when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findById(profileId)).thenReturn(Optional.of(profile));
-        when(agentProfileVersionRepository.findByIdWithTools(profileVersionId)).thenReturn(Optional.of(published));
-        when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
-                .thenReturn(List.of(instance));
-        when(connectionManager.isAgentIdle(instanceId)).thenReturn(true);
-        when(agentService.reserveInstance(eq(instanceId), any(), any()))
-                .thenReturn(true);
-        when(conversationService.listMessages(conversationId))
-                .thenReturn(List.of(newMessage(conversationId, 0L,
-                        ConversationMessage.Role.USER, "ping")));
+        when(hostSelectionService.selectForProject(conv.getProjectId())).thenReturn(Optional.empty());
+        when(conversationService.listMessages(conversationId)).thenReturn(List.of());
 
-        dispatcher.dispatch(conversationId);
+        assertThat(dispatcher.dispatch(conversationId)).isFalse();
 
-        ArgumentCaptor<InferenceRequestSpec> captor =
-                ArgumentCaptor.forClass(InferenceRequestSpec.class);
-        verify(inferenceRequestAssembler).assemble(captor.capture());
-        assertThat(captor.getValue().getConversationSystemPrompt()).isEqualTo("Profile default prompt.");
-    }
-
-    @Test
-    void marksOversizedTextAttachmentsForReadFallback() {
-        UUID conversationId = UUID.randomUUID();
-        UUID projectId = UUID.randomUUID();
-        UUID agentId = UUID.randomUUID();
-        UUID profileId = UUID.randomUUID();
-        UUID instanceId = UUID.randomUUID();
-        UUID userMessageId = UUID.randomUUID();
-        UUID attachmentId = UUID.randomUUID();
-
-        Conversation conv = new Conversation();
-        conv.setId(conversationId);
-        conv.setProjectId(projectId);
-        conv.setAgentId(agentId);
-
-        AgentHost agent = new AgentHost();
-        agent.setId(agentId);
-
-        AgentProfile profile = new AgentProfile();
-        profile.setId(profileId);
-        UUID profileVersionId = UUID.randomUUID();
-        pinConversation(conv, profileVersionId, profileId);
-        AgentProfileVersion published = pinnedVersion("Profile default prompt.", null, profileVersionId, profileId);
-
-        Agent instance = new Agent();
-        instance.setId(instanceId);
-        instance.setAgentHostId(agentId);
-        instance.setStatus(Agent.Status.IDLE);
-
-        ConversationMessage user = newMessage(conversationId, 0L, ConversationMessage.Role.USER, "use file");
-        user.setId(userMessageId);
-
-        ConversationMessageAttachment attachment = new ConversationMessageAttachment();
-        attachment.setId(attachmentId);
-        attachment.setConversationId(conversationId);
-        attachment.setMessageId(userMessageId);
-        attachment.setFilename("large.txt");
-        attachment.setMediaType("text/plain");
-        attachment.setSizeBytes(128L);
-        attachment.setSha256("abc123");
-
-        when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
-        when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findById(profileId)).thenReturn(Optional.of(profile));
-        when(agentProfileVersionRepository.findByIdWithTools(profileVersionId)).thenReturn(Optional.of(published));
-        when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
-                .thenReturn(List.of(instance));
-        when(connectionManager.isAgentIdle(instanceId)).thenReturn(true);
-        when(agentService.reserveInstance(eq(instanceId), any(), any()))
-                .thenReturn(true);
-        when(conversationService.listMessages(conversationId)).thenReturn(List.of(user));
-        when(attachmentService.listForMessage(userMessageId)).thenReturn(List.of(attachment));
-        when(attachmentService.download(conversationId, attachmentId))
-                .thenReturn("this text is intentionally too large".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        when(systemSettingService.getInt(eq("attachment_inline_token_limit"), anyLong())).thenReturn(1L);
-
-        boolean dispatched = dispatcher.dispatch(conversationId);
-        assertThat(dispatched).isTrue();
-
-        ArgumentCaptor<InferenceRequestSpec> captor =
-                ArgumentCaptor.forClass(InferenceRequestSpec.class);
-        verify(inferenceRequestAssembler).assemble(captor.capture());
-
-        InferenceRequestSpec spec = captor.getValue();
-        assertThat(spec.getAttachments()).hasSize(1);
-        InferenceRequestSpec.AttachmentDescriptor descriptor = spec.getAttachments().get(0);
-        assertThat(descriptor.id()).isEqualTo(attachmentId.toString());
-        assertThat(descriptor.inlineText()).isNull();
-        assertThat(descriptor.readContentPath())
-                .isEqualTo("/api/v1/agent/conversations/" + conversationId
-                        + "/attachments/" + attachmentId + "/content");
-    }
-
-    @Test
-    void returnsFalseAndSendsNothingWhenNoIdleInstance() {
-        UUID conversationId = UUID.randomUUID();
-        UUID agentId = UUID.randomUUID();
-        UUID profileId = UUID.randomUUID();
-        UUID instanceId = UUID.randomUUID();
-
-        Conversation conv = new Conversation();
-        conv.setId(conversationId);
-        conv.setProjectId(UUID.randomUUID());
-        conv.setAgentId(agentId);
-
-        AgentHost agent = new AgentHost();
-        agent.setId(agentId);
-
-        Agent instance = new Agent();
-        instance.setId(instanceId);
-        instance.setAgentHostId(agentId);
-
-        UUID profileVersionId = UUID.randomUUID();
-        pinConversation(conv, profileVersionId, profileId);
-        AgentProfileVersion published = pinnedVersion("Profile default prompt.", null, profileVersionId, profileId);
-
-        when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
-        when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findById(profileId)).thenReturn(Optional.of(new AgentProfile()));
-        when(agentProfileVersionRepository.findByIdWithTools(profileVersionId)).thenReturn(Optional.of(published));
-        when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
-                .thenReturn(List.of(instance));
-        when(connectionManager.isAgentIdle(instanceId)).thenReturn(false);
-
-        boolean dispatched = dispatcher.dispatch(conversationId);
-
-        assertThat(dispatched).isFalse();
-        verify(pendingTurnRegistry, never()).enqueue(any(), any());
-        // #86 \u2014 the turn isn't silently dropped: a one-time no-agent notice
-        // is emitted so the user knows their message is queued.
         verify(conversationNoticeService).emitNoAgentNotice(conversationId);
+        verify(sessionAllocator, never()).offer(any(), any(), any(), any(), any());
     }
 
     @Test
-    void returnsFalseWhenConversationHasNoPinnedAgent() {
+    void declinesWithTheNoAgentNoticeWhenTheConversationHasNoPinnedProfileVersion() {
         UUID conversationId = UUID.randomUUID();
+        UUID hostId = UUID.randomUUID();
         Conversation conv = new Conversation();
         conv.setId(conversationId);
         conv.setProjectId(UUID.randomUUID());
-        // agentId stays null \u2014 fresh conversation that hasn't picked an agent.
+        // No agentProfileVersionId — an unpinned legacy conversation.
 
+        AgentHost host = new AgentHost();
+        host.setId(hostId);
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
+        when(hostSelectionService.selectForProject(conv.getProjectId())).thenReturn(Optional.of(host));
 
-        boolean dispatched = dispatcher.dispatch(conversationId);
+        assertThat(dispatcher.dispatch(conversationId)).isFalse();
 
-        assertThat(dispatched).isFalse();
-        verify(agentRepository, never()).findById(any());
-        verify(pendingTurnRegistry, never()).enqueue(any(), any());
+        verify(conversationNoticeService).emitNoAgentNotice(conversationId);
+        verify(sessionAllocator, never()).offer(any(), any(), any(), any(), any());
+        verify(hostControlWebSocketHandler, never()).sendSessionOffer(any(), any(), any());
     }
 
     @Test
-    void foldsCoveredMessagesIntoLatestContextSummary() {
+    void declinesWhenTheHostHasNoAllocationCapacity() {
         UUID conversationId = UUID.randomUUID();
-        UUID agentId = UUID.randomUUID();
-        UUID profileId = UUID.randomUUID();
+        UUID hostId = UUID.randomUUID();
+        Conversation conv = pinnedConversation(conversationId, UUID.randomUUID());
+        wireHost(conv, hostId);
+        when(sessionRepository.findByRefIdAndServiceTypeAndAllocationStateIn(
+                eq(conversationId), eq("CONVERSATION"), any())).thenReturn(Optional.empty());
+        when(sessionAllocator.offer(any(), any(), any(), any(), any())).thenReturn(Optional.empty());
+
+        assertThat(dispatcher.dispatch(conversationId)).isFalse();
+
+        verify(conversationNoticeService).emitNoAgentNotice(conversationId);
+        verify(hostControlWebSocketHandler, never()).sendSessionOffer(any(), any(), any());
+    }
+
+    // ---------------------------------------------------------------- reuse
+
+    @Test
+    void reusesTheSameActiveSessionAndShipsExecutionStartImmediately() {
+        UUID conversationId = UUID.randomUUID();
+        UUID projectId = UUID.randomUUID();
+        UUID hostId = UUID.randomUUID();
         UUID instanceId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID executionId = UUID.randomUUID();
 
-        Conversation conv = new Conversation();
-        conv.setId(conversationId);
-        conv.setProjectId(UUID.randomUUID());
-        conv.setAgentId(agentId);
+        Conversation conv = pinnedConversation(conversationId, projectId);
+        wireHost(conv, hostId);
 
-        AgentHost agent = new AgentHost();
-        agent.setId(agentId);
+        Session active = new Session();
+        active.setId(sessionId);
+        active.setRefId(conversationId);
+        active.setServiceType("CONVERSATION");
+        active.setHostInstanceId(instanceId);
+        active.setAllocationState(SessionAllocator.ALLOC_STATE_ACTIVE);
+        when(sessionRepository.findByRefIdAndServiceTypeAndAllocationStateIn(
+                eq(conversationId), eq("CONVERSATION"), any())).thenReturn(Optional.of(active));
 
-        AgentProfile profile = new AgentProfile();
-        profile.setId(profileId);
-        UUID profileVersionId = UUID.randomUUID();
-        pinConversation(conv, profileVersionId, profileId);
-        AgentProfileVersion published = pinnedVersion("Profile default prompt.", null, profileVersionId, profileId);
+        AgentHostInstance instance = hostInstance(hostId);
+        when(hostInstanceRepository.findById(instanceId)).thenReturn(Optional.of(instance));
 
-        Agent instance = new Agent();
-        instance.setId(instanceId);
-        instance.setAgentHostId(agentId);
-        instance.setStatus(Agent.Status.IDLE);
+        SessionExecution priorTurn = new SessionExecution();
+        priorTurn.setSequenceNo(4);
+        when(executionRepository.findBySessionIdOrderBySequenceNoDesc(sessionId))
+                .thenReturn(List.of(priorTurn));
+        when(executionRegistry.start(eq(sessionId), eq(conversationId.toString()), any(), any()))
+                .thenReturn(Optional.of(execution(executionId, sessionId)));
+        when(executionCommandSender.startConversation(eq(executionId), any(), any())).thenReturn(true);
 
-        // Three early turns (seq 0..2) get folded into a summary at seq 3 that
-        // declares it covers everything up to seq 2; two fresh turns follow.
-        ConversationMessage user0 = newMessage(conversationId, 0L, ConversationMessage.Role.USER, "old one");
-        ConversationMessage asst1 = newMessage(conversationId, 1L, ConversationMessage.Role.ASSISTANT, "old reply");
-        ConversationMessage user2 = newMessage(conversationId, 2L, ConversationMessage.Role.USER, "old two");
-        ConversationMessage summary3 = newMessage(conversationId, 3L,
-                ConversationMessage.Role.CONTEXT_SUMMARY, "They discussed onboarding.");
-        summary3.setPayloadJson("{\"kind\":\"CONTEXT_SUMMARY\",\"coversUpToSequenceNo\":2,\"summarizedMessageCount\":3}");
-        ConversationMessage asst4 = newMessage(conversationId, 4L, ConversationMessage.Role.ASSISTANT, "fresh reply");
-        ConversationMessage user5 = newMessage(conversationId, 5L, ConversationMessage.Role.USER, "fresh question");
+        assertThat(dispatcher.dispatch(conversationId)).isTrue();
 
-        when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
-        when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findById(profileId)).thenReturn(Optional.of(profile));
-        when(agentProfileVersionRepository.findByIdWithTools(profileVersionId)).thenReturn(Optional.of(published));
-        when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
-                .thenReturn(List.of(instance));
-        when(connectionManager.isAgentIdle(instanceId)).thenReturn(true);
-        when(agentService.reserveInstance(eq(instanceId), any(), any()))
+        // No second offer: the ACTIVE row is reused (sticky semantics).
+        verify(sessionAllocator, never()).offer(any(), any(), any(), any(), any());
+        verify(hostControlWebSocketHandler, never()).sendSessionOffer(any(), any(), any());
+        verify(pendingConversationTurns, never()).stage(any(), any(), any(), any());
+
+        // The execution ships immediately, with the sequence one past the prior turn.
+        ArgumentCaptor<ExecutionStartPayload> payload =
+                ArgumentCaptor.forClass(ExecutionStartPayload.class);
+        verify(executionCommandSender).startConversation(eq(executionId), any(), payload.capture());
+        assertThat(payload.getValue().executionId()).isEqualTo(executionId);
+        assertThat(payload.getValue().sequenceNo()).isEqualTo(5);
+        assertThat(payload.getValue().requestId()).isEqualTo(conversationId.toString());
+        assertThat(payload.getValue().toolPolicy().activeToolNames()).containsExactly("search");
+        assertThat(payload.getValue().output().stream()).isTrue();
+    }
+
+    @Test
+    void closesAnActiveSessionPinnedToADifferentHostSoTheTurnCanReOffer() {
+        UUID conversationId = UUID.randomUUID();
+        UUID projectId = UUID.randomUUID();
+        UUID selectedHostId = UUID.randomUUID();
+        UUID staleInstanceId = UUID.randomUUID();
+        UUID staleHostId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID freshSessionId = UUID.randomUUID();
+
+        Conversation conv = pinnedConversation(conversationId, projectId);
+        wireHost(conv, selectedHostId);
+
+        Session stale = new Session();
+        stale.setId(sessionId);
+        stale.setRefId(conversationId);
+        stale.setHostInstanceId(staleInstanceId);
+        stale.setAllocationState(SessionAllocator.ALLOC_STATE_ACTIVE);
+        when(sessionRepository.findByRefIdAndServiceTypeAndAllocationStateIn(
+                eq(conversationId), eq("CONVERSATION"), any())).thenReturn(Optional.of(stale));
+
+        AgentHostInstance staleInstance = hostInstance(staleHostId);
+        when(hostInstanceRepository.findById(staleInstanceId)).thenReturn(Optional.of(staleInstance));
+
+        when(sessionAllocator.offer("CONVERSATION", conversationId, "CONVERSATION",
+                projectId, selectedHostId)).thenReturn(Optional.of(freshSessionId));
+
+        assertThat(dispatcher.dispatch(conversationId)).isTrue();
+
+        // The dead-host session is closed, and a fresh offer goes to the live host.
+        verify(sessionAllocator).close(sessionId, "HOST_RESELECTED");
+        verify(sessionAllocator).offer("CONVERSATION", conversationId, "CONVERSATION",
+                projectId, selectedHostId);
+        verify(hostControlWebSocketHandler).sendSessionOffer(freshSessionId, "CONVERSATION", conversationId);
+        verify(executionRegistry, never()).start(any(), any(), any(), any());
+    }
+
+    @Test
+    void refusesToShipWhenATurnIsAlreadyInFlightOnTheSession() {
+        UUID conversationId = UUID.randomUUID();
+        UUID projectId = UUID.randomUUID();
+        UUID hostId = UUID.randomUUID();
+        UUID instanceId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+
+        Conversation conv = pinnedConversation(conversationId, projectId);
+        wireHost(conv, hostId);
+
+        Session active = new Session();
+        active.setId(sessionId);
+        active.setRefId(conversationId);
+        active.setHostInstanceId(instanceId);
+        active.setAllocationState(SessionAllocator.ALLOC_STATE_ACTIVE);
+        when(sessionRepository.findByRefIdAndServiceTypeAndAllocationStateIn(
+                eq(conversationId), eq("CONVERSATION"), any())).thenReturn(Optional.of(active));
+
+        AgentHostInstance instance = hostInstance(hostId);
+        when(hostInstanceRepository.findById(instanceId)).thenReturn(Optional.of(instance));
+
+        when(executionRepository.findBySessionIdOrderBySequenceNoDesc(sessionId)).thenReturn(List.of());
+        // §11.3.4 — the one-in-flight guard inside the registry refuses.
+        when(executionRegistry.start(any(), any(), any(), any())).thenReturn(Optional.empty());
+
+        assertThat(dispatcher.dispatch(conversationId)).isFalse();
+
+        verify(executionCommandSender, never()).startConversation(any(), any(), any());
+    }
+
+    // ---------------------------------------------------------------- cancel
+
+    @Test
+    void cancelShipsAnExecutionCancelForTheInFlightExecution() {
+        UUID conversationId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID executionId = UUID.randomUUID();
+
+        Session active = new Session();
+        active.setId(sessionId);
+        active.setRefId(conversationId);
+        active.setAllocationState(SessionAllocator.ALLOC_STATE_ACTIVE);
+        when(sessionRepository.findByRefIdAndServiceTypeAndAllocationStateIn(
+                eq(conversationId), eq("CONVERSATION"), any())).thenReturn(Optional.of(active));
+
+        SessionExecution inFlight = execution(executionId, sessionId);
+        inFlight.setState(SessionExecution.State.RUNNING);
+        when(executionRepository.findWithLockBySessionIdAndStateIn(eq(sessionId), any()))
+                .thenReturn(List.of(inFlight));
+        when(executionCommandSender.cancel(eq(executionId), eq(active), eq(null), eq("USER_CANCEL"), eq(5)))
                 .thenReturn(true);
-        when(conversationService.listMessages(conversationId))
-                .thenReturn(List.of(user0, asst1, user2, summary3, asst4, user5));
 
-        boolean dispatched = dispatcher.dispatch(conversationId);
-        assertThat(dispatched).isTrue();
+        assertThat(dispatcher.cancel(conversationId)).isTrue();
 
-        ArgumentCaptor<InferenceRequestSpec> captor =
-                ArgumentCaptor.forClass(InferenceRequestSpec.class);
-        verify(inferenceRequestAssembler).assemble(captor.capture());
-        List<InferenceRequestSpec.HistoryEntry> history = captor.getValue().getHistory();
-
-        // Window = [summary(@3), asst(@4), user(@5)] â€” the folded turns 0..2 are gone.
-        assertThat(history).hasSize(3);
-        // The summary anchors the front, shipped as a SYSTEM entry with the label.
-        assertThat(history.get(0).role()).isEqualTo("SYSTEM");
-        assertThat(history.get(0).content())
-                .startsWith("[Summary of earlier conversation]")
-                .contains("They discussed onboarding.");
-        assertThat(history.get(1).content()).isEqualTo("fresh reply");
-        assertThat(history.get(2).role()).isEqualTo("USER");
-        assertThat(history.get(2).content()).isEqualTo("fresh question");
-    }
-
-    // ===================== #103 Slice A â€” native image PARTS ====================
-
-    @Test
-    void imageAttachmentWithVisionModelGetsImagePartFlagAndReadPath() {
-        UUID conversationId = UUID.randomUUID();
-        UUID agentId = UUID.randomUUID();
-        UUID profileId = UUID.randomUUID();
-        UUID instanceId = UUID.randomUUID();
-        UUID userMessageId = UUID.randomUUID();
-        UUID attachmentId = UUID.randomUUID();
-
-        Conversation conv = newConversation(conversationId, agentId);
-        AgentHost agent = newAgentHost(agentId);
-        AgentProfile profile = new AgentProfile();
-        profile.setId(profileId);
-        UUID profileVersionId = UUID.randomUUID();
-        pinConversation(conv, profileVersionId, profileId);
-        AgentProfileVersion published = pinnedVersion("Profile default prompt.", "gpt-4o", profileVersionId, profileId);
-        Agent instance = newIdleInstance(instanceId, agentId);
-
-        // The resolved model supports vision \u2192 the engine flags the image part.
-        Model visionModel = new Model();
-        visionModel.setSupportsVision(true);
-        when(modelService.findByCode("gpt-4o")).thenReturn(visionModel);
-
-        ConversationMessage user = newMessage(conversationId, 0L, ConversationMessage.Role.USER, "look");
-        user.setId(userMessageId);
-        ConversationMessageAttachment image =
-                newAttachment(conversationId, userMessageId, attachmentId, "shot.png", "image/png");
-
-        wireReady(conv, agent, profile, instance, instanceId, agentId, conversationId, profileVersionId, published);        when(conversationService.listMessages(conversationId)).thenReturn(List.of(user));
-        when(attachmentService.listForMessage(userMessageId)).thenReturn(List.of(image));
-
-        assertThat(dispatcher.dispatch(conversationId)).isTrue();
-
-        InferenceRequestSpec.AttachmentDescriptor d = captureSingleAttachment(conversationId);
-        assertThat(d.image()).isTrue();
-        assertThat(d.inlineText()).isNull();
-        assertThat(d.readContentPath())
-                .isEqualTo("/api/v1/agent/conversations/" + conversationId
-                        + "/attachments/" + attachmentId + "/content");
+        verify(executionCommandSender).cancel(executionId, active, null, "USER_CANCEL", 5);
     }
 
     @Test
-    void imageAttachmentWithoutVisionModelIsNotFlagged() {
+    void cancelReturnsFalseWhenNothingIsInFlight() {
         UUID conversationId = UUID.randomUUID();
-        UUID agentId = UUID.randomUUID();
-        UUID profileId = UUID.randomUUID();
-        UUID instanceId = UUID.randomUUID();
-        UUID userMessageId = UUID.randomUUID();
-        UUID attachmentId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
 
-        Conversation conv = newConversation(conversationId, agentId);
-        AgentHost agent = newAgentHost(agentId);
-        AgentProfile profile = new AgentProfile();
-        profile.setId(profileId);
-        UUID profileVersionId = UUID.randomUUID();
-        pinConversation(conv, profileVersionId, profileId);
-        AgentProfileVersion published = pinnedVersion("Profile default prompt.", "text-only", profileVersionId, profileId);
-        Agent instance = newIdleInstance(instanceId, agentId);
+        Session active = new Session();
+        active.setId(sessionId);
+        active.setAllocationState(SessionAllocator.ALLOC_STATE_ACTIVE);
+        when(sessionRepository.findByRefIdAndServiceTypeAndAllocationStateIn(
+                eq(conversationId), eq("CONVERSATION"), any())).thenReturn(Optional.of(active));
+        when(executionRepository.findWithLockBySessionIdAndStateIn(eq(sessionId), any()))
+                .thenReturn(List.of());
 
-        // Non-vision model \u2192 image is conveyed as metadata only, never flagged.
-        Model textModel = new Model();
-        textModel.setSupportsVision(false);
-        when(modelService.findByCode("text-only")).thenReturn(textModel);
+        assertThat(dispatcher.cancel(conversationId)).isFalse();
 
-        ConversationMessage user = newMessage(conversationId, 0L, ConversationMessage.Role.USER, "look");
-        user.setId(userMessageId);
-        ConversationMessageAttachment image =
-                newAttachment(conversationId, userMessageId, attachmentId, "shot.png", "image/png");
-
-        wireReady(conv, agent, profile, instance, instanceId, agentId, conversationId, profileVersionId, published);        when(conversationService.listMessages(conversationId)).thenReturn(List.of(user));
-        when(attachmentService.listForMessage(userMessageId)).thenReturn(List.of(image));
-
-        assertThat(dispatcher.dispatch(conversationId)).isTrue();
-
-        InferenceRequestSpec.AttachmentDescriptor d = captureSingleAttachment(conversationId);
-        assertThat(d.image()).isFalse();
-        assertThat(d.inlineText()).isNull();
-    }
-
-    // ============== #103 Slice B â€” inline-ratio threshold policy ===============
-
-    @Test
-    void demotesAttachmentsThatBreachAggregateInlineBudget() {
-        UUID conversationId = UUID.randomUUID();
-        UUID agentId = UUID.randomUUID();
-        UUID profileId = UUID.randomUUID();
-        UUID instanceId = UUID.randomUUID();
-        UUID userMessageId = UUID.randomUUID();
-        UUID att1 = UUID.randomUUID();
-        UUID att2 = UUID.randomUUID();
-
-        Conversation conv = newConversation(conversationId, agentId);
-        AgentHost agent = newAgentHost(agentId);
-        AgentProfile profile = new AgentProfile();
-        profile.setId(profileId);
-        UUID profileVersionId = UUID.randomUUID();
-        pinConversation(conv, profileVersionId, profileId);
-        AgentProfileVersion published = pinnedVersion("Profile default prompt.", null, profileVersionId, profileId);
-        Agent instance = newIdleInstance(instanceId, agentId);
-
-        ConversationMessage user = newMessage(conversationId, 0L, ConversationMessage.Role.USER, "use files");
-        user.setId(userMessageId);
-        ConversationMessageAttachment file1 =
-                newAttachment(conversationId, userMessageId, att1, "a.txt", "text/plain");
-        ConversationMessageAttachment file2 =
-                newAttachment(conversationId, userMessageId, att2, "b.txt", "text/plain");
-
-        wireReady(conv, agent, profile, instance, instanceId, agentId, conversationId, profileVersionId, published);
-        when(conversationService.listMessages(conversationId)).thenReturn(List.of(user));
-        when(attachmentService.listForMessage(userMessageId)).thenReturn(List.of(file1, file2));
-
-        // Each file is 120 bytes \u2192 ~31 estimated tokens; well under the
-        // per-attachment cap (1000) so both clear the first gate.
-        when(systemSettingService.getInt(eq("attachment_inline_token_limit"), anyLong())).thenReturn(1000L);
-        when(attachmentService.download(conversationId, att1)).thenReturn(bytesOfLength(120));
-        when(attachmentService.download(conversationId, att2)).thenReturn(bytesOfLength(120));
-        // Budget 100 tokens, ratio 0.5 \u2192 aggregate inline budget = 50 tokens.
-        when(systemSettingService.getInt(eq("context_token_budget"), anyLong())).thenReturn(100L);
-        when(systemSettingService.getRatio(eq("attachment_inline_ratio_max"), anyDouble())).thenReturn(0.5);
-
-        assertThat(dispatcher.dispatch(conversationId)).isTrue();
-
-        List<InferenceRequestSpec.AttachmentDescriptor> ds = captureAttachments(conversationId);
-        assertThat(ds).hasSize(2);
-        // First (upload order) is inlined within budget.
-        assertThat(ds.get(0).inlineText()).isNotNull();
-        // Second breaches the aggregate budget â†’ demoted to read-on-demand.
-        assertThat(ds.get(1).inlineText()).isNull();
-        assertThat(ds.get(1).readContentPath())
-                .isEqualTo("/api/v1/agent/conversations/" + conversationId
-                        + "/attachments/" + att2 + "/content");
+        verify(executionCommandSender, never()).cancel(any(), any(), any(), any(), anyInt());
     }
 
     @Test
-    void inlinesAtExactRatioBudgetAndDemotesOneTokenOver() {
+    void cancelReturnsFalseWhenNoSessionIsActive() {
         UUID conversationId = UUID.randomUUID();
-        UUID agentId = UUID.randomUUID();
-        UUID profileId = UUID.randomUUID();
-        UUID instanceId = UUID.randomUUID();
-        UUID userMessageId = UUID.randomUUID();
-        UUID att1 = UUID.randomUUID();
-        UUID att2 = UUID.randomUUID();
+        when(sessionRepository.findByRefIdAndServiceTypeAndAllocationStateIn(
+                eq(conversationId), eq("CONVERSATION"), any())).thenReturn(Optional.empty());
 
-        Conversation conv = newConversation(conversationId, agentId);
-        AgentHost agent = newAgentHost(agentId);
-        AgentProfile profile = new AgentProfile();
-        profile.setId(profileId);
-        UUID profileVersionId = UUID.randomUUID();
-        pinConversation(conv, profileVersionId, profileId);
-        AgentProfileVersion published = pinnedVersion("Profile default prompt.", null, profileVersionId, profileId);
-        Agent instance = newIdleInstance(instanceId, agentId);
+        assertThat(dispatcher.cancel(conversationId)).isFalse();
 
-        ConversationMessage user = newMessage(conversationId, 0L, ConversationMessage.Role.USER, "use files");
-        user.setId(userMessageId);
-        ConversationMessageAttachment file1 =
-                newAttachment(conversationId, userMessageId, att1, "a.txt", "text/plain");
-        ConversationMessageAttachment file2 =
-                newAttachment(conversationId, userMessageId, att2, "b.txt", "text/plain");
+        verify(executionCommandSender, never()).cancel(any(), any(), any(), any(), anyInt());
+    }
 
-        wireReady(conv, agent, profile, instance, instanceId, agentId, conversationId, profileVersionId, published);
-        when(conversationService.listMessages(conversationId)).thenReturn(List.of(user));
-        when(attachmentService.listForMessage(userMessageId)).thenReturn(List.of(file1, file2));
+    // ---------------------------------------------------------------- summary
 
-        when(systemSettingService.getInt(eq("attachment_inline_token_limit"), anyLong())).thenReturn(1000L);
-        // 196 bytes \u2192 (196/4)+1 = 50 estimated tokens, exactly the aggregate
-        // budget (100 \u00d7 0.5); the 4-byte file adds (4/4)+1 = 2 tokens, one+ over.
-        when(attachmentService.download(conversationId, att1)).thenReturn(bytesOfLength(196));
-        when(attachmentService.download(conversationId, att2)).thenReturn(bytesOfLength(4));
-        when(systemSettingService.getInt(eq("context_token_budget"), anyLong())).thenReturn(100L);
-        when(systemSettingService.getRatio(eq("attachment_inline_ratio_max"), anyDouble())).thenReturn(0.5);
+    @Test
+    void summaryTurnRidesTheSameUnifiedPathWithTheSummariserPrompt() {
+        UUID conversationId = UUID.randomUUID();
+        UUID projectId = UUID.randomUUID();
+        UUID hostId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
 
-        assertThat(dispatcher.dispatch(conversationId)).isTrue();
+        Conversation conv = pinnedConversation(conversationId, projectId);
+        wireHost(conv, hostId);
+        when(sessionRepository.findByRefIdAndServiceTypeAndAllocationStateIn(
+                eq(conversationId), eq("CONVERSATION"), any())).thenReturn(Optional.empty());
+        when(sessionAllocator.offer(any(), any(), any(), any(), any())).thenReturn(Optional.of(sessionId));
 
-        List<InferenceRequestSpec.AttachmentDescriptor> ds = captureAttachments(conversationId);
-        assertThat(ds).hasSize(2);
-        // Exactly at the ratio budget â†’ inlined.
-        assertThat(ds.get(0).inlineText()).isNotNull();
-        // One token over â†’ demoted.
-        assertThat(ds.get(1).inlineText()).isNull();
+        ConversationMessage older =
+                message(conversationId, 1L, ConversationMessage.Role.USER, "earlier turn");
+        assertThat(dispatcher.dispatchSummary(conversationId, "prior summary", List.of(older))).isTrue();
+
+        // Same seams as a normal turn: offer + park.
+        verify(hostControlWebSocketHandler).sendSessionOffer(sessionId, "CONVERSATION", conversationId);
+        ArgumentCaptor<ExecutionStartPayload> payload =
+                ArgumentCaptor.forClass(ExecutionStartPayload.class);
+        verify(pendingConversationTurns).stage(eq(sessionId), eq(conversationId), any(), payload.capture());
+
+        List<InferenceMessage> messages = payload.getValue().input().messages();
+        assertThat(messages.get(0).content()).contains("summarisation assistant");
+        assertThat(messages).anySatisfy(m ->
+                assertThat(String.valueOf(m.content())).contains("prior summary"));
+        assertThat(messages).anySatisfy(m ->
+                assertThat(String.valueOf(m.content())).contains("earlier turn"));
+        // Summaries are non-tool turns: no active tools, still streaming.
+        assertThat(payload.getValue().toolPolicy().activeToolNames()).isEmpty();
+        assertThat(payload.getValue().output().stream()).isTrue();
     }
 
     @Test
-    void overSizeCapKeepsSizeFlagNotBudgetFlag() {
+    void summaryDefersWithoutTheNoAgentNoticeWhenNoHostIsAvailable() {
         UUID conversationId = UUID.randomUUID();
-        UUID agentId = UUID.randomUUID();
-        UUID profileId = UUID.randomUUID();
-        UUID instanceId = UUID.randomUUID();
-        UUID userMessageId = UUID.randomUUID();
-        UUID attachmentId = UUID.randomUUID();
+        Conversation conv = pinnedConversation(conversationId, UUID.randomUUID());
+        when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
+        when(hostSelectionService.selectForProject(conv.getProjectId())).thenReturn(Optional.empty());
 
-        Conversation conv = newConversation(conversationId, agentId);
-        AgentHost agent = newAgentHost(agentId);
-        AgentProfile profile = new AgentProfile();
-        profile.setId(profileId);
-        UUID profileVersionId = UUID.randomUUID();
-        pinConversation(conv, profileVersionId, profileId);
-        AgentProfileVersion published = pinnedVersion("Profile default prompt.", null, profileVersionId, profileId);
-        Agent instance = newIdleInstance(instanceId, agentId);
+        assertThat(dispatcher.dispatchSummary(conversationId, null, List.of())).isFalse();
 
-        ConversationMessage user = newMessage(conversationId, 0L, ConversationMessage.Role.USER, "use file");
-        user.setId(userMessageId);
-        ConversationMessageAttachment file =
-                newAttachment(conversationId, userMessageId, attachmentId, "big.txt", "text/plain");
-
-        wireReady(conv, agent, profile, instance, instanceId, agentId, conversationId, profileVersionId, published);
-        when(conversationService.listMessages(conversationId)).thenReturn(List.of(user));
-        when(attachmentService.listForMessage(userMessageId)).thenReturn(List.of(file));
-
-        // Over the per-attachment SIZE cap (1 token) \u2192 omittedBySize wins; the
-        // budget gate never runs for it, so the budget flag stays false.
-        when(systemSettingService.getInt(eq("attachment_inline_token_limit"), anyLong())).thenReturn(1L);
-        when(attachmentService.download(conversationId, attachmentId)).thenReturn(bytesOfLength(120));
-        when(systemSettingService.getRatio(eq("attachment_inline_ratio_max"), anyDouble())).thenReturn(0.5);
-
-        assertThat(dispatcher.dispatch(conversationId)).isTrue();
-
-        InferenceRequestSpec.AttachmentDescriptor d = captureSingleAttachment(conversationId);
-        assertThat(d.inlineText()).isNull();
+        // A summary is an internal optimisation — it must never surface the
+        // user-facing no-agent notice.
+        verify(conversationNoticeService, never()).emitNoAgentNotice(any());
+        verify(sessionAllocator, never()).offer(any(), any(), any(), any(), any());
     }
 
-    // ----- shared fixtures for the #103 attachment tests -----
+    // ---------------------------------------------------------------- fixtures
 
-    /**
-     * Â§16.1: the behaviour contract (system prompt, default model) lives on
-     * the published version row. Builds an in-memory version the mock
-     * version service hands back for the profile under test.
-     */
-
-    // Â§3.7/Â§16.1: every dispatchable conversation must carry a pinned profile version.
-    private static void pinConversation(Conversation conv, UUID profileVersionId, UUID profileId) {
+    private Conversation pinnedConversation(UUID conversationId, UUID projectId) {
+        UUID profileVersionId = UUID.randomUUID();
+        UUID profileId = UUID.randomUUID();
+        Conversation conv = new Conversation();
+        conv.setId(conversationId);
+        conv.setProjectId(projectId);
         conv.setAgentProfileVersionId(profileVersionId);
-    }
 
-    private static AgentProfileVersion pinnedVersion(String systemPrompt, String defaultModel,
-                                                     UUID profileVersionId, UUID profileId) {
-        AgentProfileVersion version = publishedVersion(systemPrompt, defaultModel);
+        AgentProfile profile = new AgentProfile();
+        profile.setId(profileId);
+        AgentProfileVersion version = new AgentProfileVersion();
         version.setId(profileVersionId);
         version.setProfileId(profileId);
-        return version;
-    }
-    private static AgentProfileVersion publishedVersion(String systemPrompt, String defaultModel) {
-        AgentProfileVersion version = new AgentProfileVersion();
-        version.setSystemPrompt(systemPrompt);
-        version.setDefaultModel(defaultModel);
+        version.setSystemPrompt("Profile prompt.");
         version.setStatus(AgentProfileVersion.Status.PUBLISHED);
         version.setTools(java.util.Set.of());
-        return version;
-    }
-
-    private static Conversation newConversation(UUID conversationId, UUID agentId) {
-        Conversation conv = new Conversation();
-        conv.setId(conversationId);
-        conv.setProjectId(UUID.randomUUID());
-        conv.setAgentId(agentId);
+        when(agentProfileVersionRepository.findByIdWithTools(profileVersionId)).thenReturn(Optional.of(version));
+        when(agentProfileRepository.findById(profileId)).thenReturn(Optional.of(profile));
         return conv;
     }
 
-    private static AgentHost newAgentHost(UUID agentId) {
-        AgentHost agent = new AgentHost();
-        agent.setId(agentId);
-        return agent;
+    /** Wire the conversation's host selection plus the persisted message list. */
+    private void wireHost(Conversation conv, UUID hostId) {
+        AgentHost host = new AgentHost();
+        host.setId(hostId);
+        when(conversationRepository.findById(conv.getId())).thenReturn(Optional.of(conv));
+        when(hostSelectionService.selectForProject(conv.getProjectId())).thenReturn(Optional.of(host));
+        when(conversationService.listMessages(conv.getId())).thenReturn(
+                List.of(message(conv.getId(), 0L, ConversationMessage.Role.USER, "ping")));
     }
 
-    private static Agent newIdleInstance(UUID instanceId, UUID agentId) {
-        Agent instance = new Agent();
-        instance.setId(instanceId);
-        instance.setAgentHostId(agentId);
-        instance.setStatus(Agent.Status.IDLE);
+    private static SessionExecution execution(UUID executionId, UUID sessionId) {
+        SessionExecution execution = new SessionExecution();
+        execution.setId(executionId);
+        execution.setSessionId(sessionId);
+        execution.setServiceType("CONVERSATION");
+        execution.setState(SessionExecution.State.STARTING);
+        return execution;
+    }
+
+    /**
+     * A stub live instance pinned to {@code hostId}. {@link AgentHostInstance}
+     * mints its id via the {@code open(...)} factory (there is no setter), so the
+     * test doubles it and stubs only the association the dispatcher reads.
+     */
+    private static AgentHostInstance hostInstance(UUID hostId) {
+        AgentHostInstance instance = mock(AgentHostInstance.class);
+        when(instance.getAgentHostId()).thenReturn(hostId);
         return instance;
     }
 
-    private static ConversationMessageAttachment newAttachment(
-            UUID conversationId, UUID userMessageId, UUID attachmentId, String filename, String mediaType) {
-        ConversationMessageAttachment attachment = new ConversationMessageAttachment();
-        attachment.setId(attachmentId);
-        attachment.setConversationId(conversationId);
-        attachment.setMessageId(userMessageId);
-        attachment.setFilename(filename);
-        attachment.setMediaType(mediaType);
-        attachment.setSizeBytes(64L);
-        attachment.setSha256("sha-" + attachmentId);
-        return attachment;
-    }
-
-    private static byte[] bytesOfLength(int length) {
-        byte[] bytes = new byte[length];
-        java.util.Arrays.fill(bytes, (byte) 'x');
-        return bytes;
-    }
-
-    private void wireReady(Conversation conv, AgentHost agent, AgentProfile profile, Agent instance,
-                           UUID instanceId, UUID agentId, UUID conversationId,
-                           UUID profileVersionId, AgentProfileVersion version) {
-        when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
-        when(agentRepository.findById(agentId)).thenReturn(Optional.of(agent));
-        when(agentProfileRepository.findById(profile.getId())).thenReturn(Optional.of(profile));
-        when(agentProfileVersionRepository.findByIdWithTools(profileVersionId)).thenReturn(Optional.of(version));
-        when(agentInstanceRepository.findByAgentHostIdAndStatus(agentId, Agent.Status.IDLE))
-                .thenReturn(List.of(instance));
-        when(connectionManager.isAgentIdle(instanceId)).thenReturn(true);
-        when(agentService.reserveInstance(eq(instanceId), any(), any())).thenReturn(true);
-    }
-
-    private InferenceRequestSpec.AttachmentDescriptor captureSingleAttachment(UUID conversationId) {
-        List<InferenceRequestSpec.AttachmentDescriptor> ds = captureAttachments(conversationId);
-        assertThat(ds).hasSize(1);
-        return ds.get(0);
-    }
-
-    private List<InferenceRequestSpec.AttachmentDescriptor> captureAttachments(UUID conversationId) {
-        ArgumentCaptor<InferenceRequestSpec> captor =
-                ArgumentCaptor.forClass(InferenceRequestSpec.class);
-        verify(inferenceRequestAssembler).assemble(captor.capture());
-        return captor.getValue().getAttachments();
-    }
-
-    private static ConversationMessage newMessage(
-            UUID conversationId, long seq, ConversationMessage.Role role, String content) {
+    private static ConversationMessage message(UUID conversationId, long seq,
+                                               ConversationMessage.Role role, String content) {
         ConversationMessage m = new ConversationMessage();
         m.setId(UUID.randomUUID());
         m.setConversationId(conversationId);

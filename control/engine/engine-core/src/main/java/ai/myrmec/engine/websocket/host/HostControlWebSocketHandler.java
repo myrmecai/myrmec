@@ -22,7 +22,9 @@ import ai.myrmec.engine.websocket.host.payload.SessionOpenedPayload;
 import ai.myrmec.engine.websocket.host.payload.SessionRejectPayload;
 import ai.myrmec.engine.conversation.ConversationMessage;
 import ai.myrmec.engine.conversation.ConversationService;
+import ai.myrmec.engine.conversation.dispatch.PendingConversationTurns;
 import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
+import ai.myrmec.engine.inference.execution.ExecutionCommandSender;
 import ai.myrmec.engine.inference.execution.ExecutionRegistry;
 import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
@@ -85,6 +87,10 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     private final SessionExecutionRepository executionRepository;
     private final OrchestrationEventIngestionService eventIngestionService;
     private final ExecutionBridge executionBridge;
+    private final PendingConversationTurns pendingConversationTurns;
+    private final ExecutionCommandSender executionCommandSender;
+    private final ai.myrmec.engine.conversation.ConversationRepository conversationRepository;
+    private final ai.myrmec.engine.agent.AgentProfileVersionRepository agentProfileVersionRepository;
 
     @Value("${myrmec.host.heartbeat-interval-seconds:15}")
     private int heartbeatIntervalSeconds;
@@ -116,7 +122,11 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                                        ConversationService conversationService,
                                        SessionExecutionRepository executionRepository,
                                        OrchestrationEventIngestionService eventIngestionService,
-                                       ExecutionBridge executionBridge) {
+                                       ExecutionBridge executionBridge,
+                                       PendingConversationTurns pendingConversationTurns,
+                                       ExecutionCommandSender executionCommandSender,
+                                       ai.myrmec.engine.conversation.ConversationRepository conversationRepository,
+                                       ai.myrmec.engine.agent.AgentProfileVersionRepository agentProfileVersionRepository) {
         this.objectMapper = objectMapper;
         this.agentHostRepository = agentHostRepository;
         this.instanceRepository = instanceRepository;
@@ -131,6 +141,10 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         this.executionRepository = executionRepository;
         this.eventIngestionService = eventIngestionService;
         this.executionBridge = executionBridge;
+        this.pendingConversationTurns = pendingConversationTurns;
+        this.executionCommandSender = executionCommandSender;
+        this.conversationRepository = conversationRepository;
+        this.agentProfileVersionRepository = agentProfileVersionRepository;
     }
 
     /** Exposed for handler tests to assert registration. */
@@ -375,6 +389,9 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                 return;
             }
             log.info("Session {} accepted by instance {}", sessionId, instanceId);
+            // §7.3: continue a staged conversation turn — send the assembled
+            // session.open now that the host committed its slot.
+            continueStagedTurnOnAccept(sessionId);
         } catch (Exception e) {
             sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
                     "session.accept payload invalid: " + e.getMessage(), false, "SESSION", null);
@@ -398,6 +415,8 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         try {
             var reject = objectMapper.treeToValue(envelope.getPayload(), SessionRejectPayload.class);
             sessionAllocator.reject(sessionId, reject.reasonCode(), reject.message(), reject.retryable());
+            // The refusal ends this turn's staged work; the next USER turn re-offers.
+            pendingConversationTurns.discard(sessionId);
         } catch (Exception e) {
             sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
                     "session.reject payload invalid: " + e.getMessage(), false, "SESSION", null);
@@ -427,9 +446,67 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                 return;
             }
             log.info("Session {} opened on instance {}", sessionId, instanceId);
+            // §7.4/§8.1: the session is ACTIVE — ship the staged conversation
+            // turn. No execution.start is legal before this point.
+            shipStagedTurnOnOpened(sessionId);
         } catch (Exception e) {
             sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
                     "session.opened payload invalid: " + e.getMessage(), false, "SESSION", null);
+        }
+    }
+
+    /**
+     * §7.3 continuation for a staged conversation turn: the host committed a
+     * local slot, so send the fully assembled {@code session.open} (context
+     * installed before any {@code execution.start}). The staged turn itself is
+     * kept — {@code session.opened} consumes it.
+     */
+    private void continueStagedTurnOnAccept(UUID sessionId) {
+        PendingConversationTurns.PendingTurn turn = pendingConversationTurns.peek(sessionId).orElse(null);
+        if (turn == null) {
+            return;
+        }
+        // §7.3 needs the profile the conversation pinned; the pinned version row
+        // is on the conversation, addressed through the session's refId.
+        UUID pinnedProfileId = sessionRepository.findById(sessionId)
+                .flatMap(s -> conversationRepository.findById(s.getRefId()))
+                .map(ai.myrmec.engine.conversation.Conversation::getAgentProfileVersionId)
+                .flatMap(agentProfileVersionRepository::findByIdWithTools)
+                .map(ai.myrmec.engine.agent.AgentProfileVersion::getProfileId)
+                .orElse(null);
+        sendSessionOpen(sessionId, pinnedProfileId);
+        log.info("Continued staged conversation turn for session {} (conv {}) — session.open sent",
+                sessionId, turn.conversationId());
+    }
+
+    /**
+     * §7.4/§8.1 continuation for a staged conversation turn: the session is
+     * ACTIVE, so create the execution row and ship {@code execution.start}.
+     */
+    private void shipStagedTurnOnOpened(UUID sessionId) {
+        PendingConversationTurns.PendingTurn turn = pendingConversationTurns.take(sessionId).orElse(null);
+        if (turn == null) {
+            return;
+        }
+        ai.myrmec.engine.inference.Session session = sessionRepository.findById(sessionId).orElse(null);
+        if (session == null) {
+            log.warn("Staged turn for session {} has no session row — dropping", sessionId);
+            return;
+        }
+        SessionExecution execution = executionRegistry.start(sessionId, turn.conversationId().toString(),
+                turn.wirePayload().deadline(), turn.input()).orElse(null);
+        if (execution == null) {
+            log.warn("execution.start refused for staged session {} (conv {})",
+                    sessionId, turn.conversationId());
+            return;
+        }
+        boolean sent = executionCommandSender.startConversation(
+                execution.getId(), session, turn.toStartPayload(execution.getId()));
+        if (sent) {
+            log.info("Shipped staged conversation turn for session {} (conv {}, execution {})",
+                    sessionId, turn.conversationId(), execution.getId());
+        } else {
+            log.warn("Host socket gone for staged session {} — execution.start not delivered", sessionId);
         }
     }
 
@@ -450,6 +527,9 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         try {
             var closed = objectMapper.treeToValue(envelope.getPayload(), SessionClosedPayload.class);
             sessionAllocator.close(sessionId, closed.reasonCode());
+            // A closed session can never resume its staged turn; drop it so the
+            // next USER turn offers cleanly.
+            pendingConversationTurns.discard(sessionId);
         } catch (Exception e) {
             sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
                     "session.closed payload invalid: " + e.getMessage(), false, "SESSION", null);
@@ -717,14 +797,19 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         if (conversationId == null) {
             return;
         }
+        // The transcript rows the bridge writes carry the serving host as their
+        // author (legacy InboundInferenceHandler resolved it the same way, from
+        // the instance's agent host). The session knows its instance; resolve
+        // once for both terminal kinds.
+        UUID agentId = agentIdOfSession(sess);
         switch (terminalState) {
             case COMPLETED -> {
                 ExecutionCompletePayload complete = objectMapper.convertValue(payloadNode, ExecutionCompletePayload.class);
-                executionBridge.onConversationComplete(conversationId, sess.getProjectId(), null, complete);
+                executionBridge.onConversationComplete(conversationId, sess.getProjectId(), agentId, complete);
             }
             case PAUSED -> {
                 ExecutionPausedPayload paused = objectMapper.convertValue(payloadNode, ExecutionPausedPayload.class);
-                executionBridge.onConversationPaused(conversationId, null, paused);
+                executionBridge.onConversationPaused(conversationId, agentId, paused);
             }
             case FAILED -> executionBridge.onConversationFailure(conversationId,
                     rebuildRawFrame(execution, terminalState, payloadNode));
@@ -732,6 +817,16 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                 // No transcript row for a cancelled conversation turn.
             }
         }
+    }
+
+    /** The durable host serving a session (null when the instance is unresolvable). */
+    private UUID agentIdOfSession(ai.myrmec.engine.inference.Session session) {
+        if (session == null || session.getHostInstanceId() == null) {
+            return null;
+        }
+        return instanceRepository.findById(session.getHostInstanceId())
+                .map(AgentHostInstance::getAgentHostId)
+                .orElse(null);
     }
 
     private void bridgeOrchestrationTerminal(SessionExecution execution,

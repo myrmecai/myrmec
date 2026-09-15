@@ -72,6 +72,27 @@ class ConversationControllerTest extends IntegrationTestBase {
         return userRepository.save(user).getId();
     }
 
+    /**
+     * True for the engine's #86 no-agent SYSTEM notice. No host has live
+     * capacity in these tests, so the unified dispatcher correctly declines
+     * each turn and appends this one-time notice; it is a real product
+     * behaviour, not noise — the tests below assert its presence explicitly
+     * and ignore it only when asserting USER/ASSISTANT turn semantics and
+     * pagination over the transcript.
+     */
+    private static boolean isNoAgentNotice(ConversationMessageResponse m) {
+        return "SYSTEM".equals(m.role())
+                && m.payloadJson() != null
+                && m.payloadJson().contains("NO_AGENT_NOTICE");
+    }
+
+    /** Entity-side counterpart of {@link #isNoAgentNotice(ConversationMessageResponse)}. */
+    private static boolean isNoAgentNotice(ConversationMessage m) {
+        return m.getRole() == ConversationMessage.Role.SYSTEM
+                && m.getPayloadJson() != null
+                && m.getPayloadJson().contains("NO_AGENT_NOTICE");
+    }
+
     @Test
     void adminCanCreateConversationAndPostUserMessage() {
         Project project = data.project().named("conv-ctrl-create").create();
@@ -106,15 +127,19 @@ class ConversationControllerTest extends IntegrationTestBase {
         assertThat(posted.getBody().sequenceNo()).isEqualTo(0L);
         assertThat(posted.getBody().authorUserId()).isEqualTo(TEST_ADMIN_ID);
 
-        // Listing returns the same row.
+        // Listing returns the same row first, then the one-time #86 no-agent
+        // notice the declined dispatch appended (no host is online here).
         ResponseEntity<List<ConversationMessageResponse>> listed = restTemplate.exchange(
                 "/api/v1/conversations/" + conversationId + "/messages",
                 HttpMethod.GET,
                 new HttpEntity<>(adminHeaders()),
                 new ParameterizedTypeReference<List<ConversationMessageResponse>>() {});
         assertThat(listed.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(listed.getBody()).hasSize(1);
+        assertThat(listed.getBody()).hasSize(2);
         assertThat(listed.getBody().get(0).content()).isEqualTo("hello world");
+        assertThat(listed.getBody())
+                .filteredOn(ConversationControllerTest::isNoAgentNotice)
+                .hasSize(1);
     }
 
     @Test
@@ -247,14 +272,25 @@ class ConversationControllerTest extends IntegrationTestBase {
         assertThat(edited.getBody().content()).isEqualTo("what is the capital of France?");
         assertThat(edited.getBody().parentMessageId()).isEqualTo(originalId);
         assertThat(edited.getBody().superseded()).isFalse();
-        assertThat(edited.getBody().sequenceNo()).isEqualTo(1L);
 
         // The original is retained but soft-superseded; the new turn is active.
+        // Each declined dispatch interleaves its one-time no-agent notice
+        // (SYSTEM) with the turns, so compare against the turn rows only.
         List<ConversationMessage> all = conversationService.listMessages(conversationId);
-        assertThat(all).hasSize(2);
-        assertThat(all.get(0).getId()).isEqualTo(originalId);
-        assertThat(all.get(0).isSuperseded()).isTrue();
-        assertThat(all.get(1).isSuperseded()).isFalse();
+        List<ConversationMessage> turns = all.stream()
+                .filter(m -> !isNoAgentNotice(m))
+                .toList();
+        assertThat(turns).hasSize(2);
+        assertThat(turns.get(0).getId()).isEqualTo(originalId);
+        assertThat(turns.get(0).isSuperseded()).isTrue();
+        assertThat(turns.get(1).getId()).isEqualTo(edited.getBody().id());
+        assertThat(turns.get(1).isSuperseded()).isFalse();
+        // The replacement is the newest turn: strictly after the original.
+        assertThat(edited.getBody().sequenceNo())
+                .isGreaterThan(turns.get(0).getSequenceNo());
+        assertThat(edited.getBody().sequenceNo()).isEqualTo(turns.get(1).getSequenceNo());
+        // Both declined dispatches still surfaced their notice.
+        assertThat(all).filteredOn(ConversationControllerTest::isNoAgentNotice).hasSize(2);
     }
 
     @Test
@@ -311,12 +347,19 @@ class ConversationControllerTest extends IntegrationTestBase {
         assertThat(regenerated.getBody().superseded()).isTrue();
 
         // The USER turn stays active; the assistant answer is superseded.
+        // No host is online here, so each declined dispatch interleaves its
+        // one-time no-agent notice — assert over the turn rows only.
         List<ConversationMessage> all = conversationService.listMessages(conversationId);
-        assertThat(all).hasSize(2);
-        assertThat(all.get(0).getRole()).isEqualTo(ConversationMessage.Role.USER);
-        assertThat(all.get(0).isSuperseded()).isFalse();
-        assertThat(all.get(1).getId()).isEqualTo(assistant.getId());
-        assertThat(all.get(1).isSuperseded()).isTrue();
+        List<ConversationMessage> turns = all.stream()
+                .filter(m -> !isNoAgentNotice(m))
+                .toList();
+        assertThat(turns).hasSize(2);
+        assertThat(turns.get(0).getRole()).isEqualTo(ConversationMessage.Role.USER);
+        assertThat(turns.get(0).isSuperseded()).isFalse();
+        assertThat(turns.get(1).getId()).isEqualTo(assistant.getId());
+        assertThat(turns.get(1).isSuperseded()).isTrue();
+        assertThat(all).filteredOn(ConversationControllerTest::isNoAgentNotice)
+                .isNotEmpty();
     }
 
     @Test
@@ -526,14 +569,19 @@ class ConversationControllerTest extends IntegrationTestBase {
         assertThat(pinned.statusCode()).isEqualTo(200);
         assertThat(JSON.readTree(pinned.body()).get("pinned").asBoolean()).isTrue();
 
-        // The pin is persisted in the message list.
+        // The pin is persisted in the message list. The declined dispatch's
+        // one-time no-agent notice rides after the pinned turn.
         ResponseEntity<List<ConversationMessageResponse>> listed = restTemplate.exchange(
                 "/api/v1/conversations/" + conversationId + "/messages",
                 HttpMethod.GET,
                 new HttpEntity<>(adminHeaders()),
                 new ParameterizedTypeReference<List<ConversationMessageResponse>>() {});
-        assertThat(listed.getBody()).hasSize(1);
+        assertThat(listed.getBody()).hasSize(2);
+        assertThat(listed.getBody().get(0).content()).isEqualTo("pin me");
         assertThat(listed.getBody().get(0).pinned()).isTrue();
+        assertThat(listed.getBody())
+                .filteredOn(ConversationControllerTest::isNoAgentNotice)
+                .hasSize(1);
 
         // Unpin it.
         HttpResponse<String> unpinned = patch(
@@ -663,7 +711,12 @@ class ConversationControllerTest extends IntegrationTestBase {
                 ConversationResponse.class);
         UUID conversationId = created.getBody().id();
 
-        // Seed five USER messages (sequence_no 0..4).
+        // Seed five USER messages (sequence_no 0..4). No host is online here,
+        // so each dispatched turn is followed by the engine's one-time #86
+        // no-agent notice — the raw transcript interleaves 5 USER turns with
+        // 5 SYSTEM notices (m0, notice, m1, notice, … m4, notice). Paging runs
+        // over those raw rows; the assertions below ignore the notice rows
+        // when checking the USER-turn sequence.
         for (int i = 0; i < 5; i++) {
             restTemplate.exchange(
                     "/api/v1/conversations/" + conversationId + "/messages",
@@ -672,35 +725,45 @@ class ConversationControllerTest extends IntegrationTestBase {
                     ConversationMessageResponse.class);
         }
 
-        // No params → whole transcript in ascending order.
+        // No params → whole raw transcript in ascending sequence order.
         ResponseEntity<List<ConversationMessageResponse>> all = restTemplate.exchange(
                 "/api/v1/conversations/" + conversationId + "/messages",
                 HttpMethod.GET,
                 new HttpEntity<>(adminHeaders()),
                 new ParameterizedTypeReference<List<ConversationMessageResponse>>() {});
-        assertThat(all.getBody()).hasSize(5);
-        assertThat(all.getBody().get(0).content()).isEqualTo("m0");
-        assertThat(all.getBody().get(4).content()).isEqualTo("m4");
+        assertThat(all.getBody()).hasSize(10);
+        assertThat(all.getBody())
+                .filteredOn(ConversationControllerTest::isNoAgentNotice)
+                .hasSize(5);
+        assertThat(userTurns(all.getBody())).extracting(ConversationMessageResponse::content)
+                .containsExactly("m0", "m1", "m2", "m3", "m4");
 
-        // limit=2 → newest two rows, still ascending (m3, m4).
+        // limit=4 → the newest four RAW rows (m3, notice, m4, notice), still
+        // ascending; the USER turns on that page are m3 then m4.
         ResponseEntity<List<ConversationMessageResponse>> newest = restTemplate.exchange(
-                "/api/v1/conversations/" + conversationId + "/messages?limit=2",
+                "/api/v1/conversations/" + conversationId + "/messages?limit=4",
                 HttpMethod.GET,
                 new HttpEntity<>(adminHeaders()),
                 new ParameterizedTypeReference<List<ConversationMessageResponse>>() {});
-        assertThat(newest.getBody()).hasSize(2);
-        assertThat(newest.getBody().get(0).content()).isEqualTo("m3");
-        assertThat(newest.getBody().get(1).content()).isEqualTo("m4");
+        assertThat(newest.getBody()).hasSize(4);
+        assertThat(userTurns(newest.getBody())).extracting(ConversationMessageResponse::content)
+                .containsExactly("m3", "m4");
 
-        // Older page strictly before the first row of the newest page (seq 3).
+        // Older page strictly before the oldest raw row of the newest page.
         long cursor = newest.getBody().get(0).sequenceNo();
         ResponseEntity<List<ConversationMessageResponse>> older = restTemplate.exchange(
-                "/api/v1/conversations/" + conversationId + "/messages?limit=2&before=" + cursor,
+                "/api/v1/conversations/" + conversationId + "/messages?limit=4&before=" + cursor,
                 HttpMethod.GET,
                 new HttpEntity<>(adminHeaders()),
                 new ParameterizedTypeReference<List<ConversationMessageResponse>>() {});
-        assertThat(older.getBody()).hasSize(2);
-        assertThat(older.getBody().get(0).content()).isEqualTo("m1");
-        assertThat(older.getBody().get(1).content()).isEqualTo("m2");
+        assertThat(older.getBody()).hasSize(4);
+        assertThat(userTurns(older.getBody())).extracting(ConversationMessageResponse::content)
+                .containsExactly("m1", "m2");
+    }
+
+    /** The USER/ASSISTANT/CONTEXT rows on a listed page, notices dropped. */
+    private static List<ConversationMessageResponse> userTurns(
+            List<ConversationMessageResponse> rows) {
+        return rows.stream().filter(m -> !isNoAgentNotice(m)).toList();
     }
 }
