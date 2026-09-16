@@ -86,6 +86,13 @@ export interface HostControlClientOptions {
   dedupeLimit?: number;
   /** Connection override (tests inject a fake). */
   connection?: HostControlConnection;
+  /**
+   * Invoked once per `host.opened` carrying a PSK (design
+   * 2026-09-16-credential-envelope-delivery.md §6/§10). The client buffers
+   * the bytes in process memory only; the callback hands them to the
+   * SessionRegistry (`setPsk`). Never logged, never persisted.
+   */
+  onPsk?: (psk: Uint8Array) => void;
 }
 
 /** State of the host-control FSM. */
@@ -277,6 +284,7 @@ export class HostControlClient {
   private effectivePoolSize = 0;
   private readonly seen: MessageIdDedupe;
   private executionHandler: ExecutionHandler | null = null;
+  private readonly onPsk: ((psk: Uint8Array) => void) | undefined;
 
   constructor(options: HostControlClientOptions) {
     this.engineUrl = options.engineUrl.replace(/\/+$/, "");
@@ -288,6 +296,7 @@ export class HostControlClient {
     this.capabilities = options.capabilities ?? {};
     this.reportedCapacity = options.reportedCapacity ?? {};
     this.seen = new MessageIdDedupe(options.dedupeLimit ?? 256);
+    this.onPsk = options.onPsk;
     this.connection =
       options.connection ??
       new WebSocketHostControlConnection(this.engineUrl, this.path);
@@ -687,6 +696,27 @@ export class HostControlClient {
       `Host opened: instance=${payload.hostInstanceId} ` +
         `pool=${payload.effectivePoolSize} heartbeat=${payload.heartbeatIntervalSeconds}s`,
     );
+    // PSK receive path (design §6/§10): decode, validate, keep in process
+    // memory ONLY, hand to the SessionRegistry via the callback. The value
+    // is never logged and never persisted; the frame-logger denylist keeps
+    // it out of captured logs on the engine side.
+    if (payload.psk) {
+      const pskBytes = Buffer.from(payload.psk, "base64");
+      if (pskBytes.length !== 32) {
+        this.log.error(
+          `host.opened carried a malformed PSK (${pskBytes.length} bytes, expected 32) — keyless delivery disabled for this run`,
+        );
+      } else {
+        try {
+          this.onPsk?.(pskBytes);
+        } catch (err) {
+          this.log.error(
+            "onPsk handler failed:",
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+      }
+    }
   }
 
   private async handleProtocolError(frame: ParsedUnifiedFrame): Promise<void> {

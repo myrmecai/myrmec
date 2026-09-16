@@ -10,11 +10,16 @@
  * tears it down on `session.close`. The model is resolved ONCE at open time
  * and reused across every turn in the session.
  */
-import type { SessionOpenPayload } from "../protocol/unifiedFrames.js";
+import type { SessionOpenPayload, SessionCredential } from "../protocol/unifiedFrames.js";
 import type { ModelInfoWire } from "../protocol/sessionTypes.js";
 import type { ChatModel, SessionTool } from "../executor/types.js";
 import type { ChatModelFactory, SessionToolFactory } from "../executor/providers.js";
 import type { Logger } from "../models/index.js";
+import {
+  CredentialEnvelopeError,
+  deriveSessionKey,
+  openEnvelope,
+} from "../security/credentialEnvelopes.js";
 
 /** Agent-side state for one open session. */
 export interface Session {
@@ -34,7 +39,15 @@ export interface Session {
    *  session's context. Null on ordinary sessions. */
   orchestration?: Record<string, unknown> | null;
   /** §16.3 sha-256 of the canonical assignment bytes. */
-  assignmentDigest?: string | null;}
+  assignmentDigest?: string | null;
+  /**
+   * Credential vault (design 2026-09-16-credential-envelope-delivery.md
+   * §10): unwrapped `credentialRef → plaintext` for this session, populated
+   * from session.open envelopes and cleared when the session closes. The
+   * plaintext never enters any log line or serialized frame.
+   */
+  credentialVault?: Map<string, string>;
+}
 
 /** Constructor options for {@link SessionRegistry}. */
 export interface SessionRegistryOptions {
@@ -64,6 +77,12 @@ export class SessionRegistry {
   private readonly chatModelFactory: ChatModelFactory;
   private readonly sessionToolFactory: SessionToolFactory;
   private readonly logger: Logger;
+  /**
+   * This run's PSK (design §6/§10): delivered on `host.opened`, held in
+   * process memory only — never persisted, never logged, never stored on a
+   * Session record. Destroyed with the process / on disconnect.
+   */
+  private psk: Uint8Array | null = null;
 
   constructor(options: SessionRegistryOptions) {
     this.chatModelFactory = options.chatModelFactory;
@@ -72,51 +91,158 @@ export class SessionRegistry {
   }
 
   /**
-   * Open a session: resolve the model, bind tools, store knowledge sources.
-   * Throws if the model cannot be resolved or a catalogued tool has no
-   * matching implementation.
+   * Receive the run's PSK (design §6). Called by the transport layer right
+   * after `host.opened`; kept in a private field ONLY — it never lands on a
+   * Session record or any log line.
    */
-  async open(payload: SessionOpenPayload): Promise<void> {
-    const modelInfo = payload.model as unknown as ModelInfoWire;
-    const model = await this.chatModelFactory.resolve(modelInfo, payload.sessionId);
-    // zod's z.infer widens riskClass to string — re-narrow to the literal
-    // union the session-tool factory expects.
-    const tools = await this.sessionToolFactory.resolve(
-      payload.tools.map((t) => ({
-        ...t,
-        riskClass: (t.riskClass as "SAFE" | "DESTRUCTIVE" | "IRREVERSIBLE") ?? "SAFE",
-      })),
-    );
-
-    const knowledgeSourceIds = new Set(
-      payload.knowledgeSources.map((ks) => ks.knowledgeSourceId),
-    );
-
-    const session: Session = {
-      sessionId: payload.sessionId,
-      serviceType: payload.serviceType === "WORKFLOW" ? "WORKFLOW" : "CONVERSATION",
-      projectId: payload.projectId,
-      model,
-      tools,
-      knowledgeSourceIds,
-      autoHitlOnDestructive: payload.autoHitlOnDestructive ?? false,
-      // §16.2/§16.3: pass the orchestration assignment through — the
-      // orchestration executor reads it from the session, not from a
-      // legacy inference.assign wire.
-      orchestration: payload.orchestration ?? null,
-      assignmentDigest: payload.assignmentDigest ?? null,
-    };
-    this.sessions.set(payload.sessionId, session);
-
-    this.logger.info(
-      `Session opened: ${payload.sessionId} (${payload.serviceType}) — ${tools.size} tools, ${knowledgeSourceIds.size} knowledge sources${
-        payload.orchestration ? ", orchestration assignment installed" : ""}`,
-    );
+  setPsk(pskBytes: Uint8Array): void {
+    if (pskBytes.length !== 32) {
+      throw new CredentialEnvelopeError("TAMPERED", "PSK must be exactly 32 bytes");
+    }
+    this.psk = pskBytes;
   }
 
   /**
-   * Close a session: dispose the model (best-effort) and drop the entry.
-   * No-op if the session is already gone.
+   * Open a session: resolve the model, bind tools, store knowledge sources,
+   * unwrap delivered credential envelopes into the session vault.
+   * Throws if the model cannot be resolved, a catalogued tool has no
+   * matching implementation, or any credential envelope fails to open —
+   * a failed open tears the session down (fail closed).
+   */
+  async open(payload: SessionOpenPayload): Promise<void> {
+    // Credential vault (design §10): unwrap every envelope BEFORE the model
+    // is resolved so the factory resolver can reach the vault. Any failure
+    // aborts the open — nothing half-decrypted lingers.
+    const credentialVault = payload.credentials?.length
+      ? await this.buildVault(payload.sessionId, payload.credentials)
+      : undefined;
+    try {
+      const modelInfo = payload.model as unknown as ModelInfoWire;
+      const model = await this.chatModelFactory.resolve(
+        modelInfo,
+        payload.sessionId,
+        credentialVault ? (ref) => this.resolveFromVault(credentialVault, ref) : undefined,
+      );
+      // zod's z.infer widens riskClass to string — re-narrow to the literal
+      // union the session-tool factory expects.
+      const tools = await this.sessionToolFactory.resolve(
+        payload.tools.map((t) => ({
+          ...t,
+          riskClass: (t.riskClass as "SAFE" | "DESTRUCTIVE" | "IRREVERSIBLE") ?? "SAFE",
+        })),
+      );
+
+      const knowledgeSourceIds = new Set(
+        payload.knowledgeSources.map((ks) => ks.knowledgeSourceId),
+      );
+
+      const session: Session = {
+        sessionId: payload.sessionId,
+        serviceType: payload.serviceType === "WORKFLOW" ? "WORKFLOW" : "CONVERSATION",
+        projectId: payload.projectId,
+        model,
+        tools,
+        knowledgeSourceIds,
+        autoHitlOnDestructive: payload.autoHitlOnDestructive ?? false,
+        // §16.2/§16.3: pass the orchestration assignment through — the
+        // orchestration executor reads it from the session, not from a
+        // legacy inference.assign wire.
+        orchestration: payload.orchestration ?? null,
+        assignmentDigest: payload.assignmentDigest ?? null,
+        ...(credentialVault ? { credentialVault } : {}),
+      };
+      this.sessions.set(payload.sessionId, session);
+
+      this.logger.info(
+        `Session opened: ${payload.sessionId} (${payload.serviceType}) — ${tools.size} tools, ${knowledgeSourceIds.size} knowledge sources${
+          payload.orchestration ? ", orchestration assignment installed" : ""
+        }${credentialVault ? `, ${credentialVault.size} credentials unwrapped` : ""}`,
+      );
+    } catch (err) {
+      // A failed open must not leak already-unwrapped plaintexts (§10).
+      credentialVault?.clear();
+      throw err;
+    }
+  }
+
+  /**
+   * Unwrap every session credential envelope into the vault (design §10).
+   * Requires the run PSK; any envelope failure (tamper/expiry/session
+   * binding/duplicate ref) fails the whole open.
+   */
+  private async buildVault(
+    sessionId: string,
+    credentials: SessionCredential[],
+  ): Promise<Map<string, string>> {
+    if (!this.psk) {
+      throw new CredentialEnvelopeError(
+        "MISSING_PSK",
+        "session.open carried credentials but no PSK was delivered on host.opened",
+      );
+    }
+    const sessionKey = deriveSessionKey(this.psk, sessionId);
+    const vault = new Map<string, string>();
+    for (const credential of credentials) {
+      if (vault.has(credential.credentialRef)) {
+        // Protocol §7.3 rule 1: a ref resolves exactly once per session.
+        vault.clear();
+        throw new CredentialEnvelopeError(
+          "DUPLICATE_REF",
+          `credentialRef '${credential.credentialRef}' delivered more than once`,
+        );
+      }
+      if (credential.envelope.sessionId !== sessionId) {
+        // Cross-session replay — validate explicitly so the failure code is
+        // precise even when the GCM binding would also catch it.
+        vault.clear();
+        throw new CredentialEnvelopeError(
+          "SESSION_MISMATCH",
+          `credential '${credential.credentialRef}' is bound to session '${credential.envelope.sessionId}', expected '${sessionId}'`,
+        );
+      }
+      try {
+        vault.set(
+          credential.credentialRef,
+          openEnvelope(credential.envelope, sessionKey, sessionId),
+        );
+      } catch (err) {
+        vault.clear();
+        throw err;
+      }
+    }
+    return vault;
+  }
+
+  /** Vault-backed plaintext lookup; unknown refs fail closed. */
+  private resolveFromVault(vault: Map<string, string>, ref: string): string {
+    const value = vault.get(ref);
+    if (value === undefined) {
+      throw new CredentialEnvelopeError("UNKNOWN_REF", `credentialRef '${ref}' was never unwrapped`);
+    }
+    return value;
+  }
+
+  /**
+   * Resolver handed to consumers (tool/workspace factories as they grow
+   * credential needs): returns the plaintext for a ref opened in this
+   * session, or throws `UNKNOWN_REF` (design §10).
+   */
+  resolveCredential(sessionId: string, ref: string): string {
+    const session = this.sessions.get(sessionId);
+    const vault = session?.credentialVault;
+    if (!vault) {
+      throw new CredentialEnvelopeError(
+        "UNKNOWN_REF",
+        `no credential vault for session '${sessionId}' (credentialRef '${ref}')`,
+      );
+    }
+    return this.resolveFromVault(vault, ref);
+  }
+
+  /**
+   * Close a session: dispose the model (best-effort), clear the credential
+   * vault (§10: the vault dies with the session entry — no plaintext may
+   * outlive its session) and drop the entry. No-op if already gone.
    */
   close(sessionId: string): void {
     const session = this.sessions.get(sessionId);
@@ -128,6 +254,7 @@ export class SessionRegistry {
       close?: () => void;
     };
     maybeDisposable.close?.();
+    session.credentialVault?.clear();
     this.sessions.delete(sessionId);
     this.logger.debug(`Session closed: ${sessionId}`);
   }

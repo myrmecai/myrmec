@@ -396,7 +396,9 @@ export class OrchestrationRunner {
       provider: orchestratorModelDef.provider,
       modelId: orchestratorModelDef.modelId,
       apiEndpoint: orchestratorModelDef.apiEndpoint,
-      apiKey: null, // credentialRef resolution is the adapter's job
+      // Credential-envelope delivery (design §9): the assignment carries an
+      // adapter-scoped ref only; the plaintext never reaches the runner.
+      credentialRef: null,
       parameters: orchestratorModelDef.parameters as Record<string, unknown>,
     };
     const orchestratorModel = await this.options.chatModelFactory.resolve(

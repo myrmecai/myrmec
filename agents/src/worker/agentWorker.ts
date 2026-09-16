@@ -146,6 +146,16 @@ export class AgentWorker {
     return this.inference.isBusy;
   }
 
+  /**
+   * PSK receive path (design 2026-09-16-credential-envelope-delivery.md
+   * §6/§10): the transport invokes this with the run PSK from
+   * `host.opened`; the registry keeps it in process memory only and uses it
+   * to derive per-session keys for envelope unwrapping.
+   */
+  setPsk(psk: Uint8Array): void {
+    this.sessions.setPsk(psk);
+  }
+
   /** Dispatch an inbound message from the Supervisor. */
   async handle(message: WorkerInbound): Promise<void> {
     if (message.kind !== "envelope") {

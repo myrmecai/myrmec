@@ -43,8 +43,16 @@ export interface ChatModelFactory {
    * @param modelInfo  the engine's model descriptor (provider, modelId, etc.)
    * @param sessionId  the session ID — lets stub implementations scope
    *                   per-session handler state
+   * @param resolveCredential  vault-backed plaintext lookup for the model
+   *                           block's `credentialRef` (design
+   *                           2026-09-16-credential-envelope-delivery.md
+   *                           §10). Absent on keyless sessions.
    */
-  resolve(modelInfo: ModelInfoWire, sessionId: string): Promise<ChatModel>;
+  resolve(
+    modelInfo: ModelInfoWire,
+    sessionId: string,
+    resolveCredential?: (ref: string) => string,
+  ): Promise<ChatModel>;
 }
 
 /**
@@ -92,8 +100,12 @@ export interface ProviderConfig {
  * function which lazy-imports LangChain and constructs the provider model.
  */
 export class LangChainChatModelFactory implements ChatModelFactory {
-  async resolve(modelInfo: ModelInfoWire, _sessionId: string): Promise<ChatModel> {
-    return resolveChatModel(modelInfo);
+  async resolve(
+    modelInfo: ModelInfoWire,
+    _sessionId: string,
+    resolveCredential?: (ref: string) => string,
+  ): Promise<ChatModel> {
+    return resolveChatModel(modelInfo, resolveCredential);
   }
 }
 

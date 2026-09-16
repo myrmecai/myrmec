@@ -116,6 +116,11 @@ export const hostOpenedPayloadSchema = z.object({
   eventReplayWindowSeconds: z.number().int(),
   streamLimits: streamLimitsSchema,
   serverNodeId: z.string(),
+  // Per-instance PSK delivery (design §6, additive): 32-byte base64 key +
+  // its id. Key material — frame-logger denylist on both sides; the SDK
+  // holds it in process memory only.
+  psk: z.string().nullish(),
+  pskKeyId: z.string().nullish(),
 });
 export type HostOpenedPayload = z.infer<typeof hostOpenedPayloadSchema>;
 
@@ -228,7 +233,9 @@ export const modelConfigSchema = z.object({
   provider: z.string(),
   modelId: z.string(),
   apiEndpoint: z.string().nullish(),
-  apiKey: z.string().nullish(),
+  // Credential-envelope delivery (design §9): the plaintext key never rides
+  // the wire; the model block references an entry in `credentials` by ref.
+  credentialRef: z.string().nullish(),
   parameters: mapUnknown,
 });
 export type ModelConfig = z.infer<typeof modelConfigSchema>;
@@ -243,7 +250,7 @@ export const modelInfoSchema = z.object({
   provider: z.string(),
   modelId: z.string(),
   apiEndpoint: z.string().nullish(),
-  apiKey: z.string().nullish(),
+  credentialRef: z.string().nullish(),
   parameters: z.record(z.string(), z.unknown()).default({}),
 });
 export type ModelInfoWire = z.infer<typeof modelInfoSchema>;
@@ -252,7 +259,9 @@ export const workspaceConfigSchema = z.object({
   repoUrl: z.string(),
   branch: z.string(),
   subPath: z.string().nullish(),
-  repoToken: z.string().nullish(),
+  // Credential-envelope delivery (design §9): was `repoToken` — the token
+  // now travels only inside `credentials[].envelope`.
+  credentialRef: z.string().nullish(),
 });
 export type WorkspaceConfig = z.infer<typeof workspaceConfigSchema>;
 
@@ -271,6 +280,36 @@ export const knowledgeSourceHandleSchema = z.object({
 });
 export type KnowledgeSourceHandle = z.infer<typeof knowledgeSourceHandleSchema>;
 
+// ---- Credential envelopes (§7.3, design 2026-09-16-credential-envelope-
+//      delivery.md §8/§9 — additive, mode-blind) ----
+
+/**
+ * `MyrmecSecureEnvelopeV1` — sealed AES-256-GCM credential. Secrets appear
+ * ONLY inside this shape; envelope metadata is non-secret by construction.
+ * Mirrors `MyrmecSecureEnvelope` in `security/credentialEnvelopes.ts`.
+ */
+export const credentialEnvelopeSchema = z.object({
+  format: z.literal("MyrmecSecureEnvelopeV1"),
+  keyId: z.string().min(1),
+  sessionId: uuid,
+  hostId: z.string().min(1),
+  purpose: z.enum(["MODEL_PROVIDER", "WORKSPACE_TOKEN"]),
+  createdAt: isoString,
+  expiresAt: isoString,
+  plaintextDigest: z.string().min(1),
+  nonce: z.string().min(1),
+  ciphertext: z.string().min(1),
+});
+export type CredentialEnvelope = z.infer<typeof credentialEnvelopeSchema>;
+
+/** One delivered session credential: the ref configs reference + its envelope. */
+export const sessionCredentialSchema = z.object({
+  credentialRef: z.string().min(1),
+  purpose: z.enum(["MODEL_PROVIDER", "WORKSPACE_TOKEN"]),
+  envelope: credentialEnvelopeSchema,
+});
+export type SessionCredential = z.infer<typeof sessionCredentialSchema>;
+
 export const sessionOpenPayloadSchema = z.object({
   sessionId: uuid,
   serviceType: z.string(),
@@ -286,6 +325,8 @@ export const sessionOpenPayloadSchema = z.object({
   // `assignmentDigest` — the assignment IS that session's context.
   orchestration: z.record(z.string(), z.unknown()).nullish(),
   assignmentDigest: z.string().nullish(),
+  // Credential envelopes (design §9): omitted when the session is keyless.
+  credentials: z.array(sessionCredentialSchema).optional(),
 });
 export type SessionOpenPayload = z.infer<typeof sessionOpenPayloadSchema>;
 

@@ -174,7 +174,9 @@ export class WorkerInvoker {
       provider: model.provider,
       modelId: model.modelId,
       apiEndpoint: model.apiEndpoint,
-      apiKey: null, // credentialRef resolution is the adapter's job (Feature 10)
+      // Credential-envelope delivery (design §9): the assignment carries an
+      // adapter-scoped ref only; the plaintext never reaches the invoker.
+      credentialRef: null,
       parameters: model.parameters as Record<string, unknown>,
     };
     const resolved = await this.options.chatModelFactory.resolve(info, `worker-${randomUUID()}`);

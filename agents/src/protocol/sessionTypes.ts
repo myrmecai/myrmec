@@ -16,7 +16,12 @@ export interface ModelInfoWire {
   provider: string;
   modelId: string;
   apiEndpoint: string | null;
-  apiKey: string | null;
+  /**
+   * Credential-envelope delivery (design §9): `apiKey` is REMOVED — the
+   * plaintext key never rides the wire; this ref resolves through the
+   * session's credential vault (or is null for keyless local models).
+   */
+  credentialRef?: string | null;
   parameters: Record<string, unknown>;
 }
 

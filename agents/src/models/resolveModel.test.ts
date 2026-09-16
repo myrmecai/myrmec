@@ -21,7 +21,8 @@ describe("resolveChatModel", () => {
 
   it("wraps a resolved provider model in the adapter", async () => {
     const model = await resolveChatModel(
-      modelInfo({ provider: "openai", modelId: "gpt-4o", apiKey: "sk-test" }),
+      modelInfo({ provider: "openai", modelId: "gpt-4o", credentialRef: "model-provider-token" }),
+      (ref) => (ref === "model-provider-token" ? "sk-test" : ""),
     );
     expect(model).toBeInstanceOf(LangChainChatModel);
   });
@@ -30,7 +31,8 @@ describe("resolveChatModel", () => {
 describe("resolveProviderModel", () => {
   it("resolves OpenAI", async () => {
     const m = await resolveProviderModel(
-      modelInfo({ provider: "openai", modelId: "gpt-4o", apiKey: "sk-test" }),
+      modelInfo({ provider: "openai", modelId: "gpt-4o", credentialRef: "model-provider-token" }),
+      () => "sk-test",
     );
     expect(m).toBeInstanceOf(ChatOpenAI);
     expect((m as ChatOpenAI).model).toBe("gpt-4o");
@@ -41,16 +43,17 @@ describe("resolveProviderModel", () => {
       modelInfo({
         provider: "groq",
         modelId: "llama-3.1-70b",
-        apiKey: "gsk-test",
+        credentialRef: "model-provider-token",
         apiEndpoint: "https://api.groq.com/openai/v1",
       }),
+      () => "gsk-test",
     );
     expect(m).toBeInstanceOf(ChatOpenAI);
   });
 
   it("resolves a local no-auth provider without an API key", async () => {
     const m = await resolveProviderModel(
-      modelInfo({ provider: "ollama", modelId: "llama3", apiKey: "" }),
+      modelInfo({ provider: "ollama", modelId: "llama3", credentialRef: null }),
     );
     expect(m).toBeInstanceOf(ChatOpenAI);
   });
@@ -58,21 +61,43 @@ describe("resolveProviderModel", () => {
   it("rejects a credentialled provider with no API key", async () => {
     await expect(
       resolveProviderModel(
-        modelInfo({ provider: "openai", modelId: "gpt-4o", apiKey: "" }),
+        modelInfo({ provider: "openai", modelId: "gpt-4o", credentialRef: null }),
       ),
     ).rejects.toThrow(/requires an API key/i);
   });
 
+  it("rejects a credentialRef when no vault resolver is wired", async () => {
+    await expect(
+      resolveProviderModel(
+        modelInfo({ provider: "openai", modelId: "gpt-4o", credentialRef: "model-provider-token" }),
+      ),
+    ).rejects.toThrow(/no vault resolver is wired/i);
+  });
+
+  it("propagates the resolver's UNKNOWN_REF failure", async () => {
+    const err = new Error("credentialRef 'nope' was never unwrapped");
+    await expect(
+      resolveProviderModel(
+        modelInfo({ provider: "openai", modelId: "gpt-4o", credentialRef: "nope" }),
+        () => {
+          throw err;
+        },
+      ),
+    ).rejects.toThrow(/never unwrapped/i);
+  });
+
   it("resolves Anthropic", async () => {
     const m = await resolveProviderModel(
-      modelInfo({ provider: "anthropic", modelId: "claude-3-5-sonnet", apiKey: "sk-ant" }),
+      modelInfo({ provider: "anthropic", modelId: "claude-3-5-sonnet", credentialRef: "model-provider-token" }),
+      () => "sk-ant",
     );
     expect(m).toBeInstanceOf(ChatAnthropic);
   });
 
   it("resolves Google", async () => {
     const m = await resolveProviderModel(
-      modelInfo({ provider: "google", modelId: "gemini-1.5-pro", apiKey: "g-test" }),
+      modelInfo({ provider: "google", modelId: "gemini-1.5-pro", credentialRef: "model-provider-token" }),
+      () => "g-test",
     );
     expect(m).toBeInstanceOf(ChatGoogleGenerativeAI);
   });

@@ -3,10 +3,16 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { SessionRegistry } from "./SessionRegistry.js";
-import type { SessionOpenPayload } from "../protocol/unifiedFrames.js";
+import type { SessionOpenPayload, SessionCredential } from "../protocol/unifiedFrames.js";
 import type { ToolDefinition, KnowledgeSourceHandle, ModelInfoWire } from "../protocol/sessionTypes.js";
 import type { ChatModel, ConversationMessage, ModelResponse, Tool, SessionTool } from "../executor/types.js";
 import type { ChatModelFactory, SessionToolFactory } from "../executor/providers.js";
+import {
+  CredentialEnvelopeError,
+  deriveSessionKey,
+} from "../security/credentialEnvelopes.js";
+import { VECTOR_1 } from "../security/credentialVectors.js";
+import { createCipheriv, createHash } from "node:crypto";
 
 // ── helpers ───────────────────────────────────────────────────────
 
@@ -71,7 +77,7 @@ function makeOpenPayload(overrides: Partial<SessionOpenPayload> = {}): SessionOp
       provider: "ollama",
       modelId: "llama3",
       apiEndpoint: "http://localhost:11434/v1",
-      apiKey: null,
+      credentialRef: null,
       parameters: {},
     },
     workspace: null,
@@ -97,6 +103,60 @@ function makeKs(id: string): KnowledgeSourceHandle {
 function fakeTool(name: string): Tool {
   return { name, invoke: async () => "result" };
 }
+
+/** Build a valid sealed SessionCredential for `plaintext` bound to
+ * `sessionId`, exactly as the engine's CredentialEnvelopeService would. */
+function makeCredential(
+  ref: string,
+  purpose: "MODEL_PROVIDER" | "WORKSPACE_TOKEN",
+  plaintext: string,
+  sessionId: string,
+  psk: Uint8Array,
+  overrides: Partial<SessionCredential["envelope"]> = {},
+): SessionCredential {
+  const sessionKey = deriveSessionKey(psk, sessionId);
+  const nonce = Buffer.alloc(12, 0);
+  const digest =
+    "sha256:" + createHash("sha256").update(Buffer.from(plaintext, "utf8")).digest("base64");
+  const envelope: SessionCredential["envelope"] = {
+    format: "MyrmecSecureEnvelopeV1",
+    keyId: VECTOR_1.pskKeyId,
+    sessionId,
+    hostId: VECTOR_1.hostId,
+    purpose,
+    createdAt: new Date(Date.now() - 60_000).toISOString(),
+    expiresAt: new Date(Date.now() + 600_000).toISOString(),
+    plaintextDigest: digest,
+    nonce: nonce.toString("base64"),
+    ciphertext: "",
+    ...overrides,
+  };
+  const aadParts = [
+    "MyrmecSecureEnvelopeV1",
+    envelope.keyId,
+    envelope.sessionId,
+    envelope.hostId,
+    envelope.purpose,
+    envelope.expiresAt,
+    envelope.plaintextDigest,
+  ];
+  const cipher = createCipheriv("aes-256-gcm", sessionKey, nonce);
+  cipher.setAAD(Buffer.from(aadParts.join("|"), "utf8"));
+  const sealed = Buffer.concat([
+    cipher.update(Buffer.from(plaintext, "utf8")),
+    cipher.final(),
+    cipher.getAuthTag(),
+  ]);
+  envelope.ciphertext = sealed.toString("base64");
+  return { credentialRef: ref, purpose, envelope };
+}
+
+/** The canonical 32-byte test PSK (deterministic; never a real key). */
+const TEST_PSK = Buffer.alloc(32, 0xCD);
+
+/** The vault tests' session id — a real UUID, since the session key salt is
+ * derived from the raw UUID bytes. */
+const VAULT_SESSION_ID = "33333333-3333-4333-8333-333333333333";
 
 // ── tests ──────────────────────────────────────────────────────────
 
@@ -238,5 +298,161 @@ describe("SessionRegistry", () => {
     expect(session.serviceType).toBe("WORKFLOW");
     expect(session.projectId).toBe("p-99");
     expect(session.sessionId).toBe("sess-1");
+  });
+
+  // ── credential vault (design §10) ───────────────────────────────
+
+  it("opens a keyless session without a PSK (credentials absent → no vault)", async () => {
+    registry = new SessionRegistry({
+      chatModelFactory: fakeChatModelFactory(),
+      sessionToolFactory: fakeSessionToolFactory(),
+    });
+    await registry.open(makeOpenPayload());
+
+    const session = registry.get("sess-1")!;
+    expect(session.credentialVault).toBeUndefined();
+  });
+
+  it("unwraps delivered credentials into the vault and resolves through it", async () => {
+    const PLAINTEXT = "sk-test-provider-key-0123456789";
+    const credential = makeCredential(
+      "model-provider-token", "MODEL_PROVIDER", PLAINTEXT, VAULT_SESSION_ID, TEST_PSK,
+    );
+
+    const factories: ((ref: string) => string)[] = [];
+    const recordingFactory: ChatModelFactory = {
+      resolve: async (_info, _sessionId, resolveCredential) => {
+        factories.push(resolveCredential ?? (() => ""));
+        return new FakeChatModel();
+      },
+    };
+    registry = new SessionRegistry({
+      chatModelFactory: recordingFactory,
+      sessionToolFactory: fakeSessionToolFactory(),
+    });
+    registry.setPsk(TEST_PSK);
+    await registry.open(
+      makeOpenPayload({
+        sessionId: VAULT_SESSION_ID,
+        credentials: [credential],
+      }),
+    );
+
+    const session = registry.get(VAULT_SESSION_ID)!;
+    expect(session.credentialVault).toBeDefined();
+    expect(session.credentialVault!.get("model-provider-token")).toBe(PLAINTEXT);
+    // The model factory received a working resolver.
+    expect(factories[0]!("model-provider-token")).toBe(PLAINTEXT);
+  });
+
+  it("throws UNKNOWN_REF for a ref that was never unwrapped", async () => {
+    registry = new SessionRegistry({
+      chatModelFactory: fakeChatModelFactory(),
+      sessionToolFactory: fakeSessionToolFactory(),
+    });
+    registry.setPsk(TEST_PSK);
+    await registry.open(
+      makeOpenPayload({
+        sessionId: VAULT_SESSION_ID,
+        credentials: [
+          makeCredential("model-provider-token", "MODEL_PROVIDER", "sk-x", VAULT_SESSION_ID, TEST_PSK),
+        ],
+      }),
+    );
+
+    expect(() => registry.resolveCredential(VAULT_SESSION_ID, "nope")).toThrow(
+      CredentialEnvelopeError,
+    );
+    expect(() => registry.resolveCredential(VAULT_SESSION_ID, "nope")).toThrow(
+      /never unwrapped/,
+    );
+  });
+
+  it("fails the whole open when any envelope is tampered (fail closed)", async () => {
+    const good = makeCredential("good-ref", "MODEL_PROVIDER", "sk-good", VAULT_SESSION_ID, TEST_PSK);
+    const bad = makeCredential("bad-ref", "MODEL_PROVIDER", "sk-bad", VAULT_SESSION_ID, TEST_PSK);
+    // Flip a ciphertext byte → GCM auth failure.
+    const sealed = Buffer.from(bad.envelope.ciphertext, "base64");
+    sealed[0] ^= 0xFF;
+    bad.envelope.ciphertext = sealed.toString("base64");
+
+    registry = new SessionRegistry({
+      chatModelFactory: fakeChatModelFactory(),
+      sessionToolFactory: fakeSessionToolFactory(),
+    });
+    registry.setPsk(TEST_PSK);
+
+    await expect(
+      registry.open(
+        makeOpenPayload({ sessionId: VAULT_SESSION_ID, credentials: [good, bad] }),
+      ),
+    ).rejects.toThrow(CredentialEnvelopeError);
+    // Nothing was registered.
+    expect(registry.has(VAULT_SESSION_ID)).toBe(false);
+  });
+
+  it("fails the open when the envelope is bound to another session", async () => {
+    const credential = makeCredential(
+      "model-provider-token", "MODEL_PROVIDER", "sk-x", "99999999-9999-4999-8999-999999999999", TEST_PSK,
+    );
+    registry = new SessionRegistry({
+      chatModelFactory: fakeChatModelFactory(),
+      sessionToolFactory: fakeSessionToolFactory(),
+    });
+    registry.setPsk(TEST_PSK);
+
+    await expect(
+      registry.open(
+        makeOpenPayload({ sessionId: VAULT_SESSION_ID, credentials: [credential] }),
+      ),
+    ).rejects.toBeInstanceOf(CredentialEnvelopeError);
+    try {
+      await registry.open(
+        makeOpenPayload({ sessionId: VAULT_SESSION_ID, credentials: [credential] }),
+      );
+    } catch (err) {
+      expect((err as CredentialEnvelopeError).code).toBe("SESSION_MISMATCH");
+    }
+    expect(registry.has(VAULT_SESSION_ID)).toBe(false);
+  });
+
+  it("fails the open when credentials arrive but no PSK was delivered", async () => {
+    registry = new SessionRegistry({
+      chatModelFactory: fakeChatModelFactory(),
+      sessionToolFactory: fakeSessionToolFactory(),
+    });
+    await expect(
+      registry.open(
+        makeOpenPayload({
+          sessionId: VAULT_SESSION_ID,
+          credentials: [
+            makeCredential("model-provider-token", "MODEL_PROVIDER", "sk-x", VAULT_SESSION_ID, TEST_PSK),
+          ],
+        }),
+      ),
+    ).rejects.toThrow(/no PSK was delivered/i);
+  });
+
+  it("clears the vault on close (resolveCredential on a closed session fails)", async () => {
+    registry = new SessionRegistry({
+      chatModelFactory: fakeChatModelFactory(),
+      sessionToolFactory: fakeSessionToolFactory(),
+    });
+    registry.setPsk(TEST_PSK);
+    await registry.open(
+      makeOpenPayload({
+        sessionId: VAULT_SESSION_ID,
+        credentials: [
+          makeCredential("model-provider-token", "MODEL_PROVIDER", "sk-x", VAULT_SESSION_ID, TEST_PSK),
+        ],
+      }),
+    );
+    expect(registry.resolveCredential(VAULT_SESSION_ID, "model-provider-token")).toBe("sk-x");
+
+    registry.close(VAULT_SESSION_ID);
+
+    expect(() =>
+      registry.resolveCredential(VAULT_SESSION_ID, "model-provider-token"),
+    ).toThrow(CredentialEnvelopeError);
   });
 });

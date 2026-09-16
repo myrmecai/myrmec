@@ -181,6 +181,32 @@ describe("host.open / host.opened", () => {
     expect((frame.payload as { streamLimits: { maxFrameBytes: number } }).streamLimits.maxFrameBytes).toBe(65536);
   });
 
+  it("accepts host.opened with the additive psk/pskKeyId fields (design §6)", () => {
+    const payload = {
+      hostInstanceId,
+      protocolVersion: 1,
+      effectivePoolSize: 5,
+      heartbeatIntervalSeconds: 15,
+      offerTimeoutSeconds: 10,
+      eventReplayWindowSeconds: 3600,
+      streamLimits: {
+        maxFrameBytes: 65536,
+        maxBufferedDeltaBytesPerSession: 262144,
+        maxUnacknowledgedEventBytesPerSession: 8388608,
+        eventBackpressureTimeoutSeconds: 30,
+      },
+      serverNodeId: "node-a",
+      psk: Buffer.alloc(32, 0xCD).toString("base64"),
+      pskKeyId: "0f0e0d0c-0b0a-4901-8203-040506070809",
+    };
+    const frame = parseUnifiedFrame(JSON.stringify(envelope(payload, MessageType.HOST_OPENED)));
+    expect(frame.type).toBe("host.opened");
+    expect((frame.payload as { psk?: string }).psk).toBeDefined();
+    expect((frame.payload as { pskKeyId?: string }).pskKeyId).toBe(
+      "0f0e0d0c-0b0a-4901-8203-040506070809",
+    );
+  });
+
   it("rejects host.opened with missing streamLimits", () => {
     const payload = {
       hostInstanceId,
@@ -632,4 +658,119 @@ test("parse → encode → parse yields identical result", () => {
   expect(roundTripped.sessionId).toBe(original.sessionId);
   expect(roundTripped.sequence).toBe(original.sequence);
   expect(roundTripped.payload).toEqual(original.payload);
+});
+
+// ============================================================
+// credential envelopes (§7.3, design 2026-09-16 §9)
+// ============================================================
+
+/** VECTOR_1-shaped envelope re-bound to the test sessionId. */
+function testEnvelope(sessionIdValue: string) {
+  return {
+    format: "MyrmecSecureEnvelopeV1",
+    keyId: "0f0e0d0c-0b0a-4901-8203-040506070809",
+    sessionId: sessionIdValue,
+    hostId: "fedcba98-7654-4321-0fed-cba987654321",
+    purpose: "MODEL_PROVIDER",
+    createdAt: now,
+    expiresAt: new Date(Date.now() + 600_000).toISOString(),
+    plaintextDigest: "sha256:E1Lsrr0Xj46jYk02ZuJM1ulyD1ccit3TEQk8iDBc/nU=",
+    nonce: "AAAAAAAAAAAAAAAAAAAAAA==",
+    ciphertext: "b37AH5DB8Xt+cCmuKC2vt7HJOBaYtGh5aU4fB4qefUdf2jNACLn/U+a5JVh1Ix0=",
+  };
+}
+
+function sessionOpenWithCredentials(
+  credentials?: unknown,
+  modelOverride: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    sessionId,
+    serviceType: "CONVERSATION",
+    projectId: "11111111-1111-4111-8111-111111111111",
+    profileVersionId: "22222222-2222-4222-8222-222222222222",
+    model: {
+      provider: "openai",
+      modelId: "gpt-4o",
+      apiEndpoint: null,
+      credentialRef: "model-provider-token",
+      parameters: {},
+      ...modelOverride,
+    },
+    workspace: null,
+    tools: [],
+    knowledgeSources: [],
+    autoHitlOnDestructive: true,
+  };
+  if (credentials !== undefined) {
+    payload.credentials = credentials;
+  }
+  return payload;
+}
+
+describe("session.open credentials (design §9)", () => {
+  it("accepts session.open with a credentials array", () => {
+    const payload = sessionOpenWithCredentials([
+      {
+        credentialRef: "model-provider-token",
+        purpose: "MODEL_PROVIDER",
+        envelope: testEnvelope(sessionId),
+      },
+    ]);
+    const frame = parseUnifiedFrame(JSON.stringify(envelope(payload, MessageType.SESSION_OPEN)));
+    expect(frame.type).toBe("session.open");
+    const credentials = (frame.payload as { credentials?: unknown[] }).credentials;
+    expect(credentials).toHaveLength(1);
+    expect((credentials![0] as { credentialRef: string }).credentialRef).toBe(
+      "model-provider-token",
+    );
+    expect((credentials![0] as { purpose: string }).purpose).toBe("MODEL_PROVIDER");
+  });
+
+  it("accepts a keyless session.open without credentials (unchanged behavior)", () => {
+    const payload = sessionOpenWithCredentials(undefined, { credentialRef: null });
+    const frame = parseUnifiedFrame(JSON.stringify(envelope(payload, MessageType.SESSION_OPEN)));
+    const credentials = (frame.payload as { credentials?: unknown[] }).credentials;
+    expect(credentials).toBeUndefined();
+  });
+
+  it("rejects an envelope whose format literal is wrong", () => {
+    const payload = sessionOpenWithCredentials([
+      {
+        credentialRef: "model-provider-token",
+        purpose: "MODEL_PROVIDER",
+        envelope: { ...testEnvelope(sessionId), format: "MyrmecSecureEnvelopeV2" },
+      },
+    ]);
+    expect(() =>
+      parseUnifiedFrame(JSON.stringify(envelope(payload, MessageType.SESSION_OPEN))),
+    ).toThrow();
+  });
+
+  it("rejects a credentials entry with an unknown purpose", () => {
+    const payload = sessionOpenWithCredentials([
+      {
+        credentialRef: "model-provider-token",
+        purpose: "BOGUS_PURPOSE",
+        envelope: testEnvelope(sessionId),
+      },
+    ]);
+    expect(() =>
+      parseUnifiedFrame(JSON.stringify(envelope(payload, MessageType.SESSION_OPEN))),
+    ).toThrow();
+  });
+
+  it("never serializes the plaintext into the frame (no-plaintext rule)", () => {
+    const PLAINTEXT = "sk-test-provider-key-0123456789";
+    const payload = sessionOpenWithCredentials([
+      {
+        credentialRef: "model-provider-token",
+        purpose: "MODEL_PROVIDER",
+        envelope: testEnvelope(sessionId),
+      },
+    ]);
+    // The envelope only ever carries ciphertext + metadata — the plaintext
+    // must not appear anywhere in the serialized frame.
+    expect(JSON.stringify(payload)).not.toContain(PLAINTEXT);
+  });
 });
