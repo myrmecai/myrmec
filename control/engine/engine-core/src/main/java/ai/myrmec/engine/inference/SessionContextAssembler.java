@@ -8,7 +8,10 @@ import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileVersion;
 import ai.myrmec.engine.agent.AgentProfileVersionService;
 import ai.myrmec.engine.agent.AgentProfileRepository;
+import ai.myrmec.engine.agent.AgentHostInstance;
+import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.context.InstructionAssetVersionResolver;
+import ai.myrmec.engine.inference.security.CredentialEnvelopeService;
 import ai.myrmec.engine.knowledge.KnowledgeSource;
 import ai.myrmec.engine.knowledge.KnowledgeSourceRepository;
 import ai.myrmec.engine.model.Model;
@@ -18,6 +21,7 @@ import ai.myrmec.engine.project.ProjectRepository;
 import ai.myrmec.engine.secret.SecretPayload;
 import ai.myrmec.engine.secret.SecretResolverService;
 import ai.myrmec.engine.tool.Tool;
+import ai.myrmec.engine.websocket.message.payload.SessionCredential;
 import ai.myrmec.engine.websocket.message.payload.SessionOpenPayload;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -51,6 +55,14 @@ public class SessionContextAssembler {
     private final SecretResolverService secretResolverService;
     private final InstructionAssetVersionResolver instructionAssetVersionResolver;
     private final SessionRepository sessionRepository;
+    private final AgentHostInstanceRepository agentHostInstanceRepository;
+    private final CredentialEnvelopeService credentialEnvelopeService;
+
+    /** credentialRef constants (design §9) — stable across both config blocks. */
+    private static final String MODEL_CREDENTIAL_REF = "model-provider-token";
+    private static final String WORKSPACE_CREDENTIAL_REF = "repo-token";
+    private static final String PURPOSE_MODEL = "MODEL_PROVIDER";
+    private static final String PURPOSE_WORKSPACE = "WORKSPACE_TOKEN";
 
     /**
      * Assemble the session.open payload and persist the session row.
@@ -99,7 +111,8 @@ public class SessionContextAssembler {
                 ctx.kbHandles(),
                 ctx.autoHitl(),
                 null,
-                null);
+                null,
+                sealCredentials(session.getId(), ctx));
     }
 
     /**
@@ -135,7 +148,8 @@ public class SessionContextAssembler {
                 ctx.kbHandles(),
                 ctx.autoHitl(),
                 null,
-                null);
+                null,
+                sealCredentials(sessionId, ctx));
     }
 
     /**
@@ -150,16 +164,26 @@ public class SessionContextAssembler {
             List<SessionOpenPayload.ToolDefinition> tools,
             List<SessionOpenPayload.KnowledgeSourceHandle> kbHandles,
             boolean autoHitl,
-            Map<String, Object> contextPins) {
+            Map<String, Object> contextPins,
+            /** Raw plaintexts read from the secret store — sealed then dropped (design §10). */
+            String modelApiKey,
+            String workspaceRepoToken) {
+    }
+
+    /** A pending (ref, purpose, plaintext) triple awaiting sealing. */
+    private record PendingCredential(String credentialRef, String purpose, String plaintext) {
     }
 
     private ResolvedContext resolveContext(AgentProfile profile,
                                             AgentProfileVersion version,
                                             UUID projectId) {
-        // 2. Resolve model (decrypt API key once per session)
-        SessionOpenPayload.ModelConfig modelConfig = resolveModel(profile, version);
+        // 2. Resolve model (read the API key once per session for sealing)
+        String modelApiKey = modelService.getApiKey(version.getDefaultModel());
+        SessionOpenPayload.ModelConfig modelConfig =
+                resolveModel(profile, version, modelApiKey);
 
-        // 3. Resolve workspace (nullable)
+        // 3. Resolve workspace (nullable); read the repo token for sealing
+        String workspaceRepoToken = resolveWorkspaceToken(projectId);
         SessionOpenPayload.WorkspaceConfig workspace = resolveWorkspace(projectId);
 
         // 4. Resolve tool catalog (authorized set — filtered by the version)
@@ -191,10 +215,51 @@ public class SessionContextAssembler {
         contextPins.put("instructionAssetVersionIds",
                 instructionVersionIds.stream().map(UUID::toString).toList());
 
-        return new ResolvedContext(modelConfig, workspace, tools, kbHandles, autoHitl, contextPins);
+        return new ResolvedContext(modelConfig, workspace, tools, kbHandles, autoHitl,
+                contextPins, modelApiKey, workspaceRepoToken);
     }
 
-    private SessionOpenPayload.ModelConfig resolveModel(AgentProfile profile, AgentProfileVersion version) {
+    /**
+     * Seal the raw plaintexts carried by a resolved context into
+     * {@code MyrmecSecureEnvelopeV1} entries for the session's serving
+     * instance (design §8/§10). Plaintexts exist only inside this call.
+     * Nulls are skipped (keyless model / no repo credential). Empty list
+     * when the session needs no credentials at all.
+     */
+    private List<SessionCredential> sealCredentials(UUID sessionId, ResolvedContext ctx) {
+        if (ctx.modelApiKey() == null && ctx.workspaceRepoToken() == null) {
+            return List.of();
+        }
+        Session session = sessionRepository.findById(sessionId).orElse(null);
+        if (session == null || session.getHostInstanceId() == null) {
+            log.warn("Session {} has no serving instance — cannot seal credentials; "
+                    + "session.open will carry no credentials", sessionId);
+            return List.of();
+        }
+        AgentHostInstance instance = agentHostInstanceRepository
+                .findById(session.getHostInstanceId()).orElse(null);
+        if (instance == null) {
+            log.warn("Host instance {} not found — cannot seal credentials", session.getHostInstanceId());
+            return List.of();
+        }
+        List<SessionCredential> credentials = new ArrayList<>();
+        if (ctx.modelApiKey() != null) {
+            credentials.add(new SessionCredential(MODEL_CREDENTIAL_REF, PURPOSE_MODEL,
+                    credentialEnvelopeService.buildEnvelope(instance.getId(),
+                            instance.getAgentHostId(), sessionId, PURPOSE_MODEL,
+                            ctx.modelApiKey())));
+        }
+        if (ctx.workspaceRepoToken() != null) {
+            credentials.add(new SessionCredential(WORKSPACE_CREDENTIAL_REF, PURPOSE_WORKSPACE,
+                    credentialEnvelopeService.buildEnvelope(instance.getId(),
+                            instance.getAgentHostId(), sessionId, PURPOSE_WORKSPACE,
+                            ctx.workspaceRepoToken())));
+        }
+        return credentials;
+    }
+
+    private SessionOpenPayload.ModelConfig resolveModel(AgentProfile profile,
+            AgentProfileVersion version, String apiKey) {
         if (version.getDefaultModel() == null || version.getDefaultModel().isBlank()) {
             throw new IllegalStateException(
                     "Agent profile " + profile.getName() + " has no default model configured");
@@ -205,18 +270,36 @@ public class SessionContextAssembler {
                     "Model '" + version.getDefaultModel() + "' not found for profile '"
                             + profile.getName() + "'");
         }
-        String apiKey = modelService.getApiKey(version.getDefaultModel());
-        // Fall back to provider config's baseUrl when model has no explicit endpoint
+        // apiEndpoint: explicit model endpoint, else provider baseUrl.
         String apiEndpoint = model.getApiEndpoint();
         if (apiEndpoint == null && model.getProviderConfig() != null) {
             apiEndpoint = model.getProviderConfig().getBaseUrl();
         }
+        // Credential delivery (design §9): the wire carries a credentialRef;
+        // the key itself travels only inside the sealed envelope.
         return new SessionOpenPayload.ModelConfig(
                 model.getProviderConfig() != null ? model.getProviderConfig().getCode() : "unknown",
                 model.getModelId(),
                 apiEndpoint,
-                apiKey,
+                apiKey != null ? MODEL_CREDENTIAL_REF : null,
                 model.getDefaultParams() != null ? model.getDefaultParams() : Map.of());
+    }
+
+    /** Read the workspace repo token for sealing (design §9); null when none. */
+    private String resolveWorkspaceToken(UUID projectId) {
+        Project project = projectRepository.findById(projectId).orElse(null);
+        if (project == null || project.getWorkspaceCredentialSecretId() == null) {
+            return null;
+        }
+        try {
+            SecretPayload payload = secretResolverService.resolve(
+                    project.getWorkspaceCredentialSecretId(), projectId);
+            return extractToken(payload);
+        } catch (Exception e) {
+            log.warn("Failed to resolve workspace credential for project {}: {}",
+                    projectId, e.getMessage());
+            return null;
+        }
     }
 
     private SessionOpenPayload.WorkspaceConfig resolveWorkspace(UUID projectId) {
@@ -227,22 +310,12 @@ public class SessionContextAssembler {
         }
         String branch = project.getWorkspaceRepoBranch() != null
                 ? project.getWorkspaceRepoBranch() : "main";
-        String repoToken = null;
-        if (project.getWorkspaceCredentialSecretId() != null) {
-            try {
-                SecretPayload payload = secretResolverService.resolve(
-                        project.getWorkspaceCredentialSecretId(), projectId);
-                repoToken = extractToken(payload);
-            } catch (Exception e) {
-                log.warn("Failed to resolve workspace credential for project {}: {}",
-                        projectId, e.getMessage());
-            }
-        }
+        String repoToken = resolveWorkspaceToken(projectId);
         return new SessionOpenPayload.WorkspaceConfig(
                 project.getWorkspaceRepoUrl(),
                 branch,
                 null,  // subPath — not stored on Project today
-                repoToken);
+                repoToken != null ? WORKSPACE_CREDENTIAL_REF : null);
     }
 
     private List<SessionOpenPayload.ToolDefinition> resolveTools(

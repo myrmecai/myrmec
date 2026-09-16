@@ -29,27 +29,28 @@ public record SessionOpenPayload(
         List<KnowledgeSourceHandle> knowledgeSources,
         boolean autoHitlOnDestructive,  // project HITL policy
         Map<String, Object> orchestration,  // §16.2 assignment; null for non-orchestration
-        String assignmentDigest) {          // §16.3 sha-256 of the canonical assignment bytes
+        String assignmentDigest,          // §16.3 sha-256 of the canonical assignment bytes
+        List<SessionCredential> credentials) {  // sealed session secrets (design §9); null/empty when keyless
 
     /** Copy the context with the §16.2 assignment installed (orchestration only). */
     public SessionOpenPayload withAssignment(Map<String, Object> assignment, String digest) {
         return new SessionOpenPayload(sessionId, serviceType, projectId, profileVersionId,
                 model, workspace, tools, knowledgeSources, autoHitlOnDestructive,
-                assignment, digest);
+                assignment, digest, credentials);
     }
 
     public record ModelConfig(
             String provider,
             String modelId,
             String apiEndpoint,    // nullable
-            String apiKey,         // decrypted; nullable for keyless local models
+            String credentialRef,  // references credentials[] entry (design §9); null = keyless
             Map<String, Object> parameters) {}
 
     public record WorkspaceConfig(
             String repoUrl,
             String branch,
             String subPath,        // nullable
-            String repoToken) {}   // decrypted; nullable
+            String credentialRef) {}  // references credentials[] entry; null when no repo credential
 
     public record ToolDefinition(
             String name,

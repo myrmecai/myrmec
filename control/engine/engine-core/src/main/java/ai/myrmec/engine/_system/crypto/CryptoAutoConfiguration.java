@@ -1,5 +1,7 @@
 package ai.myrmec.engine._system.crypto;
 
+import ai.myrmec.engine.agent.AgentHostInstanceRepository;
+import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.inference.security.CredentialEnvelopeService;
 import ai.myrmec.engine.spi.crypto.EncryptionService;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,10 +27,13 @@ public class CryptoAutoConfiguration {
         return new BasicEncryptionService(key, previousKeysCsv);
     }
 
-    /** Per-session envelope key derivation (credential-envelope design §7). */
+    /** Per-session envelope sealing + key derivation (credential-envelope design §7/§8). */
     @Bean
     @ConditionalOnMissingBean(CredentialEnvelopeService.class)
-    public CredentialEnvelopeService credentialEnvelopeService() {
-        return new CredentialEnvelopeService();
+    public CredentialEnvelopeService credentialEnvelopeService(
+            AgentHostInstanceRepository instanceRepository,
+            SessionRepository sessionRepository,
+            EncryptionService encryptionService) {
+        return new CredentialEnvelopeService(instanceRepository, sessionRepository, encryptionService);
     }
 }
