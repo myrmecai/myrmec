@@ -1,5 +1,6 @@
 package ai.myrmec.engine._system.crypto;
 
+import ai.myrmec.engine.inference.security.CredentialEnvelopeService;
 import ai.myrmec.engine.spi.crypto.EncryptionService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -22,5 +23,12 @@ public class CryptoAutoConfiguration {
             @Value("${myrmec.encryption.previous-keys:}") String previousKeysCsv
     ) {
         return new BasicEncryptionService(key, previousKeysCsv);
+    }
+
+    /** Per-session envelope key derivation (credential-envelope design §7). */
+    @Bean
+    @ConditionalOnMissingBean(CredentialEnvelopeService.class)
+    public CredentialEnvelopeService credentialEnvelopeService() {
+        return new CredentialEnvelopeService();
     }
 }

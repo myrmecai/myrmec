@@ -6,6 +6,7 @@ import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentHostRepository;
+import ai.myrmec.engine.spi.crypto.EncryptionService;
 import ai.myrmec.engine.inference.SessionAllocator;
 import ai.myrmec.engine.inference.SessionContextAssembler;
 import ai.myrmec.engine.inference.SessionRepository;
@@ -73,6 +74,11 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
 
     public static final String ATTR_HOST_INSTANCE_ID = "hostInstanceId";
 
+    /** Run-key size in bytes (credential-envelope design §6). */
+    private static final int PSK_BYTES = 32;
+
+    private static final java.security.SecureRandom PSK_RANDOM = new java.security.SecureRandom();
+
     private final ObjectMapper objectMapper;
     private final AgentHostRepository agentHostRepository;
     private final AgentHostInstanceRepository instanceRepository;
@@ -93,6 +99,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     private final ai.myrmec.engine.conversation.ConversationRepository conversationRepository;
     private final ai.myrmec.engine.agent.AgentProfileVersionRepository agentProfileVersionRepository;
     private final ai.myrmec.engine.workflow.TaskDispatchContinuation taskDispatchContinuation;
+    private final EncryptionService encryptionService;
 
     @Value("${myrmec.host.heartbeat-interval-seconds:15}")
     private int heartbeatIntervalSeconds;
@@ -131,7 +138,8 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                                        ai.myrmec.engine.conversation.ConversationRepository conversationRepository,
                                        ai.myrmec.engine.agent.AgentProfileVersionRepository agentProfileVersionRepository,
                                        @org.springframework.context.annotation.Lazy
-                                       ai.myrmec.engine.workflow.TaskDispatchContinuation taskDispatchContinuation) {
+                                       ai.myrmec.engine.workflow.TaskDispatchContinuation taskDispatchContinuation,
+                                       EncryptionService encryptionService) {
         this.objectMapper = objectMapper;
         this.agentHostRepository = agentHostRepository;
         this.instanceRepository = instanceRepository;
@@ -149,9 +157,10 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         this.taskAttemptService = taskAttemptService;
         this.pendingConversationTurns = pendingConversationTurns;
         this.executionCommandSender = executionCommandSender;
-        this.taskDispatchContinuation = taskDispatchContinuation;
         this.conversationRepository = conversationRepository;
         this.agentProfileVersionRepository = agentProfileVersionRepository;
+        this.taskDispatchContinuation = taskDispatchContinuation;
+        this.encryptionService = encryptionService;
     }
 
     /** Exposed for handler tests to assert registration. */
@@ -255,9 +264,16 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         Optional<AgentHostInstance> liveSameNonce = instanceRepository
                 .findByAgentHostIdAndInstanceNonceAndStatus(
                         hostId, open.instanceNonce().toString(), AgentHostInstance.Status.OPEN);
+        boolean replay = liveSameNonce.isPresent();
+        String pskBase64;
+        UUID pskKeyId;
         AgentHostInstance instance;
-        if (liveSameNonce.isPresent()) {
+        if (replay) {
+            // Same-nonce replay: NO new key — re-deliver the existing one
+            // (a recovery feature; credential-envelope design §6).
             instance = liveSameNonce.get();
+            pskBase64 = encryptionService.decrypt(instance.getPskEncrypted());
+            pskKeyId = instance.getPskKeyId();
             log.info("host.open replay for host {} answered with existing instance {}",
                     hostId, instance.getId());
         } else {
@@ -274,8 +290,18 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                     host, ownerUserId, open.instanceNonce().toString(),
                     open.hostname(), effective, open.reportedCapacity(),
                     nodeRegistryService.getSelfNodeId()));
-            log.info("host.open created instance {} for host {} (pool {})",
-                    instance.getId(), hostId, effective);
+
+            // Credential-envelope design §6: mint a fresh 32-byte PSK per run.
+            // The plaintext crosses the wire exactly once (host.opened); only
+            // the EncryptionService-encrypted copy persists on the row.
+            byte[] psk = new byte[PSK_BYTES];
+            PSK_RANDOM.nextBytes(psk);
+            pskKeyId = UUID.randomUUID();
+            pskBase64 = java.util.Base64.getEncoder().encodeToString(psk);
+            instance.setPsk(pskKeyId, encryptionService.encrypt(pskBase64));
+            instance = instanceRepository.saveAndFlush(instance);
+            log.info("host.open created instance {} for host {} (pool {}, key {})",
+                    instance.getId(), hostId, effective, pskKeyId);
         }
 
         session.getAttributes().put(ATTR_HOST_INSTANCE_ID, instance.getId());
@@ -292,7 +318,9 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                         new HostOpenedPayload.StreamLimits(
                                 maxFrameBytes, maxBufferedDeltaBytes,
                                 maxUnackedEventBytes, eventBackpressureTimeoutSeconds),
-                        nodeRegistryService.getSelfNodeId()),
+                        nodeRegistryService.getSelfNodeId(),
+                        pskBase64,
+                        pskKeyId),
                 objectMapper));
     }
 

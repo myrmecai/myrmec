@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Credential-envelope design §6 (2026-09-16): per-instance PSK on
+        agent_host_instances. host.open mints a fresh 32-byte key + keyId per
+        supervisor run; host.opened carries the plaintext key ONCE and the row
+        keeps only the EncryptionService-encrypted copy. close(reason) nulls
+        psk_encrypted (key erasure at rest) while psk_key_id is retained for
+        audit. Additive and preCondition-guarded like 019; the bytea type
+        matches the agent_hosts PSK precedent (003-agents-hosts-psk).
+    -->
+
+    <changeSet id="025-agent-host-instances-psk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="agent_host_instances"/>
+                <not>
+                    <columnExists tableName="agent_host_instances" columnName="psk_key_id"/>
+                </not>
+            </and>
+        </preConditions>
+        <addColumn tableName="agent_host_instances">
+            <column name="psk_key_id" type="uuid"/>
+            <column name="psk_encrypted" type="bytea"/>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>

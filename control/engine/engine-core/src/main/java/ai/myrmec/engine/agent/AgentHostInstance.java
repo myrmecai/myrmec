@@ -80,6 +80,38 @@ public class AgentHostInstance {
     @Column(name = "control_node_id", length = 255)
     private String controlNodeId;
 
+    /**
+     * Per-run PSK identity (credential-envelope design §6): a fresh 32-byte
+     * key is minted at host.open for THIS supervisor run; host.opened
+     * delivers the plaintext once and the row keeps only the
+     * EncryptionService-encrypted copy. Key lifetime == instance lifetime.
+     */
+    @Column(name = "psk_key_id")
+    private UUID pskKeyId;
+
+    /** At-rest-encrypted PSK (never the plaintext key after creation). */
+    @Column(name = "psk_encrypted", columnDefinition = "bytea")
+    private byte[] pskEncrypted;
+
+    /**
+     * Bind the freshly minted (or idempotently re-delivered) run key.
+     * Deliberately NOT part of the append-only factory: the minting happens
+     * after the row exists, in host.open handling.
+     */
+    public void setPsk(UUID keyId, byte[] encrypted) {
+        this.pskKeyId = keyId;
+        this.pskEncrypted = encrypted;
+    }
+
+    /**
+     * Key erasure at rest (design §6): close(reason) nulls psk_encrypted;
+     * the closed row keeps psk_key_id for audit.
+     */
+    public void erasePsk() {
+        this.pskEncrypted = null;
+        // pskKeyId intentionally retained for audit.
+    }
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private Status status = Status.OPEN;
@@ -142,7 +174,9 @@ public class AgentHostInstance {
     /**
      * Terminal close. Idempotent and write-once: a second call is a no-op and
      * never overwrites {@code closedAt} or {@code closeReason} — history stays
-     * truthful (design §3.2).
+     * truthful (design §3.2). Key erasure at rest rides the same transition:
+     * {@code psk_encrypted} is nulled; {@code psk_key_id} is retained for
+     * audit (credential-envelope design §6).
      */
     public void close(String reason) {
         if (closedAt != null) {
@@ -153,6 +187,7 @@ public class AgentHostInstance {
         this.closedAt = Instant.now();
         this.closeReason = reason != null && reason.length() > 100
                 ? reason.substring(0, 100) : reason;
+        this.pskEncrypted = null;
     }
 
     /** Liveness signal; never changes lifecycle state. */
