@@ -5,6 +5,7 @@ import ai.myrmec.engine.agent.AgentHostCreationResult;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileService;
 import ai.myrmec.engine.agent.AgentHostService;
+import ai.myrmec.engine.agent.ModelAccessMode;
 import ai.myrmec.engine.knowledge.KnowledgeChunk;
 import ai.myrmec.engine.knowledge.KnowledgeChunkRepository;
 import ai.myrmec.engine.knowledge.KnowledgeProvider;
@@ -316,6 +317,7 @@ public class TestDataBuilder {
         private UUID projectId;
         private String modelOverride;
         private Integer maxAgents = 1;
+        private ModelAccessMode modelAccessMode;
 
         public AgentBuilder named(String base) {
             this.name = base;
@@ -354,6 +356,11 @@ public class TestDataBuilder {
             return this;
         }
 
+        public AgentBuilder withModelAccessMode(ModelAccessMode mode) {
+            this.modelAccessMode = mode;
+            return this;
+        }
+
         public AgentHostCreationResult create() {
             String effectiveName = autoSuffix ? unique(name) : name;
             AgentHostCreationResult result = agentService.createAgent(
@@ -362,7 +369,8 @@ public class TestDataBuilder {
                     projectId,
                     modelOverride,
                     null,
-                    maxAgents
+                    maxAgents,
+                    modelAccessMode
             );
             return new AgentHostCreationResult(
                     result.agent(), result.registrationKey(), result.pskKeyId(), result.pskBase64());

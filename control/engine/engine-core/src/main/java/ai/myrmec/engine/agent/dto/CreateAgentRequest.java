@@ -1,5 +1,6 @@
 package ai.myrmec.engine.agent.dto;
 
+import ai.myrmec.engine.agent.ModelAccessMode;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -43,4 +44,10 @@ public class CreateAgentRequest {
      */
     @Min(value = 1, message = "Max agents must be at least 1")
     private Integer maxAgents = 1;
+
+    /**
+     * Model access mode (credential-envelope design §5): DIRECT or GATEWAY.
+     * PLATFORM_ADMIN-only to change; absent means DIRECT (dev-phase default).
+     */
+    private ModelAccessMode modelAccessMode;
 }

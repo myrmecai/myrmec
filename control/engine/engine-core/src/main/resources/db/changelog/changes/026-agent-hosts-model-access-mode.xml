@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Credential-envelope design §5 (2026-09-16): model access modes.
+        agent_hosts gains model_access_mode ∈ {DIRECT, GATEWAY} (default
+        DIRECT), settable only by PLATFORM_ADMIN. The gateway system
+        settings are seeded so the admin settings UI exposes them and the
+        SystemSettingService.update write path (keys must pre-exist) works.
+        Additive and preCondition-guarded like 025.
+    -->
+
+    <changeSet id="026-agent-hosts-model-access-mode" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="agent_hosts"/>
+                <not>
+                    <columnExists tableName="agent_hosts" columnName="model_access_mode"/>
+                </not>
+            </and>
+        </preConditions>
+        <addColumn tableName="agent_hosts">
+            <column name="model_access_mode" type="varchar(20)" defaultValue="DIRECT">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="026-model-gateway-system-settings" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="system_settings"/>
+            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM system_settings WHERE setting_key = 'modelGateway.enabled'</sqlCheck>
+        </preConditions>
+        <insert tableName="system_settings">
+            <column name="setting_key" value="modelGateway.enabled"/>
+            <column name="value_type" value="BOOL"/>
+            <column name="setting_value" value="false"/>
+            <column name="description" value="Whether the org model gateway is deployed and reachable. GATEWAY host mode requires this (credential-envelope design §5.1)."/>
+        </insert>
+        <insert tableName="system_settings">
+            <column name="setting_key" value="modelGateway.endpoint"/>
+            <column name="value_type" value="STRING"/>
+            <column name="setting_value" value=""/>
+            <column name="description" value="The model gateway's OpenAI-compatible base endpoint. Required when modelGateway.enabled is true."/>
+        </insert>
+    </changeSet>
+
+</databaseChangeLog>

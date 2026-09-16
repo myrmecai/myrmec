@@ -105,7 +105,21 @@ public enum ProductFeature {
             List.of("ON", "OFF"), false,
             EnforcementKind.BEHAVIORAL,
             Map.of("ON", "auditHashChain=on",
-                    "OFF", "auditHashChain=off"));
+                    "OFF", "auditHashChain=off")),
+    /**
+     * Governance mandate for LOCAL hosts' model access (credential-envelope
+     * design §5.3): when ON, a LOCAL host configured for DIRECT model access
+     * is rejected at host create/edit with GOVERNANCE_VIOLATION — the org
+     * requires untrusted endpoints to route model calls through the gateway.
+     * Read at host create/edit time by {@code ModelAccessModeValidator}
+     * (org-default scope; per-project scope deferred). Default OFF until
+     * Phase 2 GA.
+     */
+    LOCAL_HOST_MODEL_GATEWAY(
+            "Require LOCAL hosts to use the model gateway",
+            FeatureGroup.BUDGET, 120,
+            List.of("ON", "OFF"), false,
+            EnforcementKind.BLOCKING);
 
     private final String description;
     private final FeatureGroup group;

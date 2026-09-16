@@ -102,6 +102,16 @@ public class AgentHost {
     private AgentHostType hostType = AgentHostType.MANAGED;
 
     /**
+     * Per-host model access mode (credential-envelope design §5): DIRECT
+     * calls the provider endpoint with the enveloped provider credential;
+     * GATEWAY routes model calls through the org model gateway. Settable
+     * only by PLATFORM_ADMIN (§5.1). Default DIRECT (dev-phase default).
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "model_access_mode", nullable = false, length = 20)
+    private ModelAccessMode modelAccessMode = ModelAccessMode.DIRECT;
+
+    /**
      * The owning user for LOCAL/DEDICATED hosts; NULL for MANAGED (§2.3).
      */
     @Column(name = "owner_user_id")

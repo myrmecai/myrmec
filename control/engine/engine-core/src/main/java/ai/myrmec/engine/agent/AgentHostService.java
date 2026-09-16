@@ -49,6 +49,7 @@ public class AgentHostService {
     private final ConversationEventService conversationEventService;
     private final NodeRegistryService nodeRegistryService;
     private final ai.myrmec.engine.spi.crypto.EncryptionService encryptionService;
+    private final ModelAccessModeValidator modelAccessModeValidator;
 
     // ========== Admin Operations ==========
 
@@ -66,11 +67,17 @@ public class AgentHostService {
     @Transactional
     public AgentHostCreationResult createAgent(String name, String description,
                                            UUID projectId, String modelOverride,
-                                           Map<String, Object> config, Integer maxAgents) {
+                                           Map<String, Object> config, Integer maxAgents,
+                                           ModelAccessMode modelAccessMode) {
         // Validate name uniqueness
         if (agentHostRepository.existsByName(name)) {
             throw new BadRequestException("Agent with name '" + name + "' already exists");
         }
+
+        // Credential-envelope design §5.2: validate the requested mode against
+        // the gateway configuration + governance mandate BEFORE persisting.
+        ModelAccessMode mode = modelAccessMode != null ? modelAccessMode : ModelAccessMode.DIRECT;
+        modelAccessModeValidator.validate(AgentHostType.MANAGED, mode);
 
         // Generate registration key
         String registrationKey = generateRegistrationKey();
@@ -93,6 +100,7 @@ public class AgentHostService {
         agent.setStatus(AgentHost.Status.ACTIVE);
         agent.setPskKeyId(pskKeyId);
         agent.setPskEncrypted(encryptionService.encrypt(pskBase64));
+        agent.setModelAccessMode(mode);
 
         agent = agentHostRepository.save(agent);
         log.info("Created agent: {} ({})", agent.getName(), agent.getId());
@@ -106,7 +114,8 @@ public class AgentHostService {
     @Transactional
     public AgentHost updateAgent(UUID agentId, String name, String description,
                              UUID projectId, String modelOverride,
-                             Map<String, Object> config, Integer maxAgents, AgentHost.Status status) {
+                             Map<String, Object> config, Integer maxAgents, AgentHost.Status status,
+                             ModelAccessMode modelAccessMode) {
         AgentHost agent = agentHostRepository.findById(agentId)
                 .orElseThrow(() -> ResourceNotFoundException.agent(agentId));
 
@@ -139,6 +148,15 @@ public class AgentHostService {
 
         if (status != null) {
             agent.setStatus(status);
+        }
+
+        // Credential-envelope design §5.2: a mode change is validated against
+        // the matrix + mandate (null = no change). The PLATFORM_ADMIN-only
+        // guard for this path lives in the admin controller (method-level).
+        if (modelAccessMode != null && modelAccessMode != agent.getModelAccessMode()) {
+            modelAccessModeValidator.validate(agent.getHostType(), modelAccessMode);
+            agent.setModelAccessMode(modelAccessMode);
+            log.info("Model access mode of host {} set to {}", agentId, modelAccessMode);
         }
 
         agent = agentHostRepository.save(agent);

@@ -7,6 +7,7 @@ import ai.myrmec.engine.agent.dto.AgentResponse;
 import ai.myrmec.engine.agent.dto.AgentWithKeyResponse;
 import ai.myrmec.engine.agent.dto.AgentWorkerResponse;
 import ai.myrmec.engine.agent.dto.CreateAgentRequest;
+import ai.myrmec.engine.agent.dto.SetModelAccessModeRequest;
 import ai.myrmec.engine.agent.dto.UpdateAgentRequest;
 import ai.myrmec.engine._system.exception.ErrorResponse;
 import ai.myrmec.engine.project.Project;
@@ -118,13 +119,21 @@ public class AgentHostAdminController {
     public ResponseEntity<AgentWithKeyResponse> createAgent(
             @Valid @RequestBody CreateAgentRequest request) {
 
+        // Credential-envelope design §5.1: the model access mode is a
+        // PLATFORM_ADMIN-only setting; the class-level guard also allows
+        // EDITORs, so the mode field itself is gated here.
+        ai.myrmec.engine.agent.ModelAccessMode mode =
+                request.getModelAccessMode() == null ? null
+                        : requirePlatformAdminForMode(request.getModelAccessMode());
+
         AgentHostCreationResult result = agentHostService.createAgent(
                 request.getName(),
                 request.getDescription(),
                 request.getProjectId(),
                 request.getModelOverride(),
                 request.getConfig(),
-                request.getMaxAgents()
+                request.getMaxAgents(),
+                mode
         );
 
         String projectName = null;
@@ -156,6 +165,13 @@ public class AgentHostAdminController {
             @PathVariable UUID id,
             @Valid @RequestBody UpdateAgentRequest request) {
 
+        // Credential-envelope design §5.1: mode changes are PLATFORM_ADMIN
+        // only. EDITORs may edit other fields via this endpoint, but a
+        // non-null mode in the body is rejected unless they are an admin.
+        ai.myrmec.engine.agent.ModelAccessMode mode =
+                request.getModelAccessMode() == null ? null
+                        : requirePlatformAdminForMode(request.getModelAccessMode());
+
         AgentHost agent = agentHostService.updateAgent(
                 id,
                 request.getName(),
@@ -164,7 +180,8 @@ public class AgentHostAdminController {
                 request.getModelOverride(),
                 request.getConfig(),
                 request.getMaxAgents(),
-                request.getStatus()
+                request.getStatus(),
+                mode
         );
 
         String projectName = null;
@@ -203,5 +220,59 @@ public class AgentHostAdminController {
     public ResponseEntity<Map<String, String>> regenerateKey(@PathVariable UUID id) {
         String newKey = agentHostService.regenerateRegistrationKey(id);
         return ResponseEntity.ok(Map.of("registrationKey", newKey));
+    }
+
+    /**
+     * Credential-envelope design §5.1/§5.2: change a host's model access
+     * mode. PLATFORM_ADMIN only — the class-level guard also admits EDITORs,
+     * so this endpoint tightens with a method-level guard.
+     */
+    @Operation(summary = "Set the model access mode of an agent host (PLATFORM_ADMIN only)")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Model access mode updated"),
+            @ApiResponse(responseCode = "400", description = "Mode rejected by the validation matrix",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "403", description = "Not a platform admin, or governance mandate violated",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Agent host not found",
+                    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    @PutMapping("/{id}/model-access-mode")
+    public ResponseEntity<AgentResponse> setModelAccessMode(
+            @PathVariable UUID id,
+            @Valid @RequestBody SetModelAccessModeRequest request) {
+        AgentHost agent = agentHostService.updateAgent(
+                id, null, null, null, null, null, null, null, request.getModelAccessMode());
+
+        String projectName = null;
+        if (agent.getProjectId() != null) {
+            projectName = projectRepository.findById(agent.getProjectId())
+                    .map(Project::getName)
+                    .orElse(null);
+        }
+        return ResponseEntity.ok(AgentResponse.from(
+                agent,
+                projectName,
+                agentHostService.countOnlineInstances(agent.getId())
+        ));
+    }
+
+    /**
+     * Runtime guard for the PLATFORM_ADMIN-only mode field on the shared
+     * create/update endpoints (design §5.1 — the class-level guard admits
+     * EDITORs, but the mode setting is platform-level only).
+     */
+    private ai.myrmec.engine.agent.ModelAccessMode requirePlatformAdminForMode(
+            ai.myrmec.engine.agent.ModelAccessMode mode) {
+        var principal = org.springframework.security.core.context.SecurityContextHolder
+                .getContext().getAuthentication() instanceof org.springframework.security.authentication.UsernamePasswordAuthenticationToken token
+                && token.getPrincipal() instanceof ai.myrmec.engine.user.UserPrincipal user
+                ? user : null;
+        if (principal == null || !principal.isPlatformAdmin()) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Changing the model access mode requires PLATFORM_ADMIN");
+        }
+        return mode;
     }
 }

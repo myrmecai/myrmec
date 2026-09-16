@@ -37,7 +37,8 @@ public enum BuiltInGovernanceProfile implements GovernanceProfileDefinition {
                     entry(ProductFeature.ACTIVATION_RULES, Set.of("REQUIRED_ALL")),
                     entry(ProductFeature.BUDGET_ENFORCEMENT, Set.of("ON")),
                     entry(ProductFeature.BUDGET_OVERRIDE, Set.of("NONE")),
-                    entry(ProductFeature.AUDIT_INTEGRITY, Set.of("ON")))),
+                    entry(ProductFeature.AUDIT_INTEGRITY, Set.of("ON")),
+                    entry(ProductFeature.LOCAL_HOST_MODEL_GATEWAY, Set.of("ON")))),
 
     STANDARD(
             "STANDARD", "Standard",
@@ -52,7 +53,8 @@ public enum BuiltInGovernanceProfile implements GovernanceProfileDefinition {
                     entry(ProductFeature.ACTIVATION_RULES, Set.of("REQUIRED_ORG_PROJECT")),
                     entry(ProductFeature.BUDGET_ENFORCEMENT, Set.of("ON")),
                     entry(ProductFeature.BUDGET_OVERRIDE, Set.of("PER_SERVICE")),
-                    entry(ProductFeature.AUDIT_INTEGRITY, Set.of("OFF")))),
+                    entry(ProductFeature.AUDIT_INTEGRITY, Set.of("OFF")),
+                    entry(ProductFeature.LOCAL_HOST_MODEL_GATEWAY, Set.of("OFF")))),
 
     FLEXIBLE(
             "FLEXIBLE", "Flexible",
@@ -67,7 +69,8 @@ public enum BuiltInGovernanceProfile implements GovernanceProfileDefinition {
                     entry(ProductFeature.ACTIVATION_RULES, Set.of("OPTIONAL")),
                     entry(ProductFeature.BUDGET_ENFORCEMENT, Set.of("ON")),
                     entry(ProductFeature.BUDGET_OVERRIDE, Set.of("CONFIGURABLE")),
-                    entry(ProductFeature.AUDIT_INTEGRITY, Set.of("OFF"))));
+                    entry(ProductFeature.AUDIT_INTEGRITY, Set.of("OFF")),
+                    entry(ProductFeature.LOCAL_HOST_MODEL_GATEWAY, Set.of("OFF"))));
 
     private final String code;
     private final String displayName;

@@ -56,6 +56,7 @@ public class SessionContextAssembler {
     private final InstructionAssetVersionResolver instructionAssetVersionResolver;
     private final SessionRepository sessionRepository;
     private final AgentHostInstanceRepository agentHostInstanceRepository;
+    private final ai.myrmec.engine.agent.AgentHostRepository agentHostRepository;
     private final CredentialEnvelopeService credentialEnvelopeService;
 
     /** credentialRef constants (design §9) — stable across both config blocks. */
@@ -112,7 +113,7 @@ public class SessionContextAssembler {
                 ctx.autoHitl(),
                 null,
                 null,
-                sealCredentials(session.getId(), ctx));
+                requireDispatchableThenSeal(session, ctx));
     }
 
     /**
@@ -149,7 +150,7 @@ public class SessionContextAssembler {
                 ctx.autoHitl(),
                 null,
                 null,
-                sealCredentials(sessionId, ctx));
+                requireDispatchableThenSeal(session, ctx));
     }
 
     /**
@@ -217,6 +218,45 @@ public class SessionContextAssembler {
 
         return new ResolvedContext(modelConfig, workspace, tools, kbHandles, autoHitl,
                 contextPins, modelApiKey, workspaceRepoToken);
+    }
+
+    /**
+     * Mode gate (§13 item 3) then seal: rejects the dispatch for a
+     * GATEWAY-mode host before any credential sealing happens.
+     */
+    private List<SessionCredential> requireDispatchableThenSeal(Session session, ResolvedContext ctx) {
+        requireDispatchableModelAccessMode(session);
+        return sealCredentials(session.getId(), ctx);
+    }
+
+    /**
+     * Credential-envelope design §5.1 + §13 item 3: a host in GATEWAY mode
+     * cannot be served yet — the model gateway is Phase 2 and does not
+     * exist, so assembling a session for it would silently degrade to the
+     * Direct path and break the governance guarantee. Fail the dispatch
+     * loudly via the engine's standard dispatch-failure path instead.
+     */
+    private void requireDispatchableModelAccessMode(Session session) {
+        if (session.getHostInstanceId() == null) {
+            return; // legacy un-allocated session: mode gate not applicable
+        }
+        AgentHostInstance instance = agentHostInstanceRepository
+                .findById(session.getHostInstanceId()).orElse(null);
+        if (instance == null) {
+            return; // instance already gone: existing session/instance close semantics handle it
+        }
+        ai.myrmec.engine.agent.AgentHost host = agentHostRepository
+                .findById(instance.getAgentHostId()).orElse(null);
+        if (host != null
+                && host.getModelAccessMode() == ai.myrmec.engine.agent.ModelAccessMode.GATEWAY) {
+            log.warn("Session {} dispatch refused: host {} is in GATEWAY model access mode, "
+                            + "but the model gateway is not yet implemented (Phase 2) — "
+                            + "failing the dispatch instead of silently falling back to Direct",
+                    session.getId(), host.getId());
+            throw new IllegalStateException(
+                    "Dispatch refused: host " + host.getId() + " is in GATEWAY model access mode "
+                            + "but the model gateway is not yet implemented (Phase 2)");
+        }
     }
 
     /**

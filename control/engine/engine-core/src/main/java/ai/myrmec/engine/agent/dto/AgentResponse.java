@@ -24,6 +24,7 @@ public class AgentResponse {
     private Map<String, Object> config;
     private Integer maxAgents;
     private AgentHost.Status status;
+    private ai.myrmec.engine.agent.ModelAccessMode modelAccessMode;
     private String controlNodeId;
     private int activeInstanceCount;
     private Instant createdAt;
@@ -50,6 +51,7 @@ public class AgentResponse {
                 .config(agent.getConfig())
                 .maxAgents(agent.getMaxAgents())
                 .status(agent.getStatus())
+                .modelAccessMode(agent.getModelAccessMode())
                 .controlNodeId(agent.getControlNodeId())
                 .activeInstanceCount(activeInstanceCount)
                 .createdAt(agent.getCreatedAt())

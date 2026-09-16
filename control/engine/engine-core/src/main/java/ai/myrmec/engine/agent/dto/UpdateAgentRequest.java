@@ -1,6 +1,7 @@
 package ai.myrmec.engine.agent.dto;
 
 import ai.myrmec.engine.agent.AgentHost;
+import ai.myrmec.engine.agent.ModelAccessMode;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -46,4 +47,10 @@ public class UpdateAgentRequest {
      * Agent status.
      */
     private AgentHost.Status status;
+
+    /**
+     * Model access mode change (credential-envelope design §5). PLATFORM_ADMIN
+     * only — the controller method-level guard rejects EDITORs; null = no change.
+     */
+    private ModelAccessMode modelAccessMode;
 }
