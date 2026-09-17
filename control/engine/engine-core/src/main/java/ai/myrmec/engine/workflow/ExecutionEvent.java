@@ -36,10 +36,20 @@ public class ExecutionEvent {
     private UUID id;
 
     /**
-     * Task this event belongs to.
+     * Task this event belongs to. Null for conversation (§8.4) events —
+     * conversations have no workflow task; correlation for those rows is
+     * the persisted {@code data} payload + {@link #getKind()}.
      */
-    @Column(name = "task_id", nullable = false)
+    @Column(name = "task_id")
     private UUID taskId;
+
+    /**
+     * Which execution surface produced the row: WORKFLOW for the legacy
+     * task-attempt sink, CONVERSATION for §8.4 durable conversation events.
+     * Defaults to WORKFLOW for backward compatibility.
+     */
+    @Column(name = "kind", nullable = false, length = 20)
+    private String kind = "WORKFLOW";
 
     /**
      * Attempt this event belongs to (null for legacy events).

@@ -61,5 +61,22 @@ public enum EventType {
      * sequence. Data: the redacted §21 event envelope (workerName, callId,
      * usage, candidateTreeHash, …).
      */
-    ORCHESTRATION
+    ORCHESTRATION;
+
+    /**
+     * Case-sensitive lookup of the closed §8.4/§16 union by wire string;
+     * null for unknown values (the conversation sink persists those as
+     * LOG rows with an {@code unknownEventType} data note rather than
+     * rejecting the frame).
+     */
+    public static EventType parse(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return EventType.valueOf(value);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
 }

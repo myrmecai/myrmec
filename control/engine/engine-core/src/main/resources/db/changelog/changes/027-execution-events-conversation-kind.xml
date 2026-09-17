@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Conversation execution.event durable sink (#139, protocol §8.4/§12.3).
+        execution_events gains:
+          - nullable task_id (conversations have no workflow task; the FK
+            was CASCADE on workflow_tasks and a NULL child value never
+            violates it, so no FK change is needed),
+          - a `kind` discriminator (WORKFLOW for existing engine-local rows,
+            CONVERSATION for §8.4 conversation events) so the durable
+            conversation event history is distinguishable from the
+            task-attempt sink without a second table.
+        Additive and preCondition-guarded like 026.
+    -->
+
+    <changeSet id="027-execution-events-task-id-nullable" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="execution_events"/>
+                <columnExists tableName="execution_events" columnName="task_id"/>
+            </and>
+        </preConditions>
+        <dropNotNullConstraint tableName="execution_events" columnName="task_id" columnDataType="uuid"/>
+    </changeSet>
+
+    <changeSet id="027-execution-events-kind" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="execution_events"/>
+                <not>
+                    <columnExists tableName="execution_events" columnName="kind"/>
+                </not>
+            </and>
+        </preConditions>
+        <addColumn tableName="execution_events">
+            <column name="kind" type="varchar(20)" defaultValue="WORKFLOW">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>

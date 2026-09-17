@@ -44,6 +44,7 @@ import ai.myrmec.engine.websocket.message.WebSocketMessage;
 import ai.myrmec.engine.websocket.message.payload.MessageDeltaPayload;
 import ai.myrmec.engine.websocket.message.payload.SessionOpenPayload;
 import ai.myrmec.engine.inference.execution.ExecutionBridge;
+import ai.myrmec.engine.workflow.ConversationEventIngestionService;
 import ai.myrmec.engine.workflow.OrchestrationEventIngestionService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -92,6 +93,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     private final ConversationService conversationService;
     private final SessionExecutionRepository executionRepository;
     private final OrchestrationEventIngestionService eventIngestionService;
+    private final ConversationEventIngestionService conversationEventIngestionService;
     private final ExecutionBridge executionBridge;
     private final ai.myrmec.engine.workflow.TaskAttemptService taskAttemptService;
     private final PendingConversationTurns pendingConversationTurns;
@@ -131,6 +133,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                                        ConversationService conversationService,
                                        SessionExecutionRepository executionRepository,
                                        OrchestrationEventIngestionService eventIngestionService,
+                                       ConversationEventIngestionService conversationEventIngestionService,
                                        ExecutionBridge executionBridge,
                                        ai.myrmec.engine.workflow.TaskAttemptService taskAttemptService,
                                        PendingConversationTurns pendingConversationTurns,
@@ -153,6 +156,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         this.conversationService = conversationService;
         this.executionRepository = executionRepository;
         this.eventIngestionService = eventIngestionService;
+        this.conversationEventIngestionService = conversationEventIngestionService;
         this.executionBridge = executionBridge;
         this.taskAttemptService = taskAttemptService;
         this.pendingConversationTurns = pendingConversationTurns;
@@ -750,7 +754,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    /** §8.4: durable event — advance cursor + bridge to orchestration event ingestion. */
+    /** §8.4: durable event — advance cursor + bridge to the matching ingestion sink. */
     private void handleExecutionEvent(WebSocketSession session, HostProtocolEnvelope envelope) {
         UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
         if (instanceId == null) {
@@ -771,12 +775,20 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                         "execution.event for unknown execution", false, "EXECUTION", null);
                 return;
             }
+            // §12.3 at-least-once: ack ONLY after the event is durably
+            // recorded — on ingestion failure the frame stays unacked and
+            // the host resends. The orchestration path bridges through
+            // ExecutionBridge (which catches and drops); the conversation
+            // path persists with kind=CONVERSATION.
             if ("WORKFLOW".equals(execution.getServiceType()) && execution.getDispatchId() != null) {
                 eventIngestionService.ingest(
                         execution.getDispatchId(), payload.eventId(),
                         envelope.getSequence().longValue(), payload.eventType(), payload.data());
+            } else if ("CONVERSATION".equals(execution.getServiceType())) {
+                conversationEventIngestionService.ingest(execution.getId(), payload);
             } else {
-                log.debug("Ignoring execution.event for conversation execution {}", envelope.getExecutionId());
+                log.debug("Ignoring execution.event for execution {} (serviceType {})",
+                        envelope.getExecutionId(), execution.getServiceType());
             }
             acknowledge(session, envelope.getMessageId(), execution.getSessionId(), envelope.getSequence().longValue());
         } catch (Exception e) {
