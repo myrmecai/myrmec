@@ -24,7 +24,12 @@ import {
 /** Agent-side state for one open session. */
 export interface Session {
   sessionId: string;
-  serviceType: "WORKFLOW" | "CONVERSATION";
+  kind: "WORKFLOW" | "CONVERSATION";
+  /** §7.3 (§21.4): the dispatch context from session.open — "ORCHESTRATION"
+   *  on orchestration sessions, null for conversations. */
+  executionMode?: string | null;
+  /** §7.3 (§21.4): the orchestration external reference, null when absent. */
+  ref?: string | null;
   projectId: string;
   /** Resolved chat model — instantiated once at open, disposed at close. */
   model: ChatModel;
@@ -133,12 +138,14 @@ export class SessionRegistry {
       );
 
       const knowledgeSourceIds = new Set(
-        payload.knowledgeSources.map((ks) => ks.knowledgeSourceId),
+        payload.knowledgeSources.map((ks) => ks.id),
       );
 
       const session: Session = {
         sessionId: payload.sessionId,
-        serviceType: payload.serviceType === "WORKFLOW" ? "WORKFLOW" : "CONVERSATION",
+        kind: payload.kind === "WORKFLOW" ? "WORKFLOW" : "CONVERSATION",
+        executionMode: payload.executionMode ?? null,
+        ref: payload.ref ?? null,
         projectId: payload.projectId,
         model,
         tools,
@@ -154,7 +161,7 @@ export class SessionRegistry {
       this.sessions.set(payload.sessionId, session);
 
       this.logger.info(
-        `Session opened: ${payload.sessionId} (${payload.serviceType}) — ${tools.size} tools, ${knowledgeSourceIds.size} knowledge sources${
+        `Session opened: ${payload.sessionId} (${payload.kind}) — ${tools.size} tools, ${knowledgeSourceIds.size} knowledge sources${
           payload.orchestration ? ", orchestration assignment installed" : ""
         }${credentialVault ? `, ${credentialVault.size} credentials unwrapped` : ""}`,
       );

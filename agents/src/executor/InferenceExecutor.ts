@@ -122,7 +122,7 @@ export class InferenceExecutor {
    * Available to both service types via the executor's turn context.
    */
   async retrieve(
-    knowledgeSourceId: string,
+    sourceId: string,
     query: string,
     options?: { topK?: number; filters?: Record<string, string>; taskId?: string; attemptId?: string },
   ): Promise<unknown[]> {
@@ -131,7 +131,7 @@ export class InferenceExecutor {
     }
     try {
       return await this.httpClient.retrieve(this.agentAccessToken, {
-        knowledgeSourceId,
+        sourceId,
         query,
         ...options,
       });

@@ -43,7 +43,7 @@ public class StubRetrievalProvider implements RetrievalProvider {
         String term = query.query().toLowerCase();
         List<RetrievalResult> results = chunkRepository.findAll().stream()
                 .filter(c -> c.getKnowledgeSourceId() != null
-                        && c.getKnowledgeSourceId().equals(query.knowledgeSourceId()))
+                        && c.getKnowledgeSourceId().equals(query.sourceId()))
                 .filter(c -> c.getContent() != null
                         && c.getContent().toLowerCase().contains(term))
                 .sorted(Comparator.comparing(KnowledgeChunk::getContent))
@@ -52,14 +52,14 @@ public class StubRetrievalProvider implements RetrievalProvider {
                         c.getContent(),
                         new Citation(
                                 c.getId(),
-                                query.knowledgeSourceId(),
+                                query.sourceId(),
                                 resolveSourceName(c),
                                 c.getLocator(),
                                 1.0)))
                 .toList();
 
         log.debug("StubRetrieval: source {} query '{}' → {} hits",
-                query.knowledgeSourceId(), query.query(), results.size());
+                query.sourceId(), query.query(), results.size());
 
         return results;
     }

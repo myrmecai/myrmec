@@ -76,8 +76,8 @@ export async function resolveProviderModel(
       model: info.modelId,
       apiKey,
       maxRetries: 0,
-      ...(info.apiEndpoint
-        ? { configuration: { baseURL: info.apiEndpoint } }
+      ...(info.endpoint
+        ? { configuration: { baseURL: info.endpoint } }
         : {}),
       ...params,
     } as ConstructorParameters<typeof ChatOpenAI>[0]);
@@ -89,7 +89,7 @@ export async function resolveProviderModel(
       model: info.modelId,
       apiKey,
       maxRetries: 0,
-      ...(info.apiEndpoint ? { anthropicApiUrl: info.apiEndpoint } : {}),
+      ...(info.endpoint ? { anthropicApiUrl: info.endpoint } : {}),
       ...params,
     } as ConstructorParameters<typeof ChatAnthropic>[0]);
   }

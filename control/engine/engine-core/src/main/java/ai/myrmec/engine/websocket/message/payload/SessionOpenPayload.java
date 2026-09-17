@@ -17,10 +17,18 @@ import java.util.UUID;
  * {@code assignmentDigest}. {@code execution.start} then references the stored
  * bytes by {@code dispatchId/attemptId/assignmentDigest} only. Both fields are
  * null for conversation sessions and for ordinary INFERENCE steps.</p>
+ *
+ * <p>§21.4 wire vocabulary (breaking): the session's service family rides the
+ * wire as {@code kind} (values "CONVERSATION"/"WORKFLOW" unchanged); the
+ * model block's endpoint field is {@code endpoint}; a tool's JSON schema
+ * field is {@code inputSchema}; a knowledge-source handle identifies itself
+ * by {@code id}. The §7.3 dispatch-context fields {@code executionMode}
+ * ("ORCHESTRATION" on orchestration sessions, null otherwise) and {@code ref}
+ * (the orchestration external reference, null otherwise) are additive.</p>
  */
 public record SessionOpenPayload(
         UUID sessionId,
-        String serviceType,      // "WORKFLOW" or "CONVERSATION"
+        String kind,             // §21.4: "WORKFLOW" or "CONVERSATION"
         UUID projectId,
         UUID profileVersionId,   // pinned agent-profile version
         ModelConfig model,
@@ -28,21 +36,23 @@ public record SessionOpenPayload(
         List<ToolDefinition> tools,
         List<KnowledgeSourceHandle> knowledgeSources,
         boolean autoHitlOnDestructive,  // project HITL policy
+        String executionMode,             // §7.3: "ORCHESTRATION" or null
+        String ref,                       // §7.3: orchestration external reference or null
         Map<String, Object> orchestration,  // §16.2 assignment; null for non-orchestration
         String assignmentDigest,          // §16.3 sha-256 of the canonical assignment bytes
         List<SessionCredential> credentials) {  // sealed session secrets (design §9); null/empty when keyless
 
     /** Copy the context with the §16.2 assignment installed (orchestration only). */
     public SessionOpenPayload withAssignment(Map<String, Object> assignment, String digest) {
-        return new SessionOpenPayload(sessionId, serviceType, projectId, profileVersionId,
+        return new SessionOpenPayload(sessionId, kind, projectId, profileVersionId,
                 model, workspace, tools, knowledgeSources, autoHitlOnDestructive,
-                assignment, digest, credentials);
+                executionMode, ref, assignment, digest, credentials);
     }
 
     public record ModelConfig(
             String provider,
             String modelId,
-            String apiEndpoint,    // nullable
+            String endpoint,       // §21.4: nullable
             String credentialRef,  // references credentials[] entry (design §9); null = keyless
             Map<String, Object> parameters) {}
 
@@ -55,11 +65,11 @@ public record SessionOpenPayload(
     public record ToolDefinition(
             String name,
             String description,
-            Map<String, Object> parameters,  // JSON-schema
+            Map<String, Object> inputSchema,  // §21.4: JSON-schema
             String riskClass) {}              // "SAFE", "DESTRUCTIVE", "IRREVERSIBLE"
 
     public record KnowledgeSourceHandle(
-            UUID knowledgeSourceId,
+            UUID id,               // §21.4
             String name,
             String description) {}
 }

@@ -68,14 +68,14 @@ public class SessionContextAssembler {
     /**
      * Assemble the session.open payload and persist the session row.
      *
-     * @param serviceType       "CONVERSATION" or "WORKFLOW"
+     * @param kind              "CONVERSATION" or "WORKFLOW" (§21.4 wire field)
      * @param refId             conversation_id or workflow_request_id
      * @param projectId         project scope
      * @param agentProfileId    agent profile (for model + system prompt resolution)
      * @return the assembled SessionOpenPayload (ready to send over WebSocket)
      */
     @Transactional
-    public SessionOpenPayload assemble(String serviceType, UUID refId, UUID projectId,
+    public SessionOpenPayload assemble(String kind, UUID refId, UUID projectId,
                                         UUID agentProfileId) {
         // 1. Resolve agent profile and its PUBLISHED version (design
         //    §16.1: the behaviour contract lives on the version row).
@@ -89,21 +89,21 @@ public class SessionContextAssembler {
 
         // 7. Create session row
         Session session = new Session();
-        session.setServiceType(serviceType);
+        session.setServiceType(kind);
         session.setRefId(refId);
         session.setProjectId(projectId);
         session.setContextPins(ctx.contextPins());
         session.setStatus(EntityStatus.ACTIVE);
         session = sessionRepository.save(session);
 
-        log.info("Created session {} for {} refId={}", session.getId(), serviceType, refId);
+        log.info("Created session {} for {} refId={}", session.getId(), kind, refId);
 
         // §9.5 / §16.1: the pin is the real published version row ID —
         // a worker bound to this session replays against exactly this
         // content even if the profile publishes a newer version later.
         return new SessionOpenPayload(
                 session.getId(),
-                serviceType,
+                kind,
                 projectId,
                 version.getId(),
                 ctx.modelConfig(),
@@ -111,6 +111,8 @@ public class SessionContextAssembler {
                 ctx.tools(),
                 ctx.kbHandles(),
                 ctx.autoHitl(),
+                dispatchContextExecutionMode(kind),
+                null,
                 null,
                 null,
                 requireDispatchableThenSeal(session, ctx));
@@ -123,7 +125,7 @@ public class SessionContextAssembler {
      * dispatch path until cutover. Pins context onto the given session id.
      */
     @Transactional
-    public SessionOpenPayload assembleContext(UUID sessionId, String serviceType, UUID refId,
+    public SessionOpenPayload assembleContext(UUID sessionId, String kind, UUID refId,
                                               UUID projectId, UUID agentProfileId) {
         AgentProfile profile = agentProfileRepository.findById(agentProfileId)
                 .orElseThrow(() -> new IllegalArgumentException(
@@ -140,7 +142,7 @@ public class SessionContextAssembler {
 
         return new SessionOpenPayload(
                 sessionId,
-                serviceType,
+                kind,
                 projectId,
                 version.getId(),
                 ctx.modelConfig(),
@@ -148,9 +150,20 @@ public class SessionContextAssembler {
                 ctx.tools(),
                 ctx.kbHandles(),
                 ctx.autoHitl(),
+                dispatchContextExecutionMode(kind),
+                null,
                 null,
                 null,
                 requireDispatchableThenSeal(session, ctx));
+    }
+
+    /**
+     * §7.3 dispatch-context population (§21.4): the executionMode rides the
+     * session.open payload — "ORCHESTRATION" when the session belongs to an
+     * orchestration-kind workflow execution, null for conversations.
+     */
+    private String dispatchContextExecutionMode(String kind) {
+        return "WORKFLOW".equals(kind) ? "ORCHESTRATION" : null;
     }
 
     /**
@@ -310,17 +323,17 @@ public class SessionContextAssembler {
                     "Model '" + version.getDefaultModel() + "' not found for profile '"
                             + profile.getName() + "'");
         }
-        // apiEndpoint: explicit model endpoint, else provider baseUrl.
-        String apiEndpoint = model.getApiEndpoint();
-        if (apiEndpoint == null && model.getProviderConfig() != null) {
-            apiEndpoint = model.getProviderConfig().getBaseUrl();
+        // endpoint (§21.4): explicit model endpoint, else provider baseUrl.
+        String endpoint = model.getApiEndpoint();
+        if (endpoint == null && model.getProviderConfig() != null) {
+            endpoint = model.getProviderConfig().getBaseUrl();
         }
         // Credential delivery (design §9): the wire carries a credentialRef;
         // the key itself travels only inside the sealed envelope.
         return new SessionOpenPayload.ModelConfig(
                 model.getProviderConfig() != null ? model.getProviderConfig().getCode() : "unknown",
                 model.getModelId(),
-                apiEndpoint,
+                endpoint,
                 apiKey != null ? MODEL_CREDENTIAL_REF : null,
                 model.getDefaultParams() != null ? model.getDefaultParams() : Map.of());
     }

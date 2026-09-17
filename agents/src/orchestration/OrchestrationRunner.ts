@@ -395,7 +395,7 @@ export class OrchestrationRunner {
     const info: ModelInfoWire = {
       provider: orchestratorModelDef.provider,
       modelId: orchestratorModelDef.modelId,
-      apiEndpoint: orchestratorModelDef.apiEndpoint,
+      endpoint: orchestratorModelDef.endpoint,
       // Credential-envelope delivery (design §9): the assignment carries an
       // adapter-scoped ref only; the plaintext never reaches the runner.
       credentialRef: null,

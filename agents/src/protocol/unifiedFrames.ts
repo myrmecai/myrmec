@@ -232,7 +232,7 @@ export type InferenceMessage = z.infer<typeof inferenceMessageSchema>;
 export const modelConfigSchema = z.object({
   provider: z.string(),
   modelId: z.string(),
-  apiEndpoint: z.string().nullish(),
+  endpoint: z.string().nullish(),
   // Credential-envelope delivery (design §9): the plaintext key never rides
   // the wire; the model block references an entry in `credentials` by ref.
   credentialRef: z.string().nullish(),
@@ -249,7 +249,7 @@ export type ModelConfig = z.infer<typeof modelConfigSchema>;
 export const modelInfoSchema = z.object({
   provider: z.string(),
   modelId: z.string(),
-  apiEndpoint: z.string().nullish(),
+  endpoint: z.string().nullish(),
   credentialRef: z.string().nullish(),
   parameters: z.record(z.string(), z.unknown()).default({}),
 });
@@ -268,13 +268,13 @@ export type WorkspaceConfig = z.infer<typeof workspaceConfigSchema>;
 export const toolDefinitionSchema = z.object({
   name: z.string(),
   description: z.string(),
-  parameters: mapUnknown,
+  inputSchema: mapUnknown,
   riskClass: z.string(),
 });
 export type ToolDefinition = z.infer<typeof toolDefinitionSchema>;
 
 export const knowledgeSourceHandleSchema = z.object({
-  knowledgeSourceId: uuid,
+  id: uuid,
   name: z.string(),
   description: z.string(),
 });
@@ -312,7 +312,7 @@ export type SessionCredential = z.infer<typeof sessionCredentialSchema>;
 
 export const sessionOpenPayloadSchema = z.object({
   sessionId: uuid,
-  serviceType: z.string(),
+  kind: z.string(),
   projectId: uuid,
   profileVersionId: uuid,
   model: modelConfigSchema,
@@ -320,6 +320,11 @@ export const sessionOpenPayloadSchema = z.object({
   tools: z.array(toolDefinitionSchema),
   knowledgeSources: z.array(knowledgeSourceHandleSchema),
   autoHitlOnDestructive: z.boolean(),
+  // §7.3 (§21.4): the dispatch context — executionMode is "ORCHESTRATION"
+  // on orchestration sessions, null for conversations; ref is the
+  // orchestration external reference (null when the engine carries none).
+  executionMode: z.string().nullish(),
+  ref: z.string().nullish(),
   // §16.2/§16.3 (P6-T6): an ORCHESTRATOR step's complete self-contained
   // assignment rides session.open as `orchestration` + its sha-256
   // `assignmentDigest` — the assignment IS that session's context.

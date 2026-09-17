@@ -188,7 +188,8 @@ class ConversationTurnLoopProtocolTest extends IntegrationTestBase {
         JsonNode sessionOpen = awaitFrame(hostSetup, "session.open");
         JsonNode openPayload = sessionOpen.path("payload");
         assertThat(openPayload.path("sessionId").asText()).isEqualTo(sessionId.toString());
-        assertThat(openPayload.path("serviceType").asText()).isEqualTo("CONVERSATION");
+        assertThat(openPayload.path("kind").asText()).isEqualTo("CONVERSATION");
+        assertThat(openPayload.path("executionMode").isNull()).isTrue();
         assertThat(openPayload.path("profileVersionId").asText())
                 .isEqualTo(pinVersion.getAgentProfileVersionId().toString());
         assertThat(openPayload.path("model").isObject()).isTrue();

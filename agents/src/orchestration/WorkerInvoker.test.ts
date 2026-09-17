@@ -30,7 +30,7 @@ function baseAssignment(): OrchestrationAssignment {
       attemptId: "attempt", attemptOrdinal: 1, dispatchId: "attempt",
     },
     models: [
-      { code: "worker-model", provider: "stub", modelId: "worker-model", description: "w", apiEndpoint: null, credentialRef: null, parameters: {} },
+      { code: "worker-model", provider: "stub", modelId: "worker-model", description: "w", endpoint: null, credentialRef: null, parameters: {} },
     ],
     source: {
       repoUrl: "https://example.com/r.git", sourceBranch: "main",

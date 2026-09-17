@@ -106,7 +106,10 @@ class WorkflowDispatchUnifiedProtocolTest extends WorkflowDispatchSupport {
         // ---- §7.2/§7.3: accept → session.open carries the §16.2 assignment ----
         acceptSession(host, sessionId);
         JsonNode sessionOpen = awaitFrame(host.outbound(), "session.open");
-        assertThat(sessionOpen.path("payload").path("serviceType").asText()).isEqualTo("WORKFLOW");
+        assertThat(sessionOpen.path("payload").path("kind").asText()).isEqualTo("WORKFLOW");
+        assertThat(sessionOpen.path("payload").path("executionMode").asText())
+                .as("§21.4: the orchestration dispatch context rides session.open")
+                .isEqualTo("ORCHESTRATION");
         JsonNode assignment = sessionOpen.path("payload").path("orchestration");
         assertThat(assignment.isObject())
                 .as("the §16.2 assignment rides session.open for an orchestration session")

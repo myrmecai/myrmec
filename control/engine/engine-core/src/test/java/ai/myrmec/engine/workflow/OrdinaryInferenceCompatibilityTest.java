@@ -71,7 +71,10 @@ class OrdinaryInferenceCompatibilityTest extends WorkflowDispatchSupport {
         // session.open first (§7.3) — the assembled §6.1 context, no assignment.
         acceptSession(host, sessionId);
         JsonNode sessionOpen = awaitFrame(host.outbound(), "session.open");
-        assertThat(sessionOpen.path("payload").path("serviceType").asText()).isEqualTo("WORKFLOW");
+        assertThat(sessionOpen.path("payload").path("kind").asText()).isEqualTo("WORKFLOW");
+        assertThat(sessionOpen.path("payload").path("executionMode").asText())
+                .as("§21.4: ordinary workflow sessions still carry the ORCHESTRATION mode")
+                .isEqualTo("ORCHESTRATION");
         JsonNode orchestration = sessionOpen.path("payload").path("orchestration");
         assertThat(orchestration.isMissingNode() || orchestration.isNull())
                 .as("ordinary inference never installs an orchestration assignment "

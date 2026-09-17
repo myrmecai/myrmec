@@ -228,7 +228,7 @@ public class OrchestrationAssignmentAssembler {
         def.put("provider", model.getProvider());
         def.put("modelId", model.getModelId());
         def.put("description", model.getName());
-        def.put("apiEndpoint", model.getApiEndpoint());
+        def.put("endpoint", model.getApiEndpoint());
         // §16.2 (5): session-scoped credential reference — the decrypted key
         // travels only inside the secure envelope, never in the assignment.
         def.put("credentialRef", "model:" + model.getCode());

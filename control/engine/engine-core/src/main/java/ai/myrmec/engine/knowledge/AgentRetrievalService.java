@@ -25,7 +25,7 @@ import java.util.UUID;
 /**
  * Service backing the {@code POST /api/v1/agent/retrieve} endpoint (§8).
  *
- * <p>Validates the requested {@code knowledgeSourceId} against the calling
+ * <p>Validates the requested {@code sourceId} against the calling
  * session's pinned context, resolves the appropriate
  * {@link RetrievalProvider}, executes the query, wraps untrusted passages,
  * records the audit event, and returns hits to the agent.</p>
@@ -63,19 +63,19 @@ public class AgentRetrievalService {
 
         // 2. Validate the knowledge source is pinned to this session
         if (!sessionContextAssembler.isKnowledgeSourcePinned(session.getId(),
-                request.knowledgeSourceId())) {
+                request.sourceId())) {
             log.warn("Retrieval rejected — source {} not pinned to session {} (agent {})",
-                    request.knowledgeSourceId(), session.getId(), agentInstanceId);
+                    request.sourceId(), session.getId(), agentInstanceId);
             throw new RetrievalForbiddenException(
-                    "Knowledge source " + request.knowledgeSourceId()
+                    "Knowledge source " + request.sourceId()
                             + " is not pinned to this session.");
         }
 
         // 3. Resolve the knowledge source → provider version → provider
-        KnowledgeSource source = knowledgeSourceRepository.findById(request.knowledgeSourceId())
+        KnowledgeSource source = knowledgeSourceRepository.findById(request.sourceId())
                 .orElse(null);
         if (source == null) {
-            log.warn("Retrieval — knowledge source {} not found", request.knowledgeSourceId());
+            log.warn("Retrieval — knowledge source {} not found", request.sourceId());
             return List.of();
         }
 
@@ -83,7 +83,7 @@ public class AgentRetrievalService {
                 .findById(source.getProviderVersionId()).orElse(null);
         if (providerVersion == null) {
             log.warn("Retrieval — provider version {} not found for source {}",
-                    source.getProviderVersionId(), request.knowledgeSourceId());
+                    source.getProviderVersionId(), request.sourceId());
             return List.of();
         }
 
@@ -102,7 +102,7 @@ public class AgentRetrievalService {
         int topK = request.topK() != null ? request.topK() : 5;
         Map<String, String> filters = request.filters() != null ? request.filters() : Map.of();
         RetrievalQuery query = new RetrievalQuery(
-                request.knowledgeSourceId(),
+                request.sourceId(),
                 request.query(),
                 topK,
                 filters);
@@ -113,7 +113,7 @@ public class AgentRetrievalService {
             results = provider.query(query);
         } catch (RetrievalException e) {
             log.warn("Retrieval provider '{}' failed for source {}: {}",
-                    provider.id(), request.knowledgeSourceId(), e.getMessage());
+                    provider.id(), request.sourceId(), e.getMessage());
             return List.of();  // D4: provider failure → empty result, not an error
         }
 
@@ -143,7 +143,7 @@ public class AgentRetrievalService {
             executionEventService.recordRetrieval(
                     request.taskId(),
                     request.attemptId(),
-                    request.knowledgeSourceId(),
+                    request.sourceId(),
                     request.query(),
                     topK,
                     chunkIds,
@@ -154,7 +154,7 @@ public class AgentRetrievalService {
         }
 
         log.info("Retrieval for agent {} session {} source {} → {} hits",
-                agentInstanceId, session.getId(), request.knowledgeSourceId(), hits.size());
+                agentInstanceId, session.getId(), request.sourceId(), hits.size());
         return hits;
     }
 

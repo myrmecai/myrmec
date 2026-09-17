@@ -129,7 +129,7 @@ const modelAuthoring = z
     provider: z.string().min(1),
     modelId: z.string().min(1),
     description: z.string().min(1),
-    apiEndpoint: z.string().nullable(),
+    endpoint: z.string().nullable(),
     apiKey: z.string(),
     parameters: z.record(z.string(), z.unknown()),
   })
@@ -283,7 +283,7 @@ const modelDefinition = z
     provider: z.string().min(1),
     modelId: z.string().min(1),
     description: z.string().min(1),
-    apiEndpoint: z.string().nullable(),
+    endpoint: z.string().nullable(),
     credentialRef: z.string().min(1).nullable(),
     parameters: z.record(z.string(), z.unknown()),
   })
@@ -516,7 +516,7 @@ export function compileStepAssignment(input: CompileStepAssignmentInput): import
       provider: m.provider,
       modelId: m.modelId,
       description: m.description,
-      apiEndpoint: m.apiEndpoint,
+      endpoint: m.endpoint,
       credentialRef: m.apiKey ? scope.register(m.apiKey) : null,
       parameters: m.parameters,
     })),

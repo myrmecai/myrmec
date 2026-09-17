@@ -29,16 +29,17 @@ export const VECTOR_1 = {
   sessionId: "12345678-90ab-4cde-9f01-234567890abc",
   hostId: "fedcba98-7654-4321-0fed-cba987654321",
   purpose: "MODEL_PROVIDER",
-  expiresAt: "2026-09-17T10:15:30.000Z",
+  expiresAt: "2099-09-17T10:15:30.000Z",
   plaintext: "sk-test-provider-key-0123456789",
 
   // 12-byte nonce (fixed for the vector)
   nonceBase64: "AAAAAAAAAAAAAAAAAAAAAA==",
 
   // EXPECTED — both implementations must produce these exact bytes
-  // (generated with node:crypto reference run 2026-09-16).
+  // (generated with node:crypto reference run 2026-09-17; re-sealed when the
+  // fixed expiry moved past its date).
   sessionKeyHex: "8edc74d2b2d914fc2028390a7f181786865fb9c8acac5f5e498c911cc6307848",
-  ciphertextBase64: "b37AH5DB8Xt+cCmuKC2vt7HJOBaYtGh5aU4fB4qefUdf2jNACLn/U+a5JVh1Ix0=",
+  ciphertextBase64: "b37AH5DB8Xt+cCmuKC2vt7HJOBaYtGh5aU4fB4qefXedL4c5l78GI+bAHBi4+Q4=",
 } as const;
 
 export const VECTOR_2_KEYLESS = {

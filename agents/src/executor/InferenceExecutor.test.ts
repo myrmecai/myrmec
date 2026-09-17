@@ -190,7 +190,7 @@ function makeSession(model: ChatModel, tools: SessionTool[] = [], autoHitl = fal
   for (const t of tools) toolMap.set(t.name, t);
   return {
     sessionId: "33333333-3333-4333-8333-333333333333",
-    serviceType: "CONVERSATION",
+    kind: "CONVERSATION",
     projectId: "22222222-2222-2222-8222-222222222222",
     model,
     tools: toolMap,

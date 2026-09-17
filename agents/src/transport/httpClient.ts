@@ -46,7 +46,7 @@ export interface RetrievalHit {
 /** Inputs for a {@link EngineHttpClient.retrieve} call. */
 export interface RetrieveOptions {
   /** Target knowledge source UUID. */
-  knowledgeSourceId: string;
+  sourceId: string;
   /** Free-text retrieval query. */
   query: string;
   /** Maximum number of hits to return (default 5). */
@@ -160,7 +160,7 @@ export class EngineHttpClient {
     options: RetrieveOptions,
   ): Promise<RetrievalHit[]> {
     const body: Record<string, unknown> = {
-      knowledgeSourceId: options.knowledgeSourceId,
+      sourceId: options.sourceId,
       query: options.query,
       topK: options.topK ?? 5,
     };

@@ -249,7 +249,7 @@ export class StubSessionToolFactory implements SessionToolFactory {
       tools.set(def.name, {
         name: def.name,
         description: def.description,
-        parameters: def.parameters,
+        parameters: def.inputSchema,
         riskClass,
         invoke: async (args: Record<string, unknown>) => {
           if (handler) return handler(args);

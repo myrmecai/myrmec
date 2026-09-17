@@ -236,7 +236,7 @@ describe("HostControlClient session arms", () => {
       sessionId,
       payload: {
         sessionId,
-        serviceType: "CONVERSATION",
+        kind: "CONVERSATION",
         projectId: "11111111-1111-4111-8111-111111111111",
         profileVersionId: "22222222-2222-4222-8222-222222222222",
         model: { provider: "openai", modelId: "gpt-4", parameters: {} },

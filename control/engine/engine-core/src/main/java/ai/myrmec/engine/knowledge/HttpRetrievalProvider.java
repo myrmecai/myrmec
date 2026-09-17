@@ -53,7 +53,7 @@ import java.util.UUID;
  *         <ul>
  *           <li>{@code queryField} — field name for the query string (default: {@code "query"})</li>
  *           <li>{@code topKField} — field name for topK (default: {@code "topK"})</li>
- *           <li>{@code sourceIdField} — field name for knowledgeSourceId (default: {@code "knowledgeSourceId"})</li>
+ *           <li>{@code sourceIdField} — field name for sourceId (default: {@code "knowledgeSourceId"})</li>
  *           <li>{@code sourceIdIsArray} — wrap sourceId in an array (for RAGFlow's {@code dataset_ids})</li>
  *         </ul>
  *       </li>
@@ -130,10 +130,10 @@ public class HttpRetrievalProvider implements RetrievalProvider {
     @Override
     public List<RetrievalResult> query(RetrievalQuery query) throws RetrievalException {
         // 1. Resolve the knowledge source → provider version
-        KnowledgeSource source = knowledgeSourceRepository.findById(query.knowledgeSourceId())
+        KnowledgeSource source = knowledgeSourceRepository.findById(query.sourceId())
                 .orElse(null);
         if (source == null) {
-            log.warn("HttpRetrieval: knowledge source {} not found", query.knowledgeSourceId());
+            log.warn("HttpRetrieval: knowledge source {} not found", query.sourceId());
             return List.of();
         }
 
@@ -141,7 +141,7 @@ public class HttpRetrievalProvider implements RetrievalProvider {
                 .findById(source.getProviderVersionId()).orElse(null);
         if (providerVersion == null) {
             log.warn("HttpRetrieval: provider version {} not found for source {}",
-                    source.getProviderVersionId(), query.knowledgeSourceId());
+                    source.getProviderVersionId(), query.sourceId());
             return List.of();
         }
 
@@ -311,7 +311,7 @@ public class HttpRetrievalProvider implements RetrievalProvider {
 
                 Citation citation = new Citation(
                         UUID.randomUUID(),
-                        query.knowledgeSourceId(),
+                        query.sourceId(),
                         sourceName,
                         locator,
                         score);
@@ -323,7 +323,7 @@ public class HttpRetrievalProvider implements RetrievalProvider {
         }
 
         log.info("HttpRetrieval: source {} query '{}' → {} hits",
-                query.knowledgeSourceId(), query.query(), results.size());
+                query.sourceId(), query.query(), results.size());
         return results;
     }
 

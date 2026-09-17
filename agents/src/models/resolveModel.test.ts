@@ -44,7 +44,7 @@ describe("resolveProviderModel", () => {
         provider: "groq",
         modelId: "llama-3.1-70b",
         credentialRef: "model-provider-token",
-        apiEndpoint: "https://api.groq.com/openai/v1",
+        endpoint: "https://api.groq.com/openai/v1",
       }),
       () => "gsk-test",
     );

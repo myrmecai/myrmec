@@ -21,10 +21,15 @@ import type { Envelope } from "../protocol/envelope.js";
 const exec = promisify(execFile);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-// agents/src/worker → up 4 = the workspace root holding myrmec/ + myrmec-ee/.
-const repoRoot = path.resolve(here, "..", "..", "..", "..");
+// The stub factory loads the SAME module the engine adapter uses. In the
+// main checkout the sibling myrmec-ee/ sits next to myrmec/; in a git
+// worktree (.worktrees/<name>/agents) the checkout root has no sibling
+// myrmec-ee, so walk up past .worktrees/<name> to myrmecai/ and use the
+// real myrmec-ee there. MYRMEC_EE_ROOT overrides both.
+const repoRoot = process.env.MYRMEC_EE_ROOT
+  ?? path.resolve(here, "..", "..", "..", "..", "..", "..", "myrmec-ee");
 const stubModule = path.resolve(
-  repoRoot, "myrmec-ee", "e2e", "fixtures", "stubs", "orchestration-minimal.ts",
+  repoRoot, "e2e", "fixtures", "stubs", "orchestration-minimal.ts",
 );
 let workspaceRoot: string;
 let outboxRoot: string;
@@ -88,7 +93,7 @@ describe("AgentOrchestrationExecutor (engine-mode dispatch)", () => {
           provider: "stub",
           modelId: "orch-model",
           description: "Orchestrator model",
-          apiEndpoint: null,
+          endpoint: null,
           credentialRef: null,
           parameters: {},
         },
@@ -97,7 +102,7 @@ describe("AgentOrchestrationExecutor (engine-mode dispatch)", () => {
           provider: "stub",
           modelId: "worker-model",
           description: "Implementation model",
-          apiEndpoint: null,
+          endpoint: null,
           credentialRef: null,
           parameters: {},
         },

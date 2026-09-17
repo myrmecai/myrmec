@@ -133,7 +133,7 @@ export class DefaultSessionToolFactory implements SessionToolFactory {
         tools.set(def.name, {
           name: def.name,
           description: def.description,
-          parameters: def.parameters,
+          parameters: def.inputSchema,
           invoke: async () => `Tool '${def.name}' has no agent-side implementation.`,
           riskClass,
         });

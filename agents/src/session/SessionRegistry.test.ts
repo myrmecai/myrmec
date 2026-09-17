@@ -55,7 +55,7 @@ function fakeSessionToolFactory(tools: Tool[] = []): SessionToolFactory {
           map.set(def.name, {
             name: def.name,
             description: def.description,
-            parameters: def.parameters,
+            parameters: def.inputSchema,
             invoke: async () => `Tool '${def.name}' has no agent-side implementation.`,
             riskClass,
           });
@@ -70,13 +70,13 @@ function fakeSessionToolFactory(tools: Tool[] = []): SessionToolFactory {
 function makeOpenPayload(overrides: Partial<SessionOpenPayload> = {}): SessionOpenPayload {
   return {
     sessionId: "sess-1",
-    serviceType: "CONVERSATION",
+    kind: "CONVERSATION",
     projectId: "proj-1",
     profileVersionId: "pv-1",
     model: {
       provider: "ollama",
       modelId: "llama3",
-      apiEndpoint: "http://localhost:11434/v1",
+      endpoint: "http://localhost:11434/v1",
       credentialRef: null,
       parameters: {},
     },
@@ -91,13 +91,13 @@ function makeToolDef(name: string): ToolDefinition {
   return {
     name,
     description: `tool ${name}`,
-    parameters: { type: "object" },
+    inputSchema: { type: "object" },
     riskClass: "SAFE",
   };
 }
 
 function makeKs(id: string): KnowledgeSourceHandle {
-  return { knowledgeSourceId: id, name: `ks-${id}`, description: "test" };
+  return { id, name: `ks-${id}`, description: "test" };
 }
 
 function fakeTool(name: string): Tool {
@@ -285,17 +285,17 @@ describe("SessionRegistry", () => {
     expect(registry.has("sess-1")).toBe(true);
   });
 
-  it("get() returns the session metadata (serviceType, projectId)", async () => {
+  it("get() returns the session metadata (kind, projectId)", async () => {
     registry = new SessionRegistry({
       chatModelFactory: fakeChatModelFactory(),
       sessionToolFactory: fakeSessionToolFactory(),
     });
     await registry.open(
-      makeOpenPayload({ serviceType: "WORKFLOW", projectId: "p-99" }),
+      makeOpenPayload({ kind: "WORKFLOW", projectId: "p-99" }),
     );
 
     const session = registry.get("sess-1")!;
-    expect(session.serviceType).toBe("WORKFLOW");
+    expect(session.kind).toBe("WORKFLOW");
     expect(session.projectId).toBe("p-99");
     expect(session.sessionId).toBe("sess-1");
   });

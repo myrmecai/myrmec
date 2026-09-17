@@ -51,7 +51,7 @@ const assignment = (
         provider: "stub",
         modelId: "orch-model",
         description: "m",
-        apiEndpoint: null,
+        endpoint: null,
         credentialRef: null,
         parameters: {},
       },

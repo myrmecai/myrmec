@@ -13,11 +13,11 @@ import java.util.UUID;
  * Request body for {@code POST /api/v1/agent/retrieve} (§8).
  *
  * <p>The agent calls this endpoint to execute a knowledge-source retrieval
- * query. The engine validates the {@code knowledgeSourceId} against the
- * calling session's pinned context before dispatching to the
+ * query. The engine validates the {@code sourceId} against the calling
+ * session's pinned context before dispatching to the
  * {@link ai.myrmec.engine.spi.retrieval.RetrievalProvider}.</p>
  *
- * @param knowledgeSourceId non-null knowledge source UUID (must be pinned
+ * @param sourceId          non-null knowledge source UUID (must be pinned
  *                          to the agent's active session)
  * @param query             non-blank natural-language query
  * @param topK              max hits (default 5)
@@ -30,7 +30,7 @@ import java.util.UUID;
  * @param attemptId         optional attempt ID for audit context
  */
 public record RetrievalRequest(
-    @NotNull UUID knowledgeSourceId,
+    @NotNull UUID sourceId,
     @NotBlank String query,
     @Min(1) Integer topK,
     Map<String, String> filters,

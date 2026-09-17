@@ -15,7 +15,7 @@
 export interface ModelInfoWire {
   provider: string;
   modelId: string;
-  apiEndpoint: string | null;
+  endpoint: string | null;
   /**
    * Credential-envelope delivery (design §9): `apiKey` is REMOVED — the
    * plaintext key never rides the wire; this ref resolves through the
@@ -29,6 +29,6 @@ export interface ModelInfoWire {
 export interface ToolDefinition {
   name: string;
   description: string;
-  parameters: Record<string, unknown>;
+  inputSchema: Record<string, unknown>;
   riskClass: "SAFE" | "DESTRUCTIVE" | "IRREVERSIBLE";
 }

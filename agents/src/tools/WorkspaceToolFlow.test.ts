@@ -135,8 +135,8 @@ describe("workspace tool flow", () => {
           attemptId: "a", attemptOrdinal: 1, dispatchId: "a",
         },
         models: [
-          { code: "orch-model", provider: "stub", modelId: "orch-model", description: "o", apiEndpoint: null, credentialRef: null, parameters: {} },
-          { code: "worker-model", provider: "stub", modelId: "worker-model", description: "w", apiEndpoint: null, credentialRef: null, parameters: {} },
+          { code: "orch-model", provider: "stub", modelId: "orch-model", description: "o", endpoint: null, credentialRef: null, parameters: {} },
+          { code: "worker-model", provider: "stub", modelId: "worker-model", description: "w", endpoint: null, credentialRef: null, parameters: {} },
         ],
         source: { repoUrl: "u", sourceBranch: "b", sourceBaseCommit: "a".repeat(40), targetBranch: "t", credentialRef: null },
         policy: {
@@ -238,8 +238,8 @@ describe("workspace tool flow", () => {
         schemaVersion: "1.0",
         dispatch: { workflowId: "wf", runId: "run", stepId: "s", taskId: "t", attemptId: "a", attemptOrdinal: 1, dispatchId: "a" },
         models: [
-          { code: "orch-model", provider: "stub", modelId: "orch-model", description: "o", apiEndpoint: null, credentialRef: null, parameters: {} },
-          { code: "worker-model", provider: "stub", modelId: "worker-model", description: "w", apiEndpoint: null, credentialRef: null, parameters: {} },
+          { code: "orch-model", provider: "stub", modelId: "orch-model", description: "o", endpoint: null, credentialRef: null, parameters: {} },
+          { code: "worker-model", provider: "stub", modelId: "worker-model", description: "w", endpoint: null, credentialRef: null, parameters: {} },
         ],
         source: { repoUrl: "u", sourceBranch: "b", sourceBaseCommit: "a".repeat(40), targetBranch: "t", credentialRef: null },
         policy: {

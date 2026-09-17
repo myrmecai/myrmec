@@ -676,7 +676,7 @@ function testEnvelope(sessionIdValue: string) {
     expiresAt: new Date(Date.now() + 600_000).toISOString(),
     plaintextDigest: "sha256:E1Lsrr0Xj46jYk02ZuJM1ulyD1ccit3TEQk8iDBc/nU=",
     nonce: "AAAAAAAAAAAAAAAAAAAAAA==",
-    ciphertext: "b37AH5DB8Xt+cCmuKC2vt7HJOBaYtGh5aU4fB4qefUdf2jNACLn/U+a5JVh1Ix0=",
+    ciphertext: "b37AH5DB8Xt+cCmuKC2vt7HJOBaYtGh5aU4fB4qefXedL4c5l78GI+bAHBi4+Q4=",
   };
 }
 
@@ -686,13 +686,13 @@ function sessionOpenWithCredentials(
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     sessionId,
-    serviceType: "CONVERSATION",
+    kind: "CONVERSATION",
     projectId: "11111111-1111-4111-8111-111111111111",
     profileVersionId: "22222222-2222-4222-8222-222222222222",
     model: {
       provider: "openai",
       modelId: "gpt-4o",
-      apiEndpoint: null,
+      endpoint: null,
       credentialRef: "model-provider-token",
       parameters: {},
       ...modelOverride,

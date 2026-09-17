@@ -173,7 +173,7 @@ export class WorkerInvoker {
     const info: ModelInfoWire = {
       provider: model.provider,
       modelId: model.modelId,
-      apiEndpoint: model.apiEndpoint,
+      endpoint: model.endpoint,
       // Credential-envelope delivery (design §9): the assignment carries an
       // adapter-scoped ref only; the plaintext never reaches the invoker.
       credentialRef: null,

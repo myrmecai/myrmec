@@ -57,7 +57,7 @@ const EXECUTION_ID = "44444444-4444-4444-8444-444444444444";
 function sessionOpenPayload() {
   return {
     sessionId: SESSION_ID,
-    serviceType: "CONVERSATION",
+    kind: "CONVERSATION",
     projectId: "22222222-2222-2222-8222-222222222222",
     profileVersionId: "11111111-1111-4111-8111-111111111111",
     model: { provider: "openai", modelId: "gpt-4o" },

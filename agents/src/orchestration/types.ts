@@ -21,7 +21,7 @@ export interface ModelAuthoring {
   provider: string;
   modelId: string;
   description: string;
-  apiEndpoint: string | null;
+  endpoint: string | null;
   apiKey: string;
   parameters: Record<string, unknown>;
 }
@@ -158,7 +158,7 @@ export interface ModelDefinition {
   provider: string;
   modelId: string;
   description: string;
-  apiEndpoint: string | null;
+  endpoint: string | null;
   credentialRef: string | null;
   parameters: Record<string, unknown>;
 }
