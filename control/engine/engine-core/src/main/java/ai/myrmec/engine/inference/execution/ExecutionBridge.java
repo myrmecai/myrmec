@@ -2,6 +2,8 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.inference.execution;
 
+import ai.myrmec.engine.agent.AgentProfileVersion;
+import ai.myrmec.engine.agent.AgentProfileVersionRepository;
 import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.conversation.ConversationMessage;
 import ai.myrmec.engine.conversation.ConversationRepository;
@@ -60,6 +62,7 @@ public class ExecutionBridge {
     private final ai.myrmec.engine.workflow.TaskAttemptService taskAttemptService;
     private final ai.myrmec.engine.workflow.WorkflowTaskRepository workflowTaskRepository;
     private final ConversationRepository conversationRepository;
+    private final AgentProfileVersionRepository agentProfileVersionRepository;
     private final ObjectMapper objectMapper;
 
     /**
@@ -160,7 +163,7 @@ public class ExecutionBridge {
 
         ConversationMessage persisted;
         try {
-            Instant expiresAt = payload.suspension() == null ? null : payload.suspension().expiresAt();
+            Instant expiresAt = approvalExpiryOf(conversationId, payload);
             persisted = conversationService.appendApprovalRequest(
                     conversationId, agentId,
                     "Approval required before continuing execution: " + pendingActionId,
@@ -411,6 +414,47 @@ public class ExecutionBridge {
     }
 
     // ── helpers ────────────────────────────────────────────────────
+
+    /** Platform default when the serving profile carries no TTL (§8.7). */
+    static final long DEFAULT_APPROVAL_TTL_SECONDS = 900;
+
+    /**
+     * §8.6/§8.7: a CONVERSATION paused payload carries NO suspension block —
+     * expiry is engine-owned, stamped on the approval request row from the
+     * serving profile's {@code approval_request_ttl_seconds}. Orchestration
+     * pauses (a suspension block present) keep the host-supplied expiry.
+     *
+     * @return host-supplied expiry when a suspension exists, otherwise
+     *         now + TTL (profile TTL, platform default 900s when unset)
+     */
+    private Instant approvalExpiryOf(UUID conversationId, ExecutionPausedPayload payload) {
+        if (payload.suspension() != null && payload.suspension().expiresAt() != null) {
+            return payload.suspension().expiresAt();
+        }
+        Long ttl = profileApprovalTtlSeconds(conversationId);
+        long ttlSeconds = ttl != null && ttl > 0 ? ttl : DEFAULT_APPROVAL_TTL_SECONDS;
+        return Instant.now().plusSeconds(ttlSeconds);
+    }
+
+    /**
+     * The serving agent's published profile TTL, or null when the conversation
+     * has no pinned version, the profile is unpublished, or the TTL column is
+     * null. Never throws — a lookup failure must not block the pause bridge.
+     */
+    private Long profileApprovalTtlSeconds(UUID conversationId) {
+        try {
+            return conversationRepository.findById(conversationId)
+                    .map(Conversation::getAgentProfileVersionId)
+                    .flatMap(agentProfileVersionRepository::findById)
+                    .map(AgentProfileVersion::getApprovalRequestTtlSeconds)
+                    .map(Integer::longValue)
+                    .orElse(null);
+        } catch (Exception e) {
+            log.warn("Failed to resolve approval-request TTL for conv {}: {}",
+                    conversationId, e.getMessage());
+            return null;
+        }
+    }
 
     private Long longTokenCount(Long value) {
         return value == null ? 0L : value;

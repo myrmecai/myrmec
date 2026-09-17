@@ -210,6 +210,114 @@ class ExecutionBridgeTest extends IntegrationTestBase {
     }
 
     @Test
+    void conversationPauseStampsExpiryFromProfileTtl() {
+        Project project = data.project().named("bridge-pause-ttl").create();
+        AgentHostCreationResult hostResult = data.agent().named("bridge-ttl-host").withMaxAgents(10).create();
+        AgentHost host = hostResult.agent();
+        Conversation conversation = data.conversation().inProject(project).create();
+        conversation.setAgentId(host.getId());
+        // Pin a published profile version carrying an explicit TTL (§8.7).
+        ai.myrmec.engine.agent.AgentProfile profile = data.agentProfile().named("ttl-profile").create();
+        ai.myrmec.engine.agent.AgentProfileVersion version =
+                agentProfileVersionRepository.findByProfileIdAndStatus(
+                        profile.getId(), ai.myrmec.engine.agent.AgentProfileVersion.Status.PUBLISHED).orElseThrow();
+        version.setApprovalRequestTtlSeconds(120);
+        agentProfileVersionRepository.save(version);
+        conversation.setAgentProfileVersionId(version.getId());
+        conversationRepository.save(conversation);
+
+        conversationService.appendMessage(conversation.getId(), ConversationMessage.Role.USER, "go", TEST_ADMIN_ID, null);
+
+        List<String> captured = new ArrayList<>();
+        conversationStreamBroker.subscribe(conversation.getId(), new CapturingSubscriber(captured));
+
+        Instant before = Instant.now();
+        ExecutionPausedPayload payload = new ExecutionPausedPayload(
+                UUID.randomUUID(), Instant.now(), "APPROVAL_REQUIRED",
+                null, null,
+                new ExecutionPausedPayload.ConversationContinuation(
+                        UUID.randomUUID().toString(), "pending-action-1", "digest-1"),
+                null);
+
+        executionBridge.onConversationPaused(conversation.getId(), host.getId(), payload);
+
+        ConversationMessage approval = conversationMessageRepository
+                .findByConversationIdOrderBySequenceNoAsc(conversation.getId())
+                .get(1);
+        Instant after = Instant.now();
+        assertThat(approval.getExpiresAt())
+                .as("approval expiry must be stamped from the profile TTL (120s), not null")
+                .isNotNull()
+                .isAfterOrEqualTo(before.plusSeconds(120))
+                .isBeforeOrEqualTo(after.plusSeconds(120));
+    }
+
+    @Test
+    void conversationPauseWithoutProfileUsesDefaultTtl() {
+        Project project = data.project().named("bridge-pause-default").create();
+        AgentHostCreationResult hostResult = data.agent().named("bridge-def-host").withMaxAgents(10).create();
+        AgentHost host = hostResult.agent();
+        Conversation conversation = data.conversation().inProject(project).create();
+        conversation.setAgentId(host.getId());
+        conversationRepository.save(conversation);
+
+        conversationService.appendMessage(conversation.getId(), ConversationMessage.Role.USER, "go", TEST_ADMIN_ID, null);
+
+        Instant before = Instant.now();
+        ExecutionPausedPayload payload = new ExecutionPausedPayload(
+                UUID.randomUUID(), Instant.now(), "APPROVAL_REQUIRED",
+                null, null,
+                new ExecutionPausedPayload.ConversationContinuation(
+                        UUID.randomUUID().toString(), "pending-action-1", "digest-1"),
+                null);
+
+        executionBridge.onConversationPaused(conversation.getId(), host.getId(), payload);
+
+        ConversationMessage approval = conversationMessageRepository
+                .findByConversationIdOrderBySequenceNoAsc(conversation.getId())
+                .get(1);
+        Instant after = Instant.now();
+        assertThat(approval.getExpiresAt())
+                .as("no profile → platform default TTL (900s)")
+                .isNotNull()
+                .isAfterOrEqualTo(before.plusSeconds(900))
+                .isBeforeOrEqualTo(after.plusSeconds(900));
+    }
+
+    @Test
+    void conversationPauseWithSuspensionKeepsHostExpiry() {
+        Project project = data.project().named("bridge-pause-susp").create();
+        AgentHostCreationResult hostResult = data.agent().named("bridge-susp-host").withMaxAgents(10).create();
+        AgentHost host = hostResult.agent();
+        Conversation conversation = data.conversation().inProject(project).create();
+        conversation.setAgentId(host.getId());
+        conversation.setAgentProfileVersionId(UUID.randomUUID()); // unresolvable — must not throw
+        conversationRepository.save(conversation);
+
+        conversationService.appendMessage(conversation.getId(), ConversationMessage.Role.USER, "go", TEST_ADMIN_ID, null);
+
+        // §8.6 orchestration path: a suspension block present → its expiry wins.
+        Instant hostExpiry = Instant.now().plusSeconds(7777).truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
+        ExecutionPausedPayload payload = new ExecutionPausedPayload(
+                UUID.randomUUID(), Instant.now(), "APPROVAL_REQUIRED",
+                null,
+                new ExecutionPausedPayload.Suspension(
+                        UUID.randomUUID().toString(), null, hostExpiry),
+                new ExecutionPausedPayload.ConversationContinuation(
+                        UUID.randomUUID().toString(), "pending-action-1", "digest-1"),
+                null);
+
+        executionBridge.onConversationPaused(conversation.getId(), host.getId(), payload);
+
+        ConversationMessage approval = conversationMessageRepository
+                .findByConversationIdOrderBySequenceNoAsc(conversation.getId())
+                .get(1);
+        assertThat(approval.getExpiresAt())
+                .as("suspension expiresAt must be preserved verbatim (orchestration path)")
+                .isEqualTo(hostExpiry);
+    }
+
+    @Test
     void conversationFailureBroadcastsRawFrame() {
         Project project = data.project().named("bridge-fail").create();
         Conversation conversation = data.conversation().inProject(project).create();
