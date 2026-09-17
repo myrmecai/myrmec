@@ -21,10 +21,12 @@ import ai.myrmec.engine.project.ProjectRepository;
 import ai.myrmec.engine.secret.SecretPayload;
 import ai.myrmec.engine.secret.SecretResolverService;
 import ai.myrmec.engine.tool.Tool;
+import ai.myrmec.engine.websocket.host.ChannelTokenService;
 import ai.myrmec.engine.websocket.message.payload.SessionCredential;
 import ai.myrmec.engine.websocket.message.payload.SessionOpenPayload;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -58,12 +60,18 @@ public class SessionContextAssembler {
     private final AgentHostInstanceRepository agentHostInstanceRepository;
     private final ai.myrmec.engine.agent.AgentHostRepository agentHostRepository;
     private final CredentialEnvelopeService credentialEnvelopeService;
+    private final ChannelTokenService channelTokenService;
 
     /** credentialRef constants (design §9) — stable across both config blocks. */
     private static final String MODEL_CREDENTIAL_REF = "model-provider-token";
     private static final String WORKSPACE_CREDENTIAL_REF = "repo-token";
     private static final String PURPOSE_MODEL = "MODEL_PROVIDER";
     private static final String PURPOSE_WORKSPACE = "WORKSPACE_TOKEN";
+
+    @Value("${myrmec.channel.enabled:false}")
+    private boolean channelEnabled;
+    @Value("${myrmec.channel.endpoint:}")
+    private String channelEndpoint;
 
     /**
      * Assemble the session.open payload and persist the session row.
@@ -115,7 +123,8 @@ public class SessionContextAssembler {
                 null,
                 null,
                 null,
-                requireDispatchableThenSeal(session, ctx));
+                requireDispatchableThenSeal(session, ctx),
+                channelOffer(session));
     }
 
     /**
@@ -154,7 +163,8 @@ public class SessionContextAssembler {
                 null,
                 null,
                 null,
-                requireDispatchableThenSeal(session, ctx));
+                requireDispatchableThenSeal(session, ctx),
+                channelOffer(session));
     }
 
     /**
@@ -164,6 +174,29 @@ public class SessionContextAssembler {
      */
     private String dispatchContextExecutionMode(String kind) {
         return "WORKFLOW".equals(kind) ? "ORCHESTRATION" : null;
+    }
+
+    /**
+     * §7.5 dedicated-transport offer: minted when the channel feature is on
+     * and the session has a serving host instance. The token is bound to
+     * (sessionId, instanceId), single-use, short-lived, and cannot allocate
+     * work (§15 rule 7) — transport binding only.
+     */
+    private SessionOpenPayload.ChannelOffer channelOffer(Session session) {
+        if (!channelEnabled) {
+            return null;
+        }
+        if (session.getHostInstanceId() == null || channelEndpoint == null
+                || channelEndpoint.isBlank()) {
+            log.debug("Channel offer skipped for session {} (no instance or endpoint)",
+                    session.getId());
+            return null;
+        }
+        String token = channelTokenService.mint(session.getId(), session.getHostInstanceId());
+        String endpoint = "wss://" + channelEndpoint + "/ws/host/channel";
+        log.debug("Channel offer minted for session {} (instance {})",
+                session.getId(), session.getHostInstanceId());
+        return new SessionOpenPayload.ChannelOffer(endpoint, token);
     }
 
     /**

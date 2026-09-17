@@ -4,6 +4,7 @@ package ai.myrmec.engine.inference.execution;
 
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionRepository;
+import ai.myrmec.engine.websocket.host.ChannelConnectionRegistry;
 import ai.myrmec.engine.websocket.host.HostConnectionManager;
 import ai.myrmec.engine.websocket.host.HostProtocol;
 import ai.myrmec.engine.websocket.host.HostProtocolEnvelope;
@@ -28,6 +29,7 @@ import java.util.UUID;
 public class ExecutionCommandSender {
 
     private final HostConnectionManager connectionManager;
+    private final ChannelConnectionRegistry channelRegistry;
     private final SessionRepository sessionRepository;
     private final ObjectMapper objectMapper;
 
@@ -68,9 +70,25 @@ public class ExecutionCommandSender {
                 executionId, session.getId());
     }
 
+    /**
+     * §7.5: resolve the outbound socket channel-first — the dedicated session
+     * channel when one is bound (and open), else the control socket. Channel
+     * loss degrades transparently; the session is unaffected.
+     */
+    private java.util.Optional<org.springframework.web.socket.WebSocketSession>
+            resolveSocket(UUID sessionId, UUID hostInstanceId) {
+        if (sessionId != null) {
+            var channel = channelRegistry.getChannel(sessionId);
+            if (channel.isPresent()) {
+                return channel;
+            }
+        }
+        return connectionManager.getSession(hostInstanceId);
+    }
+
     private boolean send(UUID hostInstanceId, String type, String correlationId,
                          Object payload, UUID executionId, UUID sessionId) {
-        var socket = connectionManager.getSession(hostInstanceId);
+        var socket = resolveSocket(sessionId, hostInstanceId);
         if (socket.isEmpty()) {
             return false;
         }

@@ -63,6 +63,15 @@ myrmec:
     relay:
       enabled: ${MYRMEC_NODE_RELAY_ENABLED:false}
       secret: ${MYRMEC_NODE_RELAY_SECRET:}
+  # Unified protocol §7.5 — optional dedicated session channel. Off by
+  # default in the dev phase; when enabled, session.open carries a
+  # channel offer (endpoint + single-use short-lived token) and execution
+  # traffic prefers the bound channel socket, falling back to the control
+  # socket on channel loss.
+  channel:
+    enabled: ${MYRMEC_CHANNEL_ENABLED:false}
+    endpoint: ${MYRMEC_CHANNEL_ENDPOINT:}
+    token-ttl-seconds: ${MYRMEC_CHANNEL_TOKEN_TTL_SECONDS:120}
 
 # API Documentation
 springdoc:

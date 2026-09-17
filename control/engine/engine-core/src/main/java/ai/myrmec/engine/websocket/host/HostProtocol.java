@@ -37,6 +37,10 @@ public final class HostProtocol {
     public static final String SESSION_CLOSE = "session.close";
     public static final String SESSION_CLOSED = "session.closed";
 
+    // ---- Channel (§5 catalogue, §7.5): optional dedicated session transport ----
+    public static final String CHANNEL_OPEN = "channel.open";
+    public static final String CHANNEL_OPENED = "channel.opened";
+
     // ---- Execution lifecycle (§5 catalogue, §8 payloads) ----
     public static final String EXECUTION_START = "execution.start";
     public static final String EXECUTION_ACCEPT = "execution.accept";

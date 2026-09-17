@@ -25,6 +25,10 @@ import java.util.UUID;
  * by {@code id}. The §7.3 dispatch-context fields {@code executionMode}
  * ("ORCHESTRATION" on orchestration sessions, null otherwise) and {@code ref}
  * (the orchestration external reference, null otherwise) are additive.</p>
+ *
+ * <p>§7.5 additive: {@code channel} carries the dedicated-transport offer —
+ * endpoint + single-use short-lived token. Null when the channel feature is
+ * disabled ({@code myrmec.channel.enabled}).
  */
 public record SessionOpenPayload(
         UUID sessionId,
@@ -40,13 +44,24 @@ public record SessionOpenPayload(
         String ref,                       // §7.3: orchestration external reference or null
         Map<String, Object> orchestration,  // §16.2 assignment; null for non-orchestration
         String assignmentDigest,          // §16.3 sha-256 of the canonical assignment bytes
-        List<SessionCredential> credentials) {  // sealed session secrets (design §9); null/empty when keyless
+        List<SessionCredential> credentials,  // sealed session secrets (design §9); null/empty when keyless
+        ChannelOffer channel) {           // §7.5 dedicated-transport offer; null when disabled
+
+    /** §7.5: the dedicated-transport offer on session.open. */
+    public record ChannelOffer(String endpoint, String token) {}
 
     /** Copy the context with the §16.2 assignment installed (orchestration only). */
     public SessionOpenPayload withAssignment(Map<String, Object> assignment, String digest) {
         return new SessionOpenPayload(sessionId, kind, projectId, profileVersionId,
                 model, workspace, tools, knowledgeSources, autoHitlOnDestructive,
-                executionMode, ref, assignment, digest, credentials);
+                executionMode, ref, assignment, digest, credentials, channel);
+    }
+
+    /** Copy the context with the §7.5 channel offer installed. */
+    public SessionOpenPayload withChannel(ChannelOffer offer) {
+        return new SessionOpenPayload(sessionId, kind, projectId, profileVersionId,
+                model, workspace, tools, knowledgeSources, autoHitlOnDestructive,
+                executionMode, ref, orchestration, assignmentDigest, credentials, offer);
     }
 
     public record ModelConfig(

@@ -84,6 +84,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     private final AgentHostRepository agentHostRepository;
     private final AgentHostInstanceRepository instanceRepository;
     private final HostConnectionManager connectionManager;
+    private final ChannelConnectionRegistry channelRegistry;
     private final NodeRegistryService nodeRegistryService;
     private final SessionAllocator sessionAllocator;
     private final SessionContextAssembler sessionAssembler;
@@ -124,6 +125,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                                        AgentHostRepository agentHostRepository,
                                        AgentHostInstanceRepository instanceRepository,
                                        HostConnectionManager connectionManager,
+                                       ChannelConnectionRegistry channelRegistry,
                                        NodeRegistryService nodeRegistryService,
                                        SessionAllocator sessionAllocator,
                                        SessionContextAssembler sessionAssembler,
@@ -147,6 +149,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         this.agentHostRepository = agentHostRepository;
         this.instanceRepository = instanceRepository;
         this.connectionManager = connectionManager;
+        this.channelRegistry = channelRegistry;
         this.nodeRegistryService = nodeRegistryService;
         this.sessionAllocator = sessionAllocator;
         this.sessionAssembler = sessionAssembler;
@@ -597,7 +600,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     public void sendSessionClose(UUID sessionId, String reasonCode) {
         ai.myrmec.engine.inference.Session session = sessionRepository.findById(sessionId).orElse(null);
         if (session == null) return;
-        var socket = connectionManager.getSession(session.getHostInstanceId());
+        var socket = resolveOutboundSocket(sessionId, session.getHostInstanceId());
         if (socket.isEmpty()) return;
         HostProtocolEnvelope envelope = HostProtocolEnvelope.reply(
                 HostProtocol.SESSION_CLOSE, null,
@@ -608,15 +611,28 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
-     * §7.3: send the fully assembled session.open to the host that accepted
-     * the session. Public so Plan 5's dispatch path can call it after accept.
+     * §7.5: resolve the outbound socket channel-first — the bound dedicated
+     * channel when present, else the control socket. Used by every
+     * engine→host frame that already knows its sessionId.
      */
+    public java.util.Optional<WebSocketSession> resolveOutboundSocket(UUID sessionId, UUID hostInstanceId) {
+        if (sessionId != null) {
+            var channel = channelRegistry.getChannel(sessionId);
+            if (channel.isPresent()) {
+                return channel;
+            }
+        }
+        return connectionManager.getSession(hostInstanceId);
+    }
+
+    /** §7.3: send the fully assembled session.open to the host that accepted
+     * the session. Public so Plan 5's dispatch path can call it after accept. */
     public void sendSessionOpen(UUID sessionId, UUID agentProfileId) {
         ai.myrmec.engine.inference.Session session = sessionRepository.findById(sessionId).orElse(null);
         if (session == null) {
             return;
         }
-        WebSocketSession socket = connectionManager.getSession(session.getHostInstanceId()).orElse(null);
+        WebSocketSession socket = resolveOutboundSocket(sessionId, session.getHostInstanceId()).orElse(null);
         if (socket == null) {
             return;
         }
@@ -639,7 +655,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         if (session == null) {
             return;
         }
-        WebSocketSession socket = connectionManager.getSession(session.getHostInstanceId()).orElse(null);
+        WebSocketSession socket = resolveOutboundSocket(sessionId, session.getHostInstanceId()).orElse(null);
         if (socket == null) {
             return;
         }
@@ -652,6 +668,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         if (session == null) {
             return false;
         }
+        // An offer precedes any channel binding by definition — control socket.
         WebSocketSession socket = connectionManager.getSession(session.getHostInstanceId()).orElse(null);
         if (socket == null) {
             return false;
@@ -1037,6 +1054,34 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         } catch (IOException e) {
             log.warn("Failed sending host frame to session {}: {}",
                     session.getId(), e.getMessage());
+        }
+    }
+
+    // ====================================================================
+    // §7.5 dedicated channel: shared inbound arm for the channel socket
+    // ====================================================================
+
+    /**
+     * §7.5/§4.2: the SAME inbound arm as the control socket for
+     * {@code execution.delta} / {@code execution.event} / terminal frames.
+     * The channel socket carries the exact same envelopes and, after binding,
+     * the same {@code ATTR_HOST_INSTANCE_ID} identity attribute — so the
+     * private handling methods behave identically. Control-only frames
+     * ({@code session.*}, {@code host.*}, lifecycle) get INVALID_MESSAGE.
+     */
+    public void handleChannelInbound(WebSocketSession channelSocket, HostProtocolEnvelope envelope) {
+        String type = envelope.getType();
+        switch (type) {
+            case HostProtocol.EXECUTION_DELTA -> handleExecutionDelta(channelSocket, envelope);
+            case HostProtocol.EXECUTION_EVENT -> handleExecutionEvent(channelSocket, envelope);
+            case HostProtocol.EXECUTION_COMPLETE -> handleExecutionComplete(channelSocket, envelope);
+            case HostProtocol.EXECUTION_FAILED -> handleExecutionFailed(channelSocket, envelope);
+            case HostProtocol.EXECUTION_PAUSED -> handleExecutionPaused(channelSocket, envelope);
+            case HostProtocol.EXECUTION_CANCELLED -> handleExecutionCancelled(channelSocket, envelope);
+            default -> sendError(channelSocket, envelope.getMessageId(),
+                    HostProtocol.INVALID_MESSAGE,
+                    "Frame type " + type + " is not permitted on the dedicated channel",
+                    false, "CONNECTION", null);
         }
     }
 }

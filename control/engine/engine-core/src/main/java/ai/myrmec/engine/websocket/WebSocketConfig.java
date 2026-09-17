@@ -1,6 +1,7 @@
 package ai.myrmec.engine.websocket;
 
 import ai.myrmec.engine.websocket.host.HostControlHandshakeInterceptor;
+import ai.myrmec.engine.websocket.host.HostChannelWebSocketHandler;
 import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
@@ -21,6 +22,7 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 public class WebSocketConfig implements WebSocketConfigurer {
 
     private final HostControlWebSocketHandler hostControlWebSocketHandler;
+    private final HostChannelWebSocketHandler hostChannelWebSocketHandler;
     private final HostControlHandshakeInterceptor hostControlHandshakeInterceptor;
 
     @Override
@@ -29,6 +31,12 @@ public class WebSocketConfig implements WebSocketConfigurer {
         // HOST_JWT validated in the handshake interceptor. The live instance
         // is created by the first host.open, not by the connection.
         registry.addHandler(hostControlWebSocketHandler, "/api/v1/agent/host/ws")
+                .addInterceptors(hostControlHandshakeInterceptor)
+                .setAllowedOrigins("*");
+        // Unified protocol §7.5 — the optional dedicated session channel;
+        // same HOST_JWT handshake gate, the single-use channel token rides
+        // the channel.open payload.
+        registry.addHandler(hostChannelWebSocketHandler, "/api/v1/agent/host/ws/channel")
                 .addInterceptors(hostControlHandshakeInterceptor)
                 .setAllowedOrigins("*");
     }
