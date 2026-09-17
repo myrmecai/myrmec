@@ -8,6 +8,7 @@ import ai.myrmec.engine.node.HostFrameRelayService;
 import ai.myrmec.engine.websocket.host.HostProtocol;
 import ai.myrmec.engine.websocket.host.HostProtocolEnvelope;
 import ai.myrmec.engine.websocket.host.payload.ExecutionCancelPayload;
+import ai.myrmec.engine.websocket.host.payload.ExecutionPolicyUpdatePayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionStartPayload;
 import ai.myrmec.engine.websocket.host.payload.OrchestrationExecutionStartPayload;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -68,6 +69,17 @@ public class ExecutionCommandSender {
                 null, new ExecutionCancelPayload(executionId, dispatchId, reasonCode,
                         java.time.Instant.now(), gracePeriodSeconds),
                 executionId, session.getId());
+    }
+
+    /**
+     * §8.7: send an tighten-only policy update carrying the engine's durably
+     * accounted usage. Called by {@link SessionPolicyService} when a session's
+     * accounted usage advances past the last-sent snapshot.
+     */
+    public boolean policyUpdate(UUID executionId, Session session, UUID dispatchId,
+                                ExecutionPolicyUpdatePayload payload) {
+        return send(session.getHostInstanceId(), HostProtocol.EXECUTION_POLICY_UPDATE,
+                null, payload, executionId, session.getId());
     }
 
     /**

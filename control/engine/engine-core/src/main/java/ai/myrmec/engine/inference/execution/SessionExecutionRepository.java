@@ -37,4 +37,7 @@ public interface SessionExecutionRepository extends JpaRepository<SessionExecuti
     Optional<SessionExecution> findBySessionIdAndSequenceNo(UUID sessionId, Integer sequenceNo);
 
     long countBySessionIdAndStateIn(UUID sessionId, List<SessionExecution.State> states);
+
+    /** §8.7 (A4): the execution an orchestration dispatch is served by. */
+    Optional<SessionExecution> findByDispatchId(UUID dispatchId);
 }

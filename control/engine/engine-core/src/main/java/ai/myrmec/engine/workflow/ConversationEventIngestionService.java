@@ -7,6 +7,7 @@ import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
+import ai.myrmec.engine.inference.execution.SessionPolicyService;
 import ai.myrmec.engine.spi.quota.QuotaPolicyEngine;
 import ai.myrmec.engine.spi.quota.QuotaResourceType;
 import ai.myrmec.engine.spi.quota.QuotaScope;
@@ -49,6 +50,8 @@ public class ConversationEventIngestionService {
     private final SessionRepository sessionRepository;
     private final ConversationRepository conversationRepository;
     private final QuotaPolicyEngine quotaPolicyEngine;
+    /** §8.7 (A4): usage advance triggers the tighten-only policy update. */
+    private final SessionPolicyService sessionPolicyService;
 
     public enum IngestResult {
         /** New row inserted; the caller should ack. */
@@ -113,8 +116,28 @@ public class ConversationEventIngestionService {
 
         if (event.getEventType() == EventType.TOKEN_USAGE) {
             attributeUsage(sess, payload.data());
+            notifyPolicyProducer(executionId, payload.data());
         }
         return IngestResult.INSERTED;
+    }
+
+    /**
+     * §8.7 (A4): a recorded usage advance may emit execution.policy.update —
+     * the producer throttles to one frame per accounting batch internally.
+     * The §8.4 usage envelope is metadata-only today (orchestration function
+     * calls are not carried on conversation events; token totals are), so the
+     * function-call axis stays 0 on conversation sessions.
+     */
+    private void notifyPolicyProducer(UUID executionId, Map<String, Object> data) {
+        try {
+            long total = tokenCount(data);
+            if (total > 0) {
+                sessionPolicyService.onUsageRecorded(executionId, 0L, total);
+            }
+        } catch (Exception e) {
+            // The enforcement channel must never break event ingestion.
+            log.warn("Policy-update notification failed for execution {}: {}", executionId, e.getMessage());
+        }
     }
 
     /** Tolerant event-type mapping: unknown §8.4 values persist as LOG with a note in data. */

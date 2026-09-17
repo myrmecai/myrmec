@@ -28,7 +28,14 @@ import java.util.UUID;
  *
  * <p>§7.5 additive: {@code channel} carries the dedicated-transport offer —
  * endpoint + single-use short-lived token. Null when the channel feature is
- * disabled ({@code myrmec.channel.enabled}).
+ * disabled ({@code myrmec.channel.enabled}).</p>
+ *
+ * <p>§7.3 (Wave 6, A4): {@code policy} carries the host-enforced execution
+ * limits — {@code maxIterations} (orchestration function iterations) and
+ * {@code executionTimeoutSeconds}; null fields mean "no limit on the host".
+ * {@code capture} carries the sensitive-capture policy (§15 rule 12): level
+ * METADATA is the V1 default — tool arguments/results/prompts stay off the
+ * event stream, bounded metadata only.</p>
  */
 public record SessionOpenPayload(
         UUID sessionId,
@@ -45,23 +52,41 @@ public record SessionOpenPayload(
         Map<String, Object> orchestration,  // §16.2 assignment; null for non-orchestration
         String assignmentDigest,          // §16.3 sha-256 of the canonical assignment bytes
         List<SessionCredential> credentials,  // sealed session secrets (design §9); null/empty when keyless
-        ChannelOffer channel) {           // §7.5 dedicated-transport offer; null when disabled
+        ChannelOffer channel,             // §7.5 dedicated-transport offer; null when disabled
+        SessionPolicy policy,             // §7.3 (Wave 6): host-enforced limits; null = no policy
+        CapturePolicy capture) {          // §7.3/§15: sensitive-capture policy; null = engine defaults
 
     /** §7.5: the dedicated-transport offer on session.open. */
     public record ChannelOffer(String endpoint, String token) {}
+
+    /** §7.3 (Wave 6): the host-enforced execution policy. Null fields = no limit. */
+    public record SessionPolicy(Integer maxIterations, Integer executionTimeoutSeconds) {}
+
+    /** §7.3/§15 rule 12: what the host may emit on the event stream. */
+    public record CapturePolicy(String level, Integer maxBytes) {
+        public static final String LEVEL_METADATA = "METADATA";
+        public static final int DEFAULT_MAX_BYTES = 262144;
+
+        /** The V1 default: metadata-only capture, 256 KiB detail bound. */
+        public static CapturePolicy metadataDefault() {
+            return new CapturePolicy(LEVEL_METADATA, DEFAULT_MAX_BYTES);
+        }
+    }
 
     /** Copy the context with the §16.2 assignment installed (orchestration only). */
     public SessionOpenPayload withAssignment(Map<String, Object> assignment, String digest) {
         return new SessionOpenPayload(sessionId, kind, projectId, profileVersionId,
                 model, workspace, tools, knowledgeSources, autoHitlOnDestructive,
-                executionMode, ref, assignment, digest, credentials, channel);
+                executionMode, ref, assignment, digest, credentials, channel,
+                policy, capture);
     }
 
     /** Copy the context with the §7.5 channel offer installed. */
     public SessionOpenPayload withChannel(ChannelOffer offer) {
         return new SessionOpenPayload(sessionId, kind, projectId, profileVersionId,
                 model, workspace, tools, knowledgeSources, autoHitlOnDestructive,
-                executionMode, ref, orchestration, assignmentDigest, credentials, offer);
+                executionMode, ref, orchestration, assignmentDigest, credentials, offer,
+                policy, capture);
     }
 
     public record ModelConfig(

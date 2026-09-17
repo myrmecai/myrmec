@@ -227,9 +227,15 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             case HostProtocol.EXECUTION_FAILED -> handleExecutionFailed(session, envelope);
             case HostProtocol.EXECUTION_PAUSED -> handleExecutionPaused(session, envelope);
             case HostProtocol.EXECUTION_CANCELLED -> handleExecutionCancelled(session, envelope);
-            case HostProtocol.EXECUTION_START, HostProtocol.EXECUTION_CANCEL,
-                 HostProtocol.EXECUTION_POLICY_UPDATE ->
+            case HostProtocol.EXECUTION_START, HostProtocol.EXECUTION_CANCEL ->
                     logEngineToHostIgnored(session, envelope);
+            // §8.7 (A4): execution.policy.update is an ENGINE→host frame — a
+            // host-authored copy is a protocol violation, NOT a silent ignore
+            // (the host must never control its own allowances).
+            case HostProtocol.EXECUTION_POLICY_UPDATE ->
+                    sendError(session, correlationId, HostProtocol.INVALID_MESSAGE,
+                            "execution.policy.update is engine→host only; a host may not send it",
+                            false, "EXECUTION", null);
             default ->
                     sendError(session, correlationId, HostProtocol.UNSUPPORTED_MESSAGE,
                             "Unknown message type: " + type, false, "CONNECTION", null);

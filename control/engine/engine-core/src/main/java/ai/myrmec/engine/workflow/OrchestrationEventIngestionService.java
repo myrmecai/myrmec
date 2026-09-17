@@ -2,6 +2,7 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.workflow;
 
+import ai.myrmec.engine.inference.execution.SessionPolicyService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,12 @@ import java.util.UUID;
  * duplicate payloads, and preserves dispatch-local ordering through the
  * unique {@code (attempt_id, sequence_number)} index. Events are exposed
  * through the existing SSE stream.
+ *
+ * <p>§8.7 (A4): {@code ORCHESTRATION_FUNCTION_COMPLETED} envelopes carry the
+ * authoritative per-function usage — the accounted orchestration function-call
+ * count and cumulative tokens advance here, so ingestion notifies
+ * {@link SessionPolicyService} (the tighten-only policy-update producer,
+ * throttled to one frame per accounting batch internally).</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -27,6 +34,9 @@ public class OrchestrationEventIngestionService {
 
     private final ExecutionEventRepository eventRepository;
     private final TaskAttemptRepository attemptRepository;
+    private final SessionPolicyService sessionPolicyService;
+    /** The execution row the dispatch attempt is served by (dispatch == attempt UUID). */
+    private final ai.myrmec.engine.inference.execution.SessionExecutionRepository sessionExecutionRepository;
 
     /**
      * Ingest one orchestration event frame.
@@ -81,7 +91,37 @@ public class OrchestrationEventIngestionService {
         event.setSequenceNumber(sequence);
         event.setCreatedAt(Instant.now());
         eventRepository.save(event);
+        if ("ORCHESTRATION_FUNCTION_COMPLETED".equals(type)) {
+            notifyPolicyProducer(dispatchId, envelope);
+        }
         return IngestResult.INSERTED;
+    }
+
+    /**
+     * §8.7 (A4): an orchestration function's completion advances the
+     * durably accounted usage — notify the policy producer. The producer
+     * throttles internally (one frame per accounting batch); failures here
+     * must never break event ingestion.
+     */
+    private void notifyPolicyProducer(UUID dispatchId, Map<String, Object> envelope) {
+        try {
+            var execution = sessionExecutionRepository.findByDispatchId(dispatchId).orElse(null);
+            if (execution == null) {
+                log.debug("No execution row bound to dispatch {} yet — policy update skipped", dispatchId);
+                return;
+            }
+            long functionCalls = longOf(envelope == null ? null : envelope.get("functionCalls"));
+            long totalTokens = longOf(envelope == null ? null : envelope.get("totalTokens"));
+            if (functionCalls > 0 || totalTokens > 0) {
+                sessionPolicyService.onUsageRecorded(execution.getId(), functionCalls, totalTokens);
+            }
+        } catch (Exception e) {
+            log.warn("Policy-update notification failed for dispatch {}: {}", dispatchId, e.getMessage());
+        }
+    }
+
+    private static long longOf(Object value) {
+        return value instanceof Number n ? n.longValue() : 0L;
     }
 
     private boolean samePayload(ExecutionEvent row, String type, long sequence,

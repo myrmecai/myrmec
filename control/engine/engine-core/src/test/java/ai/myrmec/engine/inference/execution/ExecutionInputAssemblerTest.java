@@ -379,7 +379,8 @@ class ExecutionInputAssemblerTest {
         when(sessionContextAssembler.assemble(any(), any(), any(), any()))
                 .thenReturn(new ai.myrmec.engine.websocket.message.payload.SessionOpenPayload(
                         null, "CONVERSATION", projectId, null, null, null,
-                        List.of(), List.of(), false, null, null, null, null, List.of(), null));
+                        List.of(), List.of(), false, null, null, null, null, List.of(), null,
+                        null, null));
     }
 
     private void assemble() {

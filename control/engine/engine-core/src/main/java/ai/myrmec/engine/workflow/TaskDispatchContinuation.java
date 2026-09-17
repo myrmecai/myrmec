@@ -110,9 +110,12 @@ public class TaskDispatchContinuation {
         if (session == null) {
             return;
         }
+        // §7.3 (Wave 6, A4): the step's declared timeout ships on the
+        // session.open policy block so the host enforces the workflow's limits.
         SessionOpenPayload open = sessionContextAssembler.assembleContext(
                 sessionId, session.getServiceType(), session.getRefId(),
-                session.getProjectId(), context.agentProfileId());
+                session.getProjectId(), context.agentProfileId(),
+                context.timeoutSeconds(), null);
         if (context.orchestration()) {
             open = open.withAssignment(context.assignment(), context.assignmentDigest());
         }

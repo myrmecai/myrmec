@@ -74,6 +74,30 @@ public class SessionContextAssembler {
     private String channelEndpoint;
 
     /**
+     * §7.3 (Wave 6, A4): the host-enforced iteration ceiling shipped on
+     * session.open. No workflow-layer carrier exists for orchestration
+     * iteration limits today, so the platform default applies:
+     * {@code myrmec.session.policy.max-iterations} (0 = unset → null on the
+     * wire = no host-side limit).
+     */
+    @Value("${myrmec.session.policy.max-iterations:0}")
+    private int policyMaxIterations;
+
+    /**
+     * §7.3 (Wave 6, A4): the host-enforced execution timeout shipped on
+     * session.open. The step's declared timeoutSeconds (or the 300s platform
+     * default) is threaded by the caller when known; 0 = unset → null.
+     */
+    @Value("${myrmec.session.policy.execution-timeout-seconds:0}")
+    private int policyExecutionTimeoutSeconds;
+
+    /** §7.3 (Wave 6, A4): METADATA-only capture is the platform default. */
+    @Value("${myrmec.session.capture.level:METADATA}")
+    private String captureLevel;
+    @Value("${myrmec.session.capture.max-bytes:262144}")
+    private int captureMaxBytes;
+
+    /**
      * Assemble the session.open payload and persist the session row.
      *
      * @param kind              "CONVERSATION" or "WORKFLOW" (§21.4 wire field)
@@ -124,7 +148,9 @@ public class SessionContextAssembler {
                 null,
                 null,
                 requireDispatchableThenSeal(session, ctx),
-                channelOffer(session));
+                channelOffer(session),
+                sessionPolicy(policyExecutionTimeoutSeconds, null),
+                capturePolicy());
     }
 
     /**
@@ -136,6 +162,18 @@ public class SessionContextAssembler {
     @Transactional
     public SessionOpenPayload assembleContext(UUID sessionId, String kind, UUID refId,
                                               UUID projectId, UUID agentProfileId) {
+        return assembleContext(sessionId, kind, refId, projectId, agentProfileId, 0, null);
+    }
+
+    /**
+     * §7.3 (Wave 6, A4): the dispatch-path overload — the step's declared
+     * {@code timeoutSeconds} (or 0 = none) and optional iteration ceiling ride
+     * the session.open policy block so the host enforces the workflow's limits.
+     */
+    @Transactional
+    public SessionOpenPayload assembleContext(UUID sessionId, String kind, UUID refId,
+                                              UUID projectId, UUID agentProfileId,
+                                              int stepTimeoutSeconds, Integer stepMaxIterations) {
         AgentProfile profile = agentProfileRepository.findById(agentProfileId)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Agent profile not found: " + agentProfileId));
@@ -164,7 +202,30 @@ public class SessionContextAssembler {
                 null,
                 null,
                 requireDispatchableThenSeal(session, ctx),
-                channelOffer(session));
+                channelOffer(session),
+                sessionPolicy(stepTimeoutSeconds, stepMaxIterations),
+                capturePolicy());
+    }
+
+    /**
+     * §7.3 (Wave 6, A4): the session's host-enforced execution policy.
+     * {@code executionTimeoutSeconds} = the step's declared timeout (or the
+     * platform default when 0/absent is passed); 0/null on the wire means no
+     * host-side limit. {@code maxIterations} = the platform default config
+     * (no workflow-layer carrier exists — 0 = unset = no limit).
+     */
+    private SessionOpenPayload.SessionPolicy sessionPolicy(int stepTimeoutSeconds,
+                                                           Integer stepMaxIterations) {
+        Integer timeout = stepTimeoutSeconds > 0 ? stepTimeoutSeconds : null;
+        Integer maxIterations = stepMaxIterations != null && stepMaxIterations > 0
+                ? stepMaxIterations
+                : (policyMaxIterations > 0 ? policyMaxIterations : null);
+        return new SessionOpenPayload.SessionPolicy(maxIterations, timeout);
+    }
+
+    /** §7.3/§15 rule 12: the session's capture policy (V1 = metadata-only). */
+    private SessionOpenPayload.CapturePolicy capturePolicy() {
+        return new SessionOpenPayload.CapturePolicy(captureLevel, captureMaxBytes);
     }
 
     /**
