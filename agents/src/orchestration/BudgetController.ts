@@ -59,11 +59,13 @@ export interface BudgetController {
   /** The effective limits (already the min of assignment and any
    * tighten-only allowance overlay — engine mode only). */
   limits(): { maxWorkerCalls: number; maxTokens: number; maxVerifierRejectionsPerAttempt: number };
+  /** §8.7 (A4): tighten the token ceiling to the engine's allowance. */
+  applyAllowance(maxTokens: number | null): void;
 }
 
 export class InMemoryBudgetController implements BudgetController {
   private readonly maxWorkerCalls: number;
-  private readonly maxTokens: number;
+  private maxTokens: number;
   private readonly maxVerifierRejectionsPerAttempt: number;
   private workerCalls = 0;
   private totalTokens = 0;
@@ -84,6 +86,18 @@ export class InMemoryBudgetController implements BudgetController {
       this.workerCalls = counters.workerCalls;
       this.totalTokens = counters.totalTokens;
       this.rejections = counters.rejectionCount;
+    }
+  }
+
+  /**
+   * §8.7 (A4): apply an engine policy.update's tighten-only allowance —
+   * the enforced token limit becomes min(current, allowance). A LOOSER
+   * value is ignored here; the worker rejects the frame at the protocol
+   * layer before calling this.
+   */
+  applyAllowance(maxTokens: number | null): void {
+    if (maxTokens !== null && maxTokens > 0 && maxTokens < this.maxTokens) {
+      this.maxTokens = maxTokens;
     }
   }
 
@@ -132,7 +146,12 @@ export class InMemoryBudgetController implements BudgetController {
     // same breach so nested model loops stop immediately (§13).
     if (this.flagged) return this.flagged;
     if (
-      (checkpoint === "before-model-call" || checkpoint === "before-tool-execution") &&
+      (checkpoint === "before-model-call" ||
+        checkpoint === "before-tool-execution" ||
+        // Â§8.7 (A4): the runner's worker-call boundary also gates the
+        // token ceiling so a tighten-only allowance pauses the attempt at
+        // the boundary instead of leaking as a mid-turn breach.
+        checkpoint === "before-worker-call") &&
       this.totalTokens > this.maxTokens
     ) {
       return {

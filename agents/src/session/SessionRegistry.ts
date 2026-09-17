@@ -14,11 +14,14 @@ import type {
   SessionOpenPayload,
   SessionCredential,
   ChannelOpenedPayload,
+  SessionPolicy,
+  CapturePolicy,
 } from "../protocol/unifiedFrames.js";
 import type { ModelInfoWire } from "../protocol/sessionTypes.js";
 import type { ChatModel, SessionTool } from "../executor/types.js";
 import type { ChatModelFactory, SessionToolFactory } from "../executor/providers.js";
 import type { Logger } from "../models/index.js";
+import { PolicyEnforcer } from "../executor/PolicyEnforcer.js";
 import {
   CredentialEnvelopeError,
   deriveSessionKey,
@@ -89,6 +92,16 @@ export interface Session {
    * pending host.resume/host.reconcile; cleared on KEEP re-bind.
    */
   disconnected?: boolean;
+  /**
+   * §7.3 (Wave 6, A4): the host-enforced execution limits shipped on
+   * session.open. Null/absent fields mean "no host-side limit".
+   */
+  policy?: SessionPolicy | null;
+  /**
+   * §7.3/§15 rule 12 (Wave 6): the sensitive-capture policy — METADATA is
+   * the V1 default (no sensitive payloads on the event stream).
+   */
+  capture?: CapturePolicy | null;
 }
 
 /** §13 (A2): one host.resume retained-session summary built from registry state. */
@@ -209,13 +222,18 @@ export class SessionRegistry {
         channel: null,
         highestContiguousSequence: 0,
         ...(credentialVault ? { credentialVault } : {}),
+        // §7.3 (Wave 6, A4): the session's enforced policy + capture limits.
+        policy: payload.policy ?? null,
+        capture: payload.capture ?? null,
       };
       this.sessions.set(payload.sessionId, session);
 
       this.logger.info(
         `Session opened: ${payload.sessionId} (${payload.kind}) — ${tools.size} tools, ${knowledgeSourceIds.size} knowledge sources${
           payload.orchestration ? ", orchestration assignment installed" : ""
-        }${credentialVault ? `, ${credentialVault.size} credentials unwrapped` : ""}`,
+        }${credentialVault ? `, ${credentialVault.size} credentials unwrapped` : ""}${
+          payload.policy ? ", policy enforced" : ""
+        }`,
       );
     } catch (err) {
       // A failed open must not leak already-unwrapped plaintexts (§10).
@@ -461,5 +479,74 @@ export class SessionRegistry {
    */
   closeRetained(sessionId: string): void {
     this.close(sessionId);
+  }
+
+  // ==================== §8.7 policy enforcement (A4) ====================
+
+  /**
+   * One enforcer per in-flight execution (§8.7: per-execution monotonic
+   * accounting). Created lazily from the session's policy; dropped with the
+   * session.
+   */
+  private readonly enforcers = new Map<string, PolicyEnforcer>();
+
+  /**
+   * The (lazily created) §8.7 enforcer for an execution of a session. The
+   * session's policy block seeds the iteration ceiling; a session with no
+   * policy enforces nothing until an execution.policy.update arrives.
+   * Unknown sessions yield undefined (fail-open to the executor's own
+   * SESSION_NOT_OPEN path).
+   *
+   * Resolves by execution id when the executor registered one, else by
+   * session id (a conversation session serves one execution at a time,
+   * §11.3.4 — the session-keyed enforcer IS the execution's).
+   */
+  enforcerFor(sessionOrExecutionId: string): PolicyEnforcer | undefined {
+    const session = this.sessions.get(sessionOrExecutionId);
+    if (session) {
+      return this.enforcerForSession(session.sessionId);
+    }
+    // An execution id the executor registered shares the session's enforcer;
+    // an unregistered one gets a standalone enforcer (§8.7: the allowance
+    // rides the updates themselves — no session policy is consulted).
+    let enforcer = this.enforcers.get(sessionOrExecutionId);
+    if (!enforcer) {
+      enforcer = new PolicyEnforcer({ policy: null, logger: this.logger });
+      this.enforcers.set(sessionOrExecutionId, enforcer);
+    }
+    return enforcer;
+  }
+
+  /** Lazily create (or return) the session-keyed enforcer. */
+  private enforcerForSession(sessionId: string): PolicyEnforcer {
+    let enforcer = this.enforcers.get(sessionId);
+    if (!enforcer) {
+      const session = this.sessions.get(sessionId);
+      enforcer = new PolicyEnforcer({
+        policy: session?.policy ?? null,
+        logger: this.logger,
+      });
+      this.enforcers.set(sessionId, enforcer);
+    }
+    return enforcer;
+  }
+
+  /**
+   * §8.7 (A4): the execution start registers its enforcement state against
+   * the executionId so policy updates addressed to the execution (not the
+   * session) find it. Shares the session's enforcer (§11.3.4: one in-flight
+   * execution per conversation session) so accounting stays monotonic
+   * across turns of the same session.
+   */
+  registerExecution(sessionId: string, executionId: string): void {
+    const enforcer = this.enforcerForSession(sessionId);
+    if (enforcer) {
+      this.enforcers.set(executionId, enforcer);
+    }
+  }
+
+  /** Drop the execution's enforcer state (terminal housekeeping). */
+  dropEnforcer(sessionOrExecutionId: string): void {
+    this.enforcers.delete(sessionOrExecutionId);
   }
 }

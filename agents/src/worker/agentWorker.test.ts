@@ -174,4 +174,109 @@ describe("AgentWorker", () => {
     const { post } = sink();
     expect(() => new AgentWorker({ post, chatModelFactory: noopChatModelFactory, sessionToolFactory: noopSessionToolFactory })).not.toThrow();
   });
+
+  // ── §8.7 (A4): execution.policy.update enforcement ──
+
+  const resolvingChatModelFactory: ChatModelFactory = {
+    resolve: async () => new FixedStreamModel([]),
+  };
+
+  it("applies a tighten-only policy update to the session enforcer without emitting", async () => {
+    const { post, frames } = sink();
+    const worker = new AgentWorker({
+      post,
+      chatModelFactory: resolvingChatModelFactory,
+      sessionToolFactory: noopSessionToolFactory,
+    });
+    await worker.handle(inbound(MessageType.SESSION_OPEN, sessionOpenPayload()));
+
+    worker.handle(
+      inbound(UnifiedMessageType.EXECUTION_POLICY_UPDATE, {
+        executionId: EXECUTION_ID,
+        dispatchId: null,
+        usage: { orchestrationFunctionCalls: 2, totalTokens: 5_000 },
+        allowance: { maxTokens: 150_000 },
+      }),
+    );
+
+    expect(frames()).toHaveLength(0);
+    // The enforced ceiling is queryable through the registry's enforcer.
+    const enforcer = (worker as unknown as {
+      sessions: { enforcerFor: (id: string) => { maxTokens: number | null } };
+    }).sessions.enforcerFor(EXECUTION_ID);
+    expect(enforcer?.maxTokens).toBe(150_000);
+  });
+
+  it("rejects a backward usage roll with protocol.error INVALID_MESSAGE", async () => {
+    const { post, frames, typesSent } = sink();
+    const worker = new AgentWorker({
+      post,
+      chatModelFactory: resolvingChatModelFactory,
+      sessionToolFactory: noopSessionToolFactory,
+    });
+    await worker.handle(inbound(MessageType.SESSION_OPEN, sessionOpenPayload()));
+
+    // Seed local accounting above the frame's usage.
+    const enforcer = (worker as unknown as {
+      sessions: {
+        enforcerFor: (id: string) => {
+          recordTokens: (n: number) => void;
+        };
+      };
+    }).sessions.enforcerFor(EXECUTION_ID)!;
+    enforcer.recordTokens(10_000);
+
+    worker.handle(
+      inbound(UnifiedMessageType.EXECUTION_POLICY_UPDATE, {
+        executionId: EXECUTION_ID,
+        dispatchId: null,
+        usage: { orchestrationFunctionCalls: 0, totalTokens: 100 },
+        allowance: { maxTokens: 200_000 },
+      }),
+    );
+
+    expect(typesSent()).toEqual(["protocol.error"]);
+    const error = frames()[0]?.payload as {
+      code: string;
+      message: string;
+      details: { executionId: string };
+    };
+    expect(error.code).toBe("INVALID_MESSAGE");
+    expect(error.message).toContain("backward");
+    expect(error.details.executionId).toBe(EXECUTION_ID);
+  });
+
+  it("rejects a loosening allowance with protocol.error INVALID_MESSAGE", async () => {
+    const { post, frames, typesSent } = sink();
+    const worker = new AgentWorker({
+      post,
+      chatModelFactory: resolvingChatModelFactory,
+      sessionToolFactory: noopSessionToolFactory,
+    });
+    await worker.handle(inbound(MessageType.SESSION_OPEN, sessionOpenPayload()));
+    const enforcers = (worker as unknown as {
+      sessions: {
+        enforcerFor: (id: string) => {
+          applyPolicyUpdate: (u: unknown, a?: unknown) => unknown;
+        };
+      };
+    }).sessions;
+    enforcers.enforcerFor(EXECUTION_ID)!.applyPolicyUpdate(
+      { orchestrationFunctionCalls: 0, totalTokens: 0 },
+      { maxTokens: 50_000 },
+    );
+
+    worker.handle(
+      inbound(UnifiedMessageType.EXECUTION_POLICY_UPDATE, {
+        executionId: EXECUTION_ID,
+        usage: { orchestrationFunctionCalls: 0, totalTokens: 0 },
+        allowance: { maxTokens: 100_000 },
+      }),
+    );
+
+    expect(typesSent()).toEqual(["protocol.error"]);
+    const error = frames()[0]?.payload as { code: string; message: string };
+    expect(error.code).toBe("INVALID_MESSAGE");
+    expect(error.message).toContain("tighten-only");
+  });
 });

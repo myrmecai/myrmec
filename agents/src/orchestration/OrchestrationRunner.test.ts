@@ -432,6 +432,109 @@ describe("OrchestrationRunner minimal delegation", () => {
     expect(result.status).toBe("FAILED");
     expect(result.errorCode).toBe("ORCHESTRATOR_FAILED");
   });
+
+  // ── §7.3/§8.7 (A4) enforcement ──
+
+  it("caps the orchestrator iterations at the session's maxIterations policy", async () => {
+    // The host ceiling (2) is BELOW the assignment budget's orchestrator
+    // iteration cap (20): the loop stops at the policy ceiling with
+    // ORCHESTRATOR_ITERATION_LIMIT (the turn-cap semantics), not PAUSED.
+    const a = assignment();
+    a.step.orchestration.budget.maxWorkerCalls = 100;
+    const loop: ModelResponse[] = Array.from({ length: 10 }, () => invokeCall("coder"));
+    const orch = new ScriptedModel(loop);
+    const worker = new ScriptedModel(
+      Array.from({ length: 10 }, () => ({
+        content: "done",
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      })),
+    );
+
+    const result = await makeRunner(orch, worker).run(a, {
+      runId: "run-uuid",
+      maxFunctionCalls: 2,
+    });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.errorCode).toBe("ORCHESTRATOR_ITERATION_LIMIT");
+    // The ceiling (not the assignment's cap of 20) terminated the run —
+    // the usage reflects 2 orchestrator iterations + 2 worker responses.
+    expect(result.usage.workerCalls).toBe(2);
+  });
+
+  it("keeps the assignment budget as the cap when the host ceiling is looser", async () => {
+    const a = assignment();
+    a.step.orchestration.budget.maxOrchestratorIterations = 1;
+    const orch = new ScriptedModel(
+      Array.from({ length: 8 }, () => invokeCall("coder")),
+    );
+    const worker = new ScriptedModel(
+      Array.from({ length: 8 }, () => ({
+        content: "done",
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      })),
+    );
+
+    // Host ceiling of 99 never applies — the budget's 1 wins (min).
+    const result = await makeRunner(orch, worker).run(a, {
+      runId: "run-uuid",
+      maxFunctionCalls: 99,
+    });
+
+    expect(result.status).toBe("FAILED");
+    expect(result.errorCode).toBe("ORCHESTRATOR_ITERATION_LIMIT");
+    expect(result.usage.workerCalls).toBe(1);
+  });
+
+  it("pauses the attempt when the live allowance ceiling is reached", async () => {
+    // The assignment budget's token ceiling is generous (100000); the
+    // engine's tighten-only allowance (12) is reached after the first
+    // worker call (15 + 28 + 40 = 83 > 12) — the NEXT invoke_worker
+    // boundary pauses the attempt.
+    const allowanceSource = { maxTokens: 12 as number | null };
+    const orch = new ScriptedModel([
+      invokeCall("coder"),
+      invokeCall("coder"),
+      { content: "never reached" },
+    ]);
+    const worker = new ScriptedModel([
+      { content: "first", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
+      { content: "second", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
+    ]);
+
+    const result = await makeRunner(orch, worker).run(assignment(), {
+      runId: "run-uuid",
+      allowanceSource,
+    });
+
+    expect(result.status).toBe("PAUSED");
+    expect(result.errorCode).toBe("POLICY_CEILING_REACHED");
+    expect(result.suspension?.reason).toBe("POLICY_CEILING");
+    expect(result.retryDisposition).toBe("NONE");
+  });
+
+  it("applies a live tighten to the budget: a ceiling below accounted usage pauses at the next boundary", async () => {
+    const allowanceSource = { maxTokens: null as number | null };
+    const orch = new ScriptedModel([
+      invokeCall("coder"),
+      { content: "final answer", usage: { promptTokens: 5, completionTokens: 5, totalTokens: 10 } },
+    ]);
+    const worker = new ScriptedModel([
+      { content: "done", usage: { promptTokens: 30, completionTokens: 10, totalTokens: 40 } },
+    ]);
+
+    // Tighten BEFORE the run: the ceiling (30) is below the accounted usage
+    // the first worker call will reach (15 + 28 + 40) — the next boundary pauses.
+    allowanceSource.maxTokens = 30;
+
+    const result = await makeRunner(orch, worker).run(assignment(), {
+      runId: "run-uuid",
+      allowanceSource,
+    });
+
+    expect(result.status).toBe("PAUSED");
+    expect(result.errorCode).toBe("POLICY_CEILING_REACHED");
+  });
 });
 
 // ── verification (Feature 5, design §11) ──────────────────────────────

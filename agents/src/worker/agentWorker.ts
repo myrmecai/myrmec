@@ -13,12 +13,12 @@
  * adapters cannot cross the thread boundary, so the worker constructs them.
  */
 import { MessageType } from "../protocol/messages.js";
+import { MessageType as UnifiedMessageType } from "../protocol/unifiedFrames.js";
 import { makeEnvelope } from "../protocol/envelope.js";
 import type { Logger } from "../models/index.js";
 import { InferenceExecutor } from "../executor/InferenceExecutor.js";
 import { SessionRegistry } from "../session/SessionRegistry.js";
 import { ApprovalCoordinator } from "../executor/ApprovalCoordinator.js";
-import type { SessionOpenPayload } from "../protocol/unifiedFrames.js";
 import type {
   ExecutionCancelPayload,
   ExecutionStartPayload,
@@ -138,6 +138,7 @@ export class AgentWorker {
       sendExecutionCancel: (p) => send("execution.cancel", p as Record<string, unknown>),
       sendExecutionApprovalRequested: (p) =>
         send("execution.approval.requested", p as Record<string, unknown>),
+      sendProtocolError: (p) => send("protocol.error", p as Record<string, unknown>),
     };
   }
 
@@ -196,9 +197,86 @@ export class AgentWorker {
         // the quota loop's dispatch-allowance wiring.
         this.log.debug("orchestration.budget_updated received");
         return;
+      // ── §8.7 (A4): execution.policy.update — the engine's tighten-only
+      // allowance + accounted usage. Validated by the session's enforcer
+      // (conversations) or the dispatch's allowance overlay (orchestration):
+      // a backward usage roll or a loosening allowance is REJECTED with
+      // protocol.error (§8.7 defines no dedicated rejection frame — recorded
+      // deviation); an accepted update raises the enforced ceilings.
+      case UnifiedMessageType.EXECUTION_POLICY_UPDATE:
+        await this.handlePolicyUpdate(
+          frame.payload as import("../protocol/unifiedFrames.js").ExecutionPolicyUpdatePayload,
+          frame as unknown as { messageId?: string },
+        );
+        return;
       default:
         this.log.warn("AgentWorker: unhandled frame type", frame.type);
     }
+  }
+
+  /**
+   * §8.7 (A4): apply an execution.policy.update. Orchestration dispatches
+   * apply to their live allowance overlay; conversations to the session's
+   * §8.7 enforcer. A rejected frame answers protocol.error INVALID_MESSAGE
+   * so the engine knows the update was a violation.
+   */
+  private async handlePolicyUpdate(
+    payload: import("../protocol/unifiedFrames.js").ExecutionPolicyUpdatePayload,
+    frame?: { messageId?: string },
+  ): Promise<void> {
+    // Orchestration path: a dispatchId names the dispatch's allowance.
+    if (payload.dispatchId && this.orchestration) {
+      const verdict = this.orchestration.applyPolicyUpdate(payload);
+      if (verdict === "applied") {
+        this.log.info(
+          `execution.policy.update applied to dispatch ${payload.dispatchId}: maxTokens=${payload.allowance?.maxTokens ?? "none"}`,
+        );
+        return;
+      }
+      if (verdict === "rejected") {
+        await this.rejectPolicyUpdate(payload, frame,
+          "execution.policy.update loosens the allowance (tighten-only, §8.7)");
+        return;
+      }
+      // unknown-dispatch falls through to the conversation path.
+    }
+    // Conversation path: the execution's enforcer (registry-seeded).
+    const enforcer = this.sessions.enforcerFor(payload.executionId);
+    if (!enforcer) {
+      this.log.warn(
+        `execution.policy.update for unknown execution ${payload.executionId} — ignored (no open session)`,
+      );
+      return;
+    }
+    const verdict = enforcer.applyPolicyUpdate(payload.usage, payload.allowance);
+    if (verdict.kind === "accepted") {
+      this.log.info(
+        `execution.policy.update applied for ${payload.executionId}: maxTokens=${verdict.allowanceMaxTokens ?? "none"}, accounting=${JSON.stringify(enforcer.accounting())}`,
+      );
+      return;
+    }
+    await this.rejectPolicyUpdate(payload, frame, verdict.reason);
+  }
+
+  /** §8.7 violation — reject with protocol.error (recorded deviation:
+   * the design defines no dedicated rejection frame). */
+  private async rejectPolicyUpdate(
+    payload: { executionId: string },
+    frame?: { messageId?: string },
+    reason?: string,
+  ): Promise<void> {
+    const message = reason ?? "execution.policy.update rejected (§8.7 violation)";
+    this.log.warn(
+      `execution.policy.update rejected for ${payload.executionId}: ${message}`,
+    );
+    await this.executionSender.sendProtocolError({
+      code: "INVALID_MESSAGE",
+      message,
+      retryable: false,
+      offendingMessageId: frame?.messageId ?? null,
+      scope: "EXECUTION",
+      details: { executionId: payload.executionId },
+    });
   }
 
   /**
@@ -236,11 +314,19 @@ export class AgentWorker {
 
   /**
    * `session.open` (§5.2) — establish a session: instantiate the model once,
-   * register tools, store knowledge-source handles.
+   * register tools, store knowledge-source handles. §7.3 (Wave 6, A4): the
+   * session's policy block is captured so an orchestration session's host
+   * limits ride its dispatches.
    */
   private async handleSessionOpen(payload: unknown): Promise<void> {
     try {
-      await this.sessions.open(payload as SessionOpenPayload);
+      const open = payload as import("../protocol/unifiedFrames.js").SessionOpenPayload;
+      await this.sessions.open(open);
+      // §7.3 (A4): capture the session's enforced policy for the
+      // orchestration executor (conversations enforce via the registry).
+      if (open.policy) {
+        this.orchestration?.recordSessionPolicy(open.sessionId, open.policy);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.log.error("AgentWorker: failed to open session:", message);

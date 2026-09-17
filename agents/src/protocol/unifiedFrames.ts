@@ -367,6 +367,22 @@ export const knowledgeSourceHandleSchema = z.object({
 });
 export type KnowledgeSourceHandle = z.infer<typeof knowledgeSourceHandleSchema>;
 
+// ---- §7.3 (Wave 6, A4): policy + capture on session.open ----
+
+/** §7.3: the host-enforced execution limits. Null fields = no host-side limit. */
+export const sessionPolicySchema = z.object({
+  maxIterations: z.number().int().positive().nullish(),
+  executionTimeoutSeconds: z.number().int().positive().nullish(),
+});
+export type SessionPolicy = z.infer<typeof sessionPolicySchema>;
+
+/** §7.3/§15 rule 12: what the host may emit on the event stream (sensitive capture). */
+export const capturePolicySchema = z.object({
+  level: z.string(),
+  maxBytes: z.number().int().positive().nullish(),
+});
+export type CapturePolicy = z.infer<typeof capturePolicySchema>;
+
 // ---- Credential envelopes (§7.3, design 2026-09-16-credential-envelope-
 //      delivery.md §8/§9 — additive, mode-blind) ----
 
@@ -428,6 +444,13 @@ export const sessionOpenPayloadSchema = z.object({
       token: z.string(),
     })
     .nullish(),
+  // §7.3 (Wave 6, A4): the host-enforced execution limits. Null/absent
+  // fields mean "no limit on the host".
+  policy: sessionPolicySchema.nullish(),
+  // §7.3/§15 rule 12 (Wave 6): the sensitive-capture policy — METADATA is
+  // the platform default (tool arguments/results/prompts stay off the
+  // event stream, bounded metadata only).
+  capture: capturePolicySchema.nullish(),
 });
 export type SessionChannelOffer = NonNullable<
   NonNullable<SessionOpenPayload["channel"]>
@@ -637,6 +660,31 @@ export type ExecutionCancelledPayload = z.infer<
   typeof executionCancelledPayloadSchema
 >;
 
+// ---- §8.7 (A4): execution.policy.update (engine→host tighten-only) ----
+
+/**
+ * §8.7: the engine's durably accounted usage + tighten-only allowance.
+ * `usage` is the engine's accounted value (the host rejects a backward
+ * roll against its local monotonic accounting); `allowance.maxTokens` may
+ * only preserve or tighten the current limit.
+ */
+export const executionPolicyUpdatePayloadSchema = z.object({
+  executionId: uuid,
+  dispatchId: uuid.nullish(),
+  usage: z.object({
+    orchestrationFunctionCalls: z.number().int().nonnegative(),
+    totalTokens: z.number().int().nonnegative(),
+  }),
+  allowance: z
+    .object({
+      maxTokens: z.number().int().positive().nullish(),
+    })
+    .nullish(),
+});
+export type ExecutionPolicyUpdatePayload = z.infer<
+  typeof executionPolicyUpdatePayloadSchema
+>;
+
 export const executionApprovalRequestedPayloadSchema = z.object({
   executionId: uuid,
   dispatchId: uuid.nullish(),
@@ -771,6 +819,10 @@ export type ExecutionCancelFrame = UnifiedFrame<"execution.cancel"> & {
 export type ExecutionCancelledFrame = UnifiedFrame<"execution.cancelled"> & {
   payload: ExecutionCancelledPayload;
 };
+export type ExecutionPolicyUpdateFrame =
+  UnifiedFrame<"execution.policy.update"> & {
+    payload: ExecutionPolicyUpdatePayload;
+  };
 export type ExecutionApprovalRequestedFrame =
   UnifiedFrame<"execution.approval.requested"> & {
     payload: ExecutionApprovalRequestedPayload;
@@ -823,7 +875,7 @@ export const unifiedPayloadSchemas: Record<
   [MessageType.EXECUTION_PAUSED]: executionPausedPayloadSchema,
   [MessageType.EXECUTION_CANCEL]: executionCancelPayloadSchema,
   [MessageType.EXECUTION_CANCELLED]: executionCancelledPayloadSchema,
-  [MessageType.EXECUTION_POLICY_UPDATE]: z.record(z.string(), z.unknown()),
+  [MessageType.EXECUTION_POLICY_UPDATE]: executionPolicyUpdatePayloadSchema,
   [MessageType.EXECUTION_APPROVAL_REQUESTED]: executionApprovalRequestedPayloadSchema,
 
   [MessageType.PROTOCOL_ACK]: protocolAckPayloadSchema,
@@ -856,6 +908,7 @@ export type ParsedUnifiedFrame =
   | ExecutionPausedFrame
   | ExecutionCancelFrame
   | ExecutionCancelledFrame
+  | ExecutionPolicyUpdateFrame
   | ExecutionApprovalRequestedFrame
   | ProtocolAckFrame
   | ProtocolErrorFrame;

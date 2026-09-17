@@ -52,6 +52,7 @@ import type {
 import type { EngineHttpClient } from "../transport/httpClient.js";
 import type { ApprovalCoordinator } from "./ApprovalCoordinator.js";
 import type { ExecutionFrameSender } from "./ExecutionFrameSender.js";
+import type { PolicyEnforcer } from "./PolicyEnforcer.js";
 
 /** Constructor options for {@link InferenceExecutor}. */
 export interface InferenceExecutorOptions {
@@ -188,6 +189,9 @@ export class InferenceExecutor {
     const controller = new AbortController();
     const state = { controller, partialContent: "" };
     this.inFlight.set(executionId, state);
+    // §8.7 (A4): register the execution's enforcement state (the session's
+    // enforcer is shared; the executionId alias lets policy updates find it).
+    this.registry.registerExecution(sessionId, executionId);
 
     try {
       // 2. Emit execution.accept.
@@ -204,6 +208,10 @@ export class InferenceExecutor {
         description,
         parameters,
       }));
+
+      // §8.7 (A4): the execution's enforcement state — monotonic local
+      // accounting seeded from the session's §7.3 policy block.
+      const enforcer = this.registry.enforcerFor(sessionId);
 
       this.log.info(
         `Execution ${executionId}: ${toolSpecs.length} active tools (${toolSpecs.map(t => t.name).join(', ') || 'none'}), streaming=${payload.output?.stream ?? false}`
@@ -224,6 +232,7 @@ export class InferenceExecutor {
         cancellation,
         payload,
         state,
+        enforcer,
       );
 
       // 7. Cancellation takes precedence over completion.
@@ -383,6 +392,7 @@ export class InferenceExecutor {
     cancellation: CancellationSignal,
     payload: ExecutionStartPayload,
     state: { controller: AbortController; partialContent: string },
+    enforcer?: PolicyEnforcer,
   ): Promise<
     | { kind: "complete"; content: string; tokenCount?: number; modelCode?: string }
     | { kind: "failed"; errorCode: string; message: string }
@@ -399,6 +409,21 @@ export class InferenceExecutor {
           kind: "complete",
           content: state.partialContent,
         };
+      }
+      // §8.7 (A4): the enforced ceiling is checked BEFORE every model call —
+      // when local accounting reached the allowance (or the session's
+      // iteration policy), the execution pauses: no further model calls pass
+      // the ceiling (pause is the terminal answer until resumed).
+      if (enforcer) {
+        const decision = enforcer.check();
+        if (decision.kind === "paused") {
+          enforcer.notePause(decision);
+          return {
+            kind: "failed",
+            errorCode: "POLICY_CEILING_REACHED",
+            message: decision.message,
+          };
+        }
       }
       iteration += 1;
       this.log.debug(`Execution iteration ${iteration} for ${executionId}`);
@@ -421,6 +446,15 @@ export class InferenceExecutor {
         const message = err instanceof Error ? err.message : String(err);
         this.log.error("Model invocation failed:", message);
         return { kind: "failed", errorCode: "PROVIDER_ERROR", message };
+      }
+
+      // §8.7 (A4): record the response's accounted tokens into the
+      // monotonic local accounting (provider-reported deltas only).
+      if (enforcer) {
+        const delta = this.responseTokenDelta(response);
+        if (delta > 0) {
+          enforcer.recordTokens(delta);
+        }
       }
 
       if (cancellation.cancelled) {
@@ -517,6 +551,22 @@ export class InferenceExecutor {
       errorCode: "MAX_ITERATIONS",
       message: `Execution did not converge within ${this.maxIterations} iterations`,
     };
+  }
+
+  /**
+   * §8.7 (A4): the provider-reported token delta of ONE model response
+   * (mirrors TurnExecutor's per-response accounting — integer counts only,
+   * never estimated).
+   */
+  private responseTokenDelta(response: ModelResponse): number {
+    const u = response.usage;
+    if (!u) {
+      return 0;
+    }
+    const prompt = Number.isInteger(u.promptTokens) && u.promptTokens! >= 0 ? u.promptTokens! : 0;
+    const completion =
+      Number.isInteger(u.completionTokens) && u.completionTokens! >= 0 ? u.completionTokens! : 0;
+    return prompt + completion;
   }
 
   /**

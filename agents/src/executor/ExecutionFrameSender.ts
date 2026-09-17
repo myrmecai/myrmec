@@ -19,6 +19,7 @@ import type {
   ExecutionPausedPayload,
   ExecutionApprovalRequestedPayload,
   ExecutionRejectPayload,
+  ProtocolErrorPayload,
 } from "../protocol/unifiedFrames.js";
 
 export interface ExecutionFrameSender {
@@ -34,4 +35,6 @@ export interface ExecutionFrameSender {
   sendExecutionApprovalRequested(
     payload: ExecutionApprovalRequestedPayload,
   ): Promise<void>;
+  /** §8.7 (A4): answer a rejected execution.policy.update. */
+  sendProtocolError(payload: ProtocolErrorPayload): Promise<void>;
 }

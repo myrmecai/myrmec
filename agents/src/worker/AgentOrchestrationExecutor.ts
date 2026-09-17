@@ -93,6 +93,29 @@ export class AgentOrchestrationExecutor {
     string,
     { runId: string; cancellation: { cancelled: boolean } }
   >();
+  /**
+   * §7.3 (Wave 6, A4): the session's host-enforced execution policy, keyed
+   * by the session the orchestration dispatch rides (captured at
+   * session.open by the worker).
+   */
+  private readonly sessionPolicies = new Map<
+    string,
+    import("../protocol/unifiedFrames.js").SessionPolicy
+  >();
+  /**
+   * §8.7 (A4): the live tighten-only allowance per dispatch — mutated by
+   * execution.policy.update frames while the dispatch executes; the runner
+   * reads through this object at every worker-call boundary.
+   */
+  private readonly allowanceSources = new Map<
+    string,
+    { maxTokens: number | null }
+  >();
+  /** §7.3 (Wave 6, A4): the policy bound to each admitted dispatch. */
+  private readonly dispatchPolicies = new Map<
+    string,
+    import("../protocol/unifiedFrames.js").SessionPolicy
+  >();
   private readonly log: Logger;
   /**
    * §17.6/V1: one dispatch executes at a time — a single agent
@@ -185,6 +208,18 @@ export class AgentOrchestrationExecutor {
       admittedAt: new Date().toISOString(),
     });
 
+    // §7.3 (Wave 6, A4): bind the session's policy to THIS dispatch so the
+    // runner enforces the host limits; seed the allowance overlay the
+    // policy updates will tighten.
+    const sessionPolicy = payload.sessionId
+      ? this.sessionPolicies.get(payload.sessionId)
+      : undefined;
+    const allowanceSource: { maxTokens: number | null } = { maxTokens: null };
+    this.allowanceSources.set(dispatchId, allowanceSource);
+    if (sessionPolicy) {
+      this.dispatchPolicies.set(dispatchId, sessionPolicy);
+    }
+
     // Acknowledge: the exact admitted digest.
     this.sendAccept(dispatchId, payload.sessionId, digest);
 
@@ -209,6 +244,57 @@ export class AgentOrchestrationExecutor {
       state.cancellation.cancelled = true;
       this.log.info(`orchestration dispatch ${dispatchId} cancellation signalled`);
     }
+  }
+
+  /**
+   * §7.3 (Wave 6, A4): the worker records the session.open policy block so
+   * the orchestration dispatch it serves enforces the host limits.
+   */
+  recordSessionPolicy(
+    sessionId: string,
+    policy: import("../protocol/unifiedFrames.js").SessionPolicy | null | undefined,
+  ): void {
+    if (policy) {
+      this.sessionPolicies.set(sessionId, policy);
+    }
+  }
+
+  /** The policy a dispatch's session carried (undefined = none captured). */
+  private sessionPolicyOf(
+    dispatchId: string,
+  ): import("../protocol/unifiedFrames.js").SessionPolicy | undefined {
+    return this.dispatchPolicies.get(dispatchId);
+  }
+
+  /**
+   * §8.7 (A4): apply an execution.policy.update to a live orchestration
+   * dispatch — tighten-only. Returns the verdict so the caller can reject
+   * a violation with protocol.error.
+   */
+  applyPolicyUpdate(payload: {
+    dispatchId?: string | null;
+    usage: { orchestrationFunctionCalls: number; totalTokens: number };
+    allowance?: { maxTokens?: number | null } | null;
+  }): "applied" | "rejected" | "unknown-dispatch" {
+    const dispatchId = payload.dispatchId;
+    if (!dispatchId) {
+      return "unknown-dispatch";
+    }
+    const source = this.allowanceSources.get(dispatchId);
+    if (!source) {
+      return "unknown-dispatch";
+    }
+    const newLimit = payload.allowance?.maxTokens ?? null;
+    if (newLimit !== null && source.maxTokens !== null && newLimit > source.maxTokens) {
+      return "rejected";
+    }
+    // §13 alignment: the engine's durable accounting is authoritative —
+    // the reconciled ceiling applies at the next boundary. Lower engine
+    // totals than local counters cannot roll the runner's accounting
+    // backward (BudgetController only reads the ALLOWANCE here); the
+    // accounted usage riding the frame keeps the host's view authoritative.
+    source.maxTokens = newLimit;
+    return "applied";
   }
 
   /**
@@ -278,6 +364,13 @@ export class AgentOrchestrationExecutor {
     const runId = dispatch.runId;
     const generation = 1;
     this.runWorkflow.set(runId, dispatch.workflowId);
+
+    // §7.3/§8.7 (A4): the policy/allowance captured at admission (bound to
+    // this dispatch) — the runner enforces the host limits and reads the
+    // live tighten-only allowance at every worker-call boundary.
+    const sessionPolicy = this.sessionPolicyOf(dispatch.dispatchId);
+    const allowanceSource =
+      this.allowanceSources.get(dispatch.dispatchId) ?? { maxTokens: null };
 
     this.log.info(
       `orchestration dispatch ${dispatch.dispatchId} executing (step ${step.id}, run ${runId})`,
@@ -566,7 +659,16 @@ export class AgentOrchestrationExecutor {
         },
       });
 
-      const result = await runner.run(assignment, { runId });
+      const result = await runner.run(assignment, {
+        runId,
+        // §7.3 (Wave 6, A4): the session's host-side function-call ceiling.
+        ...(sessionPolicy?.maxIterations != null
+          ? { maxFunctionCalls: sessionPolicy.maxIterations }
+          : {}),
+        // §8.7 (A4): the live tighten-only allowance overlay — the
+        // policy-updates handler mutates this through the run handle.
+        allowanceSource: allowanceSource,
+      });
       this.log.info(
         `orchestration dispatch ${dispatch.dispatchId} runner finished: ${result.status}`,
       );

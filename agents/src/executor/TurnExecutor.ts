@@ -287,11 +287,15 @@ export class TurnExecutor {
       // §17.4 HITL: a governed-action suspension or policy denial is a
       // RUNNER-level control-flow event, not a tool error — the turn
       // must tear down immediately so the runner can return PAUSED or
-      // the terminal denial. Re-raise the typed signals; every other
-      // error is recorded (the loop continues).
+      // the terminal denial. §8.7 (A4): a policy-ceiling breach is the
+      // same class of control-flow signal (the attempt PAUSES at the
+      // next boundary). Re-raise the typed signals; every other error
+      // is recorded (the loop continues).
       if (
         err instanceof Error &&
-        (err.name === "ApprovalRequiredSignal" || err.name === "PolicyDeniedSignal")
+        (err.name === "ApprovalRequiredSignal" ||
+          err.name === "PolicyDeniedSignal" ||
+          err.name === "PolicyCeilingSignal")
       ) {
         throw err;
       }

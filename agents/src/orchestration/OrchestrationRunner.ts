@@ -149,6 +149,14 @@ export interface OrchestrationRunnerOptions {
 
 export interface OrchestrationRunOptions {
   runId: string;
+  /** §7.3 (Wave 6, A4): the host-side orchestration function-call ceiling
+   * from session.open policy (null = no host limit). Enforced at the
+   * invoke_worker boundary — reaching it pauses the attempt. */
+  maxFunctionCalls?: number | null;
+  /** §8.7 (A4): live allowance overlay from the engine (tighten-only).
+   * Mutated by policy updates via {@link OrchestrationRunHandle}; the
+   * controller reads through this seam each boundary. */
+  allowanceSource?: { maxTokens: number | null };
 }
 
 /** The orchestrator's single action tool input (design §10.1). */
@@ -184,6 +192,18 @@ class PolicyDeniedSignal extends Error {
   constructor(readonly reason: string) {
     super(reason);
     this.name = "PolicyDeniedSignal";
+  }
+}
+
+/**
+ * §8.7 (A4): thrown by the invoke_worker boundary when the tighten-only
+ * allowance ceiling is reached — the attempt PAUSES (§8.7: pause is the
+ * terminal answer; no further model calls pass the ceiling).
+ */
+class PolicyCeilingSignal extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "PolicyCeilingSignal";
   }
 }
 
@@ -223,7 +243,7 @@ export class OrchestrationRunner {
     assignmentInput: OrchestrationAssignment,
     options: OrchestrationRunOptions,
   ): Promise<OrchestrationRunResult> {
-    void options; // reserved: cancellation/events land in later features
+    const runOptions = options;
     // Boundary validation: the runtime never trusts unvalidated input.
     const parsed = orchestrationAssignmentSchema.safeParse(assignmentInput);
     if (!parsed.success) {
@@ -543,6 +563,19 @@ export class OrchestrationRunner {
             summary: callBreach.message,
           };
         }
+        // §8.7 (A4): tighten-only live allowance — the runner re-reads the
+        // enforced ceiling at each worker-call boundary and PAUSES the
+        // attempt when the accounted usage reached it (pause is the
+        // terminal answer until a tighter/looser frame arrives per §8.7;
+        // the controller routes the PAUSED result to the engine).
+        if (runOptions.allowanceSource && runOptions.allowanceSource.maxTokens !== null) {
+          budget.applyAllowance(runOptions.allowanceSource.maxTokens);
+          const breach = budget.check("before-worker-call");
+          if (breach) {
+            budgetBreach = breach;
+            throw new PolicyCeilingSignal(breach.message);
+          }
+        }
         const outcome = await this.options.workerInvoker.invoke(
           assignment,
           args.workerName,
@@ -624,11 +657,18 @@ export class OrchestrationRunner {
     };
 
     let result: TaskResult;
+    // §7.3 (Wave 6, A4): the session's host-side function-call ceiling
+    // caps the orchestrator turn's iterations (the orchestrator's
+    // invoke_worker calls are the §8.7 "orchestration function calls").
+    const hostIterationCap =
+      runOptions.maxFunctionCalls != null && runOptions.maxFunctionCalls > 0
+        ? Math.min(runOptions.maxFunctionCalls, o.budget.maxOrchestratorIterations)
+        : o.budget.maxOrchestratorIterations;
     try {
       result = await this.options.turnExecutor.execute(task, {
         model: orchestratorModel,
         tools: [invokeWorkerTool],
-        maxIterationsOverride: o.budget.maxOrchestratorIterations,
+        maxIterationsOverride: hostIterationCap,
         // §13: the orchestrator turn shares the per-attempt budget — its
         // responses are recorded and checked inside the model-tool loop.
         budget,
@@ -675,6 +715,42 @@ export class OrchestrationRunner {
           verifierResults,
           commandExecutions,
         );
+      }
+      // §8.7 (A4): the tighten-only allowance ceiling was reached at the
+      // worker-call boundary — PAUSE the attempt (§8.7: pause is the
+      // terminal answer until the host resumes with a tighter/none).
+      if (signal instanceof PolicyCeilingSignal) {
+        return {
+          schemaVersion: "1.0",
+          resultId: this.resultId(dispatch),
+          resultDigest: this.resultDigest(dispatch),
+          dispatch,
+          status: "PAUSED",
+          retryDisposition: "NONE",
+          summary: `suspended: ${signal.message}`.slice(0, 4000),
+          workerCalls,
+          verifierResults: verifierResults.map(toVerifierResult),
+          commandExecutions,
+          changedFiles: [],
+          commits: [],
+          cleanWorktree: false,
+          usage: {
+            workerCalls: budget.counters().workerCalls,
+            rejectionCount,
+            totalTokens: budget.counters().totalTokens,
+          },
+          errorCode: "POLICY_CEILING_REACHED",
+          suspension: {
+            continuationId: `cont-${dispatch.dispatchId}-ceiling`,
+            continuationRef: `local:cont-${dispatch.dispatchId}-ceiling`,
+            snapshotTreeHash: lastTree.value,
+            workspaceRevision: revision.value,
+            stateDigest: createHash("sha256")
+              .update(`${dispatch.dispatchId}:ceiling:${lastTree.value}:${revision.value}`)
+              .digest("hex"),
+            reason: "POLICY_CEILING",
+          },
+        };
       }
       throw signal;
     }
@@ -752,6 +828,44 @@ export class OrchestrationRunner {
         finishReason === "TOKEN_BUDGET_EXCEEDED" ||
         finishReason === "REJECTION_BUDGET_EXCEEDED"
       ) {
+        // Â§8.7 (A4): when a tighten-only engine allowance is in force,
+        // the breach IS the policy ceiling â€” pause is the terminal answer
+        // regardless of the assignment budget's onBudgetExceeded policy
+        // (the engine, not the local budget, owns the pause semantics).
+        // Mirrors the PolicyCeilingSignal catch branch's PAUSED result.
+        if (runOptions.allowanceSource && runOptions.allowanceSource.maxTokens !== null) {
+          return {
+            schemaVersion: "1.0",
+            resultId: this.resultId(dispatch),
+            resultDigest: this.resultDigest(dispatch),
+            dispatch,
+            status: "PAUSED",
+            retryDisposition: "NONE",
+            summary: `suspended: ${result.failure?.message ?? "policy allowance ceiling reached"}`.slice(0, 4000),
+            workerCalls,
+            verifierResults: verifierResults.map(toVerifierResult),
+            commandExecutions,
+            changedFiles: [],
+            commits: [],
+            cleanWorktree: false,
+            usage: {
+              workerCalls: budget.counters().workerCalls,
+              rejectionCount,
+              totalTokens: budget.counters().totalTokens,
+            },
+            errorCode: "POLICY_CEILING_REACHED",
+            suspension: {
+              continuationId: `cont-${dispatch.dispatchId}-ceiling`,
+              continuationRef: `local:cont-${dispatch.dispatchId}-ceiling`,
+              snapshotTreeHash: lastTree.value,
+              workspaceRevision: revision.value,
+              stateDigest: createHash("sha256")
+                .update(`${dispatch.dispatchId}:ceiling:${lastTree.value}:${revision.value}`)
+                .digest("hex"),
+              reason: "POLICY_CEILING",
+            },
+          };
+        }
         return mapBreach({
           checkpoint: "before-tool-execution",
           errorCode: finishReason,
