@@ -19,6 +19,7 @@ import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
 import ai.myrmec.engine.websocket.host.payload.ExecutionApprovalRequestedPayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionCompletePayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionEventPayload;
+import ai.myrmec.engine.websocket.host.payload.ExecutionFailedPayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionPausedPayload;
 import ai.myrmec.engine.workflow.AttemptStatus;
 import ai.myrmec.engine.workflow.RequestStatus;
@@ -231,7 +232,10 @@ class ExecutionBridgeTest extends IntegrationTestBase {
         List<String> captured = new ArrayList<>();
         conversationStreamBroker.subscribe(conversation.getId(), new CapturingSubscriber(captured));
 
-        Instant before = Instant.now();
+        // H2 truncates timestamptz to micros — window the assert to millis
+        // (Plan 2's known pattern) or the stored value can land nanos below
+        // the lower bound.
+        Instant before = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
         ExecutionPausedPayload payload = new ExecutionPausedPayload(
                 UUID.randomUUID(), Instant.now(), "APPROVAL_REQUIRED",
                 null, null,
@@ -244,7 +248,7 @@ class ExecutionBridgeTest extends IntegrationTestBase {
         ConversationMessage approval = conversationMessageRepository
                 .findByConversationIdOrderBySequenceNoAsc(conversation.getId())
                 .get(1);
-        Instant after = Instant.now();
+        Instant after = Instant.now().plusSeconds(1).truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
         assertThat(approval.getExpiresAt())
                 .as("approval expiry must be stamped from the profile TTL (120s), not null")
                 .isNotNull()
@@ -263,7 +267,8 @@ class ExecutionBridgeTest extends IntegrationTestBase {
 
         conversationService.appendMessage(conversation.getId(), ConversationMessage.Role.USER, "go", TEST_ADMIN_ID, null);
 
-        Instant before = Instant.now();
+        // Same H2-micros windowing as the profile-TTL test above.
+        Instant before = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
         ExecutionPausedPayload payload = new ExecutionPausedPayload(
                 UUID.randomUUID(), Instant.now(), "APPROVAL_REQUIRED",
                 null, null,
@@ -276,7 +281,7 @@ class ExecutionBridgeTest extends IntegrationTestBase {
         ConversationMessage approval = conversationMessageRepository
                 .findByConversationIdOrderBySequenceNoAsc(conversation.getId())
                 .get(1);
-        Instant after = Instant.now();
+        Instant after = Instant.now().plusSeconds(1).truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
         assertThat(approval.getExpiresAt())
                 .as("no profile → platform default TTL (900s)")
                 .isNotNull()
@@ -291,7 +296,7 @@ class ExecutionBridgeTest extends IntegrationTestBase {
         AgentHost host = hostResult.agent();
         Conversation conversation = data.conversation().inProject(project).create();
         conversation.setAgentId(host.getId());
-        conversation.setAgentProfileVersionId(UUID.randomUUID()); // unresolvable — must not throw
+        conversation.setAgentProfileVersionId(UUID.randomUUID()); // would resolve nothing
         conversationRepository.save(conversation);
 
         conversationService.appendMessage(conversation.getId(), ConversationMessage.Role.USER, "go", TEST_ADMIN_ID, null);
@@ -318,17 +323,69 @@ class ExecutionBridgeTest extends IntegrationTestBase {
     }
 
     @Test
-    void conversationFailureBroadcastsRawFrame() {
+    void conversationFailurePersistsSystemRowAndBroadcastsEnvelope() {
         Project project = data.project().named("bridge-fail").create();
+        AgentHostCreationResult hostResult = data.agent().named("bridge-fail-host").withMaxAgents(10).create();
+        AgentHost host = hostResult.agent();
+        Conversation conversation = data.conversation().inProject(project).create();
+        conversation.setAgentId(host.getId());
+        conversationRepository.save(conversation);
+        conversationService.appendMessage(conversation.getId(), ConversationMessage.Role.USER, "hi", TEST_ADMIN_ID, null);
+
+        List<String> captured = new ArrayList<>();
+        conversationStreamBroker.subscribe(conversation.getId(), new CapturingSubscriber(captured));
+
+        ExecutionFailedPayload payload = new ExecutionFailedPayload(
+                UUID.randomUUID(), Instant.now(),
+                new ExecutionFailedPayload.Error("MODEL_UNAVAILABLE", "The model provider is down",
+                        "PROVIDER", false, null),
+                null);
+
+        executionBridge.onConversationFailure(
+                conversation.getId(), project.getId(), host.getId(), payload);
+
+        // (1) Durable SYSTEM transcript row carrying the error envelope.
+        List<ConversationMessage> messages = conversationMessageRepository
+                .findByConversationIdOrderBySequenceNoAsc(conversation.getId());
+        assertThat(messages).hasSize(2);
+        ConversationMessage failure = messages.get(1);
+        assertThat(failure.getRole()).isEqualTo(ConversationMessage.Role.SYSTEM);
+        assertThat(failure.getContent()).contains("MODEL_UNAVAILABLE");
+        assertThat(failure.getPayloadJson()).contains("errorCode");
+        assertThat(failure.getPayloadJson()).contains("MODEL_UNAVAILABLE");
+        assertThat(failure.getPayloadJson()).contains("The model provider is down");
+
+        // (2) Enriched message.complete envelope — role SYSTEM + the error code,
+        // NOT the raw host frame.
+        assertThat(captured).hasSize(1);
+        String broadcast = captured.get(0);
+        assertThat(broadcast).contains("message.complete");
+        assertThat(broadcast).contains(failure.getId().toString());
+        assertThat(broadcast).contains("SYSTEM");
+        assertThat(broadcast).contains("MODEL_UNAVAILABLE");
+        // The raw host frame shape (top-level "error" block) must NOT be re-broadcast.
+        assertThat(broadcast).doesNotContain("\"error\"");
+    }
+
+    @Test
+    void conversationFailureWithoutPayloadPersistsGenericNotice() {
+        Project project = data.project().named("bridge-fail-null").create();
         Conversation conversation = data.conversation().inProject(project).create();
         conversationService.appendMessage(conversation.getId(), ConversationMessage.Role.USER, "hi", TEST_ADMIN_ID, null);
 
         List<String> captured = new ArrayList<>();
         conversationStreamBroker.subscribe(conversation.getId(), new CapturingSubscriber(captured));
 
-        executionBridge.onConversationFailure(conversation.getId(), "{\"type\":\"execution.failed\"}");
+        executionBridge.onConversationFailure(conversation.getId(), project.getId(), null, null);
 
-        assertThat(captured).containsExactly("{\"type\":\"execution.failed\"}");
+        List<ConversationMessage> messages = conversationMessageRepository
+                .findByConversationIdOrderBySequenceNoAsc(conversation.getId());
+        assertThat(messages).hasSize(2);
+        ConversationMessage failure = messages.get(1);
+        assertThat(failure.getRole()).isEqualTo(ConversationMessage.Role.SYSTEM);
+        assertThat(failure.getContent()).contains("EXECUTION_FAILED");
+        assertThat(captured).hasSize(1);
+        assertThat(captured.get(0)).contains("message.complete");
     }
 
     // =================================================================

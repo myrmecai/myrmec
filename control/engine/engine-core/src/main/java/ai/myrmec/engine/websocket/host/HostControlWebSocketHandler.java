@@ -893,8 +893,12 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                 ExecutionPausedPayload paused = objectMapper.convertValue(payloadNode, ExecutionPausedPayload.class);
                 executionBridge.onConversationPaused(conversationId, agentId, paused);
             }
-            case FAILED -> executionBridge.onConversationFailure(conversationId,
-                    rebuildRawFrame(execution, terminalState, payloadNode));
+            case FAILED -> {
+                ExecutionFailedPayload failed =
+                        objectMapper.convertValue(payloadNode, ExecutionFailedPayload.class);
+                executionBridge.onConversationFailure(
+                        conversationId, sess.getProjectId(), agentId, failed);
+            }
             case CANCELLED -> {
                 // No transcript row for a cancelled conversation turn.
             }
@@ -996,20 +1000,6 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                 null,
                 null,
                 suspension.expiresAt());
-    }
-
-    private String rebuildRawFrame(SessionExecution execution, SessionExecution.State terminalState, JsonNode payloadNode) {
-        try {
-            var reply = HostProtocolEnvelope.reply(
-                    terminalState.name().toLowerCase(), null,
-                    objectMapper.treeToValue(payloadNode, Object.class), objectMapper);
-            reply.setExecutionId(execution.getId());
-            reply.setSessionId(execution.getSessionId());
-            return objectMapper.writeValueAsString(reply);
-        } catch (Exception e) {
-            log.debug("Failed to rebuild raw failure frame for execution {}: {}", execution.getId(), e.getMessage());
-            return payloadNode != null ? payloadNode.toString() : "";
-        }
     }
 
     /** §12.3: acknowledge a durable host→engine frame after its state is recorded. */

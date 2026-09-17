@@ -14,6 +14,7 @@ import ai.myrmec.engine.spi.quota.QuotaPolicyEngine;
 import ai.myrmec.engine.spi.quota.QuotaResourceType;
 import ai.myrmec.engine.spi.quota.QuotaScope;
 import ai.myrmec.engine.websocket.host.payload.ExecutionApprovalRequestedPayload;
+import ai.myrmec.engine.websocket.host.payload.ExecutionFailedPayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionCompletePayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionEventPayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionPausedPayload;
@@ -118,18 +119,6 @@ public class ExecutionBridge {
                 log.warn("Failed to build message.complete bridge for conv {}: {}", conversationId, ex.getMessage());
             }
         }
-    }
-
-    /**
-     * Conversation failure: broadcast the raw failure frame to viewers.
-     * Mirrors InboundInferenceHandler.onInferenceFailed conversation branch.
-     */
-    public void onConversationFailure(UUID conversationId, String rawFrame) {
-        if (conversationId == null || rawFrame == null) {
-            return;
-        }
-        conversationStreamBroker.broadcast(conversationId, rawFrame);
-        log.debug("Bridged execution.failed conversation frame for conv {}", conversationId);
     }
 
     /**
@@ -454,6 +443,63 @@ public class ExecutionBridge {
                     conversationId, e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Conversation failure surface (#136, §14): a failed turn must be visible
+     * in the transcript, not a silent stall. Mirrors {@link #onConversationComplete}:
+     * persist a SYSTEM error row → broadcast an enriched {@code message.complete}-
+     * shaped envelope (NOT the raw host frame).
+     */
+    public void onConversationFailure(UUID conversationId, UUID projectId, UUID agentId,
+                                      ExecutionFailedPayload payload) {
+        if (conversationId == null) {
+            return;
+        }
+        String code = payload == null || payload.error() == null
+                || payload.error().code() == null ? "EXECUTION_FAILED" : payload.error().code();
+        String message = payload == null || payload.error() == null
+                || payload.error().message() == null
+                ? "Execution failed." : payload.error().message();
+
+        Map<String, Object> errorEnvelope = new LinkedHashMap<>();
+        errorEnvelope.put("errorCode", code);
+        errorEnvelope.put("message", message);
+        if (payload != null && payload.error() != null && payload.error().category() != null) {
+            errorEnvelope.put("category", payload.error().category());
+        }
+        if (payload != null && payload.error() != null && payload.error().retryable()) {
+            errorEnvelope.put("retryable", true);
+            if (payload.error().retryAfterSeconds() != null) {
+                errorEnvelope.put("retryAfterSeconds", payload.error().retryAfterSeconds());
+            }
+        }
+        String content = "Execution failed (" + code + "): " + message;
+        String payloadJson;
+        try {
+            payloadJson = objectMapper.writeValueAsString(errorEnvelope);
+        } catch (Exception e) {
+            payloadJson = null;
+        }
+
+        ConversationMessage persisted;
+        try {
+            persisted = conversationService.appendSystemNotice(conversationId, content, payloadJson);
+        } catch (Exception e) {
+            log.error("Failed to persist failure notice for conv {}: {}", conversationId, e.getMessage(), e);
+            return;
+        }
+
+        try {
+            String mcFrame = objectMapper.writeValueAsString(
+                    WebSocketMessage.of(MessageType.MESSAGE_COMPLETE, buildHistoryEnvelope(persisted)));
+            conversationStreamBroker.broadcast(conversationId, mcFrame);
+            log.info("Bridged execution.failed to SYSTEM row + message.complete for conv {} (seq {})",
+                    conversationId, persisted.getSequenceNo());
+        } catch (Exception ex) {
+            log.warn("Failed to build message.complete bridge for conv {}: {}", conversationId, ex.getMessage());
+        }
+        log.debug("Conversation failure surface (projectId={}, agentId={})", projectId, agentId);
     }
 
     private Long longTokenCount(Long value) {
