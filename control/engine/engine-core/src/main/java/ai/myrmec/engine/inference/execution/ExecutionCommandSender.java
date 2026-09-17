@@ -4,8 +4,7 @@ package ai.myrmec.engine.inference.execution;
 
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionRepository;
-import ai.myrmec.engine.websocket.host.ChannelConnectionRegistry;
-import ai.myrmec.engine.websocket.host.HostConnectionManager;
+import ai.myrmec.engine.node.HostFrameRelayService;
 import ai.myrmec.engine.websocket.host.HostProtocol;
 import ai.myrmec.engine.websocket.host.HostProtocolEnvelope;
 import ai.myrmec.engine.websocket.host.payload.ExecutionCancelPayload;
@@ -16,20 +15,21 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Engine→host execution commands over the host control socket (§8.1/§8.8).
- * Plan 8's dispatch cutover calls these after allocation; until then they
- * are exercised by the contract tests only.
+ * Engine→host execution commands (§8.1/§8.8) over the host socket — local or
+ * relayed (§20, decision H5): the frame is serialized once and handed to
+ * {@link HostFrameRelayService}, which delivers it to the owning replica's
+ * socket directly when the instance is homed here, or relays it over the HTTP
+ * mesh when the instance lives on a peer (falling back to a local socket if
+ * one exists, per the relay's failure semantics).
  */
 @Component
 @RequiredArgsConstructor
 public class ExecutionCommandSender {
 
-    private final HostConnectionManager connectionManager;
-    private final ChannelConnectionRegistry channelRegistry;
+    private final HostFrameRelayService relayService;
     private final SessionRepository sessionRepository;
     private final ObjectMapper objectMapper;
 
@@ -71,34 +71,17 @@ public class ExecutionCommandSender {
     }
 
     /**
-     * §7.5: resolve the outbound socket channel-first — the dedicated session
-     * channel when one is bound (and open), else the control socket. Channel
-     * loss degrades transparently; the session is unaffected.
+     * Serialize once, then route: node-aware resolution inside the relay
+     * service decides local socket vs HTTP relay to the owning replica.
      */
-    private java.util.Optional<org.springframework.web.socket.WebSocketSession>
-            resolveSocket(UUID sessionId, UUID hostInstanceId) {
-        if (sessionId != null) {
-            var channel = channelRegistry.getChannel(sessionId);
-            if (channel.isPresent()) {
-                return channel;
-            }
-        }
-        return connectionManager.getSession(hostInstanceId);
-    }
-
     private boolean send(UUID hostInstanceId, String type, String correlationId,
                          Object payload, UUID executionId, UUID sessionId) {
-        var socket = resolveSocket(sessionId, hostInstanceId);
-        if (socket.isEmpty()) {
-            return false;
-        }
         HostProtocolEnvelope envelope = HostProtocolEnvelope.reply(type, correlationId, payload, objectMapper);
         envelope.setExecutionId(executionId);
         envelope.setSessionId(sessionId);
         try {
-            socket.get().sendMessage(new org.springframework.web.socket.TextMessage(
-                    objectMapper.writeValueAsString(envelope)));
-            return true;
+            String json = objectMapper.writeValueAsString(envelope);
+            return relayService.send(sessionId, hostInstanceId, json);
         } catch (Exception e) {
             return false;
         }

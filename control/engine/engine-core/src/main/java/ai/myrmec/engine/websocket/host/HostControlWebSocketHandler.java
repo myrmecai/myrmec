@@ -10,6 +10,7 @@ import ai.myrmec.engine.spi.crypto.EncryptionService;
 import ai.myrmec.engine.inference.SessionAllocator;
 import ai.myrmec.engine.inference.SessionContextAssembler;
 import ai.myrmec.engine.inference.SessionRepository;
+import ai.myrmec.engine.node.HostFrameRelayService;
 import ai.myrmec.engine.node.NodeRegistryService;
 import ai.myrmec.engine.websocket.host.payload.HostCapacityPayload;
 import ai.myrmec.engine.websocket.host.payload.HostHeartbeatPayload;
@@ -99,6 +100,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     private final ai.myrmec.engine.workflow.TaskAttemptService taskAttemptService;
     private final PendingConversationTurns pendingConversationTurns;
     private final ExecutionCommandSender executionCommandSender;
+    private final HostFrameRelayService frameRelayService;
     private final ai.myrmec.engine.conversation.ConversationRepository conversationRepository;
     private final ai.myrmec.engine.agent.AgentProfileVersionRepository agentProfileVersionRepository;
     private final ai.myrmec.engine.workflow.TaskDispatchContinuation taskDispatchContinuation;
@@ -140,6 +142,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                                        ai.myrmec.engine.workflow.TaskAttemptService taskAttemptService,
                                        PendingConversationTurns pendingConversationTurns,
                                        ExecutionCommandSender executionCommandSender,
+                                       HostFrameRelayService frameRelayService,
                                        ai.myrmec.engine.conversation.ConversationRepository conversationRepository,
                                        ai.myrmec.engine.agent.AgentProfileVersionRepository agentProfileVersionRepository,
                                        @org.springframework.context.annotation.Lazy
@@ -164,6 +167,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         this.taskAttemptService = taskAttemptService;
         this.pendingConversationTurns = pendingConversationTurns;
         this.executionCommandSender = executionCommandSender;
+        this.frameRelayService = frameRelayService;
         this.conversationRepository = conversationRepository;
         this.agentProfileVersionRepository = agentProfileVersionRepository;
         this.taskDispatchContinuation = taskDispatchContinuation;
@@ -281,6 +285,10 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             instance = liveSameNonce.get();
             pskBase64 = encryptionService.decrypt(instance.getPskEncrypted());
             pskKeyId = instance.getPskKeyId();
+            // §20 (A3): the socket now lives on THIS replica — re-stamp the
+            // routing node so peer relays target the current owner.
+            instance.rehomeTo(nodeRegistryService.getSelfNodeId());
+            instance = instanceRepository.saveAndFlush(instance);
             log.info("host.open replay for host {} answered with existing instance {}",
                     hostId, instance.getId());
         } else {
@@ -600,29 +608,26 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     public void sendSessionClose(UUID sessionId, String reasonCode) {
         ai.myrmec.engine.inference.Session session = sessionRepository.findById(sessionId).orElse(null);
         if (session == null) return;
-        var socket = resolveOutboundSocket(sessionId, session.getHostInstanceId());
-        if (socket.isEmpty()) return;
         HostProtocolEnvelope envelope = HostProtocolEnvelope.reply(
                 HostProtocol.SESSION_CLOSE, null,
                 Map.of("sessionId", sessionId, "reasonCode", reasonCode, "gracePeriodSeconds", 5),
                 objectMapper);
         envelope.setSessionId(sessionId);
-        send(socket.get(), envelope);
+        relayOrSend(sessionId, session.getHostInstanceId(), envelope);
     }
 
     /**
-     * §7.5: resolve the outbound socket channel-first — the bound dedicated
-     * channel when present, else the control socket. Used by every
-     * engine→host frame that already knows its sessionId.
+     * §20 (decision H5): route a fully-built engine→host envelope to the
+     * instance's owning replica — direct socket on self, HTTP relay on a peer.
      */
-    public java.util.Optional<WebSocketSession> resolveOutboundSocket(UUID sessionId, UUID hostInstanceId) {
-        if (sessionId != null) {
-            var channel = channelRegistry.getChannel(sessionId);
-            if (channel.isPresent()) {
-                return channel;
-            }
+    private void relayOrSend(UUID sessionId, UUID hostInstanceId, HostProtocolEnvelope envelope) {
+        envelope.setSessionId(sessionId);
+        try {
+            String json = objectMapper.writeValueAsString(envelope);
+            frameRelayService.send(sessionId, hostInstanceId, json);
+        } catch (IOException e) {
+            log.warn("Failed sending host frame to instance {}: {}", hostInstanceId, e.getMessage());
         }
-        return connectionManager.getSession(hostInstanceId);
     }
 
     /** §7.3: send the fully assembled session.open to the host that accepted
@@ -632,15 +637,12 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         if (session == null) {
             return;
         }
-        WebSocketSession socket = resolveOutboundSocket(sessionId, session.getHostInstanceId()).orElse(null);
-        if (socket == null) {
-            return;
-        }
-        send(socket, HostProtocolEnvelope.reply(HostProtocol.SESSION_OPEN, null,
+        HostProtocolEnvelope envelope = HostProtocolEnvelope.reply(HostProtocol.SESSION_OPEN, null,
                 sessionAssembler.assembleContext(
                         sessionId, session.getServiceType(), session.getRefId(),
                         session.getProjectId(), agentProfileId),
-                objectMapper));
+                objectMapper);
+        relayOrSend(sessionId, session.getHostInstanceId(), envelope);
     }
 
     /**
@@ -655,11 +657,8 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         if (session == null) {
             return;
         }
-        WebSocketSession socket = resolveOutboundSocket(sessionId, session.getHostInstanceId()).orElse(null);
-        if (socket == null) {
-            return;
-        }
-        send(socket, HostProtocolEnvelope.reply(HostProtocol.SESSION_OPEN, null, context, objectMapper));
+        relayOrSend(sessionId, session.getHostInstanceId(),
+                HostProtocolEnvelope.reply(HostProtocol.SESSION_OPEN, null, context, objectMapper));
     }
 
     /** §7.1: send the offer for a reserved session (Plan 5's dispatcher calls this). */
@@ -669,18 +668,21 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             return false;
         }
         // An offer precedes any channel binding by definition — control socket.
-        WebSocketSession socket = connectionManager.getSession(session.getHostInstanceId()).orElse(null);
-        if (socket == null) {
-            return false;
-        }
-        send(socket, HostProtocolEnvelope.reply(HostProtocol.SESSION_OFFER, null,
+        HostProtocolEnvelope envelope = HostProtocolEnvelope.reply(HostProtocol.SESSION_OFFER, null,
                 new SessionOfferPayload(sessionId, sessionId, kind,
                         new SessionOfferPayload.Ref(kind, refId),
                         new SessionOfferPayload.Requirements(List.of(), List.of(), List.of()),
                         new SessionOfferPayload.Lease(session.getOfferExpiresAt(), idleTimeoutSeconds),
                         new SessionOfferPayload.Routing(nodeRegistryService.getSelfNodeId(), null)),
-                objectMapper));
-        return true;
+                objectMapper);
+        try {
+            return frameRelayService.sendControl(session.getHostInstanceId(),
+                    objectMapper.writeValueAsString(envelope));
+        } catch (IOException e) {
+            log.warn("Failed sending session.offer to instance {}: {}",
+                    session.getHostInstanceId(), e.getMessage());
+            return false;
+        }
     }
 
     /** §8.2: host durably admitted the execution — STARTING→RUNNING. */

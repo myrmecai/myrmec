@@ -112,6 +112,17 @@ public class AgentHostInstance {
         // pskKeyId intentionally retained for audit.
     }
 
+    /**
+     * §20 routing identity (A3, decision H5): the node whose socket serves
+     * this run — the same value {@code host.opened.serverNodeId} reported at
+     * open time. A same-nonce replay answered by a different replica means
+     * the socket moved: re-stamp so peer relays target the socket's CURRENT
+     * node, not the one that minted the row.
+     */
+    public void rehomeTo(String nodeId) {
+        this.controlNodeId = nodeId;
+    }
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private Status status = Status.OPEN;

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        §20 inter-node host-socket routing (A3, decision H5): the routing
+        node of a host instance's socket. Changelog 018 already shipped the
+        column this relay needs — agent_host_instances.control_node_id —
+        stamped at host.open from NodeRegistryService.getSelfNodeId(), the
+        exact source the wire's host.opened.serverNodeId reports. A second
+        server_node_id column would be a redundant duplicate of that value
+        (no-redundant-columns rule), so this changeset deliberately does NOT
+        add a new column; it exists to keep the changelog numbering unambiguous
+        and to document the reuse. If a future wave redefines the routing
+        identity independently of the control-socket owner, add the column
+        here under the next free number.
+    -->
+
+</databaseChangeLog>
