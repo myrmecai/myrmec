@@ -10,6 +10,9 @@ import {
   unifiedEnvelopeSchema,
   hostOpenPayloadSchema,
   hostOpenedPayloadSchema,
+  hostResumePayloadSchema,
+  hostReconcilePayloadSchema,
+  ReconcileAction,
   sessionAcceptPayloadSchema,
   sessionOpenedPayloadSchema,
   sessionClosedPayloadSchema,
@@ -236,6 +239,90 @@ describe("host.open / host.opened", () => {
     const encoded = JSON.parse(encodeUnifiedFrame(frame));
     expect(encoded.type).toBe("host.open");
     expect(encoded.payload.instanceNonce).toBe(nonce);
+  });
+});
+
+// ============================================================
+// §13 reconnect & reconciliation (A2)
+// ============================================================
+
+describe("§13 host.resume / host.reconcile", () => {
+  it("accepts the canonical host.resume fixture (§13 verbatim)", () => {
+    const payload = {
+      previousHostInstanceId: hostInstanceId,
+      instanceNonce: nonce,
+      sessions: [
+        {
+          sessionId,
+          state: "ACTIVE",
+          capacityHeld: true,
+          activeExecutionId: executionId,
+          lastSentSequence: 18,
+          lastAcknowledgedMessageId: "m-17",
+        },
+      ],
+    };
+    const result = hostResumePayloadSchema.safeParse(payload);
+    expect(result.success).toBe(true);
+  });
+
+  it("defaults host.resume sessions to empty when absent (engine tolerates)", () => {
+    const result = hostResumePayloadSchema.safeParse({
+      previousHostInstanceId: hostInstanceId,
+      instanceNonce: nonce,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.sessions).toEqual([]);
+    }
+  });
+
+  it("rejects host.resume without instanceNonce", () => {
+    const result = hostResumePayloadSchema.safeParse({
+      previousHostInstanceId: hostInstanceId,
+      sessions: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts every §13 reconcile action", () => {
+    expect(ReconcileAction.KEEP).toBe("KEEP");
+    expect(ReconcileAction.CANCEL_EXECUTION).toBe("CANCEL_EXECUTION");
+    expect(ReconcileAction.CLOSE).toBe("CLOSE");
+  });
+
+  it("accepts the canonical host.reconcile fixture (engine reply)", () => {
+    const payload = {
+      hostInstanceId,
+      decisions: [
+        { sessionId, action: "KEEP", resumeFromSequence: 17 },
+        { sessionId, action: "CANCEL_EXECUTION", executionId },
+        { sessionId, action: "CLOSE", reasonCode: "TASK_ALREADY_RETRIED" },
+      ],
+    };
+    const result = hostReconcilePayloadSchema.safeParse(payload);
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects host.reconcile with an unknown action", () => {
+    const result = hostReconcilePayloadSchema.safeParse({
+      hostInstanceId,
+      decisions: [{ sessionId, action: "REPLAY", resumeFromSequence: 1 }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("round-trips a host.reconcile frame through parse and encode", () => {
+    const payload = {
+      hostInstanceId,
+      decisions: [{ sessionId, action: "KEEP", resumeFromSequence: 17 }],
+    };
+    const frame = parseUnifiedFrame(
+      JSON.stringify(envelope(payload, MessageType.HOST_RECONCILE)),
+    );
+    expect(frame.type).toBe("host.reconcile");
+    const encoded = JSON.parse(encodeUnifiedFrame(frame));
+    expect(encoded.payload.decisions[0].action).toBe("KEEP");
   });
 });
 

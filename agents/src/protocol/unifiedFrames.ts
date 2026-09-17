@@ -26,6 +26,8 @@ export const MessageType = {
   HOST_OPENED: "host.opened",
   HOST_HEARTBEAT: "host.heartbeat",
   HOST_CAPACITY: "host.capacity",
+  HOST_RESUME: "host.resume",
+  HOST_RECONCILE: "host.reconcile",
 
   SESSION_OFFER: "session.offer",
   SESSION_ACCEPT: "session.accept",
@@ -142,6 +144,66 @@ export const hostCapacityPayloadSchema = z.object({
   reportedCapacity: mapUnknown,
 });
 export type HostCapacityPayload = z.infer<typeof hostCapacityPayloadSchema>;
+
+// ---- Reconnect & reconciliation payloads (§13, A2) ----
+
+/**
+ * One session the host retained across a control-socket drop (§13). Fields
+ * mirror the engine's `HostResumePayload.RetainedSession` record:
+ * `capacityHeld` is the reconciliation assertion (the engine may KEEP only
+ * when true), `lastSentSequence` the host's durable-event cursor, and
+ * `lastAcknowledgedMessageId` the last terminal/session frame the host
+ * acknowledged (terminal-resend dedup, §12.1).
+ */
+export const hostRetainedSessionSchema = z.object({
+  sessionId: uuid,
+  state: z.string(),
+  capacityHeld: z.boolean(),
+  activeExecutionId: uuid.nullish(),
+  lastSentSequence: z.number().int().nullish(),
+  lastAcknowledgedMessageId: z.string().nullish(),
+});
+export type HostRetainedSession = z.infer<typeof hostRetainedSessionSchema>;
+
+/** host.resume (host→engine): report retained sessions after reconnect. */
+export const hostResumePayloadSchema = z.object({
+  previousHostInstanceId: uuid,
+  instanceNonce: uuid,
+  sessions: z.array(hostRetainedSessionSchema).default([]),
+});
+export type HostResumePayload = z.infer<typeof hostResumePayloadSchema>;
+
+/** §13 reconcile actions — allowed values for host.reconcile decisions. */
+export const ReconcileAction = {
+  KEEP: "KEEP",
+  CANCEL_EXECUTION: "CANCEL_EXECUTION",
+  CLOSE: "CLOSE",
+} as const;
+export type ReconcileActionType =
+  (typeof ReconcileAction)[keyof typeof ReconcileAction];
+
+/**
+ * One per-session decision (§13). KEEP carries `resumeFromSequence` (the
+ * replay cursor: durable events after this envelope sequence are replayed),
+ * CANCEL_EXECUTION carries `executionId` (the decision IS the cancellation
+ * command — no separate execution.cancel frame), CLOSE carries `reasonCode`.
+ * Mirrors the engine's `HostResumePayload.ReconcilePayload.Decision`.
+ */
+export const reconcileDecisionSchema = z.object({
+  sessionId: uuid,
+  action: z.enum(["KEEP", "CANCEL_EXECUTION", "CLOSE"]),
+  resumeFromSequence: z.number().int().nullish(),
+  executionId: uuid.nullish(),
+  reasonCode: z.string().nullish(),
+});
+export type ReconcileDecision = z.infer<typeof reconcileDecisionSchema>;
+
+/** host.reconcile (engine→host): authoritative keep/cancel/close decisions. */
+export const hostReconcilePayloadSchema = z.object({
+  hostInstanceId: uuid,
+  decisions: z.array(reconcileDecisionSchema).default([]),
+});
+export type HostReconcilePayload = z.infer<typeof hostReconcilePayloadSchema>;
 
 // ---- Session allocation payloads (§7) ----
 
@@ -643,6 +705,12 @@ export type HostHeartbeatFrame = UnifiedFrame<"host.heartbeat"> & {
 export type HostCapacityFrame = UnifiedFrame<"host.capacity"> & {
   payload: HostCapacityPayload;
 };
+export type HostResumeFrame = UnifiedFrame<"host.resume"> & {
+  payload: HostResumePayload;
+};
+export type HostReconcileFrame = UnifiedFrame<"host.reconcile"> & {
+  payload: HostReconcilePayload;
+};
 
 export type SessionOfferFrame = UnifiedFrame<"session.offer"> & {
   payload: SessionOfferPayload;
@@ -726,6 +794,10 @@ export const unifiedPayloadSchemas: Record<
   [MessageType.HOST_OPENED]: hostOpenedPayloadSchema,
   [MessageType.HOST_HEARTBEAT]: hostHeartbeatPayloadSchema,
   [MessageType.HOST_CAPACITY]: hostCapacityPayloadSchema,
+  // host.resume is host→engine only (never parsed inbound); host.reconcile
+  // is the engine's reply the client parses.
+  [MessageType.HOST_RESUME]: hostResumePayloadSchema,
+  [MessageType.HOST_RECONCILE]: hostReconcilePayloadSchema,
 
   [MessageType.SESSION_OFFER]: sessionOfferPayloadSchema,
   [MessageType.SESSION_ACCEPT]: sessionAcceptPayloadSchema,
@@ -763,6 +835,8 @@ export type ParsedUnifiedFrame =
   | HostOpenedFrame
   | HostHeartbeatFrame
   | HostCapacityFrame
+  | HostResumeFrame
+  | HostReconcileFrame
   | SessionOfferFrame
   | SessionAcceptFrame
   | SessionRejectFrame

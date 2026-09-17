@@ -83,6 +83,25 @@ export interface Session {
    * Undefined reads as 0.
    */
   highestContiguousSequence?: number;
+  /**
+   * §13 (A2): true while the control socket is down inside the retention
+   * window — the entry SURVIVES the drop (cursors, vaults, models stay)
+   * pending host.resume/host.reconcile; cleared on KEEP re-bind.
+   */
+  disconnected?: boolean;
+}
+
+/** §13 (A2): one host.resume retained-session summary built from registry state. */
+export interface RetainedSessionSummary {
+  sessionId: string;
+  /** §13 retained-state string — "ACTIVE" for every session the host holds. */
+  state: string;
+  /**
+   * The host holds one local slot per retained session. V1 has no eviction
+   * on drop, so every registry entry asserts a held slot (§13: the engine
+   * may KEEP only when this is true).
+   */
+  capacityHeld: boolean;
 }
 
 /** Constructor options for {@link SessionRegistry}. */
@@ -376,5 +395,71 @@ export class SessionRegistry {
       session.channel = null;
     }
     return channel;
+  }
+
+  // ==================== §13 retention (A2) ====================
+
+  /**
+   * Mark every session as retained across a control-socket drop (§13).
+   * Entries, cursors, channels (as dead) and credential vaults all SURVIVE
+   * — teardown happens only on a CLOSE decision or retention expiry.
+   */
+  markAllDisconnected(): void {
+    for (const session of this.sessions.values()) {
+      session.disconnected = true;
+      if (session.channel) {
+        session.channel.alive = false;
+      }
+    }
+    this.logger.debug(
+      `Retention armed: ${this.sessions.size} session(s) survive the drop`,
+    );
+  }
+
+  /** Whether the session was retained across the drop and still is. */
+  isRetained(sessionId: string): boolean {
+    return this.sessions.get(sessionId)?.disconnected ?? false;
+  }
+
+  /** All retained (disconnected) session ids, insertion order. */
+  retainedSessionIds(): string[] {
+    return [...this.sessions.entries()]
+      .filter(([, s]) => s.disconnected)
+      .map(([id]) => id);
+  }
+
+  /** Build the §13 host.resume summaries for every retained session. */
+  buildRetainedSummaries(): RetainedSessionSummary[] {
+    return this.retainedSessionIds().map((sessionId) => ({
+      sessionId,
+      state: "ACTIVE",
+      capacityHeld: true,
+    }));
+  }
+
+  /**
+   * Re-bind a session the engine decided to KEEP (§13): clears the
+   * disconnected marker; cursors, vaults and the model survive. The channel
+   * binding stays dead — a fresh channel.open handshake (client side) binds
+   * a new socket on the resumed connection. Returns the entry's durable
+   * cursor (0 when unknown).
+   */
+  rebindAfterReconcile(sessionId: string): number {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return 0;
+    }
+    session.disconnected = false;
+    session.channel = null;
+    return session.highestContiguousSequence ?? 0;
+  }
+
+  /**
+   * Drop a session per a CLOSE/unknown reconcile decision (§13): the vault
+   * dies with the entry (§10: no plaintext outlives its session), the model
+   * is disposed best-effort. No-op if the session is already gone.
+   */
+  closeRetained(sessionId: string): void {
+    this.close(sessionId);
   }
 }

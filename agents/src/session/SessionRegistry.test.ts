@@ -455,4 +455,84 @@ describe("SessionRegistry", () => {
       registry.resolveCredential(VAULT_SESSION_ID, "model-provider-token"),
     ).toThrow(CredentialEnvelopeError);
   });
+
+  // ── §13 (A2) retention across the control-socket drop ──────────
+
+  it("retains entries, cursors and vaults across markAllDisconnected", async () => {
+    registry = new SessionRegistry({
+      chatModelFactory: fakeChatModelFactory(),
+      sessionToolFactory: fakeSessionToolFactory(),
+    });
+    registry.setPsk(TEST_PSK);
+    await registry.open(
+      makeOpenPayload({
+        sessionId: VAULT_SESSION_ID,
+        credentials: [
+          makeCredential("model-provider-token", "MODEL_PROVIDER", "sk-x", VAULT_SESSION_ID, TEST_PSK),
+        ],
+      }),
+    );
+    registry.observeDurableSequence(VAULT_SESSION_ID, 8);
+
+    registry.markAllDisconnected();
+
+    // The entry SURVIVES the drop: marked disconnected, cursor + vault intact.
+    expect(registry.retainedSessionIds()).toEqual([VAULT_SESSION_ID]);
+    expect(registry.getHighestContiguousSequence(VAULT_SESSION_ID)).toBe(8);
+    expect(registry.resolveCredential(VAULT_SESSION_ID, "model-provider-token")).toBe("sk-x");
+    expect(registry.buildRetainedSummaries()).toEqual([
+      { sessionId: VAULT_SESSION_ID, state: "ACTIVE", capacityHeld: true },
+    ]);
+  });
+
+  it("rebindAfterReconcile clears the marker, keeps the cursor and vault", async () => {
+    registry = new SessionRegistry({
+      chatModelFactory: fakeChatModelFactory(),
+      sessionToolFactory: fakeSessionToolFactory(),
+    });
+    registry.setPsk(TEST_PSK);
+    await registry.open(
+      makeOpenPayload({
+        sessionId: VAULT_SESSION_ID,
+        credentials: [
+          makeCredential("model-provider-token", "MODEL_PROVIDER", "sk-x", VAULT_SESSION_ID, TEST_PSK),
+        ],
+      }),
+    );
+    registry.observeDurableSequence(VAULT_SESSION_ID, 5);
+    registry.markAllDisconnected();
+
+    const cursor = registry.rebindAfterReconcile(VAULT_SESSION_ID);
+
+    expect(cursor).toBe(5);
+    expect(registry.isRetained(VAULT_SESSION_ID)).toBe(false);
+    expect(registry.has(VAULT_SESSION_ID)).toBe(true);
+    // The vault survives the KEEP decision (same instance resumes).
+    expect(registry.resolveCredential(VAULT_SESSION_ID, "model-provider-token")).toBe("sk-x");
+  });
+
+  it("closeRetained drops the entry and the vault (CLOSE decision / expiry)", async () => {
+    registry = new SessionRegistry({
+      chatModelFactory: fakeChatModelFactory(),
+      sessionToolFactory: fakeSessionToolFactory(),
+    });
+    registry.setPsk(TEST_PSK);
+    await registry.open(
+      makeOpenPayload({
+        sessionId: VAULT_SESSION_ID,
+        credentials: [
+          makeCredential("model-provider-token", "MODEL_PROVIDER", "sk-x", VAULT_SESSION_ID, TEST_PSK),
+        ],
+      }),
+    );
+    registry.markAllDisconnected();
+
+    registry.closeRetained(VAULT_SESSION_ID);
+
+    expect(registry.has(VAULT_SESSION_ID)).toBe(false);
+    expect(registry.retainedSessionIds()).toHaveLength(0);
+    expect(() =>
+      registry.resolveCredential(VAULT_SESSION_ID, "model-provider-token"),
+    ).toThrow(CredentialEnvelopeError);
+  });
 });

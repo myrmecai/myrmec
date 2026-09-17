@@ -17,6 +17,7 @@ import {
   MessageType as UnifiedMessageType,
   parseUnifiedFrame,
   ProtocolErrorCode,
+  ReconcileAction,
   SUPPORTED_PROTOCOL_VERSION,
   type ChannelOpenedPayload,
   type ExecutionAcceptPayload,
@@ -32,8 +33,10 @@ import {
   type HostHeartbeatPayload,
   type HostOpenPayload,
   type HostOpenedPayload,
+  type HostResumePayload,
   type ParsedUnifiedFrame,
   type ProtocolAckPayload,
+  type ReconcileDecision,
   type SessionAcceptPayload,
   type SessionClosedPayload,
   type SessionOfferPayload,
@@ -111,6 +114,49 @@ export interface HostControlClientOptions {
    * Default dials the real `WebSocketChannelConnection`.
    */
   channelConnectionFactory?: (endpoint: string) => ChannelConnection;
+  /**
+   * §13 (A2): session-lifecycle retention collaborators. Implemented by the
+   * SessionRegistry. When wired, a control-socket drop RETAINS sessions for
+   * `retentionWindowMs` and the reconnect path sends `host.resume` +
+   * applies `host.reconcile` decisions instead of tearing everything down.
+   * Optional — when omitted the client keeps the pre-A2 behavior.
+   */
+  retention?: HostRetentionLifecycle;
+  /**
+   * §13 (A2): how long retained state survives a drop, in ms. Must not
+   * exceed the engine's `myrmec.host.recovery.retain-seconds` (default
+   * 300s) — the engine expires its side first. Default 300_000.
+   */
+  retentionWindowMs?: number;
+}
+
+/**
+ * §13 (A2): the retention collaborators the client needs across a
+ * control-socket drop. Implemented by the SessionRegistry (plus the
+ * execution-cancellation hook the worker/executor layer supplies).
+ */
+export interface HostRetentionLifecycle extends HostSessionLifecycle {
+  /** Mark every session as retained (survive the drop). */
+  markAllDisconnected(): void;
+  /** All retained session ids, insertion order. */
+  retainedSessionIds(): string[];
+  /** §13 host.resume summaries for every retained session. */
+  buildRetainedSummaries(): Array<{
+    sessionId: string;
+    state: string;
+    capacityHeld: boolean;
+  }>;
+  /** Re-bind a session the engine decided to KEEP. */
+  rebindAfterReconcile(sessionId: string): number;
+  /** Drop a session per a CLOSE/unknown decision (vault included). */
+  closeRetained(sessionId: string): void;
+  /**
+   * Apply cancellation semantics for one execution (§13: a
+   * CANCEL_EXECUTION decision IS the cancellation command — the in-flight
+   * turn is aborted and the normal execution.cancelled terminal frame is
+   * emitted; no separate execution.cancel frame is sent).
+   */
+  cancelExecution(executionId: string): void;
 }
 
 /**
@@ -523,6 +569,12 @@ const DURABLE_INBOUND_TYPES: ReadonlySet<string> = new Set([
   UnifiedMessageType.SESSION_CLOSED,
 ]);
 
+/** §13 (A2): the host.reconcile payload shape as received from the engine. */
+type HostReconcileWire = {
+  hostInstanceId: string;
+  decisions: ReconcileDecision[];
+};
+
 /** Inbound frame families handled by the client itself (not forwarded). */
 const CLIENT_HANDLED_TYPES: ReadonlySet<string> = new Set([
   UnifiedMessageType.HOST_OPENED,
@@ -609,6 +661,29 @@ export class HostControlClient {
     | undefined;
   /** §7.5 (A1): one channel client per bound session (open handshake state). */
   private readonly channels = new Map<string, SessionChannelClient>();
+  /** §13 (A2): retention collaborators (registry + cancel hook). */
+  private readonly retention: HostRetentionLifecycle | null;
+  /** §13 (A2): how long retained state survives a drop (ms). */
+  private readonly retentionWindowMs: number;
+  /** §13 (A2): the nonce of the instance the host last served (the resume
+   * identity — a fresh host.open rotates `_currentNonce`, so it is captured
+   * on every opened). */
+  private previousInstanceNonce: string | null = null;
+  /** §13 (A2): the id of the instance the host last served. */
+  private previousHostInstanceId: string | null = null;
+  /** §13 (A2): pending retention-expiry timer (armed on drop). */
+  private retentionTimer: ReturnType<typeof setTimeout> | null = null;
+  /** §13 (A2): guard so one resume runs per reconnection. */
+  private resumePending: Promise<void> | null = null;
+  /** §13 (A2): whether the current connection resumed (vs fresh host.open). */
+  private resumedThisConnection = false;
+  /**
+   * §12.1/§13 (A2): per-session id of the last terminal/session frame the
+   * host acknowledged (protocol.ack correlation) — the resume report's
+   * lastAcknowledgedMessageId; the engine uses it to skip terminal resends
+   * the host already holds.
+   */
+  private readonly lastAcknowledgedMessageIds = new Map<string, string>();
 
   constructor(options: HostControlClientOptions) {
     this.engineUrl = options.engineUrl.replace(/\/+$/, "");
@@ -623,6 +698,8 @@ export class HostControlClient {
     this.onPsk = options.onPsk;
     this.sessionLifecycle = options.sessionLifecycle ?? null;
     this.channelConnectionFactory = options.channelConnectionFactory;
+    this.retention = options.retention ?? null;
+    this.retentionWindowMs = options.retentionWindowMs ?? 300_000;
     this.connection =
       options.connection ??
       new WebSocketHostControlConnection(this.engineUrl, this.path);
@@ -683,6 +760,7 @@ export class HostControlClient {
     this.stopHeartbeat();
     // §7.5: every bound channel socket dies with the host teardown.
     await this.closeAllChannels(reason);
+    this.stopRetentionTimer();
     this.reconnecting?.stop();
     await this.connection?.disconnect(reason);
     this.state = "IDLE";
@@ -981,8 +1059,26 @@ export class HostControlClient {
   private async onDisconnect(code: number, reason: string): Promise<void> {
     this.log.info(`Host control socket closed: code=${code} reason=${reason}`);
     this.stopHeartbeat();
+    // §13 (A2): capture the resume identity BEFORE it is cleared — a
+    // reconnecting host reports (previousHostInstanceId, instanceNonce).
+    this.previousHostInstanceId = this.hostInstanceId;
+    this.previousInstanceNonce = this._currentNonce;
     this.hostInstanceId = null;
     this.state = this.running ? "RECOVERING" : "IDLE";
+
+    // §13 (A2): a drop no longer tears the world down. Sessions, execution
+    // states, the durable-event cursors and the PSK vaults are RETAINED for
+    // the window pending host.resume/host.reconcile; teardown happens only
+    // on a CLOSE decision, a protocol.error reject, or retention expiry.
+    // Bound channel sockets are INDEPENDENT transports — where one is still
+    // alive (and the engine still routes to it) the §7.5 binding stands and
+    // is resumed as-is; one that died with the engine flows through the
+    // existing onDead path (non-fatal, session rides the control socket).
+    if (this.running && this.retention && this.previousHostInstanceId) {
+      this.retention.markAllDisconnected();
+      this.armRetentionTimer();
+      this.resumedThisConnection = false;
+    }
 
     if (!this.running || !this.reconnecting) {
       return;
@@ -994,6 +1090,220 @@ export class HostControlClient {
     );
     if (shouldReconnect && this.running) {
       await this.reconnecting.connectWithRetry();
+    }
+  }
+
+  // ==================== §13 retention (A2) ====================
+
+  /**
+   * Arm the retention-expiry timer: if no successful resume happens within
+   * the window the retained state is torn down (the engine expired its side
+   * too — HOST_LOST).
+   */
+  private armRetentionTimer(): void {
+    this.stopRetentionTimer();
+    if (!this.retention) {
+      return;
+    }
+    this.retentionTimer = setTimeout(() => {
+      void this.expireRetention();
+    }, this.retentionWindowMs);
+  }
+
+  private stopRetentionTimer(): void {
+    if (this.retentionTimer) {
+      clearTimeout(this.retentionTimer);
+      this.retentionTimer = null;
+    }
+  }
+
+  /**
+   * §13: the retention window lapsed without a reconnect — clear retained
+   * state and tear the sessions down (the engine expired its side too).
+   */
+  private async expireRetention(): Promise<void> {
+    const retention = this.retention;
+    if (!retention) {
+      return;
+    }
+    this.stopRetentionTimer();
+    const expired = retention.retainedSessionIds();
+    if (expired.length === 0) {
+      return;
+    }
+    this.log.info(
+      `Retention window expired for ${expired.length} session(s) — tearing down (HOST_LOST)`,
+    );
+    for (const sessionId of expired) {
+      retention.closeRetained(sessionId);
+    }
+  }
+
+  /**
+   * §13: after host.opened on a reconnected socket, if retained state exists
+   * report it with host.resume and apply the engine's host.reconcile
+   * decisions. A rejected resume (protocol.error — no matching RECOVERING
+   * instance) falls back to the fresh-host path and wipes retained state.
+   * Runs once per reconnection; never throws.
+   */
+  private async attemptResume(): Promise<void> {
+    const retention = this.retention;
+    if (
+      !retention ||
+      this.resumedThisConnection ||
+      this.resumePending ||
+      !this.previousHostInstanceId ||
+      !this.previousInstanceNonce
+    ) {
+      return;
+    }
+    const summaries = retention.buildRetainedSummaries();
+    if (summaries.length === 0) {
+      this.stopRetentionTimer();
+      this.resumedThisConnection = true;
+      return;
+    }
+    this.resumePending = this.runResume(summaries).finally(() => {
+      this.resumePending = null;
+    });
+    await this.resumePending;
+  }
+
+  /** Send host.resume, await host.reconcile (bounded), apply decisions. */
+  private async runResume(
+    summaries: Array<{
+      sessionId: string;
+      state: string;
+      capacityHeld: boolean;
+    }>,
+  ): Promise<void> {
+    const retention = this.retention;
+    if (!retention) {
+      return;
+    }
+    const payload: HostResumePayload = {
+      previousHostInstanceId: this.previousHostInstanceId ?? "",
+      instanceNonce: this.previousInstanceNonce ?? "",
+      sessions: summaries.map((s) => ({
+        sessionId: s.sessionId,
+        state: s.state,
+        capacityHeld: s.capacityHeld,
+        activeExecutionId: null,
+        lastSentSequence: retention.getHighestContiguousSequence(s.sessionId),
+        lastAcknowledgedMessageId: this.lastAcknowledgedMessageIds.get(s.sessionId) ?? null,
+      })),
+    };
+    this.log.info(
+      `host.resume: ${summaries.length} retained session(s) ` +
+        `(previous instance ${this.previousHostInstanceId})`,
+    );
+    this.resumedThisConnection = true;
+    try {
+      await this.sendFrame({
+        protocolVersion: SUPPORTED_PROTOCOL_VERSION,
+        messageId: this.nextMessageId(),
+        type: UnifiedMessageType.HOST_RESUME,
+        sentAt: new Date().toISOString(),
+        payload,
+      });
+    } catch (err) {
+      this.log.error(
+        "host.resume send failed:",
+        err instanceof Error ? err.message : String(err),
+      );
+      // The drop-retry machinery redials; retention stays armed.
+      this.resumedThisConnection = false;
+      return;
+    }
+
+    const reply = await this.awaitReconcile();
+    if (!reply) {
+      // Bounded await lapsed: the engine never answered (its side expired or
+      // was replaced). A subsequent protocol.error still wipes state; here
+      // the window keeps running so a later reconnect can retry.
+      this.log.warn("host.reconcile not received in time; retention stays armed");
+      return;
+    }
+    await this.applyReconcile(reply.payload as HostReconcileWire);
+  }
+
+  /**
+   * Await the host.reconcile reply (bounded, correlation on messageId).
+   * @returns the parsed host.reconcile frame, or null on timeout/error.
+   */
+  private awaitReconcile(timeoutMs = 10_000): Promise<UnifiedFrame<"host.reconcile"> | null> {
+    return new Promise<UnifiedFrame<"host.reconcile"> | null>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingReconcile = null;
+        resolve(null);
+      }, timeoutMs);
+      this.pendingReconcile = (frame) => {
+        clearTimeout(timer);
+        this.pendingReconcile = null;
+        resolve(frame);
+      };
+    });
+  }
+
+  private pendingReconcile:
+    | ((frame: UnifiedFrame<"host.reconcile">) => void)
+    | null = null;
+
+  /**
+   * Apply the engine's authoritative decisions (§13):
+   *  - KEEP: re-bind the session; the engine replays its durable events onto
+   *    the resumed socket where the existing dispatch (dedupe by messageId,
+   *    registry cursor) absorbs them; a fresh channel.open re-binds the
+   *    dedicated channel with the retained cursor.
+   *  - CANCEL_EXECUTION: the decision IS the cancellation command — the
+   *    hook aborts the in-flight turn and the normal execution.cancelled
+   *    terminal flows out; NO separate execution.cancel frame is sent.
+   *  - CLOSE/unknown: drop the session (registry removal, vault clear).
+   */
+  private async applyReconcile(
+    payload: {
+      hostInstanceId: string;
+      decisions: Array<{
+        sessionId: string;
+        action: string;
+        resumeFromSequence?: number | null;
+        executionId?: string | null;
+        reasonCode?: string | null;
+      }>;
+    },
+  ): Promise<void> {
+    const retention = this.retention;
+    if (!retention) {
+      return;
+    }
+    // The engine re-adopted this instance — the retention window closes.
+    this.stopRetentionTimer();
+    for (const decision of payload.decisions as ReconcileDecision[]) {
+      const sessionId = decision.sessionId;
+      if (decision.action === ReconcileAction.KEEP) {
+        const cursor = retention.rebindAfterReconcile(sessionId);
+        this.log.info(
+          `Reconcile KEEP for session ${sessionId} (cursor ${cursor}, ` +
+            `resume from ${decision.resumeFromSequence ?? "n/a"})`,
+        );
+        continue;
+      }
+      if (decision.action === ReconcileAction.CANCEL_EXECUTION) {
+        const executionId = decision.executionId ?? "";
+        this.log.info(
+          `Reconcile CANCEL_EXECUTION for session ${sessionId} ` +
+            `(execution ${executionId}) — applying execution.cancel semantics`,
+        );
+        retention.cancelExecution(executionId);
+        retention.closeRetained(sessionId);
+        continue;
+      }
+      // CLOSE (and any unknown action — fail closed toward teardown).
+      this.log.info(
+        `Reconcile ${decision.action} for session ${sessionId} ` +
+          `(reason ${decision.reasonCode ?? "n/a"}) — dropping session`,
+      );
+      retention.closeRetained(sessionId);
     }
   }
 
@@ -1018,6 +1328,12 @@ export class HostControlClient {
 
     if (frame.type === UnifiedMessageType.HOST_OPENED) {
       await this.handleHostOpened(frame as UnifiedFrame<"host.opened">);
+      return;
+    }
+
+    if (frame.type === UnifiedMessageType.HOST_RECONCILE) {
+      // §13 (A2): the engine's authoritative answer to host.resume.
+      this.pendingReconcile?.(frame as UnifiedFrame<"host.reconcile">);
       return;
     }
 
@@ -1046,6 +1362,11 @@ export class HostControlClient {
           frame.sessionId,
           frame.sequence,
         );
+      }
+      // §12.1/§13 (A2): record the per-session last-acknowledged messageId
+      // so host.resume can report it (engine terminal-resend dedup).
+      if (frame.sessionId) {
+        this.lastAcknowledgedMessageIds.set(frame.sessionId, messageId);
       }
       await this.ack(frame);
     }
@@ -1076,6 +1397,10 @@ export class HostControlClient {
     frame: UnifiedFrame<"host.opened">,
   ): Promise<void> {
     const payload = frame.payload as HostOpenedPayload;
+    // §13 (A2): a reconnection (retained state + a previous instance) runs
+    // the resume handshake INSTEAD of treating this as a fresh world. The
+    // fresh-host path is the protocol.error fallback.
+    const isReconnect = this.previousHostInstanceId !== null && this.retention !== null;
     this.hostInstanceId = payload.hostInstanceId;
     this.effectivePoolSize = payload.effectivePoolSize;
     this.heartbeatIntervalSeconds = payload.heartbeatIntervalSeconds;
@@ -1085,6 +1410,12 @@ export class HostControlClient {
       `Host opened: instance=${payload.hostInstanceId} ` +
         `pool=${payload.effectivePoolSize} heartbeat=${payload.heartbeatIntervalSeconds}s`,
     );
+    if (isReconnect) {
+      // Retained state exists — report it before new work flows. A rejected
+      // resume (protocol.error) wipes state; the fresh host.open fallback
+      // re-opens the instance and new work proceeds there.
+      await this.attemptResume();
+    }
     // PSK receive path (design §6/§10): decode, validate, keep in process
     // memory ONLY, hand to the SessionRegistry via the callback. The value
     // is never logged and never persisted; the frame-logger denylist keeps
@@ -1122,6 +1453,32 @@ export class HostControlClient {
       this.reconnecting?.stop();
       await this.connection.disconnect("Unsupported protocol version");
       this.state = "IDLE";
+      return;
+    }
+    // §13 (A2): the engine rejected host.resume (no matching RECOVERING
+    // instance — expired/unknown/nonce mismatch, SESSION_NOT_FOUND or
+    // IDENTITY_MISMATCH). Fall back to a fresh host.open: wipe the retained
+    // state (the engine has no instance — it is stale), close the window,
+    // and let the reconnection machinery re-dial into the fresh path.
+    if (
+      this.running &&
+      this.retention &&
+      this.resumedThisConnection &&
+      (payload.code === ProtocolErrorCode.SESSION_NOT_FOUND ||
+        payload.code === ProtocolErrorCode.IDENTITY_MISMATCH)
+    ) {
+      this.log.warn(
+        `host.resume rejected (${payload.code}) — wiping retained state, falling back to fresh host.open`,
+      );
+      this.stopRetentionTimer();
+      this.resumedThisConnection = false;
+      this.previousHostInstanceId = null;
+      this.previousInstanceNonce = null;
+      const retained = this.retention.retainedSessionIds();
+      for (const sessionId of retained) {
+        this.retention.closeRetained(sessionId);
+      }
+      this.lastAcknowledgedMessageIds.clear();
     }
   }
 
