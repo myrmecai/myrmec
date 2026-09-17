@@ -359,12 +359,12 @@ class ConversationTurnDispatcherTest {
         inFlight.setState(SessionExecution.State.RUNNING);
         when(executionRepository.findWithLockBySessionIdAndStateIn(eq(sessionId), any()))
                 .thenReturn(List.of(inFlight));
-        when(executionCommandSender.cancel(eq(executionId), eq(active), eq(null), eq("USER_CANCEL"), eq(5)))
+        when(executionCommandSender.cancel(eq(executionId), eq(active), eq(null), eq("USER_REQUESTED"), eq(5)))
                 .thenReturn(true);
 
         assertThat(dispatcher.cancel(conversationId)).isTrue();
 
-        verify(executionCommandSender).cancel(executionId, active, null, "USER_CANCEL", 5);
+        verify(executionCommandSender).cancel(executionId, active, null, "USER_REQUESTED", 5);
     }
 
     @Test

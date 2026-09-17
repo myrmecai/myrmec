@@ -152,13 +152,13 @@ class WorkflowRequestServiceCancelTest {
         assertThat(task.getStatus()).isEqualTo(TaskStatus.CANCELLED);
         assertThat(attempt.getStatus()).isEqualTo(AttemptStatus.ABANDONED);
 
-        // §8.8: execution.cancel relayed on the unified host socket with
-        // USER_CANCEL + grace period.
+        // §8.8/§21.5: execution.cancel relayed on the unified host socket with
+        // USER_REQUESTED + grace period.
         verify(executionCommandSender).cancel(
                 org.mockito.ArgumentMatchers.eq(inFlight.getId()),
                 org.mockito.ArgumentMatchers.eq(session),
                 org.mockito.ArgumentMatchers.isNull(),
-                org.mockito.ArgumentMatchers.eq("USER_CANCEL"),
+                org.mockito.ArgumentMatchers.eq("USER_REQUESTED"),
                 org.mockito.ArgumentMatchers.anyInt());
     }
 

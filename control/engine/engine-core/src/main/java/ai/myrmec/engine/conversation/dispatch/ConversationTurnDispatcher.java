@@ -98,8 +98,8 @@ public class ConversationTurnDispatcher {
     /** Per-turn timeout shipped to the agent. Mirrors workflow tasks. */
     public static final int DEFAULT_TIMEOUT_SECONDS = 300;
 
-    /** Cancellation reason code shipped on {@code execution.cancel} (&sect;8.8). */
-    private static final String CANCEL_REASON_USER = "USER_CANCEL";
+    /** Cancellation reason code shipped on {@code execution.cancel} (§8.8/§21.5). */
+    private static final String CANCEL_REASON_USER = "USER_REQUESTED";
 
     /** Grace period the host gets to unwind a cancelled turn, in seconds. */
     private static final int CANCEL_GRACE_SECONDS = 5;

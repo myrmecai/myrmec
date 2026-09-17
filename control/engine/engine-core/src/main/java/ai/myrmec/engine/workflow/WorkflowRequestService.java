@@ -42,8 +42,8 @@ public class WorkflowRequestService {
     /** Feature 10 (§16.1): run pinning at request creation. */
     private final OrchestrationRunService orchestrationRunService;
 
-    /** §8.8 cancel reason/grace — mirrors ConversationTurnDispatcher. */
-    private static final String CANCEL_REASON_USER = "USER_CANCEL";
+    /** §8.8/§21.5 cancel reason/grace — mirrors ConversationTurnDispatcher. */
+    private static final String CANCEL_REASON_USER = "USER_REQUESTED";
     private static final int CANCEL_GRACE_SECONDS = 5;
     private static final List<SessionExecution.State> IN_FLIGHT_STATES =
             List.of(SessionExecution.State.STARTING, SessionExecution.State.RUNNING,

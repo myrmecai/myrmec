@@ -143,7 +143,7 @@ describe("AgentWorker", () => {
       inbound(UnifiedMessageType.EXECUTION_CANCEL, {
         executionId: EXECUTION_ID,
         dispatchId: EXECUTION_ID,
-        reasonCode: "USER_CANCEL",
+        reasonCode: "USER_REQUESTED",
         requestedAt: new Date().toISOString(),
         gracePeriodSeconds: 5,
       }),

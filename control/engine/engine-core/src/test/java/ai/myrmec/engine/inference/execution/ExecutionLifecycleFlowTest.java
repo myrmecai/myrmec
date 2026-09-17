@@ -388,11 +388,11 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
                 setup.executionId(), Instant.now(), UUID.randomUUID());
         ((WebSocketHandler) handler).handleMessage(setup.host().session(), new TextMessage(accept));
 
-        // execution.cancel is engineâ†’host; echoed copies are ignored.
+        // execution.cancel is engine→host; echoed copies are ignored.
         String echoedCancel = """
                 { "protocolVersion": 1, "messageId": "m-cancel-echo", "type": "execution.cancel",
                   "sentAt": "%s", "hostInstanceId": "%s", "sessionId": "%s", "executionId": "%s",
-                  "payload": { "executionId": "%s", "dispatchId": "%s", "reasonCode": "USER_CANCEL",
+                  "payload": { "executionId": "%s", "dispatchId": "%s", "reasonCode": "USER_REQUESTED",
                   "cancelledAt": "%s", "gracePeriodSeconds": 5 } }
                 """.formatted(Instant.now(), setup.instanceId(), setup.sessionId(), setup.executionId(),
                 setup.executionId(), UUID.randomUUID(), Instant.now());
@@ -403,7 +403,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
         // Engine sends execution.cancel directly.
         boolean sent = executionCommandSender.cancel(setup.executionId(),
                 sessionRepository.findById(setup.sessionId()).orElseThrow(), UUID.randomUUID(),
-                "USER_CANCEL", 5);
+                "USER_REQUESTED", 5);
         assertThat(sent).isTrue();
         assertThat(replies(setup.host().session()).stream()
                 .anyMatch(n -> "execution.cancel".equals(n.path("type").asText()))).isTrue();
@@ -413,7 +413,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
                 { "protocolVersion": 1, "messageId": "m-cancelled", "type": "execution.cancelled",
                   "sentAt": "%s", "hostInstanceId": "%s", "sessionId": "%s", "executionId": "%s",
                   "payload": { "executionId": "%s", "dispatchId": "%s", "cancelledAt": "%s",
-                  "reasonCode": "USER_CANCEL" } }
+                  "reasonCode": "USER_REQUESTED" } }
                 """.formatted(Instant.now(), setup.instanceId(), setup.sessionId(), setup.executionId(),
                 setup.executionId(), UUID.randomUUID(), Instant.now());
         ((WebSocketHandler) handler).handleMessage(setup.host().session(), new TextMessage(cancelled));
