@@ -16,6 +16,7 @@ import ai.myrmec.engine.websocket.host.payload.HostCapacityPayload;
 import ai.myrmec.engine.websocket.host.payload.HostHeartbeatPayload;
 import ai.myrmec.engine.websocket.host.payload.HostOpenPayload;
 import ai.myrmec.engine.websocket.host.payload.HostOpenedPayload;
+import ai.myrmec.engine.websocket.host.payload.HostResumePayload;
 import ai.myrmec.engine.websocket.host.payload.ProtocolErrorPayload;
 import ai.myrmec.engine.websocket.host.payload.SessionAcceptPayload;
 import ai.myrmec.engine.websocket.host.payload.SessionClosedPayload;
@@ -105,6 +106,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     private final ai.myrmec.engine.agent.AgentProfileVersionRepository agentProfileVersionRepository;
     private final ai.myrmec.engine.workflow.TaskDispatchContinuation taskDispatchContinuation;
     private final EncryptionService encryptionService;
+    private final HostResumeReconcileService resumeReconcileService;
 
     @Value("${myrmec.host.heartbeat-interval-seconds:15}")
     private int heartbeatIntervalSeconds;
@@ -147,7 +149,8 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                                        ai.myrmec.engine.agent.AgentProfileVersionRepository agentProfileVersionRepository,
                                        @org.springframework.context.annotation.Lazy
                                        ai.myrmec.engine.workflow.TaskDispatchContinuation taskDispatchContinuation,
-                                       EncryptionService encryptionService) {
+                                       EncryptionService encryptionService,
+                                       HostResumeReconcileService resumeReconcileService) {
         this.objectMapper = objectMapper;
         this.agentHostRepository = agentHostRepository;
         this.instanceRepository = instanceRepository;
@@ -172,6 +175,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         this.agentProfileVersionRepository = agentProfileVersionRepository;
         this.taskDispatchContinuation = taskDispatchContinuation;
         this.encryptionService = encryptionService;
+        this.resumeReconcileService = resumeReconcileService;
     }
 
     /** Exposed for handler tests to assert registration. */
@@ -206,6 +210,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
 
         switch (type) {
             case HostProtocol.HOST_OPEN -> handleHostOpen(session, envelope);
+            case HostProtocol.HOST_RESUME -> handleHostResume(session, envelope);
             case HostProtocol.HOST_HEARTBEAT -> handleHostHeartbeat(session, envelope);
             case HostProtocol.HOST_CAPACITY -> handleHostCapacity(session, envelope);
             case HostProtocol.SESSION_ACCEPT -> handleSessionAccept(session, envelope);
@@ -339,32 +344,86 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                 objectMapper));
     }
 
-    /** §3.2: disconnect closes the instance row (append-only history) and
-     *  unregisters the socket. The close reason is standardized. */
+    /**
+     * §13 (A2): a reconnected host reports retained sessions; the engine
+     * answers with authoritative keep/cancel/close decisions. Match by
+     * (previousInstanceId, instanceNonce) — §6.1 nonce identity. No
+     * RECOVERING instance (window expired, never armed, or nonce mismatch)
+     * → a §13-shaped error with the reason; the host falls back to
+     * {@code host.open} (fresh instance), today's path.
+     */
+    private void handleHostResume(WebSocketSession session, HostProtocolEnvelope envelope) {
+        UUID hostId = (UUID) session.getAttributes().get(HostControlHandshakeInterceptor.ATTR_HOST_ID);
+        if (hostId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.IDENTITY_MISMATCH,
+                    "Connection is not host-authenticated", false, "CONNECTION", null);
+            return;
+        }
+        HostResumePayload resume;
+        try {
+            resume = objectMapper.treeToValue(envelope.getPayload(), HostResumePayload.class);
+        } catch (Exception e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "host.resume payload failed validation: " + e.getMessage(),
+                    false, "CONNECTION", null);
+            return;
+        }
+
+        var match = resumeReconcileService.match(
+                hostId, resume.previousHostInstanceId(), resume.instanceNonce());
+        if (!(match instanceof HostResumeReconcileService.MatchResult.Matched matched)) {
+            String code = match instanceof HostResumeReconcileService.MatchResult.Expired
+                    ? HostProtocol.SESSION_NOT_FOUND
+                    : match instanceof HostResumeReconcileService.MatchResult.NonceMismatch
+                        ? HostProtocol.IDENTITY_MISMATCH
+                        : HostProtocol.SESSION_NOT_FOUND;
+            sendError(session, envelope.getMessageId(), code,
+                    "host.resume cannot re-adopt an instance — use host.open",
+                    false, "CONNECTION", null);
+            log.info("host.resume from host {} rejected (no RECOVERING match for {})",
+                    hostId, resume.previousHostInstanceId());
+            return;
+        }
+
+        AgentHostInstance instance = matched.instance();
+        List<HostResumePayload.ReconcilePayload.Decision> decisions =
+                resumeReconcileService.reconcile(instance, resume.sessions());
+
+        // The re-adopted instance is this socket's identity from here on.
+        session.getAttributes().put(ATTR_HOST_INSTANCE_ID, instance.getId());
+        connectionManager.register(instance.getId(), session);
+
+        HostProtocolEnvelope reply = HostProtocolEnvelope.reply(HostProtocol.HOST_RECONCILE,
+                envelope.getMessageId(),
+                new HostResumePayload.ReconcilePayload(instance.getId(), decisions),
+                objectMapper);
+        reply.setHostInstanceId(instance.getId());
+        send(session, reply);
+        log.info("host.resume from host {} re-adopted instance {} ({} decisions)",
+                hostId, instance.getId(), decisions.size());
+    }
+
+    /** §3.2: disconnect parks the instance in the bounded RECOVERING window
+     *  (§13, A2) and unregisters the socket. Retention expiry (the
+     *  allocation sweep's {@code expireRecoveredInstances}) later applies
+     *  the §9 fallback: close the instance + its sessions with HOST_LOST. */
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         connectionManager.unregister(session);
         Object instanceId = session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
         if (instanceId instanceof UUID id) {
+            String dropReason = CloseStatus.NORMAL.equals(status)
+                    ? "DISCONNECT" : "ABNORMAL_DISCONNECT";
             instanceRepository.findById(id).ifPresent(instance -> {
-                instance.close(CloseStatus.NORMAL.equals(status)
-                        ? "DISCONNECT" : "ABNORMAL_DISCONNECT");
+                instance.startRecovery(sessionAllocator.recoveryRetainFor());
                 instanceRepository.save(instance);
-                log.info("Host instance {} closed ({})", id, status);
+                log.info("Host instance {} dropped ({}) — RECOVERING until {}",
+                        id, dropReason, instance.getRecoveryExpiresAt());
             });
-            // §9 (P6-T6): the host's control socket is the session's
-            // lifeline — when it dies, every session the instance was
-            // serving closes with HOST_LOST (dev-phase: no RECOVERING).
-            // The affected conversation re-offers a fresh session on the
-            // next turn; an ordinary workflow task's progression pass
-            // re-dispatches (attempt stays attempt-numbered).
-            try {
-                sessionAllocator.closeAllOnHostInstance(id, "HOST_LOST");
-            } catch (Exception e) {
-                // The allocation sweep reconciles leaked rows; never let a
-                // close-path failure break socket teardown.
-                log.warn("Host-lost session close for instance {} failed: {}", id, e.getMessage(), e);
-            }
+            // §13 (A2): the host's control socket is the session's lifeline,
+            // but a disconnect no longer fails everything — the sessions stay
+            // parked (allocation-state untouched) pending host.resume; the
+            // retention sweep closes them HOST_LOST if the window lapses.
             session.getAttributes().remove(ATTR_HOST_INSTANCE_ID);
         }
     }

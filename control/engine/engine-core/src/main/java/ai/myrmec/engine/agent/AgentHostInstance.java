@@ -38,7 +38,13 @@ import java.util.UUID;
 @NoArgsConstructor
 public class AgentHostInstance {
 
-    public enum Status { OPEN, CLOSED }
+    /**
+     * §11.1 (A2): RECOVERING is the bounded recovery window between a
+     * transport drop and either resume (back to OPEN) or retention expiry
+     * (to CLOSED). It is NOT terminal — a RECOVERING row is still live
+     * history-in-progress and keeps its PSK for the resume handshake.
+     */
+    public enum Status { OPEN, RECOVERING, CLOSED }
 
     /** The sentinel live_key value; the unique index relies on it. */
     static final String LIVE = "OPEN";
@@ -131,6 +137,10 @@ public class AgentHostInstance {
     @Column(name = "live_key", length = 8)
     private String liveKey;
 
+    /** §13: when the RECOVERING window lapses (null unless RECOVERING). */
+    @Column(name = "recovery_expires_at")
+    private Instant recoveryExpiresAt;
+
     @Column(name = "opened_at", nullable = false, updatable = false)
     private Instant openedAt;
 
@@ -204,5 +214,42 @@ public class AgentHostInstance {
     /** Liveness signal; never changes lifecycle state. */
     public void markHeartbeat() {
         this.lastHeartbeatAt = Instant.now();
+    }
+
+    /**
+     * §13 (A2): the control socket dropped — enter the bounded recovery
+     * window instead of closing. The row stays live (live_key retained so
+     * the one-live-per-owner index still holds), the PSK stays for the
+     * resume handshake, and the retention sweep uses
+     * {@code recoveryExpiresAt} to decide expiry. Idempotent: a second
+     * drop inside the window re-arms the same horizon, never shortens it.
+     */
+    public void startRecovery(java.time.Duration retainFor) {
+        if (this.status == Status.CLOSED) {
+            return;
+        }
+        Instant horizon = Instant.now().plus(retainFor);
+        if (this.status == Status.RECOVERING && recoveryExpiresAt != null
+                && recoveryExpiresAt.isAfter(horizon)) {
+            return;
+        }
+        this.status = Status.RECOVERING;
+        this.recoveryExpiresAt = horizon;
+    }
+
+    /**
+     * §13 (A2): the host resumed within the window — back to OPEN, window
+     * cleared, socket re-homed to the node now serving it (A3 routing).
+     * Illegal from CLOSED (append-only terminal) — the caller re-opens via
+     * the fresh-instance path instead.
+     */
+    public void recoverTo(String nodeId) {
+        if (this.status == Status.CLOSED) {
+            throw new IllegalStateException(
+                    "Instance " + id + " is CLOSED — resume is not possible");
+        }
+        this.status = Status.OPEN;
+        this.recoveryExpiresAt = null;
+        rehomeTo(nodeId);
     }
 }

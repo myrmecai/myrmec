@@ -18,8 +18,15 @@ public final class HostProtocol {
     public static final String HOST_OPENED = "host.opened";
     public static final String HOST_HEARTBEAT = "host.heartbeat";
     public static final String HOST_CAPACITY = "host.capacity";
+    public static final String HOST_RESUME = "host.resume";
+    public static final String HOST_RECONCILE = "host.reconcile";
     public static final String PROTOCOL_ERROR = "protocol.error";
     public static final String PROTOCOL_ACK = "protocol.ack";
+
+    // ---- §13 recovery: reconcile decision actions ----
+    public static final String RECONCILE_KEEP = "KEEP";
+    public static final String RECONCILE_CANCEL_EXECUTION = "CANCEL_EXECUTION";
+    public static final String RECONCILE_CLOSE = "CLOSE";
 
     // ---- Error codes (§14) ----
     public static final String INVALID_MESSAGE = "INVALID_MESSAGE";
@@ -57,4 +64,10 @@ public final class HostProtocol {
     public static final String EVENT_BACKPRESSURE_TIMEOUT = "EVENT_BACKPRESSURE_TIMEOUT";
     public static final String SESSION_NOT_FOUND = "SESSION_NOT_FOUND";
     public static final String EXECUTION_NOT_FOUND = "EXECUTION_NOT_FOUND";
+    public static final String REPLAY_WINDOW_EXPIRED = "REPLAY_WINDOW_EXPIRED";
+    public static final String NO_CAPACITY = "NO_CAPACITY";
+
+    // ---- §13 recovery reason codes ----
+    /** Orchestration execution whose outcome is already durably recorded. */
+    public static final String TASK_ALREADY_RETRIED = "TASK_ALREADY_RETRIED";
 }

@@ -266,7 +266,7 @@ class SessionAllocatorTest extends IntegrationTestBase {
         // Enabled half: a directly-constructed allocator with enabled=true must sweep
         // the expired offer to CLOSED.
         SessionAllocator enabledSweep = new SessionAllocator(sessionRepository,
-                instances, agentRepository, nodeRegistryService, 10, 1800, true);
+                instances, agentRepository, nodeRegistryService, 10, 1800, 300, true);
         enabledSweep.sweepAllocation();
         assertThat(sessionRepository.findById(sessionId).orElseThrow().getAllocationState())
                 .isEqualTo(SessionAllocator.ALLOC_STATE_CLOSED);

@@ -38,6 +38,13 @@ public interface AgentHostInstanceRepository extends JpaRepository<AgentHostInst
     /** §9 (P6-T6): every OPEN instance across hosts — the host-lost sweep's liveness set. */
     List<AgentHostInstance> findByStatus(AgentHostInstance.Status status);
 
+    /**
+     * §13 (A2): RECOVERING instances whose bounded recovery window lapsed —
+     * the retention sweep's close-fallback input.
+     */
+    List<AgentHostInstance> findByStatusAndRecoveryExpiresAtBefore(
+            AgentHostInstance.Status status, Instant before);
+
     /** §7.1 atomic reservation: allocation locks the instance row. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT i FROM AgentHostInstance i WHERE i.id = :id")

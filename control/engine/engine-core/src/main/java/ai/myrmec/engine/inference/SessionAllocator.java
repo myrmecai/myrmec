@@ -50,6 +50,7 @@ public class SessionAllocator {
     private final int offerTimeoutSeconds;
     private final int idleTimeoutSeconds;
     private final boolean enabled;
+    private final java.time.Duration recoveryRetainFor;
 
     public SessionAllocator(
             SessionRepository sessionRepository,
@@ -58,6 +59,7 @@ public class SessionAllocator {
             NodeRegistryService nodeRegistryService,
             @Value("${myrmec.host.offer-timeout-seconds:10}") int offerTimeoutSeconds,
             @Value("${myrmec.host.session-idle-timeout-seconds:1800}") int idleTimeoutSeconds,
+            @Value("${myrmec.host.recovery.retain-seconds:300}") int recoveryRetainSeconds,
             @Value("${myrmec.host.allocation-sweep.enabled:true}") boolean enabled) {
         this.sessionRepository = sessionRepository;
         this.instanceRepository = instanceRepository;
@@ -65,7 +67,18 @@ public class SessionAllocator {
         this.nodeRegistryService = nodeRegistryService;
         this.offerTimeoutSeconds = offerTimeoutSeconds;
         this.idleTimeoutSeconds = idleTimeoutSeconds;
+        this.recoveryRetainFor = Duration.ofSeconds(recoveryRetainSeconds);
         this.enabled = enabled;
+    }
+
+    /**
+     * §13 (A2): the retention window a dropped instance gets before its
+     * sessions are lost. The close path needs the same horizon to arm
+     * {@code startRecovery}; a config value, not a constant, so tests can
+     * shrink the window.
+     */
+    public java.time.Duration recoveryRetainFor() {
+        return recoveryRetainFor;
     }
 
     /**
@@ -291,14 +304,22 @@ public class SessionAllocator {
      * that no longer exist (the close-path may have missed them — crash
      * before the socket close handler ran, replica kill -9, …). Closes them
      * with HOST_LOST so capacity returns and the next turn re-offers.
+     *
+     * <p>§13 (A2): RECOVERING instances are NOT leaked — their sessions are
+     * parked pending resume; the retention sweep
+     * ({@link #expireRecoveredInstances}) owns their expiry. Only CLOSED or
+     * vanished instances leak sessions.</p>
      */
     @Transactional
     public int expireHostLostSessions() {
-        // Live = a row that is still OPEN. A CLOSED instance (socket died,
-        // close-path ran) or a vanished row (crash) both mean the host is
-        // gone and its sessions are leaked.
+        // Live = a row still OPEN, or RECOVERING inside its retention window
+        // (§13 A2: sessions park while the instance waits for resume). A
+        // CLOSED instance (socket died, close-path ran) or a vanished row
+        // (crash) mean the host is gone and its sessions are leaked.
         Set<UUID> liveInstanceIds = new HashSet<>();
-        instanceRepository.findByStatus(ai.myrmec.engine.agent.AgentHostInstance.Status.OPEN)
+        instanceRepository.findByStatus(AgentHostInstance.Status.OPEN)
+                .forEach(i -> liveInstanceIds.add(i.getId()));
+        instanceRepository.findByStatus(AgentHostInstance.Status.RECOVERING)
                 .forEach(i -> liveInstanceIds.add(i.getId()));
 
         List<Session> leaked = sessionRepository.findAll().stream()
@@ -317,6 +338,42 @@ public class SessionAllocator {
         return leaked.size();
     }
 
+    /**
+     * §13 (A2) sweep body: RECOVERING instances whose retention window
+     * lapsed fall back to the §9 dev-minimum — close the instance and every
+     * session it served with HOST_LOST (the pre-A2 close path, preserved as
+     * the expiry fallback). Instances still inside the window are left
+     * parked; resume re-adopts them. Idempotent per session.
+     */
+    @Transactional
+    public int expireRecoveredInstances(Instant now) {
+        List<AgentHostInstance> lapsed = instanceRepository.findByStatusAndRecoveryExpiresAtBefore(
+                AgentHostInstance.Status.RECOVERING, now);
+        int closedSessions = 0;
+        for (AgentHostInstance instance : lapsed) {
+            instance.close("HOST_LOST");
+            instanceRepository.save(instance);
+            closedSessions += closeAllOnHostInstance(instance.getId(), "HOST_LOST");
+            log.info("Recovery window expired for instance {} — closed as HOST_LOST",
+                    instance.getId());
+        }
+        return closedSessions;
+    }
+
+    /**
+     * §13 (A2): the reconnected host re-adopts its RECOVERING instance —
+     * OPEN again, socket re-homed to the node now serving it. Only the
+     * nonce-matched row (resolved by the caller, §6.1 replay-idempotency
+     * semantics) can be re-adopted; anything else is caller-validated.
+     */
+    @Transactional
+    public void resumeInstance(AgentHostInstance instance, String nodeId) {
+        instance.recoverTo(nodeId);
+        instanceRepository.save(instance);
+        log.info("Instance {} resumed on node {} — RECOVERING window closed",
+                instance.getId(), nodeId);
+    }
+
     /** §12.2 scheduled sweep — disabled in e2e like the reaper. */
     @Scheduled(fixedDelayString = "${myrmec.host.allocation-sweep.interval-ms:15000}")
     public void sweepAllocation() {
@@ -326,9 +383,11 @@ public class SessionAllocator {
         int expiredOffers = expireOffers(Instant.now());
         int expiredLeases = expireIdleLeases(Instant.now());
         int hostLost = expireHostLostSessions();
-        if (expiredOffers + expiredLeases + hostLost > 0) {
-            log.info("Allocation sweep: {} offers, {} leases, {} host-lost sessions expired",
-                    expiredOffers, expiredLeases, hostLost);
+        int recovered = expireRecoveredInstances(Instant.now());
+        if (expiredOffers + expiredLeases + hostLost + recovered > 0) {
+            log.info("Allocation sweep: {} offers, {} leases, {} host-lost sessions, "
+                    + "{} recovery-expired sessions",
+                    expiredOffers, expiredLeases, hostLost, recovered);
         }
     }
 

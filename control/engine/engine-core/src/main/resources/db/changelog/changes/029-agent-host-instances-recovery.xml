@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        §13 reconnect/reconciliation (A2; §11.1 RECOVERING): when a host
+        control socket drops, the instance enters a bounded recovery window
+        instead of closing immediately. recovery_expires_at carries the
+        horizon; the retention sweep closes lapsed RECOVERING rows with
+        close_reason=HOST_LOST (the §9 fallback preserved). Status is an
+        existing varchar(20) column — RECOVERING fits without a resize.
+    -->
+
+    <changeSet id="029-instance-recovery-window" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="agent_host_instances"/>
+                <not>
+                    <columnExists tableName="agent_host_instances" columnName="recovery_expires_at"/>
+                </not>
+            </and>
+        </preConditions>
+
+        <addColumn tableName="agent_host_instances">
+            <column name="recovery_expires_at" type="timestamp with time zone"/>
+        </addColumn>
+
+        <createIndex indexName="idx_agent_host_instances_recovery" tableName="agent_host_instances">
+            <column name="status"/>
+            <column name="recovery_expires_at"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

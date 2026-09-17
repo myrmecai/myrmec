@@ -120,36 +120,40 @@ class HostControlLifecycleTest extends IntegrationTestBase {
         assertThat(row.getPoolSize()).isEqualTo(setup.host().getMaxAgents());
     }
 
+    /**
+     * §13 (A2): a disconnect parks the instance in the bounded RECOVERING
+     * window instead of closing it. The socket is unregistered; the drop
+     * reason is recorded on the row for forensics only when the window
+     * later lapses (the retention sweep stamps HOST_LOST at expiry).
+     */
     @Test
-    void normalDisconnectClosesInstanceAndUnregisters() throws Exception {
+    void normalDisconnectParksInstanceRecoveringAndUnregisters() throws Exception {
         Setup setup = openedHost();
 
         handler.afterConnectionClosed(setup.session(), CloseStatus.NORMAL);
 
         AgentHostInstance row = instances.findById(setup.instanceId()).orElseThrow();
-        assertThat(row.getStatus()).isEqualTo(AgentHostInstance.Status.CLOSED);
-        assertThat(row.getCloseReason()).isEqualTo("DISCONNECT");
-        assertThat(row.getClosedAt()).isNotNull();
+        assertThat(row.getStatus()).isEqualTo(AgentHostInstance.Status.RECOVERING);
+        assertThat(row.getClosedAt()).isNull();
+        assertThat(row.getRecoveryExpiresAt()).isNotNull();
         assertThat(handler.getConnectionManager().getSession(setup.instanceId())).isEmpty();
     }
 
     @Test
-    void abnormalDisconnectClosesWithAbnormalReason() throws Exception {
+    void abnormalDisconnectAlsoParksRecovering() throws Exception {
         Setup setup = openedHost();
 
         handler.afterConnectionClosed(setup.session(), CloseStatus.GOING_AWAY);
 
-        assertThat(instances.findById(setup.instanceId()).orElseThrow().getCloseReason())
-                .isEqualTo("ABNORMAL_DISCONNECT");
+        assertThat(instances.findById(setup.instanceId()).orElseThrow().getStatus())
+                .isEqualTo(AgentHostInstance.Status.RECOVERING);
     }
 
     /**
-     * §9 (P6-T6): the discriminating host-lost test. A session offered and
-     * accepted on the instance must close with close_reason=HOST_LOST when
-     * the host socket dies — and nothing else (the session row is the only
-     * durable state touched; the next turn re-offers a fresh session, which
-     * the follow-up assertion proves by offering successfully on a live
-     * host after the close).
+     * §13 (A2): the disconnect path parks the instance RECOVERING — it must
+     * NOT touch the instance's sessions (they stay parked pending
+     * host.resume; the retention sweep's {@code expireRecoveredInstances}
+     * is what closes them HOST_LOST if the window lapses).
      */
     @Test
     void hostLostClosesOpenSessionsOnTheDeadInstance() throws Exception {
@@ -163,16 +167,14 @@ class HostControlLifecycleTest extends IntegrationTestBase {
         try {
             ai.myrmec.engine.inference.SessionAllocator allocator =
                     org.mockito.Mockito.mock(ai.myrmec.engine.inference.SessionAllocator.class);
-            org.mockito.Mockito.lenient().when(
-                    allocator.closeAllOnHostInstance(setup.instanceId(), "HOST_LOST"))
-                    .thenReturn(1);
             org.springframework.test.util.ReflectionTestUtils.setField(
                     handler, "sessionAllocator", allocator);
 
             handler.afterConnectionClosed(setup.session(), CloseStatus.GOING_AWAY);
 
-            // The close-path MUST reconcile the instance's sessions.
-            org.mockito.Mockito.verify(allocator)
+            // §13: the close-path must NOT close sessions — the drop parks
+            // the instance RECOVERING and leaves the sessions untouched.
+            org.mockito.Mockito.verify(allocator, org.mockito.Mockito.never())
                     .closeAllOnHostInstance(setup.instanceId(), "HOST_LOST");
         } finally {
             org.springframework.test.util.ReflectionTestUtils.setField(

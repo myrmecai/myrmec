@@ -169,16 +169,34 @@ class HostPskLifecycleTest extends IntegrationTestBase {
         assertThat(oldRow.getPskEncrypted()).isNull();
     }
 
+    /**
+     * §13 (A2): the drop parks the instance RECOVERING — the PSK survives
+     * the window (the resume handshake re-delivers the SAME key). Erasure
+     * happens only at the terminal close (retention expiry → HOST_LOST).
+     */
     @Test
-    void closeErasesTheKeyAndRetainsTheId() throws Exception {
+    void dropRetainsTheKeyForTheRecoveryWindowAndExpiryErasesIt() throws Exception {
         Setup setup = openedHost();
 
         handler.afterConnectionClosed(setup.session(), CloseStatus.NORMAL);
 
         AgentHostInstance row = instances.findById(setup.instanceId()).orElseThrow();
-        assertThat(row.getStatus()).isEqualTo(AgentHostInstance.Status.CLOSED);
-        assertThat(row.getPskEncrypted()).isNull();
+        assertThat(row.getStatus()).isEqualTo(AgentHostInstance.Status.RECOVERING);
+        assertThat(row.getPskEncrypted()).isNotNull();
         assertThat(row.getPskKeyId()).isEqualTo(setup.pskKeyId());
+
+        // Retention expiry applies the §9 fallback: terminal close erases.
+        instances.saveAndFlush(instances.findById(setup.instanceId()).orElseThrow());
+        ai.myrmec.engine.inference.SessionAllocator allocator =
+                ai.myrmec.engine.inference.SessionAllocator.class.cast(
+                        org.springframework.test.util.ReflectionTestUtils.getField(
+                                handler, "sessionAllocator"));
+        allocator.expireRecoveredInstances(
+                row.getRecoveryExpiresAt().plusSeconds(1));
+        AgentHostInstance expired = instances.findById(setup.instanceId()).orElseThrow();
+        assertThat(expired.getStatus()).isEqualTo(AgentHostInstance.Status.CLOSED);
+        assertThat(expired.getPskEncrypted()).isNull();
+        assertThat(expired.getPskKeyId()).isEqualTo(setup.pskKeyId());
     }
 
     @Test
