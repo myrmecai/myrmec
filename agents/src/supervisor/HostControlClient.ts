@@ -18,6 +18,7 @@ import {
   parseUnifiedFrame,
   ProtocolErrorCode,
   SUPPORTED_PROTOCOL_VERSION,
+  type ChannelOpenedPayload,
   type ExecutionAcceptPayload,
   type ExecutionCancelPayload,
   type ExecutionCompletePayload,
@@ -36,6 +37,8 @@ import {
   type SessionAcceptPayload,
   type SessionClosedPayload,
   type SessionOfferPayload,
+  type SessionOpenPayload,
+  type SessionChannelOffer,
   type SessionRejectPayload,
   type SessionOpenedPayload,
   type UnifiedFrame,
@@ -93,6 +96,198 @@ export interface HostControlClientOptions {
    * SessionRegistry (`setPsk`). Never logged, never persisted.
    */
   onPsk?: (psk: Uint8Array) => void;
+  /**
+   * §7.5 (A1): session-lifecycle collaborator. When a `session.open` carries
+   * a `channel` offer the client opens the dedicated channel socket, runs the
+   * channel.open/opened handshake, and registers the bound socket here;
+   * channel loss is NON-fatal (the session keeps riding the control socket).
+   * Inbound execution frames on the channel socket are dispatched through the
+   * same pipeline as control-socket frames. Optional — when omitted the
+   * client stays control-only (existing behavior unchanged).
+   */
+  sessionLifecycle?: HostSessionLifecycle;
+  /**
+   * §7.5 (A1): channel socket factory override (tests inject a fake).
+   * Default dials the real `WebSocketChannelConnection`.
+   */
+  channelConnectionFactory?: (endpoint: string) => ChannelConnection;
+}
+
+/**
+ * §7.5 (A1): one bound dedicated-channel client per session. Owns the
+ * channel socket + the channel.open → channel.opened handshake, forwards
+ * inbound frames through the shared dispatch, and reports death (close /
+ * error) so the session falls back to the control socket — never closing
+ * the session itself.
+ */
+export class SessionChannelClient {
+  private readonly connection: ChannelConnection;
+  private opened: ChannelOpenedPayload | null = null;
+
+  constructor(
+    readonly sessionId: string,
+    private readonly offer: SessionChannelOffer,
+    private readonly getAccessToken: () => Promise<string>,
+    private readonly callbacks: {
+      onFrame: (raw: string) => void | Promise<void>;
+      onDead: (reason: string) => void;
+    },
+    private readonly log: Logger,
+    connectionFactory?: (endpoint: string) => ChannelConnection,
+  ) {
+    this.connection = (connectionFactory ?? ((endpoint) => new WebSocketChannelConnection(endpoint)))(
+      offer.endpoint,
+    );
+    this.connection.onMessage = (raw) => this.handleMessage(raw);
+    this.connection.onClose = (code, reason) => {
+      if (this.opened) {
+        // Only report death after a successful bind; a pre-bind failure is
+        // handled by open() itself.
+        this.callbacks.onDead(`code=${code} reason=${reason}`);
+      }
+    };
+  }
+
+  /** True while the channel socket is open (post-bind). */
+  get isOpen(): boolean {
+    return this.opened !== null && this.connection.isOpen;
+  }
+
+  /**
+   * Run the §7.5 handshake: connect (same HOST_JWT gate as the control
+   * socket), send channel.open with the session's durable cursor + the
+   * single-use offer token, await channel.opened. Never throws.
+   *
+   * @returns the channel.opened payload, or null on any failure.
+   */
+  async open(resumeFromSequence: number): Promise<ChannelOpenedPayload | null> {
+    try {
+      const token = await this.getAccessToken();
+      await this.connection.connect(token);
+      await this.connection.send(
+        JSON.stringify({
+          protocolVersion: SUPPORTED_PROTOCOL_VERSION,
+          messageId: randomUUID(),
+          type: UnifiedMessageType.CHANNEL_OPEN,
+          sentAt: new Date().toISOString(),
+          sessionId: this.sessionId,
+          payload: {
+            sessionId: this.sessionId,
+            resumeFromSequence,
+            // §15 rule 7: the token rides the payload, not the auth.
+            token: this.offer.token,
+          },
+        }),
+      );
+      return await this.awaitOpened();
+    } catch (err) {
+      this.log.warn(
+        `channel.open failed for session ${this.sessionId}: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+      await this.close("channel.open failed");
+      return null;
+    }
+  }
+
+  /** Await the channel.opened reply (bounded — the token is short-lived). */
+  private awaitOpened(timeoutMs = 10_000): Promise<ChannelOpenedPayload | null> {
+    return new Promise<ChannelOpenedPayload | null>((resolve) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        resolve(null);
+      }, timeoutMs);
+      const cleanup = (): void => {
+        clearTimeout(timer);
+        // Poll-free completion: the pending resolver is swapped for null.
+        this.pendingOpened = null;
+      };
+      this.pendingOpened = (payload) => {
+        cleanup();
+        resolve(payload);
+      };
+    });
+  }
+
+  private pendingOpened:
+    | ((payload: ChannelOpenedPayload | null) => void)
+    | null = null;
+
+  private async handleMessage(raw: string): Promise<void> {
+    let frame: ParsedUnifiedFrame;
+    try {
+      frame = parseUnifiedFrame(raw);
+    } catch (err) {
+      this.log.warn("Dropping malformed channel frame:", err);
+      return;
+    }
+
+    if (frame.type === UnifiedMessageType.CHANNEL_OPENED) {
+      const payload = frame.payload as ChannelOpenedPayload;
+      if (payload.sessionId !== this.sessionId) {
+        this.log.warn(
+          `channel.opened sessionId mismatch: ${payload.sessionId} (expected ${this.sessionId})`,
+        );
+        this.pendingOpened?.(null);
+        return;
+      }
+      this.opened = payload;
+      this.pendingOpened?.(payload);
+      return;
+    }
+
+    if (frame.type === UnifiedMessageType.PROTOCOL_ERROR) {
+      // Handshake rejection (expired/misbound token, invalid state) — the
+      // bind never happened, so fall back cleanly.
+      const payload = frame.payload as { code: string; message: string };
+      if (!this.opened) {
+        this.pendingOpened?.(null);
+        return;
+      }
+      // Post-bind protocol errors ride the same dispatch as control frames.
+      this.log.warn(
+        `protocol.error on channel ${payload.code}: ${payload.message}`,
+      );
+      return;
+    }
+
+    // Any other frame post-bind (execution.*) is the engine's
+    // channel-preferred arm — dispatch through the SAME pipeline the control
+    // socket uses (shared dedupe, acks, handlers).
+    await this.callbacks.onFrame(raw);
+  }
+
+  /** Send a raw frame on the channel socket. */
+  send(raw: string): Promise<void> {
+    return this.connection.send(raw);
+  }
+
+  /** Close the channel socket (idempotent; safe pre-bind). */
+  async close(reason = "Session closed"): Promise<void> {
+    this.pendingOpened?.(null);
+    this.pendingOpened = null;
+    await this.connection.close(reason);
+  }
+}
+
+/** §7.5 (A1): the session-side collaborators the channel client needs.
+ * Implemented by the SessionRegistry. */
+export interface HostSessionLifecycle {
+  /** The session's durable-event cursor — feeds channel.open's
+   * resumeFromSequence (§12.3). 0 when unknown. */
+  getHighestContiguousSequence(sessionId: string): number;
+  /** Record a durable inbound frame's sequence (registry cursor tracking). */
+  observeDurableSequence(sessionId: string, sequence: number): void;
+  /** Record the bound channel socket after channel.opened. */
+  bindChannel(
+    sessionId: string,
+    socket: unknown,
+    opened: ChannelOpenedPayload,
+  ): void;
+  /** Mark the channel dead (§7.5: non-fatal — keep the session). */
+  markChannelDead(sessionId: string): void;
+  /** Drop the binding on session close (returns the socket to close). */
+  unbindChannel(sessionId: string): { socket: unknown } | null;
 }
 
 /** State of the host-control FSM. */
@@ -214,6 +409,110 @@ class WebSocketHostControlConnection implements HostControlConnection {
   }
 }
 
+/**
+ * §7.5 (A1): raw WebSocket abstraction for the dedicated channel socket.
+ * Same shape as {@link HostControlConnection} minus the reconnect machinery —
+ * channel loss is non-fatal and reconnect is A2/Wave 5.
+ */
+export interface ChannelConnection {
+  connect(token: string): Promise<void>;
+  close(reason?: string): Promise<void>;
+  send(raw: string): Promise<void>;
+  readonly isOpen: boolean;
+  onMessage?: (raw: string) => void | Promise<void>;
+  onClose?: (code: number, reason: string) => void | Promise<void>;
+}
+
+/** Production channel socket for one session (§7.5). Same HOST_JWT
+ * handshake gate as the control socket (`?token=`); the single-use channel
+ * token rides the channel.open payload. */
+export class WebSocketChannelConnection implements ChannelConnection {
+  private readonly endpoint: string;
+  private ws: WebSocket | null = null;
+  private running = false;
+
+  onMessage?: (raw: string) => void | Promise<void>;
+  onClose?: (code: number, reason: string) => void | Promise<void>;
+
+  constructor(endpoint: string) {
+    this.endpoint = endpoint;
+  }
+
+  get isOpen(): boolean {
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  connect(token: string): Promise<void> {
+    // The token is the HOST_JWT handshake credential (same gate as the
+    // control socket); `ws` carries it as the `?token=` query param.
+    const url = new URL(this.endpoint);
+    url.searchParams.set("token", token);
+    return new Promise<void>((resolve, reject) => {
+      const ws = new WebSocket(url.toString(), { perMessageDeflate: false });
+      this.ws = ws;
+
+      const onOpenError = (err: Error): void => {
+        ws.off("open", onOpen);
+        reject(err);
+      };
+      const onOpen = (): void => {
+        ws.off("error", onOpenError);
+        this.running = true;
+        this.attachHandlers(ws);
+        resolve();
+      };
+
+      ws.once("open", onOpen);
+      ws.once("error", onOpenError);
+    });
+  }
+
+  private attachHandlers(ws: WebSocket): void {
+    ws.on("message", (raw: RawData) => {
+      if (!this.running) {
+        return;
+      }
+      void this.onMessage?.(raw.toString());
+    });
+
+    ws.on("close", (code: number, reasonBuf: Buffer) => {
+      this.running = false;
+      void this.onClose?.(code, reasonBuf.toString());
+    });
+
+    ws.on("error", (err: Error) => {
+      if (this.running) {
+        this.running = false;
+        void this.onClose?.(CloseCode.GOING_AWAY, err.message);
+      }
+    });
+  }
+
+  send(raw: string): Promise<void> {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error("Channel WebSocket not connected"));
+    }
+    return new Promise<void>((resolve, reject) => {
+      ws.send(raw, (err) => (err ? reject(err) : resolve()));
+    });
+  }
+
+  close(reason = "Session closed"): Promise<void> {
+    this.running = false;
+    const ws = this.ws;
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      try {
+        ws.close(CloseCode.NORMAL, reason);
+      } catch {
+        // ignore
+      }
+    }
+    this.ws = null;
+    return Promise.resolve();
+  }
+}
+
 /** Durable inbound frame families that must be acknowledged with protocol.ack. */
 const DURABLE_INBOUND_TYPES: ReadonlySet<string> = new Set([
   UnifiedMessageType.EXECUTION_EVENT,
@@ -229,6 +528,23 @@ const CLIENT_HANDLED_TYPES: ReadonlySet<string> = new Set([
   UnifiedMessageType.HOST_OPENED,
   UnifiedMessageType.HOST_HEARTBEAT,
   UnifiedMessageType.PROTOCOL_ERROR,
+  // §12.3: the engine's protocol.ack for host→engine durable frames. The
+  // engine replies on the socket the frame arrived on — with A1 that can be
+  // the dedicated channel. The SDK records the ack's cursor for its own
+  // replay bookkeeping later (A2); here it is simply expected noise.
+  UnifiedMessageType.PROTOCOL_ACK,
+]);
+
+/** §7.5 (A1): outbound frame families that PREFER the dedicated channel
+ * when one is bound for their session. Everything else (session.*, host.*,
+ * protocol.ack, execution.accept/reject/start/cancel) is control-only — the
+ * engine's channel arm refuses it (INVALID_MESSAGE). */
+const CHANNEL_PREFERRED_OUTBOUND_TYPES: ReadonlySet<string> = new Set([
+  UnifiedMessageType.EXECUTION_DELTA,
+  UnifiedMessageType.EXECUTION_EVENT,
+  UnifiedMessageType.EXECUTION_COMPLETE,
+  UnifiedMessageType.EXECUTION_FAILED,
+  UnifiedMessageType.EXECUTION_PAUSED,
 ]);
 
 /** Simple append-only bounded LRU set for seen messageIds. */
@@ -285,6 +601,14 @@ export class HostControlClient {
   private readonly seen: MessageIdDedupe;
   private executionHandler: ExecutionHandler | null = null;
   private readonly onPsk: ((psk: Uint8Array) => void) | undefined;
+  /** §7.5 (A1): session collaborators (registry) for channel binding. */
+  private readonly sessionLifecycle: HostSessionLifecycle | null;
+  /** §7.5 (A1): channel socket factory override (tests inject a fake). */
+  private readonly channelConnectionFactory:
+    | ((endpoint: string) => ChannelConnection)
+    | undefined;
+  /** §7.5 (A1): one channel client per bound session (open handshake state). */
+  private readonly channels = new Map<string, SessionChannelClient>();
 
   constructor(options: HostControlClientOptions) {
     this.engineUrl = options.engineUrl.replace(/\/+$/, "");
@@ -297,6 +621,8 @@ export class HostControlClient {
     this.reportedCapacity = options.reportedCapacity ?? {};
     this.seen = new MessageIdDedupe(options.dedupeLimit ?? 256);
     this.onPsk = options.onPsk;
+    this.sessionLifecycle = options.sessionLifecycle ?? null;
+    this.channelConnectionFactory = options.channelConnectionFactory;
     this.connection =
       options.connection ??
       new WebSocketHostControlConnection(this.engineUrl, this.path);
@@ -355,6 +681,8 @@ export class HostControlClient {
   async stop(reason = "Host shutdown"): Promise<void> {
     this.running = false;
     this.stopHeartbeat();
+    // §7.5: every bound channel socket dies with the host teardown.
+    await this.closeAllChannels(reason);
     this.reconnecting?.stop();
     await this.connection?.disconnect(reason);
     this.state = "IDLE";
@@ -566,8 +894,54 @@ export class HostControlClient {
       sessionId: frame.sessionId ?? null,
       executionId: frame.executionId ?? null,
     };
+    // §7.5 (A1): execution.delta/event/terminal PREFER the bound channel
+    // socket for their session; everything else is control-only. A channel
+    // send failure falls back to the control socket (best-effort) — channel
+    // loss must not break an execution.
+    const channel = this.channelForOutbound(fullFrame);
+    if (channel) {
+      try {
+        await channel.send(encodeUnifiedFrame(fullFrame));
+        // Terminal frames end the execution — drop its session mapping.
+        if (
+          fullFrame.type === UnifiedMessageType.EXECUTION_COMPLETE ||
+          fullFrame.type === UnifiedMessageType.EXECUTION_FAILED ||
+          fullFrame.type === UnifiedMessageType.EXECUTION_PAUSED
+        ) {
+          this.executionSessions.delete(fullFrame.executionId ?? "");
+        }
+        return;
+      } catch (err) {
+        this.log.warn(
+          "Channel send failed; falling back to the control socket:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
     await this.connection.send(encodeUnifiedFrame(fullFrame));
   }
+
+  /**
+   * §7.5 (A1): resolve the outbound channel for an execution frame — the
+   * bound, alive channel for the frame's session, else null (control).
+   * Resolves the session from the envelope's sessionId, falling back to the
+   * executionId→sessionId map the client fills on execution.start.
+   */
+  private channelForOutbound(frame: ParsedUnifiedFrame): SessionChannelClient | null {
+    if (!CHANNEL_PREFERRED_OUTBOUND_TYPES.has(frame.type)) {
+      return null;
+    }
+    const sessionId =
+      frame.sessionId ?? this.executionSessions.get(frame.executionId ?? "");
+    if (!sessionId) {
+      return null;
+    }
+    const channel = this.channels.get(sessionId);
+    return channel && channel.isOpen ? channel : null;
+  }
+
+  /** Registry of executionId → sessionId, filled from execution.start. */
+  private readonly executionSessions = new Map<string, string>();
 
   // ==================== Internal transport wiring ====================
 
@@ -657,7 +1031,22 @@ export class HostControlClient {
       return;
     }
 
+    if (frame.type === UnifiedMessageType.PROTOCOL_ACK) {
+      // §12.3: the engine's ack for a host→engine durable frame (arrives on
+      // the socket the frame was sent on — control or channel). Bookkeeping
+      // of the acked cursor is A2; here it is simply expected noise.
+      return;
+    }
+
     if (DURABLE_INBOUND_TYPES.has(frame.type)) {
+      // §7.5 (A1): feed the registry's durable cursor (monotonic) so a later
+      // channel.open carries the correct resumeFromSequence, then ack.
+      if (frame.sessionId && typeof frame.sequence === "number") {
+        this.sessionLifecycle?.observeDurableSequence(
+          frame.sessionId,
+          frame.sequence,
+        );
+      }
       await this.ack(frame);
     }
 
@@ -756,14 +1145,112 @@ export class HostControlClient {
   private async handleSessionOpen(
     frame: UnifiedFrame<"session.open">,
   ): Promise<void> {
-    const payload = frame.payload as SessionOpenedPayload;
+    const payload = frame.payload as SessionOpenPayload;
     const sessionId = frame.sessionId ?? payload.sessionId;
     this.log.info(`Session opened by engine: ${sessionId}`);
+
+    // §7.5 (A1): the engine minted a dedicated-channel offer — open the
+    // channel socket and run the bind handshake BEFORE confirming the open.
+    // A failed handshake is non-fatal: the session rides the control socket
+    // (the engine accepts execution arms on both sockets).
+    let channelMode = "CONTROL";
+    const offer = payload.channel ?? null;
+    if (offer) {
+      const opened = await this.openChannel(sessionId, offer);
+      if (opened) {
+        channelMode = "CHANNEL";
+      }
+    }
+
     await this.sendSessionOpened({
       sessionId,
       ready: true,
-      channelMode: "CONTROL",
+      channelMode,
     });
+  }
+
+  // ==================== Dedicated session channel (§7.5, A1) ====================
+
+  /**
+   * Open the dedicated channel socket for a session and run the
+   * channel.open → channel.opened handshake (§7.5). Auth is the same
+   * HOST_JWT handshake gate as the control socket; the single-use token
+   * rides the channel.open payload. Never throws — any failure logs a warn
+   * and falls back to the control socket.
+   *
+   * @returns the channel.opened payload on success, null on any failure.
+   */
+  private async openChannel(
+    sessionId: string,
+    offer: SessionChannelOffer,
+  ): Promise<ChannelOpenedPayload | null> {
+    const lifecycle = this.sessionLifecycle;
+    if (!lifecycle) {
+      this.log.warn(
+        `Channel offer for session ${sessionId} ignored: no session lifecycle wired`,
+      );
+      return null;
+    }
+    if (this.channels.has(sessionId)) {
+      this.log.warn(
+        `Channel offer for session ${sessionId} ignored: channel already exists`,
+      );
+      return null;
+    }
+
+    const channel = new SessionChannelClient(
+      sessionId,
+      offer,
+      () => this.tokenProvider.getAccessToken(),
+      {
+        onFrame: (raw) => this.handleRaw(raw),
+        onDead: (reason) => {
+          this.log.warn(
+            `Dedicated channel lost for session ${sessionId} (${reason}): ` +
+              "session unaffected — traffic continues on the control socket",
+          );
+          lifecycle.markChannelDead(sessionId);
+          this.channels.delete(sessionId);
+        },
+      },
+      this.log,
+      this.channelConnectionFactory,
+    );
+
+    const opened = await channel.open(lifecycle.getHighestContiguousSequence(sessionId));
+    if (!opened) {
+      return null;
+    }
+    this.channels.set(sessionId, channel);
+    lifecycle.bindChannel(sessionId, channel, opened);
+    this.log.info(
+      `Channel bound: session=${sessionId} cursor=${opened.highestContiguousSequence}`,
+    );
+    return opened;
+  }
+
+  /** Close a session's channel socket alongside the control teardown (§7.5). */
+  private async closeChannel(sessionId: string, reason: string): Promise<void> {
+    const channel = this.channels.get(sessionId);
+    this.channels.delete(sessionId);
+    if (channel) {
+      await channel.close(reason);
+    }
+    this.sessionLifecycle?.unbindChannel(sessionId);
+    // Drop the session's execution mappings — they resolve to a channel
+    // that no longer exists.
+    for (const [executionId, mapped] of this.executionSessions) {
+      if (mapped === sessionId) {
+        this.executionSessions.delete(executionId);
+      }
+    }
+  }
+
+  /** Close every channel socket (host stop / control teardown). */
+  private async closeAllChannels(reason: string): Promise<void> {
+    for (const sessionId of [...this.channels.keys()]) {
+      await this.closeChannel(sessionId, reason);
+    }
   }
 
   private async handleSessionClose(
@@ -772,6 +1259,8 @@ export class HostControlClient {
     const payload = frame.payload as SessionClosedPayload;
     const sessionId = frame.sessionId ?? payload.sessionId;
     this.log.info(`Session close requested: ${sessionId}`);
+    // §7.5: the channel dies with the session.
+    await this.closeChannel(sessionId, "Session closed");
     await this.sendSessionClosed({
       sessionId,
       closedAt: new Date().toISOString(),
@@ -785,6 +1274,15 @@ export class HostControlClient {
     const payload = frame.payload as ExecutionEventPayload;
     const executionId = frame.executionId ?? payload.executionId;
     this.log.info(`Execution start: ${executionId}`);
+    // §7.5 (A1): remember the session so channel-preferred sends (which
+    // carry only executionId) can resolve their channel.
+    const startSessionId =
+      frame.sessionId ??
+      (frame.payload as { sessionId?: string | null }).sessionId ??
+      null;
+    if (executionId && startSessionId) {
+      this.executionSessions.set(executionId, startSessionId);
+    }
     if (this.executionHandler) {
       await this.executionHandler(frame);
     }

@@ -13,6 +13,8 @@ import {
   sessionAcceptPayloadSchema,
   sessionOpenedPayloadSchema,
   sessionClosedPayloadSchema,
+  channelOpenPayloadSchema,
+  channelOpenedPayloadSchema,
   executionStartPayloadSchema,
   executionEventPayloadSchema,
   executionCompletePayloadSchema,
@@ -355,6 +357,175 @@ describe("session allocation frames", () => {
     const encoded = JSON.parse(encodeUnifiedFrame(frame));
     expect(encoded.type).toBe("session.offer");
     expect(encoded.payload.kind).toBe("ORCHESTRATION_TASK");
+  });
+});
+
+// ============================================================
+// §7.5 dedicated session channel (A1)
+// ============================================================
+
+describe("§7.5 channel frames", () => {
+  it("accepts the canonical channel.open fixture", () => {
+    const payload = {
+      sessionId,
+      resumeFromSequence: 42,
+      token: "myr_chn_offer_token",
+    };
+    const frame = parseUnifiedFrame(
+      JSON.stringify({
+        ...envelope(payload, MessageType.CHANNEL_OPEN),
+        sessionId,
+      }),
+    );
+    expect(frame.type).toBe("channel.open");
+    const p = frame.payload as { sessionId: string; resumeFromSequence: number; token: string };
+    expect(p.sessionId).toBe(sessionId);
+    expect(p.resumeFromSequence).toBe(42);
+    expect(p.token).toBe("myr_chn_offer_token");
+  });
+
+  it("defaults resumeFromSequence to 0 when omitted (channel.open)", () => {
+    const payload = {
+      sessionId,
+      token: "myr_chn_offer_token",
+    };
+    const frame = parseUnifiedFrame(JSON.stringify(envelope(payload, MessageType.CHANNEL_OPEN)));
+    expect(
+      (frame.payload as { resumeFromSequence: number }).resumeFromSequence,
+    ).toBe(0);
+  });
+
+  it("rejects channel.open with a negative resumeFromSequence", () => {
+    expect(
+      channelOpenPayloadSchema.safeParse({
+        sessionId,
+        resumeFromSequence: -1,
+        token: "t",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects channel.open with a missing token", () => {
+    expect(
+      channelOpenPayloadSchema.safeParse({ sessionId, resumeFromSequence: 0 })
+        .success,
+    ).toBe(false);
+  });
+
+  it("rejects channel.open with a non-uuid sessionId", () => {
+    expect(
+      channelOpenPayloadSchema.safeParse({
+        sessionId: "not-a-uuid",
+        resumeFromSequence: 0,
+        token: "t",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts the canonical channel.opened fixture", () => {
+    const payload = {
+      sessionId,
+      highestContiguousSequence: 7,
+    };
+    const frame = parseUnifiedFrame(
+      JSON.stringify({
+        ...envelope(payload, MessageType.CHANNEL_OPENED),
+        sessionId,
+      }),
+    );
+    expect(frame.type).toBe("channel.opened");
+    const p = frame.payload as {
+      sessionId: string;
+      highestContiguousSequence: number;
+    };
+    expect(p.highestContiguousSequence).toBe(7);
+  });
+
+  it("rejects channel.opened with a missing highestContiguousSequence", () => {
+    expect(
+      channelOpenedPayloadSchema.safeParse({ sessionId }).success,
+    ).toBe(false);
+  });
+
+  it("round-trips channel.open through parse and encode", () => {
+    const payload = { sessionId, resumeFromSequence: 5, token: "tok" };
+    const original = parseUnifiedFrame(
+      JSON.stringify({
+        ...envelope(payload, MessageType.CHANNEL_OPEN),
+        sessionId,
+      }),
+    );
+    const encoded = JSON.parse(encodeUnifiedFrame(original));
+    expect(encoded.type).toBe("channel.open");
+    expect(encoded.payload.resumeFromSequence).toBe(5);
+  });
+});
+
+describe("§7.5 session.open channel offer (A1)", () => {
+  function sessionOpenWithChannel(channel?: unknown): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
+      sessionId,
+      kind: "CONVERSATION",
+      projectId: "11111111-1111-4111-8111-111111111111",
+      profileVersionId: "22222222-2222-4222-8222-222222222222",
+      model: {
+        provider: "openai",
+        modelId: "gpt-4o",
+        endpoint: null,
+        credentialRef: null,
+        parameters: {},
+      },
+      workspace: null,
+      tools: [],
+      knowledgeSources: [],
+      autoHitlOnDestructive: true,
+    };
+    if (channel !== undefined) {
+      payload.channel = channel;
+    }
+    return payload;
+  }
+
+  it("accepts session.open carrying a channel offer", () => {
+    const payload = sessionOpenWithChannel({
+      endpoint: "wss://engine.example/api/v1/agent/host/ws/channel",
+      token: "myr_chn_offer_token",
+    });
+    const frame = parseUnifiedFrame(JSON.stringify(envelope(payload, MessageType.SESSION_OPEN)));
+    const channel = (frame.payload as { channel?: { endpoint: string; token: string } }).channel;
+    expect(channel).toEqual({
+      endpoint: "wss://engine.example/api/v1/agent/host/ws/channel",
+      token: "myr_chn_offer_token",
+    });
+  });
+
+  it("accepts session.open with channel null (channel disabled)", () => {
+    const payload = sessionOpenWithChannel(null);
+    const frame = parseUnifiedFrame(JSON.stringify(envelope(payload, MessageType.SESSION_OPEN)));
+    const channel = (frame.payload as { channel?: unknown }).channel;
+    expect(channel).toBeNull();
+  });
+
+  it("accepts session.open without a channel field (older engine)", () => {
+    const payload = sessionOpenWithChannel(undefined);
+    const frame = parseUnifiedFrame(JSON.stringify(envelope(payload, MessageType.SESSION_OPEN)));
+    expect((frame.payload as { channel?: unknown }).channel).toBeUndefined();
+  });
+
+  it("rejects a channel offer with a missing token", () => {
+    const payload = sessionOpenWithChannel({
+      endpoint: "wss://engine.example/api/v1/agent/host/ws/channel",
+    });
+    expect(() =>
+      parseUnifiedFrame(JSON.stringify(envelope(payload, MessageType.SESSION_OPEN))),
+    ).toThrow();
+  });
+
+  it("rejects a channel offer with a missing endpoint", () => {
+    const payload = sessionOpenWithChannel({ token: "myr_chn_offer_token" });
+    expect(() =>
+      parseUnifiedFrame(JSON.stringify(envelope(payload, MessageType.SESSION_OPEN))),
+    ).toThrow();
   });
 });
 

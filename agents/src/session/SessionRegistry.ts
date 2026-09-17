@@ -10,7 +10,11 @@
  * tears it down on `session.close`. The model is resolved ONCE at open time
  * and reused across every turn in the session.
  */
-import type { SessionOpenPayload, SessionCredential } from "../protocol/unifiedFrames.js";
+import type {
+  SessionOpenPayload,
+  SessionCredential,
+  ChannelOpenedPayload,
+} from "../protocol/unifiedFrames.js";
 import type { ModelInfoWire } from "../protocol/sessionTypes.js";
 import type { ChatModel, SessionTool } from "../executor/types.js";
 import type { ChatModelFactory, SessionToolFactory } from "../executor/providers.js";
@@ -20,6 +24,20 @@ import {
   deriveSessionKey,
   openEnvelope,
 } from "../security/credentialEnvelopes.js";
+
+/** §7.5 (A1): the bound dedicated-channel transport for one session. The
+ * client owns the socket + handshake; the registry only records the state so
+ * close() can tear the socket down alongside the session. */
+export interface SessionChannelState {
+  sessionId: string;
+  /** The opened channel socket abstraction (never null while alive). */
+  socket: unknown;
+  /** False once the channel was lost (close/error) — non-fatal; the session
+   * keeps riding the control socket. */
+  alive: boolean;
+  /** The engine-reported cursor at bind time (§12.3 replay resume point). */
+  highestContiguousSequence: number;
+}
 
 /** Agent-side state for one open session. */
 export interface Session {
@@ -52,6 +70,19 @@ export interface Session {
    * plaintext never enters any log line or serialized frame.
    */
   credentialVault?: Map<string, string>;
+  /**
+   * §7.5 (A1): the bound dedicated channel for this session, set after the
+   * channel handshake completes. Null when the session rides the control
+   * socket only (channel offer absent, or channel lost — non-fatal).
+   */
+  channel?: SessionChannelState | null;
+  /**
+   * §7.5 (A1): the host's durable-event cursor for this session — the
+   * highest contiguous sequence the host has durably recorded (protocol.ack
+   * reply sequence). Feeds `channel.open.resumeFromSequence` (§12.3).
+   * Undefined reads as 0.
+   */
+  highestContiguousSequence?: number;
 }
 
 /** Constructor options for {@link SessionRegistry}. */
@@ -156,6 +187,8 @@ export class SessionRegistry {
         // legacy inference.assign wire.
         orchestration: payload.orchestration ?? null,
         assignmentDigest: payload.assignmentDigest ?? null,
+        channel: null,
+        highestContiguousSequence: 0,
         ...(credentialVault ? { credentialVault } : {}),
       };
       this.sessions.set(payload.sessionId, session);
@@ -274,5 +307,74 @@ export class SessionRegistry {
   /** Whether a session is currently open for this sessionId. */
   has(sessionId: string): boolean {
     return this.sessions.has(sessionId);
+  }
+
+  // ==================== Dedicated channel state (§7.5, A1) ====================
+
+  /**
+   * Record a bound channel socket for the session after the channel handshake
+   * completes. The socket reference is opaque to the registry — the client
+   * owns connect/close/dispatch; the registry only tracks liveness so
+   * session close can tear the socket down.
+   */
+  bindChannel(
+    sessionId: string,
+    socket: unknown,
+    opened: ChannelOpenedPayload,
+  ): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return;
+    }
+    session.channel = {
+      sessionId,
+      socket,
+      alive: true,
+      highestContiguousSequence: opened.highestContiguousSequence,
+    };
+  }
+
+  /**
+   * Mark the channel dead for a session (§7.5: channel loss is NON-fatal —
+   * the session stays open on the control socket). No-op if the session is
+   * gone or already dead.
+   */
+  markChannelDead(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session?.channel?.alive) {
+      return;
+    }
+    session.channel.alive = false;
+  }
+
+  /**
+   * Record a durable event's sequence for the session — the registry's
+   * highest-contiguous-sequence tracking feeds both `protocol.ack` replies
+   * and `channel.open.resumeFromSequence`. Monotonic; replays are ignored.
+   */
+  observeDurableSequence(sessionId: string, sequence: number): void {
+    const session = this.sessions.get(sessionId);
+    if (!session || sequence <= (session.highestContiguousSequence ?? 0)) {
+      return;
+    }
+    session.highestContiguousSequence = sequence;
+  }
+
+  /** Read the session's durable-event cursor (0 when unknown). */
+  getHighestContiguousSequence(sessionId: string): number {
+    return this.sessions.get(sessionId)?.highestContiguousSequence ?? 0;
+  }
+
+  /**
+   * Drop the channel binding on session close: the client receives the
+   * socket back via the returned state so it can close the transport.
+   */
+  unbindChannel(sessionId: string): SessionChannelState | null {
+    const session = this.sessions.get(sessionId);
+    const channel = session?.channel ?? null;
+    if (session) {
+      session.channel = null;
+    }
+    return channel;
   }
 }

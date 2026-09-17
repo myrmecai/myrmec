@@ -35,6 +35,9 @@ export const MessageType = {
   SESSION_CLOSE: "session.close",
   SESSION_CLOSED: "session.closed",
 
+  CHANNEL_OPEN: "channel.open",
+  CHANNEL_OPENED: "channel.opened",
+
   EXECUTION_START: "execution.start",
   EXECUTION_ACCEPT: "execution.accept",
   EXECUTION_REJECT: "execution.reject",
@@ -201,6 +204,28 @@ export const sessionClosePayloadSchema = z.object({
 });
 export type SessionClosePayload = z.infer<typeof sessionClosePayloadSchema>;
 
+// ---- Dedicated session channel payloads (§7.5, A1) ----
+
+/** channel.open (host→engine, FIRST frame on the channel socket): bind the
+ * dedicated transport to one session. `resumeFromSequence` is the host's
+ * durable-event cursor — the replay resume point (§12.3). */
+export const channelOpenPayloadSchema = z.object({
+  sessionId: uuid,
+  resumeFromSequence: z.number().int().nonnegative().default(0),
+  // §15 rule 7: the single-use offer token rides the payload, NOT the auth
+  // (the handshake is the same HOST_JWT gate as the control socket).
+  token: z.string(),
+});
+export type ChannelOpenPayload = z.infer<typeof channelOpenPayloadSchema>;
+
+/** channel.opened (engine→host): the channel is bound; the engine reports
+ * its current highest contiguous sequence for the session. */
+export const channelOpenedPayloadSchema = z.object({
+  sessionId: uuid,
+  highestContiguousSequence: z.number().int().nonnegative(),
+});
+export type ChannelOpenedPayload = z.infer<typeof channelOpenedPayloadSchema>;
+
 // ---- Execution lifecycle payloads (§8) ----
 
 export const inferenceMessageSchema = z.object({
@@ -332,7 +357,19 @@ export const sessionOpenPayloadSchema = z.object({
   assignmentDigest: z.string().nullish(),
   // Credential envelopes (design §9): omitted when the session is keyless.
   credentials: z.array(sessionCredentialSchema).optional(),
+  // §7.5 (A1): the dedicated-transport offer — endpoint + single-use
+  // short-lived token. Null/absent when the engine disabled the channel
+  // feature (`myrmec.channel.enabled`) or could not mint an offer.
+  channel: z
+    .object({
+      endpoint: z.string(),
+      token: z.string(),
+    })
+    .nullish(),
 });
+export type SessionChannelOffer = NonNullable<
+  NonNullable<SessionOpenPayload["channel"]>
+>;
 export type SessionOpenPayload = z.infer<typeof sessionOpenPayloadSchema>;
 
 export const executionStartPayloadSchema = z.object({
@@ -629,6 +666,13 @@ export type SessionClosedFrame = UnifiedFrame<"session.closed"> & {
   payload: SessionClosedPayload;
 };
 
+export type ChannelOpenFrame = UnifiedFrame<"channel.open"> & {
+  payload: ChannelOpenPayload;
+};
+export type ChannelOpenedFrame = UnifiedFrame<"channel.opened"> & {
+  payload: ChannelOpenedPayload;
+};
+
 export type ExecutionStartFrame = UnifiedFrame<"execution.start"> & {
   payload: ExecutionStartPayload | OrchestrationExecutionStartPayload;
 };
@@ -691,6 +735,9 @@ export const unifiedPayloadSchemas: Record<
   [MessageType.SESSION_CLOSE]: sessionClosePayloadSchema,
   [MessageType.SESSION_CLOSED]: sessionClosedPayloadSchema,
 
+  [MessageType.CHANNEL_OPEN]: channelOpenPayloadSchema,
+  [MessageType.CHANNEL_OPENED]: channelOpenedPayloadSchema,
+
   [MessageType.EXECUTION_START]: z.union([
     orchestrationExecutionStartPayloadSchema,
     executionStartPayloadSchema,
@@ -723,6 +770,8 @@ export type ParsedUnifiedFrame =
   | SessionOpenedFrame
   | SessionCloseFrame
   | SessionClosedFrame
+  | ChannelOpenFrame
+  | ChannelOpenedFrame
   | ExecutionStartFrame
   | ExecutionAcceptFrame
   | ExecutionRejectFrame
