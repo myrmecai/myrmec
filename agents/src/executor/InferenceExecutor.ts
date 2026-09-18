@@ -414,6 +414,13 @@ export class InferenceExecutor {
       // when local accounting reached the allowance (or the session's
       // iteration policy), the execution pauses: no further model calls pass
       // the ceiling (pause is the terminal answer until resumed).
+      // §7.3 (§12.2): the wall-clock deadline joins the same boundary —
+      // a turn whose policy executionTimeoutSeconds elapsed pauses instead
+      // of starting another model call. Both surface FAILED with
+      // POLICY_CEILING_REACHED: the unified conversation turn has no
+      // suspension store to resume from (§8.7 pause = the terminal answer
+      // for this executor's turn shape, matching the ITERATION_LIMIT
+      // convention above).
       if (enforcer) {
         const decision = enforcer.check();
         if (decision.kind === "paused") {
@@ -422,6 +429,15 @@ export class InferenceExecutor {
             kind: "failed",
             errorCode: "POLICY_CEILING_REACHED",
             message: decision.message,
+          };
+        }
+        const deadlineDecision = enforcer.checkDeadline();
+        if (deadlineDecision.kind === "paused") {
+          enforcer.notePause(deadlineDecision);
+          return {
+            kind: "failed",
+            errorCode: "POLICY_CEILING_REACHED",
+            message: deadlineDecision.message,
           };
         }
       }

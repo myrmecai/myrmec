@@ -50,7 +50,10 @@ export type EnforcementDecision =
   | { kind: "ok" }
   | {
       kind: "paused";
-      reason: "TOKEN_ALLOWANCE_EXCEEDED" | "ITERATION_LIMIT";
+      reason:
+        | "TOKEN_ALLOWANCE_EXCEEDED"
+        | "ITERATION_LIMIT"
+        | "EXECUTION_TIMEOUT";
       message: string;
     };
 
@@ -67,6 +70,14 @@ export class PolicyEnforcer {
   private allowanceMaxTokens: number | null;
   /** The session's iteration ceiling (from session.open policy). */
   private readonly maxIterations: number | null;
+  /**
+   * §7.3 (§12.2): the execution's wall-clock deadline from
+   * `policy.executionTimeoutSeconds` (null = none enforced). Monotonic
+   * epoch-ms captured at construction (Date.now()). Tighten-only: a policy
+   * update carrying a LOWER value re-arms the deadline as
+   * min(current, now + new) — a larger value never extends it.
+   */
+  private deadlineAt: number | null;
   private readonly log: Logger;
 
   constructor(options: {
@@ -77,6 +88,8 @@ export class PolicyEnforcer {
     logger?: Logger;
   }) {
     this.maxIterations = options.policy?.maxIterations ?? null;
+    const timeoutSeconds = options.policy?.executionTimeoutSeconds ?? null;
+    this.deadlineAt = timeoutSeconds !== null ? Date.now() + timeoutSeconds * 1000 : null;
     this.allowanceMaxTokens = options.initialAllowanceMaxTokens ?? null;
     this.log = options.logger ?? console;
   }
@@ -148,6 +161,21 @@ export class PolicyEnforcer {
   }
 
   /**
+   * §7.3 (§12.2): apply a policy update's executionTimeoutSeconds to the
+   * deadline — tighten-only, mirroring the allowance semantics. A LOWER
+   * value re-arms the deadline as min(current, now + new) (a shorter
+   * timeout takes effect immediately); a larger value never extends it.
+   */
+  applyExecutionTimeout(executionTimeoutSeconds: number | null | undefined): void {
+    if (executionTimeoutSeconds == null) {
+      return;
+    }
+    const candidate = Date.now() + executionTimeoutSeconds * 1000;
+    this.deadlineAt =
+      this.deadlineAt !== null ? Math.min(this.deadlineAt, candidate) : candidate;
+  }
+
+  /**
    * The next-boundary decision: is any enforced ceiling reached? Callers
    * (InferenceExecutor / OrchestrationRunner) check BEFORE each model call
    * and pause the execution when a ceiling reports.
@@ -165,6 +193,28 @@ export class PolicyEnforcer {
         kind: "paused",
         reason: "ITERATION_LIMIT",
         message: `execution paused: ${this.functionCalls} function calls reached the policy ceiling ${this.maxIterations}`,
+      };
+    }
+    return { kind: "ok" };
+  }
+
+  /**
+   * §7.3 (§12.2): the next-boundary wall-clock decision. Callers (the
+   * executors) consult it alongside {@link check} at each model-loop
+   * boundary and pause the execution when the deadline has passed.
+   * Comparison is >= so a 0-second deadline deterministically pauses at
+   * the first boundary (the deadline is reached the instant it is armed).
+   */
+  checkDeadline(): EnforcementDecision {
+    if (this.deadlineAt === null) {
+      return { kind: "ok" };
+    }
+    const now = Date.now();
+    if (now >= this.deadlineAt) {
+      return {
+        kind: "paused",
+        reason: "EXECUTION_TIMEOUT",
+        message: `execution paused: the policy execution timeout reached (deadline ${new Date(this.deadlineAt).toISOString()})`,
       };
     }
     return { kind: "ok" };

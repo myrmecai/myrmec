@@ -535,6 +535,56 @@ describe("OrchestrationRunner minimal delegation", () => {
     expect(result.status).toBe("PAUSED");
     expect(result.errorCode).toBe("POLICY_CEILING_REACHED");
   });
+
+  // ── §7.3 (§12.2): execution timeout pauses the attempt ──────────────
+
+  it("pauses the attempt with EXECUTION_TIMEOUT when the policy timeout has elapsed", async () => {
+    // A 0-second deadline arms at run start and is already elapsed by the
+    // first invoke_worker boundary — the worker never runs.
+    const orch = new ScriptedModel([
+      invokeCall("coder"),
+      { content: "never reached" },
+    ]);
+    const worker = new ScriptedModel([
+      { content: "done", usage: { promptTokens: 30, completionTokens: 10, totalTokens: 40 } },
+    ]);
+
+    const result = await makeRunner(orch, worker).run(assignment(), {
+      runId: "run-uuid",
+      executionTimeoutSeconds: 0,
+    });
+
+    expect(result.status).toBe("PAUSED");
+    expect(result.errorCode).toBe("EXECUTION_TIMEOUT");
+    expect(result.suspension?.reason).toBe("EXECUTION_TIMEOUT");
+    expect(result.retryDisposition).toBe("NONE");
+    // The worker was never invoked — the deadline precedes the call.
+    expect(result.workerCalls).toHaveLength(0);
+    expect(worker.invocations.length).toBe(0);
+  });
+
+  it("completes when the policy carries no execution timeout", async () => {
+    const orch = new ScriptedModel([
+      invokeCall("coder"),
+      {
+        content: "The coder completed the work.",
+        usage: { promptTokens: 20, completionTokens: 8, totalTokens: 28 },
+      },
+    ]);
+    const worker = new ScriptedModel([
+      {
+        content: "Implementation done.",
+        usage: { promptTokens: 30, completionTokens: 10, totalTokens: 40 },
+      },
+    ]);
+
+    const result = await makeRunner(orch, worker).run(assignment(), {
+      runId: "run-uuid",
+      executionTimeoutSeconds: null,
+    });
+
+    expect(result.status).toBe("COMPLETED");
+  });
 });
 
 // ── verification (Feature 5, design §11) ──────────────────────────────

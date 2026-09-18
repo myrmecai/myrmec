@@ -289,13 +289,16 @@ export class TurnExecutor {
       // must tear down immediately so the runner can return PAUSED or
       // the terminal denial. §8.7 (A4): a policy-ceiling breach is the
       // same class of control-flow signal (the attempt PAUSES at the
-      // next boundary). Re-raise the typed signals; every other error
-      // is recorded (the loop continues).
+      // next boundary). §7.3 (§12.2): an elapsed execution-timeout
+      // deadline is the same control-flow class (PAUSED with
+      // EXECUTION_TIMEOUT). Re-raise the typed signals; every other
+      // error is recorded (the loop continues).
       if (
         err instanceof Error &&
         (err.name === "ApprovalRequiredSignal" ||
           err.name === "PolicyDeniedSignal" ||
-          err.name === "PolicyCeilingSignal")
+          err.name === "PolicyCeilingSignal" ||
+          err.name === "ExecutionTimeoutSignal")
       ) {
         throw err;
       }

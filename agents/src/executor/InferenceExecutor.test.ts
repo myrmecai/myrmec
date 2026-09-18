@@ -17,6 +17,7 @@ import type {
 } from "./types.js";
 import type { ExecutionFrameSender } from "./ExecutionFrameSender.js";
 import { ApprovalCoordinator } from "./ApprovalCoordinator.js";
+import { PolicyEnforcer } from "./PolicyEnforcer.js";
 import type { ExecutionStartPayload } from "../protocol/unifiedFrames.js";
 
 // ── helpers ───────────────────────────────────────────────────────
@@ -159,6 +160,10 @@ const toolCall = (id: string, name: string, args: Record<string, unknown> = {}):
  * fixed sessionId. */
 class FakeRegistry extends SessionRegistry {
   private readonly sessionMap = new Map<string, Session>();
+  /** §8.7: session-keyed enforcers built from the fake session's policy
+   * (mirrors the base class, which reads its own sessions map — hidden
+   * from this fake by the overridden open/get). */
+  private readonly fakeEnforcers = new Map<string, PolicyEnforcer>();
 
   constructor() {
     // Pass no-op factories — FakeRegistry overrides open/close/get/has so
@@ -181,6 +186,23 @@ class FakeRegistry extends SessionRegistry {
   }
   override has(sessionId: string): boolean {
     return this.sessionMap.has(sessionId);
+  }
+
+  /** The base enforcerFor consults the base sessions map (empty here);
+   * resolve the policy from the fake session map instead. */
+  override enforcerFor(
+    sessionOrExecutionId: string,
+  ): PolicyEnforcer | undefined {
+    const session = this.sessionMap.get(sessionOrExecutionId);
+    let enforcer = this.fakeEnforcers.get(sessionOrExecutionId);
+    if (!enforcer) {
+      enforcer = new PolicyEnforcer({
+        policy: session?.policy ?? null,
+        logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+      });
+      this.fakeEnforcers.set(sessionOrExecutionId, enforcer);
+    }
+    return enforcer;
   }
 }
 
@@ -599,5 +621,48 @@ describe("InferenceExecutor unified emissions", () => {
 
     const complete = sent.find((f) => f.type === "execution.complete");
     expect(complete).toBeDefined();
+  });
+
+  // ── §7.3 (§12.2): execution timeout pauses the turn ─────────────
+
+  it("fails the turn with POLICY_CEILING_REACHED (EXECUTION_TIMEOUT) when the policy timeout has elapsed", async () => {
+    // The enforcer seeds from the session's §7.3 policy block — a 0-second
+    // deadline is already elapsed by the first model-loop boundary, so no
+    // model call ever starts.
+    const model = new ScriptedModel([{ content: "never reached" }]);
+    const session = makeSession(model);
+    session.policy = { maxIterations: null, executionTimeoutSeconds: 0 };
+    registry.set("33333333-3333-4333-8333-333333333333", session);
+
+    const { executor, sent } = makeExecutor();
+
+    await executor.handleStart(makeStartPayload({ stream: false }));
+
+    const failed = sent.find((f) => f.type === "execution.failed");
+    expect(failed).toBeDefined();
+    expect(failed!.payload.error).toMatchObject({
+      code: "POLICY_CEILING_REACHED",
+    });
+    expect(
+      String((failed!.payload.error as { message: unknown }).message),
+    ).toContain("execution timeout");
+
+    // The model was never invoked — the boundary precedes every call.
+    expect(model.calls).toHaveLength(0);
+  });
+
+  it("completes normally when the session policy carries no timeout", async () => {
+    const model = new ScriptedModel([{ content: "done" }]);
+    const session = makeSession(model);
+    session.policy = { maxIterations: null, executionTimeoutSeconds: null };
+    registry.set("33333333-3333-4333-8333-333333333333", session);
+
+    const { executor, sent } = makeExecutor();
+
+    await executor.handleStart(makeStartPayload({ stream: false }));
+
+    const complete = sent.find((f) => f.type === "execution.complete");
+    expect(complete).toBeDefined();
+    expect(complete!.payload.result).toMatchObject({ content: "done" });
   });
 });

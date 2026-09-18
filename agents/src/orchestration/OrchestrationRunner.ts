@@ -153,6 +153,11 @@ export interface OrchestrationRunOptions {
    * from session.open policy (null = no host limit). Enforced at the
    * invoke_worker boundary — reaching it pauses the attempt. */
   maxFunctionCalls?: number | null;
+  /** §7.3 (§12.2): the dispatch's wall-clock execution timeout in seconds
+   * from session.open policy (null/absent = none). The runner arms the
+   * deadline at run start and enforces it at the worker-call boundary —
+   * an elapsed deadline PAUSES the attempt (errorCode EXECUTION_TIMEOUT). */
+  executionTimeoutSeconds?: number | null;
   /** §8.7 (A4): live allowance overlay from the engine (tighten-only).
    * Mutated by policy updates via {@link OrchestrationRunHandle}; the
    * controller reads through this seam each boundary. */
@@ -207,6 +212,18 @@ class PolicyCeilingSignal extends Error {
   }
 }
 
+/**
+ * §7.3 (§12.2): thrown by the invoke_worker boundary when the policy
+ * executionTimeoutSeconds deadline has elapsed — the attempt PAUSES with
+ * errorCode EXECUTION_TIMEOUT (mirroring PolicyCeilingSignal's shape).
+ */
+class ExecutionTimeoutSignal extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "ExecutionTimeoutSignal";
+  }
+}
+
 export class OrchestrationRunner {
   private readonly options: OrchestrationRunnerOptions;
   /** §17.4 (slice C): the approved pending action's semantic identity
@@ -257,6 +274,13 @@ export class OrchestrationRunner {
     const assignment = parsed.data as OrchestrationAssignment;
     const { step, dispatch } = assignment;
     const o = step.orchestration;
+    // §7.3 (§12.2): the dispatch's wall-clock deadline — armed from the
+    // run options at run start (monotonic epoch-ms) and enforced at the
+    // worker-call boundary. Null = no timeout enforced.
+    const deadlineAt =
+      runOptions.executionTimeoutSeconds != null
+        ? Date.now() + runOptions.executionTimeoutSeconds * 1000
+        : null;
 
     // §7/§17.4 (HITL slice C): a decision-bearing continuation is a HITL
     // resume. The typed ApprovalDecision is validated against the
@@ -576,6 +600,16 @@ export class OrchestrationRunner {
             throw new PolicyCeilingSignal(breach.message);
           }
         }
+        // §7.3 (§12.2): the wall-clock deadline joins the same boundary —
+        // a dispatch whose policy executionTimeoutSeconds elapsed pauses
+        // instead of starting another worker call (same PAUSED shape as
+        // the allowance ceiling above). Comparison is >= so a 0-second
+        // deadline deterministically pauses at the first boundary.
+        if (deadlineAt !== null && Date.now() >= deadlineAt) {
+          throw new ExecutionTimeoutSignal(
+            `execution paused: the policy execution timeout reached (timeout ${runOptions.executionTimeoutSeconds}s)`,
+          );
+        }
         const outcome = await this.options.workerInvoker.invoke(
           assignment,
           args.workerName,
@@ -749,6 +783,43 @@ export class OrchestrationRunner {
               .update(`${dispatch.dispatchId}:ceiling:${lastTree.value}:${revision.value}`)
               .digest("hex"),
             reason: "POLICY_CEILING",
+          },
+        };
+      }
+      // §7.3 (§12.2): the wall-clock deadline elapsed at the worker-call
+      // boundary — PAUSE the attempt with EXECUTION_TIMEOUT (mirrors the
+      // PolicyCeilingSignal PAUSED shape; the deadline breach is a policy
+      // pause, not a failure, so the engine may resume/re-dispatch).
+      if (signal instanceof ExecutionTimeoutSignal) {
+        return {
+          schemaVersion: "1.0",
+          resultId: this.resultId(dispatch),
+          resultDigest: this.resultDigest(dispatch),
+          dispatch,
+          status: "PAUSED",
+          retryDisposition: "NONE",
+          summary: `suspended: ${signal.message}`.slice(0, 4000),
+          workerCalls,
+          verifierResults: verifierResults.map(toVerifierResult),
+          commandExecutions,
+          changedFiles: [],
+          commits: [],
+          cleanWorktree: false,
+          usage: {
+            workerCalls: budget.counters().workerCalls,
+            rejectionCount,
+            totalTokens: budget.counters().totalTokens,
+          },
+          errorCode: "EXECUTION_TIMEOUT",
+          suspension: {
+            continuationId: `cont-${dispatch.dispatchId}-timeout`,
+            continuationRef: `local:cont-${dispatch.dispatchId}-timeout`,
+            snapshotTreeHash: lastTree.value,
+            workspaceRevision: revision.value,
+            stateDigest: createHash("sha256")
+              .update(`${dispatch.dispatchId}:timeout:${lastTree.value}:${revision.value}`)
+              .digest("hex"),
+            reason: "EXECUTION_TIMEOUT",
           },
         };
       }

@@ -5,7 +5,7 @@
  * §8.7 (A4) enforcement contract tests: monotonic accounting,
  * tighten-only allowance, ceiling pause, and the §7.3 policy seeding.
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { PolicyEnforcer } from "./PolicyEnforcer.js";
 import type { EnforcementDecision } from "./PolicyEnforcer.js";
 
@@ -162,5 +162,68 @@ describe("PolicyEnforcer (§8.7)", () => {
     expect(enforcer.accounting().totalTokens).toBe(0);
     enforcer.recordTokens(42);
     expect(enforcer.accounting().totalTokens).toBe(42);
+  });
+});
+
+describe("PolicyEnforcer execution timeout (§7.3 / §12.2)", () => {
+  it("reports no deadline when the policy carries no executionTimeoutSeconds", () => {
+    const enforcer = new PolicyEnforcer({ logger: silentLogger });
+    expect(enforcer.checkDeadline()).toEqual({ kind: "ok" });
+  });
+
+  it("pauses with EXECUTION_TIMEOUT once the policy timeout has elapsed", async () => {
+    const enforcer = new PolicyEnforcer({
+      logger: silentLogger,
+      policy: { executionTimeoutSeconds: 0 },
+    });
+
+    // A 0-second deadline is already elapsed by the next observation.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(enforcer.checkDeadline()).toMatchObject({
+      kind: "paused",
+      reason: "EXECUTION_TIMEOUT",
+    });
+  });
+
+  it("does not pause while the deadline is in the future", () => {
+    const enforcer = new PolicyEnforcer({
+      logger: silentLogger,
+      policy: { executionTimeoutSeconds: 60 },
+    });
+    expect(enforcer.checkDeadline()).toEqual({ kind: "ok" });
+  });
+
+  it("re-arms the deadline tighten-only: a lower timeout shortens it, a larger one never extends", async () => {
+    const enforcer = new PolicyEnforcer({
+      logger: silentLogger,
+      policy: { executionTimeoutSeconds: 1 },
+    });
+
+    // A LARGER value (60s) must not extend the deadline.
+    enforcer.applyExecutionTimeout(60);
+    // The 1s deadline from construction has elapsed by the time we check
+    // (min(current, now+60) = current — the stale deadline survives).
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    expect(enforcer.checkDeadline()).toMatchObject({
+      kind: "paused",
+      reason: "EXECUTION_TIMEOUT",
+    });
+  });
+
+  it("a lower timeout takes effect immediately (re-arm at now + new)", async () => {
+    const enforcer = new PolicyEnforcer({
+      logger: silentLogger,
+      policy: { executionTimeoutSeconds: 60 },
+    });
+
+    // Tighten to 0s: the deadline re-arms at now+0 — elapsed immediately.
+    enforcer.applyExecutionTimeout(0);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(enforcer.checkDeadline()).toMatchObject({
+      kind: "paused",
+      reason: "EXECUTION_TIMEOUT",
+    });
   });
 });

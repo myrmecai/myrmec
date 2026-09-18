@@ -665,6 +665,11 @@ export class AgentOrchestrationExecutor {
         ...(sessionPolicy?.maxIterations != null
           ? { maxFunctionCalls: sessionPolicy.maxIterations }
           : {}),
+        // §7.3 (§12.2): the session's wall-clock execution timeout — the
+        // runner pauses the dispatch with EXECUTION_TIMEOUT once elapsed.
+        ...(sessionPolicy?.executionTimeoutSeconds != null
+          ? { executionTimeoutSeconds: sessionPolicy.executionTimeoutSeconds }
+          : {}),
         // §8.7 (A4): the live tighten-only allowance overlay — the
         // policy-updates handler mutates this through the run handle.
         allowanceSource: allowanceSource,

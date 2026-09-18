@@ -252,6 +252,7 @@ export type OrchestrationErrorCode =
   | "APPROVAL_EXPIRED"
   | "APPROVAL_POLICY_DENIED"
   | "POLICY_CEILING_REACHED"
+  | "EXECUTION_TIMEOUT"
   | "INTERNAL_ORCHESTRATION_ERROR";
 
 export type RetryDisposition = "NONE" | "RETRYABLE" | "TERMINAL";
@@ -322,7 +323,11 @@ export interface ContinuationRecord {
 
 /** §7.3 SuspensionRecord — a paused dispatch's durable reason. */
 export interface SuspensionRecord extends ContinuationRecord {
-  reason: "HITL_APPROVAL" | "BUDGET_REVIEW" | "POLICY_CEILING";
+  reason:
+    | "HITL_APPROVAL"
+    | "BUDGET_REVIEW"
+    | "POLICY_CEILING"
+    | "EXECUTION_TIMEOUT";
   approvalRequestId?: string;
   pendingAction?: {
     actionId: string;
