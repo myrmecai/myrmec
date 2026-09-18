@@ -45,6 +45,16 @@ public interface AgentHostInstanceRepository extends JpaRepository<AgentHostInst
     List<AgentHostInstance> findByStatusAndRecoveryExpiresAtBefore(
             AgentHostInstance.Status status, Instant before);
 
+    /**
+     * §12.2 heartbeat-staleness sweep input: OPEN instances whose last
+     * liveness signal predates the staleness cutoff.
+     */
+    List<AgentHostInstance> findByStatusAndLastHeartbeatAtBefore(
+            AgentHostInstance.Status status, Instant before);
+
+    /** §12.2 sweep: OPEN instances that never sent a heartbeat (openedAt grace). */
+    List<AgentHostInstance> findByStatusAndLastHeartbeatAtIsNull(AgentHostInstance.Status status);
+
     /** §7.1 atomic reservation: allocation locks the instance row. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT i FROM AgentHostInstance i WHERE i.id = :id")

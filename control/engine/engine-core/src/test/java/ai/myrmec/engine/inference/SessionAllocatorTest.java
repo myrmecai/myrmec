@@ -10,6 +10,8 @@ import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentRepository;
+import ai.myrmec.engine.inference.execution.SessionExecution;
+import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
 import ai.myrmec.engine.node.NodeRegistryService;
 import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.testing.TestDataBuilder;
@@ -43,6 +45,7 @@ class SessionAllocatorTest extends IntegrationTestBase {
     @Autowired AgentRepository agentRepository;
     @Autowired SessionRepository sessionRepository;
     @Autowired NodeRegistryService nodeRegistryService;
+    @Autowired SessionExecutionRepository executionRepository;
 
     private AgentHostInstance openInstance(int pool) {
         AgentHostCreationResult created =
@@ -309,9 +312,122 @@ class SessionAllocatorTest extends IntegrationTestBase {
         // Enabled half: a directly-constructed allocator with enabled=true must sweep
         // the expired offer to CLOSED.
         SessionAllocator enabledSweep = new SessionAllocator(sessionRepository,
-                instances, agentRepository, nodeRegistryService, 10, 30, 1800, 300, true);
+                instances, agentRepository, nodeRegistryService, executionRepository,
+                10, 30, 1800, 300, true);
         enabledSweep.sweepAllocation();
         assertThat(sessionRepository.findById(sessionId).orElseThrow().getAllocationState())
                 .isEqualTo(SessionAllocator.ALLOC_STATE_CLOSED);
+    }
+
+    // ------------------------------------------------------------------
+    // §12.2 idle-lease reset + in-flight guard
+    // ------------------------------------------------------------------
+
+    /** Active session fixture: offer → accept → confirmOpened. */
+    private UUID activeSession(AgentHostInstance instance, Project project) {
+        UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
+                project.getId(), instance.getAgentHostId()).orElseThrow();
+        allocator.accept(sessionId);
+        allocator.confirmOpened(sessionId, "slot-thread-1");
+        return sessionId;
+    }
+
+    /** Execution row fixture on a session (caller picks the state). */
+    private SessionExecution execution(UUID sessionId, SessionExecution.State state) {
+        SessionExecution e = new SessionExecution();
+        e.setSessionId(sessionId);
+        e.setServiceType("CONVERSATION");
+        e.setRequestId(UUID.randomUUID().toString());
+        e.setState(state);
+        e.setCreatedAt(Instant.now());
+        return executionRepository.saveAndFlush(e);
+    }
+
+    /**
+     * §12.2 activity touch: a touch on an ACTIVE session re-arms the expiry,
+     * so a sweep after it does NOT close the session.
+     */
+    @Test
+    void touchIdleLeaseRearmsExpiryAndSweepSparesTheSession() {
+        AgentHostInstance instance = openInstance(2);
+        Project project = project();
+        UUID sessionId = activeSession(instance, project);
+
+        // Age the lease past the window first.
+        Session row = sessionRepository.findById(sessionId).orElseThrow();
+        row.setIdleLeaseExpiresAt(Instant.now().minusSeconds(60));
+        sessionRepository.saveAndFlush(row);
+
+        allocator.touchIdleLease(sessionId);
+
+        Instant touched = sessionRepository.findById(sessionId).orElseThrow()
+                .getIdleLeaseExpiresAt();
+        assertThat(touched).isAfter(Instant.now());
+
+        // The stale snapshot must no longer match: sweep finds nothing to close.
+        int expired = allocator.expireIdleLeases(touched);
+        assertThat(expired).isZero();
+        assertThat(sessionRepository.findById(sessionId).orElseThrow().getAllocationState())
+                .isEqualTo(SessionAllocator.ALLOC_STATE_ACTIVE);
+    }
+
+    /**
+     * §12.2 in-flight guard: an ACTIVE session past expiry with a RUNNING
+     * execution is deferred — the sweep returns 0 and the row stays ACTIVE.
+     */
+    @Test
+    void idleLeaseSweepSkipsSessionsWithRunningExecution() {
+        AgentHostInstance instance = openInstance(2);
+        Project project = project();
+        UUID sessionId = activeSession(instance, project);
+
+        Session row = sessionRepository.findById(sessionId).orElseThrow();
+        row.setIdleLeaseExpiresAt(Instant.now().minusSeconds(60));
+        sessionRepository.saveAndFlush(row);
+        execution(sessionId, SessionExecution.State.RUNNING);
+
+        int expired = allocator.expireIdleLeases(Instant.now());
+
+        assertThat(expired).isZero();
+        assertThat(sessionRepository.findById(sessionId).orElseThrow().getAllocationState())
+                .isEqualTo(SessionAllocator.ALLOC_STATE_ACTIVE);
+        // The lease is untouched — the terminal touch re-arms it later.
+        assertThat(sessionRepository.findById(sessionId).orElseThrow().getIdleLeaseExpiresAt())
+                .isBefore(Instant.now());
+    }
+
+    /**
+     * §12.2 in-flight guard release: once the execution is terminal the same
+     * session sweeps CLOSED (the guard was the only thing holding it).
+     */
+    @Test
+    void terminalExecutionReleasesGuardAndSessionSweepsClosed() {
+        AgentHostInstance instance = openInstance(2);
+        Project project = project();
+        UUID sessionId = activeSession(instance, project);
+
+        Session row = sessionRepository.findById(sessionId).orElseThrow();
+        row.setIdleLeaseExpiresAt(Instant.now().minusSeconds(60));
+        sessionRepository.saveAndFlush(row);
+        SessionExecution running = execution(sessionId, SessionExecution.State.RUNNING);
+
+        // Guard holds while RUNNING.
+        assertThat(allocator.expireIdleLeases(Instant.now())).isZero();
+        assertThat(sessionRepository.findById(sessionId).orElseThrow().getAllocationState())
+                .isEqualTo(SessionAllocator.ALLOC_STATE_ACTIVE);
+
+        // Execution reaches a durable terminal — the same sweep now closes.
+        running.setState(SessionExecution.State.COMPLETED);
+        running.setTerminalMessageId("m-term");
+        running.setTerminalAt(Instant.now());
+        executionRepository.saveAndFlush(running);
+
+        int expired = allocator.expireIdleLeases(Instant.now());
+        assertThat(expired).isEqualTo(1);
+        assertThat(sessionRepository.findById(sessionId).orElseThrow().getAllocationState())
+                .isEqualTo(SessionAllocator.ALLOC_STATE_CLOSED);
+        // Capacity returned.
+        assertThat(allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
+                project.getId(), instance.getAgentHostId())).isPresent();
     }
 }

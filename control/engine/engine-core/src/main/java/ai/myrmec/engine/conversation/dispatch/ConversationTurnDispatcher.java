@@ -368,6 +368,10 @@ public class ConversationTurnDispatcher {
                     session.getId(), conversationId);
             return false;
         }
+        // §12.2: the sticky session just took work — restart its idle lease from
+        // now, after the send (a failed send leaves the session no busier than
+        // before, so only success re-arms the window).
+        sessionAllocator.touchIdleLease(session.getId());
         writeSnapshot(conversation, bundle.toStartPayload(execution.getId()), snapshotEvent);
         return true;
     }

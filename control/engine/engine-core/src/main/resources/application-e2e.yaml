@@ -76,6 +76,11 @@ myrmec:
   host:
     allocation-sweep:
       enabled: false
+    # Heartbeat-staleness sweeper (§12.2). Off under test — tests age
+    # heartbeats and drive HostHeartbeatStalenessSweeper.sweep() directly;
+    # a scheduled sweep would race them.
+    heartbeat-staleness:
+      enabled: false
 
 # API Documentation
 springdoc:

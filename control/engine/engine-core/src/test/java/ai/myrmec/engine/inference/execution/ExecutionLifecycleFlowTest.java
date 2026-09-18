@@ -315,6 +315,56 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
         assertThat(error.path("payload").path("code").asText()).isEqualTo("INVALID_STATE");
     }
 
+    /**
+     * §12.2 idle-lease reset on terminal: a CONVERSATION session stays ACTIVE
+     * after its turn's terminal and the terminal arm re-arms the idle lease —
+     * the next expiry window measures idleness from the terminal, not from the
+     * previous turn's ship time.
+     */
+    @Test
+    void conversationTerminalRearmsIdleLeaseAndSessionStaysActive() throws Exception {
+        ActiveSession setup = openedConversationWithExecution();
+
+        // Host admits the execution (STARTING → RUNNING) so the terminal lands.
+        String accept = """
+                { "protocolVersion": 1, "messageId": "m-accept", "type": "execution.accept",
+                  "sentAt": "%s", "hostInstanceId": "%s", "sessionId": "%s", "executionId": "%s",
+                  "payload": { "executionId": "%s", "startedAt": "%s", "resolvedModelId": "m1",
+                  "dispatchId": "%s", "assignmentDigest": "abc" } }
+                """.formatted(Instant.now(), setup.instanceId(), setup.sessionId(), setup.executionId(),
+                setup.executionId(), Instant.now(), UUID.randomUUID());
+        ((WebSocketHandler) handler).handleMessage(setup.host().session(), new TextMessage(accept));
+        assertThat(executionRepository.findById(setup.executionId()).orElseThrow().getState())
+                .isEqualTo(SessionExecution.State.RUNNING);
+
+        // Age the lease past the window — without the terminal touch, the very
+        // next idle sweep would close this session.
+        Session aged = sessionRepository.findById(setup.sessionId()).orElseThrow();
+        aged.setIdleLeaseExpiresAt(Instant.now().minusSeconds(60));
+        sessionRepository.saveAndFlush(aged);
+
+        // execution.complete (CONVERSATION terminal).
+        String complete = """
+                { "protocolVersion": 1, "messageId": "m-term", "type": "execution.complete",
+                  "sentAt": "%s", "hostInstanceId": "%s", "sessionId": "%s", "executionId": "%s",
+                  "payload": { "executionId": "%s", "completedAt": "%s",
+                  "result": { "content": "done", "structured": null, "artifacts": [] },
+                  "usage": { "modelId": "m1", "inputTokens": 3, "outputTokens": 5, "durationMs": 100 } } }
+                """.formatted(Instant.now(), setup.instanceId(), setup.sessionId(), setup.executionId(),
+                setup.executionId(), Instant.now());
+        ((WebSocketHandler) handler).handleMessage(setup.host().session(), new TextMessage(complete));
+
+        assertThat(executionRepository.findById(setup.executionId()).orElseThrow().getState())
+                .isEqualTo(SessionExecution.State.COMPLETED);
+
+        // The session stays ACTIVE (sticky reuse) and its lease was re-armed.
+        Session after = sessionRepository.findById(setup.sessionId()).orElseThrow();
+        assertThat(after.getAllocationState()).isEqualTo(SessionAllocator.ALLOC_STATE_ACTIVE);
+        assertThat(after.getIdleLeaseExpiresAt()).isAfter(Instant.now());
+        // And the re-armed lease spares the session from an immediate sweep.
+        assertThat(allocator.expireIdleLeases(Instant.now())).isZero();
+    }
+
     @Test
     void outOfOrderAndBogusFramesStayDisciplined() throws Exception {
         Host hostSetup = openedHost();

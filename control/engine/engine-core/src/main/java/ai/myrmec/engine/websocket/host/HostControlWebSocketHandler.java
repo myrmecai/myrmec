@@ -639,6 +639,10 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         boolean sent = executionCommandSender.startConversation(
                 execution.getId(), session, turn.toStartPayload(execution.getId()));
         if (sent) {
+            // §12.2: the session just took work — restart its idle lease from
+            // now, after the send (a failed send leaves the session no busier
+            // than before, so only success re-arms the window).
+            sessionAllocator.touchIdleLease(sessionId);
             log.info("Shipped staged conversation turn for session {} (conv {}, execution {})",
                     sessionId, turn.conversationId(), execution.getId());
         } else {
@@ -1046,6 +1050,13 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                 // stay ACTIVE for the next turn (the sticky reuse path).
                 sessionAllocator.close(execution.getSessionId(), "EXECUTION_TERMINAL");
                 sendSessionClose(execution.getSessionId(), "EXECUTION_TERMINAL");
+            } else {
+                // §12.2: a CONVERSATION session stays ACTIVE after its turn's
+                // terminal — restart the idle lease from the terminal so the
+                // next expiry window measures true idleness (not the previous
+                // turn's age). PAUSED and WORKFLOW close above; terminal
+                // replays short-circuit earlier via isReplay.
+                sessionAllocator.touchIdleLease(execution.getSessionId());
             }
         } catch (Exception e) {
             sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,

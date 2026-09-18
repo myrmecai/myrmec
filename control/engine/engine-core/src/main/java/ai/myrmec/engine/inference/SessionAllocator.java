@@ -6,6 +6,8 @@ import ai.myrmec.engine.agent.Agent;
 import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentRepository;
+import ai.myrmec.engine.inference.execution.SessionExecution;
+import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
 import ai.myrmec.engine.node.NodeRegistryService;
 import ai.myrmec.engine.websocket.host.payload.SessionCloseReason;
 import lombok.extern.slf4j.Slf4j;
@@ -43,10 +45,21 @@ public class SessionAllocator {
     private static final List<Agent.Status> SLOT_CONSUMING =
             List.of(Agent.Status.IDLE, Agent.Status.RESERVED, Agent.Status.BOUND, Agent.Status.DEAD);
 
+    /**
+     * §12.2 execution states that mean "an execution is still in flight on this
+     * session" — the idle-lease sweep defers these sessions. CANCELLING is
+     * transitional but included to be safe: a cancellation in progress is
+     * still engine-observable work.
+     */
+    private static final List<SessionExecution.State> IN_FLIGHT_EXECUTION_STATES =
+            List.of(SessionExecution.State.STARTING, SessionExecution.State.RUNNING,
+                    SessionExecution.State.CANCELLING);
+
     private final SessionRepository sessionRepository;
     private final AgentHostInstanceRepository instanceRepository;
     private final AgentRepository agentRepository;
     private final NodeRegistryService nodeRegistryService;
+    private final SessionExecutionRepository executionRepository;
 
     private final int offerTimeoutSeconds;
     private final int openTimeoutSeconds;
@@ -59,6 +72,7 @@ public class SessionAllocator {
             AgentHostInstanceRepository instanceRepository,
             AgentRepository agentRepository,
             NodeRegistryService nodeRegistryService,
+            SessionExecutionRepository executionRepository,
             @Value("${myrmec.host.offer-timeout-seconds:10}") int offerTimeoutSeconds,
             @Value("${myrmec.host.open-timeout-seconds:30}") int openTimeoutSeconds,
             @Value("${myrmec.host.session-idle-timeout-seconds:1800}") int idleTimeoutSeconds,
@@ -68,6 +82,7 @@ public class SessionAllocator {
         this.instanceRepository = instanceRepository;
         this.agentRepository = agentRepository;
         this.nodeRegistryService = nodeRegistryService;
+        this.executionRepository = executionRepository;
         this.offerTimeoutSeconds = offerTimeoutSeconds;
         this.openTimeoutSeconds = openTimeoutSeconds;
         this.idleTimeoutSeconds = idleTimeoutSeconds;
@@ -307,15 +322,48 @@ public class SessionAllocator {
         return stale.size();
     }
 
-    /** §12.2 idle-lease sweep body. */
+    /**
+     * §12.2 idle-lease sweep body. An ACTIVE session past its expiry closes —
+     * UNLESS an execution is still in flight on it (§12.2 "the engine does not
+     * expire while an execution is active"): STARTING/RUNNING/CANCELLING rows
+     * hold the lease; the sweep skips those and lets the idle window restart
+     * from the execution's terminal touch. Explicit {@link #close} calls are
+     * always legal (host-lost, archived, paused) and remain unguarded.
+     */
     @Transactional
     public int expireIdleLeases(Instant now) {
         List<Session> stale = sessionRepository.findByAllocationStateAndIdleLeaseExpiresAtBefore(
                 ALLOC_STATE_ACTIVE, now);
+        int closed = 0;
         for (Session session : stale) {
+            if (executionRepository.countBySessionIdAndStateIn(session.getId(),
+                    IN_FLIGHT_EXECUTION_STATES) > 0) {
+                log.debug("Idle lease of session {} deferred — an execution is in flight",
+                        session.getId());
+                continue;
+            }
             close(session.getId(), "IDLE_LEASE_EXPIRED");
+            closed++;
         }
-        return stale.size();
+        return closed;
+    }
+
+    /**
+     * §12.2 activity touch: re-arms the idle lease of an ACTIVE session so the
+     * expiry horizon restarts from NOW. Callers: the conversation ship sites
+     * (a turn just shipped on the sticky session) and the conversation terminal
+     * arm (the next idle window starts from the terminal, per §12.2 "resets
+     * whenever an execution reaches a durable terminal state"). No-op for
+     * non-ACTIVE sessions (an offer/init or a closed row carries no lease).
+     */
+    @Transactional
+    public void touchIdleLease(UUID sessionId) {
+        Session session = sessionRepository.findWithLockById(sessionId).orElse(null);
+        if (session == null || !ALLOC_STATE_ACTIVE.equals(session.getAllocationState())) {
+            return;
+        }
+        session.setIdleLeaseExpiresAt(Instant.now().plus(Duration.ofSeconds(idleTimeoutSeconds)));
+        sessionRepository.save(session);
     }
 
     /**
