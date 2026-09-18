@@ -220,5 +220,9 @@ export function orchestrationResult(detail: OrchestrationResultWire): Envelope {
 export function workspaceReleaseAcknowledgement(
   detail: WorkspaceReleaseAcknowledgementWire,
 ): Envelope {
-  return makeEnvelope("host.announce", detail);
+  // The legacy "host.announce" carriage is deleted with the legacy wire: the
+  // engine's §16.5 expiry sweep reconciles the lease, so the acknowledgement
+  // rides its own legacy-shape family (outbox record → engine ingestion is
+  // the consumer; the family name is the wire type).
+  return makeEnvelope("workspace.release_ack", detail);
 }

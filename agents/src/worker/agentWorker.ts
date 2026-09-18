@@ -12,7 +12,6 @@
  * resolves its own model per task/turn from the engine descriptor — live model
  * adapters cannot cross the thread boundary, so the worker constructs them.
  */
-import { MessageType } from "../protocol/messages.js";
 import { MessageType as UnifiedMessageType } from "../protocol/unifiedFrames.js";
 import { makeEnvelope } from "../protocol/envelope.js";
 import type { Logger } from "../models/index.js";
@@ -122,7 +121,7 @@ export class AgentWorker {
         type: string,
         payload: T,
       ): Promise<void> => {
-        post({ kind: "frame", frame: makeEnvelope(type as MessageType, payload) });
+        post({ kind: "frame", frame: makeEnvelope(type, payload) });
         return Promise.resolve();
       };
     return {
@@ -166,10 +165,10 @@ export class AgentWorker {
     const { frame } = message;
     switch (frame.type) {
       // ── Unified Inference Dispatch (§5) ──
-      case MessageType.SESSION_OPEN:
+      case "session.open":
         await this.handleSessionOpen(frame.payload);
         return;
-      case MessageType.SESSION_CLOSE:
+      case "session.close":
         this.handleSessionClose(frame.payload);
         return;
       case "execution.start":
@@ -178,13 +177,15 @@ export class AgentWorker {
       case "execution.cancel":
         this.handleExecutionCancel(frame.payload as ExecutionCancelPayload);
         return;
-      case MessageType.APPROVAL_DECISION:
-        // Approval decisions are routed to the InferenceExecutor's
-        // internal ApprovalCoordinator.
+      case "approval.decision":
+        // §8.6 live-execution delivery: the verdict unblocks a handler
+        // awaiting ctx.requestApproval. The §8.6 durable path is the engine
+        // row → next turn's conversationContinuation; this branch covers a
+        // host-authored decision frame when the engine pushes one.
         this.inference.handleApprovalDecision(frame.payload);
         return;
       // ── Feature 10: orchestration (§16.3) ──
-      case MessageType.ORCHESTRATION_RELEASE:
+      case "orchestration.release":
         await this.orchestration?.handleRelease(frame.payload as {
           releaseId: string;
           runId: string;
@@ -192,7 +193,7 @@ export class AgentWorker {
           reason?: string;
         });
         return;
-      case MessageType.ORCHESTRATION_BUDGET_UPDATED:
+      case "orchestration.budget_updated":
         // §16.3 tighten-only: V1 records the frame; enforcement lands with
         // the quota loop's dispatch-allowance wiring.
         this.log.debug("orchestration.budget_updated received");

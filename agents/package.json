@@ -29,11 +29,6 @@
       "require": "./dist/worker/AgentWorkerHost.cjs",
       "default": "./dist/worker/AgentWorkerHost.js"
     },
-    "./protocol/hostFrames.js": {
-      "types": "./dist/protocol/hostFrames.d.ts",
-      "require": "./dist/protocol/hostFrames.cjs",
-      "default": "./dist/protocol/hostFrames.js"
-    },
     "./models/index.js": {
       "types": "./dist/models/index.d.ts",
       "require": "./dist/models/index.cjs",

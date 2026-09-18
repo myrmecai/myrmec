@@ -6,7 +6,7 @@ import { AgentWorkerHost, type WorkerLike } from "./AgentWorkerHost.js";
 import type { WorkerOutbound } from "./agentWorkerProtocol.js";
 import type { Envelope, RawEnvelope } from "../protocol/envelope.js";
 import { makeEnvelope } from "../protocol/envelope.js";
-import { MessageType } from "../protocol/messages.js";
+import { MessageType as UnifiedMessageType } from "../protocol/unifiedFrames.js";
 
 /** A fake worker that lets the test drive message/error/exit and observe sends. */
 class FakeWorker implements WorkerLike {
@@ -48,12 +48,12 @@ describe("AgentWorkerHost", () => {
     const worker = new FakeWorker();
     const host = new AgentWorkerHost({ worker, onFrame: () => {} });
 
-    host.dispatch(frame(MessageType.TASK_ASSIGN));
+    host.dispatch(frame("task.assign"));
 
     expect(worker.posted).toHaveLength(1);
     expect(worker.posted[0]).toMatchObject({
       kind: "envelope",
-      frame: { type: MessageType.TASK_ASSIGN },
+      frame: { type: "task.assign" },
     });
   });
 
@@ -64,12 +64,12 @@ describe("AgentWorkerHost", () => {
 
     const out: WorkerOutbound = {
       kind: "frame",
-      frame: makeEnvelope(MessageType.MESSAGE_DELTA, { content: "hi" }),
+      frame: makeEnvelope(UnifiedMessageType.EXECUTION_DELTA, { content: "hi" }),
     };
     worker.emit("message", out);
 
     expect(routed).toHaveLength(1);
-    expect(routed[0].type).toBe(MessageType.MESSAGE_DELTA);
+    expect(routed[0].type).toBe(UnifiedMessageType.EXECUTION_DELTA);
   });
 
   it("ignores an unknown worker message", () => {

@@ -22,6 +22,7 @@ import {
   type ChannelOpenedPayload,
   type ExecutionAcceptPayload,
   type ExecutionCancelPayload,
+  type ExecutionCancelledPayload,
   type ExecutionCompletePayload,
   type ExecutionDeltaPayload,
   type ExecutionEventPayload,
@@ -36,6 +37,7 @@ import {
   type HostResumePayload,
   type ParsedUnifiedFrame,
   type ProtocolAckPayload,
+  type ProtocolErrorPayload,
   type ReconcileDecision,
   type SessionAcceptPayload,
   type SessionClosedPayload,
@@ -50,7 +52,6 @@ import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import type { Logger } from "../models/index.js";
 import { WebSocket, type RawData } from "ws";
-import type { ReconnectingConnection } from "../transport/reconnectingConnection.js";
 
 /** Provider for the HOST_JWT access token used on the control socket. */
 export interface HostTokenProvider {
@@ -348,6 +349,11 @@ export interface ExecutionHandler {
   (frame: UnifiedFrame<"execution.start">): void | Promise<void>;
 }
 
+/** Handler for execution.cancel commands arriving from the engine. */
+export interface ExecutionCancelHandler {
+  (frame: UnifiedFrame<"execution.cancel">): void | Promise<void>;
+}
+
 /**
  * Production WebSocket connection for the host-control socket. Sends and
  * receives raw unified-protocol frames.
@@ -559,6 +565,11 @@ export class WebSocketChannelConnection implements ChannelConnection {
   }
 }
 
+/** Initial reconnect backoff in ms (matches the legacy policy's 1s). */
+const INITIAL_BACKOFF_MS = 1_000;
+/** Maximum reconnect backoff in ms (matches the legacy policy's 32s). */
+const MAX_BACKOFF_MS = 32_000;
+
 /** Durable inbound frame families that must be acknowledged with protocol.ack. */
 const DURABLE_INBOUND_TYPES: ReadonlySet<string> = new Set([
   UnifiedMessageType.EXECUTION_EVENT,
@@ -642,7 +653,6 @@ export class HostControlClient {
   private readonly reportedCapacity: Record<string, unknown>;
 
   private connection: HostControlConnection;
-  private reconnecting: ReconnectingConnection | null = null;
   private state: HostControlState = "IDLE";
   private running = false;
   private _currentNonce: string | null = null;
@@ -652,6 +662,13 @@ export class HostControlClient {
   private effectivePoolSize = 0;
   private readonly seen: MessageIdDedupe;
   private executionHandler: ExecutionHandler | null = null;
+  private executionCancelHandler: ExecutionCancelHandler | null = null;
+  private sessionOpenObserver:
+    | ((frame: UnifiedFrame<"session.open">) => void | Promise<void>)
+    | null = null;
+  private sessionCloseObserver:
+    | ((frame: UnifiedFrame<"session.close">) => void | Promise<void>)
+    | null = null;
   private readonly onPsk: ((psk: Uint8Array) => void) | undefined;
   /** §7.5 (A1): session collaborators (registry) for channel binding. */
   private readonly sessionLifecycle: HostSessionLifecycle | null;
@@ -731,8 +748,39 @@ export class HostControlClient {
     this.executionHandler = handler;
   }
 
+  /** Register a callback for execution.cancel frames (§8.4: engine→host). */
+  onExecutionCancel(handler: ExecutionCancelHandler): void {
+    this.executionCancelHandler = handler;
+  }
+
+  /**
+   * Observe `session.open` frames (§7.1): fired AFTER the transport-side
+   * bookkeeping (channel bind, session.opened reply) so the consumer opens
+   * its model/tools for the session. The payload is the raw frame — the
+   * consumer narrows it.
+   */
+  onSessionOpen(
+    handler: (frame: UnifiedFrame<"session.open">) => void | Promise<void>,
+  ): void {
+    this.sessionOpenObserver = handler;
+  }
+
+  /**
+   * Observe `session.close` frames (§9): fired after the channel teardown.
+   */
+  onSessionClose(
+    handler: (frame: UnifiedFrame<"session.close">) => void | Promise<void>,
+  ): void {
+    this.sessionCloseObserver = handler;
+  }
+
   /**
    * Start the control socket: open with retry, then run the FSM until stop().
+   *
+   * The reconnect machinery (exponential backoff + the close-code reaction —
+   * refresh on 4001, re-register on 4002, permanent stop on 4003, reconnect
+   * otherwise) is INLINED here: the legacy `ReconnectingConnection` was its
+   * only consumer and is deleted with the legacy wire.
    */
   async start(): Promise<void> {
     if (this.running) {
@@ -741,17 +789,71 @@ export class HostControlClient {
     this.running = true;
     this.state = "CONNECTING";
 
-    const { ReconnectingConnection: RC } = await import(
-      "../transport/reconnectingConnection.js"
-    );
-    this.reconnecting = new RC({
-      connection: this.connection as unknown as import("../transport/connection.js").WebSocketConnection,
-      getAccessToken: () => this.tokenProvider.getAccessToken(),
-      refreshToken: () => this.tokenProvider.refreshTokens(),
-      register: () => this.tokenProvider.reRegister(),
-    });
+    await this.connectWithRetry();
+  }
 
-    await this.reconnecting.connectWithRetry();
+  /** Connect, retrying with exponential backoff until success or `stopReconnecting()`. */
+  private async connectWithRetry(): Promise<void> {
+    this.backoffMs = INITIAL_BACKOFF_MS;
+    while (this.shouldReconnect) {
+      try {
+        const token = await this.tokenProvider.getAccessToken();
+        await this.connection.connect(token);
+        return;
+      } catch {
+        await this.sleep(this.backoffMs);
+        this.backoffMs = Math.min(this.backoffMs * 2, MAX_BACKOFF_MS);
+      }
+    }
+  }
+
+  /**
+   * React to a disconnect close code (REQ-A-002): refresh on 4001,
+   * re-register on 4002 (and as the fallback when a refresh fails), stop on
+   * 4003, reconnect otherwise.
+   *
+   * @returns true if the caller should attempt to reconnect.
+   */
+  private async handleDisconnectCode(code: number): Promise<boolean> {
+    if (!this.shouldReconnect) {
+      return false;
+    }
+    switch (code) {
+      case CloseCode.NORMAL:
+        return false;
+      case CloseCode.TOKEN_EXPIRED:
+        try {
+          await this.tokenProvider.refreshTokens();
+        } catch {
+          // Refresh failed — fall back to a full re-register.
+          await this.tokenProvider.reRegister();
+        }
+        return true;
+      case CloseCode.INVALID_TOKEN:
+        await this.tokenProvider.reRegister();
+        return true;
+      case CloseCode.AGENT_DEACTIVATED:
+        this.shouldReconnect = false;
+        return false;
+      case CloseCode.DUPLICATE_CONNECTION:
+        // Could be a race during a redeploy; still try to reconnect.
+        return true;
+      default:
+        return true;
+    }
+  }
+
+  /** Cease reconnection attempts (deliberate shutdown / protocol fatal). */
+  private stopReconnecting(): void {
+    this.shouldReconnect = false;
+  }
+
+  private shouldReconnect = true;
+  private backoffMs = INITIAL_BACKOFF_MS;
+
+  /** Sleep impl (fake timers in tests advance real setTimeout). */
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /** Stop the client: cease heartbeats, stop reconnecting, close the socket. */
@@ -761,7 +863,7 @@ export class HostControlClient {
     // §7.5: every bound channel socket dies with the host teardown.
     await this.closeAllChannels(reason);
     this.stopRetentionTimer();
-    this.reconnecting?.stop();
+    this.stopReconnecting();
     await this.connection?.disconnect(reason);
     this.state = "IDLE";
   }
@@ -925,6 +1027,32 @@ export class HostControlClient {
     });
   }
 
+  /** Send a terminal execution.cancelled (host aborted the execution). */
+  async sendExecutionCancelled(
+    payload: ExecutionCancelledPayload,
+  ): Promise<void> {
+    await this.sendFrame({
+      protocolVersion: SUPPORTED_PROTOCOL_VERSION,
+      messageId: this.nextMessageId(),
+      type: UnifiedMessageType.EXECUTION_CANCELLED,
+      sentAt: new Date().toISOString(),
+      executionId: payload.executionId,
+      payload,
+    });
+  }
+
+  /** Answer a rejected frame with protocol.error (§8.7 etc.). */
+  async sendProtocolError(payload: ProtocolErrorPayload): Promise<void> {
+    await this.sendFrame({
+      protocolVersion: SUPPORTED_PROTOCOL_VERSION,
+      messageId: this.nextMessageId(),
+      type: UnifiedMessageType.PROTOCOL_ERROR,
+      sentAt: new Date().toISOString(),
+      correlationId: payload.offendingMessageId ?? null,
+      payload,
+    });
+  }
+
   /** Request cancellation of an execution. */
   async sendExecutionCancel(payload: ExecutionCancelPayload): Promise<void> {
     await this.sendFrame({
@@ -1080,16 +1208,13 @@ export class HostControlClient {
       this.resumedThisConnection = false;
     }
 
-    if (!this.running || !this.reconnecting) {
+    if (!this.running) {
       return;
     }
 
-    const shouldReconnect = await this.reconnecting.handleDisconnect(
-      code,
-      reason,
-    );
+    const shouldReconnect = await this.handleDisconnectCode(code);
     if (shouldReconnect && this.running) {
-      await this.reconnecting.connectWithRetry();
+      await this.connectWithRetry();
     }
   }
 
@@ -1387,6 +1512,10 @@ export class HostControlClient {
       await this.handleExecutionStart(frame as UnifiedFrame<"execution.start">);
       return;
     }
+    if (frame.type === UnifiedMessageType.EXECUTION_CANCEL) {
+      await this.handleExecutionCancel(frame as UnifiedFrame<"execution.cancel">);
+      return;
+    }
 
     if (!CLIENT_HANDLED_TYPES.has(frame.type)) {
       this.log.warn("Unhandled unified frame type:", frame.type);
@@ -1450,7 +1579,7 @@ export class HostControlClient {
     );
     if (payload.code === ProtocolErrorCode.UNSUPPORTED_VERSION) {
       this.log.error("Unsupported protocol version — closing connection");
-      this.reconnecting?.stop();
+      this.stopReconnecting();
       await this.connection.disconnect("Unsupported protocol version");
       this.state = "IDLE";
       return;
@@ -1524,6 +1653,11 @@ export class HostControlClient {
       ready: true,
       channelMode,
     });
+    // Consumer hook (§7.1): after the transport-side bookkeeping the
+    // supervisor/worker opens its model + tools for the session.
+    if (this.sessionOpenObserver) {
+      await this.sessionOpenObserver(frame);
+    }
   }
 
   // ==================== Dedicated session channel (§7.5, A1) ====================
@@ -1623,6 +1757,11 @@ export class HostControlClient {
       closedAt: new Date().toISOString(),
       reasonCode: payload.reasonCode ?? "HOST_INITIATED",
     });
+    // Consumer hook (§9): the worker/registry tears the session down
+    // alongside the transport-side teardown.
+    if (this.sessionCloseObserver) {
+      await this.sessionCloseObserver(frame);
+    }
   }
 
   private async handleExecutionStart(
@@ -1643,6 +1782,21 @@ export class HostControlClient {
     if (this.executionHandler) {
       await this.executionHandler(frame);
     }
+  }
+
+  private async handleExecutionCancel(
+    frame: UnifiedFrame<"execution.cancel">,
+  ): Promise<void> {
+    const payload = frame.payload as ExecutionCancelPayload;
+    const executionId = frame.executionId ?? payload.executionId;
+    this.log.info(`Execution cancel requested: ${executionId}`);
+    if (this.executionCancelHandler) {
+      await this.executionCancelHandler(frame);
+      return;
+    }
+    this.log.warn(
+      `execution.cancel for ${executionId} dropped: no cancel handler wired`,
+    );
   }
 
   private async ack(frame: ParsedUnifiedFrame): Promise<void> {

@@ -2,92 +2,15 @@
 // Copyright 2026 The Myrmec Authors
 
 /**
- * WebSocket message types and close codes for the Myrmec Engine ↔ Agent
- * protocol. Ported verbatim from the Python SDK (`myrmec/agent/messages.py`)
- * — keep the string values byte-identical so a TypeScript agent and the
- * existing engine speak the same wire protocol.
+ * WebSocket close codes for host↔engine communication. The 4xxx codes drive
+ * the host-control client's reconnect/re-register reaction (REQ-A-002) — the
+ * same matrix the legacy supervisor loop ran, now inside
+ * `ReconnectingConnection` under `HostControlClient.start()`.
  */
 
-/** WebSocket message types for Engine ↔ Agent communication. */
-export const MessageType = {
-  // Engine → Agent
-  TASK_ASSIGN: "task.assign",
-  TASK_CANCEL: "task.cancel",
-  PING: "ping",
-
-  // Conversational sessions (Engine → Agent)
-  CONVERSATION_TURN_ASSIGN: "conversation.turn.assign",
-  CONVERSATION_TURN_CANCEL: "conversation.turn.cancel",
-
-  // HITL approvals (Engine → Agent)
-  APPROVAL_DECISION: "approval.decision",
-
-  // Reserve-time binding (Engine → Agent)
-  AGENT_BIND: "agent.bind",
-  AGENT_RELEASE: "agent.release",
-
-  // Bind handshake (Host → Engine)
-  AGENT_BIND_ACK: "agent.bind.ack",
-  AGENT_BIND_NACK: "agent.bind.nack",
-
-  // Agent Host control (Host → Engine)
-  HOST_ANNOUNCE: "host.announce",
-
-  // Agent → Engine
-  TASK_ACCEPT: "task.accept",
-  TASK_REJECT: "task.reject",
-  TASK_PROGRESS: "task.progress",
-  TASK_COMPLETE: "task.complete",
-  TASK_FAILED: "task.failed",
-  LOG: "log",
-  TOOL_CALL: "tool.call",
-  TOOL_RESULT: "tool.result",
-  TOKEN_USAGE: "token.usage",
-  TASK_METRICS: "task.metrics",
-  PONG: "pong",
-  DISCONNECT: "disconnect",
-
-  // Conversation socket attach (Agent → Engine)
-  CONVERSATION_ATTACH: "conversation.attach",
-
-  // Conversational sessions (Agent → Engine)
-  MESSAGE_DELTA: "message.delta",
-  MESSAGE_COMPLETE: "message.complete",
-  TASK_CANCELLED: "task.cancelled",
-
-  // HITL approvals (Agent → Engine)
-  APPROVAL_REQUEST: "approval.request",
-
-  // Unified Inference Dispatch — Engine → Agent
-  SESSION_OPEN: "session.open",
-  SESSION_CLOSE: "session.close",
-  INFERENCE_ASSIGN: "inference.assign",
-  INFERENCE_CANCEL: "inference.cancel",
-
-  // Orchestration — Engine → Agent (design §16.3, Feature 10)
-  ORCHESTRATION_RELEASE: "orchestration.release",
-  ORCHESTRATION_BUDGET_UPDATED: "orchestration.budget_updated",
-
-  // Orchestration — Agent → Engine (design §16.3, Feature 10)
-  ORCHESTRATION_EVENT: "orchestration.event",
-  ORCHESTRATION_APPROVAL_REQUESTED: "orchestration.approval_requested",
-  ORCHESTRATION_RESULT: "orchestration.result",
-
-  // Unified Inference Dispatch — Agent → Engine
-  INFERENCE_ACCEPT: "inference.accept",
-  INFERENCE_DELTA: "inference.delta",
-  INFERENCE_TOOL_CALL: "inference.tool_call",
-  INFERENCE_TOOL_RESULT: "inference.tool_result",
-  INFERENCE_COMPLETE: "inference.complete",
-  INFERENCE_FAILED: "inference.failed",
-  INFERENCE_CANCELLED: "inference.cancelled",
-} as const;
-
-export type MessageType = (typeof MessageType)[keyof typeof MessageType];
-
 /**
- * WebSocket close codes for agent communication. The 4xxx codes drive the
- * Supervisor's reconnect/re-register reaction (REQ-A-002).
+ * WebSocket close codes for host communication. The 4xxx codes drive the
+ * reconnect/re-register reaction (REQ-A-002).
  */
 export const CloseCode = {
   NORMAL: 1000, // Normal closure

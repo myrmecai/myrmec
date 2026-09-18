@@ -2,31 +2,53 @@
 // Copyright 2026 The Myrmec Authors
 
 /**
- * Abstract Supervisor base shared by the Headless and Interactive runtimes.
+ * Abstract Supervisor base shared by the Headless and Interactive runtimes —
+ * the PRODUCTION COMPOSITION ROOT for the unified host-control wire (§6–§11).
  *
- * Ported from the lifecycle of the Python `Agent` class
- * (`myrmec/agent/agent.py`) and shaped per Â§9.6.1: a thin core that owns the
- * control socket, reconnect policy, and envelope dispatch, while everything
- * that differs between cluster and plugin lives behind a small set of
- * overridable seams (Â§9.3). Subclasses provide auth (seam 1) and may override
- * the dispatch hooks (work-initiation / presentation seams).
+ * The legacy transport stack (`WebSocketConnection` + `ReconnectingConnection`
+ * + the `/api/v1/agent/ws` wire) is deleted: the supervisor now owns a
+ * {@link HostControlClient} that drives the host-control socket end to end —
+ * connect + HOST_JWT handshake, host.open/opened, heartbeat, session offers
+ * (auto-accept), session.open dispatch (§7.5 channel binding), execution
+ * routing, and §13 retention/recovery. The supervisor's job shrinks to:
+ *
+ *   1. adapt the subclass's auth seam onto the client's `HostTokenProvider`,
+ *   2. report capacity/pool in `host.open` (replaces the legacy
+ *      `host.announce` — capacity now rides host.open + heartbeat),
+ *   3. route inbound commands (execution.start/cancel) to the overridable
+ *      `on*` hooks the executor slice fills in,
+ *   4. route worker-produced frames out through the client's typed senders,
+ *   5. wire the SessionRegistry seams (sessionLifecycle / retention / PSK)
+ *      into the client when a registry is present.
  *
  * This base implements REQ-A-001/002/010/011 (register, connect, reconnect,
- * token refresh). Task/turn execution is layered on top by the executor slice
- * via the overridable `on*` hooks.
+ * token refresh) — reconnect + refresh/re-register are the client's internal
+ * path, driven by the same close-code reaction the old supervisor loop ran.
  */
 import {
-  ReconnectingConnection,
-  WebSocketConnection,
-} from "../transport/index.js";
+  HostControlClient,
+  type ExecutionCancelHandler,
+  type ExecutionHandler,
+  type HostControlConnection,
+  type HostRetentionLifecycle,
+  type HostSessionLifecycle,
+  type HostTokenProvider,
+} from "./HostControlClient.js";
 import type { Envelope, RawEnvelope } from "../protocol/envelope.js";
-import { MessageType } from "../protocol/messages.js";
-import {
-  hostAnnounce,
-  type AgentProvisions,
-  type ReportedCapacity,
-} from "../protocol/hostFrames.js";
-import os from "node:os";
+import type {
+  ExecutionAcceptPayload,
+  ExecutionApprovalRequestedPayload,
+  ExecutionCancelPayload,
+  ExecutionCancelledPayload,
+  ExecutionCompletePayload,
+  ExecutionDeltaPayload,
+  ExecutionEventPayload,
+  ExecutionFailedPayload,
+  ExecutionPausedPayload,
+  ExecutionRejectPayload,
+  ProtocolErrorPayload,
+  SessionOpenPayload,
+} from "../protocol/unifiedFrames.js";
 import type {
   AuthContext,
   Logger,
@@ -41,28 +63,65 @@ export interface AgentSupervisorOptions {
   role: SupervisorRole;
   logger?: Logger;
   /**
-   * Tools + runtime this host advertises as installed (the supply side of
-   * reserve-time matching). Announced on every control-socket connect.
-   * Defaults to empty buckets when omitted.
+   * Worker-pool size reported in `host.open` + heartbeat. The subclass sets
+   * it from its spawnWorkers configuration; default 1 (V1 pool = 1).
    */
-  provisions?: AgentProvisions;
+  poolSize?: number;
+  /**
+   * Extra host capabilities (tools/runtime catalog) reported in `host.open`
+   * — the supply side of reserve-time matching (replaces the legacy
+   * `host.announce` provisions).
+   */
+  capabilities?: Record<string, unknown>;
+  /**
+   * CPU/RAM capacity the pool was auto-sized from, reported in `host.open`
+   * + heartbeat (replaces the legacy `host.announce` reportedCapacity).
+   */
+  reportedCapacity?: Record<string, unknown>;
+  /**
+   * Connection override (tests inject a fake) — forwarded to the client.
+   */
+  connection?: HostControlConnection;
+  /**
+   * Override the host-control socket path. Defaults to the client's own
+   * unified path (`/api/v1/agent/host/ws`).
+   */
+  path?: string;
 }
 
 export abstract class AgentSupervisor {
   protected readonly engineUrl: string;
   protected readonly log: Logger;
-  protected readonly provisions: AgentProvisions;
+  protected readonly poolSize: number;
+  protected readonly capabilities: Record<string, unknown>;
+  protected readonly reportedCapacity: Record<string, unknown>;
   protected ctx: SupervisorContext;
   protected auth: AuthContext | null = null;
 
-  private connection: WebSocketConnection | null = null;
-  private reconnecting: ReconnectingConnection | null = null;
+  /**
+   * §7.5 (A1) + §13 (A2): the session-lifecycle collaborator (the
+   * SessionRegistry). When set before {@link start}, the client binds
+   * dedicated channels for channel-bearing session.opens and retains
+   * sessions across control-socket drops (host.resume/host.reconcile
+   * instead of teardown).
+   */
+  protected sessionRegistry?: HostSessionLifecycle & HostRetentionLifecycle;
+
+  /** The host-control path override (tests/consumers may pin it). */
+  private path: string | undefined;
+  /** Connection override captured from options (tests inject a fake). */
+  private optionsConnection: HostControlConnection | undefined;
+  private client: HostControlClient | null = null;
   private running = false;
 
   constructor(options: AgentSupervisorOptions) {
     this.engineUrl = options.engineUrl;
     this.log = options.logger ?? console;
-    this.provisions = options.provisions ?? { tools: [], runtime: [] };
+    this.poolSize = options.poolSize ?? 1;
+    this.capabilities = options.capabilities ?? {};
+    this.reportedCapacity = options.reportedCapacity ?? {};
+    this.path = options.path;
+    this.optionsConnection = options.connection;
     this.ctx = {
       hostId: "",
       role: options.role,
@@ -112,45 +171,82 @@ export abstract class AgentSupervisor {
   // ==================== Lifecycle ====================
 
   /**
-   * Start the Supervisor: authenticate, open the control socket, and run the
-   * receive/reconnect loop until `stop()`. Blocks for the Supervisor's life.
+   * Build the unified host-control client from this supervisor's state. The
+   * token provider adapts the subclass's auth seam onto the client's
+   * `HostTokenProvider` contract; the registry seams (sessionLifecycle /
+   * retention / PSK) are wired when the subclass set a registry.
+   */
+  private buildClient(): HostControlClient {
+    const tokenProvider: HostTokenProvider = {
+      getAccessToken: () => this.getAccessToken(),
+      refreshTokens: () => this.refreshTokens(),
+      reRegister: () => this.reRegister(),
+    };
+    const client = new HostControlClient({
+      engineUrl: this.engineUrl,
+      tokenProvider,
+      logger: this.log,
+      poolSize: this.poolSize,
+      capabilities: this.capabilities,
+      reportedCapacity: this.reportedCapacity,
+      // Runtime version constant: the SDK version (§6 host.open contract).
+      runtimeVersion: "0.1.0",
+      ...(this.path ? { path: this.path } : {}),
+      ...(this.optionsConnection ? { connection: this.optionsConnection } : {}),
+      // §6 (design 2026-09-16-credential-envelope-delivery.md): hand the
+      // delivered run PSK to the subclass's registry seam when present.
+      onPsk: (psk) => this.onPsk(psk),
+      // §7.5 (A1) + §13 (A2): the registry implements both collaborator
+      // surfaces; when absent the client stays control-only and pre-A2.
+      ...(this.sessionRegistry
+        ? { sessionLifecycle: this.sessionRegistry }
+        : {}),
+      ...(this.sessionRegistry ? { retention: this.sessionRegistry } : {}),
+    });
+    client.onExecutionStart((frame) => this.onExecutionStart(frame));
+    client.onExecutionCancel((frame) => this.onExecutionCancel(frame));
+    // Mirror session opens/closes to the subclass's forwarding hooks (the
+    // worker's registry opens/closes the model + tools alongside the
+    // transport-side bookkeeping).
+    client.onSessionOpen(async (frame) => {
+      this.onSessionOpen(frame.payload as SessionOpenPayload);
+    });
+    client.onSessionClose(async (frame) => {
+      const payload = frame.payload as { sessionId?: string };
+      if (payload.sessionId) {
+        this.onSessionClose({ sessionId: payload.sessionId });
+      }
+    });
+    return client;
+  }
+
+  /**
+   * Start the Supervisor: authenticate, bring up the worker pool, open the
+   * host-control socket (host.open → host.opened → heartbeat) and run until
+   * `stop()`. Blocks until the socket is connected — the client owns
+   * reconnection from there (the old `onDisconnect` retry loop is the
+   * client's internal path now).
    */
   async start(): Promise<void> {
-    this.log.info("Starting supervisorâ€¦");
+    this.log.info("Starting supervisor…");
     this.running = true;
 
     this.auth = await this.authenticate();
 
     // Bring up the worker pool before the socket so a worker is ready to take
-    // the first engine-pushed frame (Â§9.6.1 spawnWorkers seam).
+    // the first engine-pushed frame (§9.6.1 spawnWorkers seam).
     await this.spawnWorkers();
 
-    this.connection = new WebSocketConnection({
-      engineUrl: this.engineUrl,
-      onMessage: (frame) => this.onEnvelope(frame),
-      onConnect: () => this.onConnect(),
-      onDisconnect: (code, reason) => this.onDisconnect(code, reason),
-    });
-
-    this.reconnecting = new ReconnectingConnection({
-      connection: this.connection,
-      getAccessToken: () => this.getAccessToken(),
-      refreshToken: () => this.refreshTokens(),
-      register: () => this.reRegister(),
-    });
-
-    await this.reconnecting.connectWithRetry();
-    // From here the socket's close handler drives reconnect via onDisconnect;
-    // start() resolves once connected, matching the Python run() entry.
+    this.client = this.buildClient();
+    await this.client.start();
   }
 
-  /** Request graceful shutdown: stop reconnecting and close the socket. */
+  /** Request graceful shutdown: stop the client (heartbeats, channels, socket). */
   async stop(reason = "Shutdown requested"): Promise<void> {
     this.log.info("Shutdown requested:", reason);
     this.running = false;
-    this.reconnecting?.stop();
     await this.stopWorkers();
-    await this.connection?.disconnect(reason);
+    await this.client?.stop(reason);
   }
 
   /** True while the Supervisor is running. */
@@ -158,92 +254,56 @@ export abstract class AgentSupervisor {
     return this.running;
   }
 
-  // ==================== Reconnect wiring ====================
+  // ==================== Inbound routing (unified wire) ====================
 
-  /** Fired once the control socket opens. Announces host capacity (Â§9.9). */
-  protected async onConnect(): Promise<void> {
-    this.log.info("Control socket connected");
-    await this.announce();
+  /**
+   * Unified `execution.start` — the ONE work-initiation frame on the
+   * host-control socket (conversation + orchestration alike; the frame
+   * discriminates by payload shape). Overridable for tests.
+   */
+  protected async onExecutionStart(
+    _frame: Parameters<ExecutionHandler>[0],
+  ): Promise<void> {
+    this.log.debug("execution.start received (no executor wired yet)");
   }
 
   /**
-   * Advertise this host's provisions + auto-sized capacity to the engine
-   * (`host.announce`). Sent on every connect so the engine always holds the
-   * host's current supply (the host is the source of truth, agent-host-model
-   * Â§4.3). Capacity is read from the running machine.
+   * Unified `execution.cancel` — cancellation for an in-flight execution.
+   * Overridable for tests.
    */
-  protected async announce(): Promise<void> {
-    const reportedCapacity: ReportedCapacity = {
-      cpuCount: os.cpus().length,
-      totalMemoryBytes: os.totalmem(),
-    };
-    await this.send(hostAnnounce(this.provisions, reportedCapacity));
-    this.log.debug("Sent host.announce", this.provisions, reportedCapacity);
+  protected async onExecutionCancel(
+    _frame: Parameters<ExecutionCancelHandler>[0],
+  ): Promise<void> {
+    this.log.debug("execution.cancel received (no handler wired yet)");
   }
 
   /**
-   * Fired when the socket closes. Runs the close-code reaction (refresh /
-   * re-register / stop) and, if reconnection is warranted, reconnects with
-   * backoff. This is the glue the Python `run()` loop performed inline.
+   * A `session.open` the client dispatched (after channel bind + opened
+   * reply). The base default is a logged no-op; subclasses forward to the
+   * worker registry.
    */
-  protected async onDisconnect(code: number, reason: string): Promise<void> {
-    this.log.info(`Control socket closed: code=${code} reason=${reason}`);
-    if (!this.running || !this.reconnecting) {
-      return;
-    }
-    const shouldReconnect = await this.reconnecting.handleDisconnect(
-      code,
-      reason,
-    );
-    if (shouldReconnect && this.running) {
-      await this.reconnecting.connectWithRetry();
-    }
+  protected onSessionOpen(_payload: SessionOpenPayload): void {
+    this.log.debug("session.open received (no worker wired yet)");
   }
 
-  // ==================== Envelope dispatch ====================
+  /** A `session.close` the client dispatched. Base default: no-op. */
+  protected onSessionClose(_payload: { sessionId: string }): void {
+    this.log.debug("session.close received (no worker wired yet)");
+  }
+
+  // ==================== PSK delivery (§6, credential envelope design) ========
 
   /**
-   * Default envelope router (mirrors Python `_handle_message`). `ping` is
-   * already answered in the transport layer, so it never reaches here.
-   * Subclasses/executor override the `on*` hooks below.
+   * The run PSK decoded from `host.opened` (32 bytes, process memory only —
+   * never logged, never persisted). The base default forwards to the wired
+   * session registry's `setPsk` when one is present; otherwise no-op.
+   * Subclasses may override for their own vault plumbing.
    */
-  protected async onEnvelope(frame: RawEnvelope): Promise<void> {
-    switch (frame.type) {
-      case MessageType.TASK_ASSIGN:
-        return this.onTaskAssign(frame);
-      case MessageType.TASK_CANCEL:
-        return this.onTaskCancel(frame);
-      case MessageType.CONVERSATION_TURN_ASSIGN:
-        return this.onConversationTurnAssign(frame);
-      case MessageType.APPROVAL_DECISION:
-        return this.onApprovalDecision(frame);
-      // â”€â”€ Unified Inference Dispatch (Â§5) + orchestration (Â§16.3) â”€â”€
-      // Frames the engine streams to a connected agent: forwarded into
-      // the worker pool (the worker routes orchestration payloads itself).
-      case MessageType.SESSION_OPEN:
-      case MessageType.SESSION_CLOSE:
-      case MessageType.INFERENCE_ASSIGN:
-      case MessageType.INFERENCE_CANCEL:
-      case MessageType.ORCHESTRATION_RELEASE:
-      case MessageType.ORCHESTRATION_BUDGET_UPDATED:
-        return this.onInferenceFrame(frame);
-      default:
-        this.log.warn("Unknown message type:", frame.type);
-    }
-  }
-
-  /** A session/inference/orchestration frame from the engine (Â§5/Â§16.3):
-   * forwarded to the worker pool. Overridable for tests. */
-  protected async onInferenceFrame(frame: RawEnvelope): Promise<void> {
-    this.forwardToWorker(frame);
-  }
-
-  /** Send a frame on the control socket. */
-  protected send(frame: Parameters<WebSocketConnection["send"]>[0]): Promise<void> {
-    if (!this.connection) {
-      return Promise.reject(new Error("Supervisor not connected"));
-    }
-    return this.connection.send(frame);
+  protected onPsk(psk: Uint8Array): void {
+    const registry = this.sessionRegistry as unknown as
+      | { setPsk?: (psk: Uint8Array) => void }
+      | undefined;
+    registry?.setPsk?.(psk);
   }
 
   // ==================== Worker forwarding ====================
@@ -251,37 +311,88 @@ export abstract class AgentSupervisor {
   /**
    * Forward an inbound frame to the worker pool. The base default logs; the
    * concrete Supervisor overrides this to dispatch into its worker host
-   * (Â§9.7). Conversation-socket inbound (`conversation.turn.assign`,
-   * `approval.decision`) and reserve-time bind/release frames both flow here.
+   * (§9.7). Conversation-socket inbound and reserve-time frames are gone
+   * with the legacy wire — everything unified flows here.
    */
   protected forwardToWorker(frame: RawEnvelope): void {
     this.log.debug("forwardToWorker (no worker wired):", frame.type);
   }
 
+  /** Convert a unified frame to a worker envelope and hand it to the
+   * overridable forwarding seam. */
+  protected forwardToWorkerEnvelope(frame: Envelope): void {
+    this.forwardToWorker(frame as RawEnvelope);
+  }
+
   /**
-   * Route a frame the worker produced. Under the unified protocol (P6-T6)
-   * every worker frame rides the host control socket - the per-conversation
-   * socket split is gone with the legacy wire (9.3 seam 4 collapsed).
+   * Route a frame the worker produced onto the unified wire. Under the
+   * unified protocol (P6-T6) every worker frame rides the host control
+   * socket — the per-conversation socket split is gone with the legacy wire
+   * (§9.3 seam 4 collapsed).
    */
   protected async routeWorkerFrame(frame: Envelope): Promise<void> {
-    await this.send(frame);
-  }
-  // Overridable dispatch hooks â€” default to a logged no-op. The executor
-  // slice fills these in. Kept as seams so work-initiation (headless vs
-  // interactive) and presentation differences stay out of this core.
-  protected async onTaskAssign(_frame: RawEnvelope): Promise<void> {
-    this.log.debug("task.assign received (no executor wired yet)");
+    await this.post(frame);
   }
 
-  protected async onTaskCancel(_frame: RawEnvelope): Promise<void> {
-    this.log.debug("task.cancel received (no executor wired yet)");
-  }
-
-  protected async onConversationTurnAssign(_frame: RawEnvelope): Promise<void> {
-    this.log.debug("conversation.turn.assign received (no handler wired yet)");
-  }
-
-  protected async onApprovalDecision(_frame: RawEnvelope): Promise<void> {
-    this.log.debug("approval.decision received (no handler wired yet)");
+  /**
+   * Post a worker-produced frame to the engine. Maps the legacy Envelope
+   * shape (the worker's only sink) onto the client's typed senders. Warns
+   * (and drops) when the client is not connected (shutdown race).
+   */
+  protected async post(frame: Envelope): Promise<void> {
+    const client = this.client;
+    if (!client) {
+      this.log.warn("post() before start — dropping frame:", frame.type);
+      return;
+    }
+    const payload = frame.payload as Record<string, unknown>;
+    switch (frame.type) {
+      case "execution.accept":
+        return client.sendExecutionAccept(
+          payload as unknown as ExecutionAcceptPayload,
+        );
+      case "execution.reject":
+        return client.sendExecutionReject(
+          payload as unknown as ExecutionRejectPayload,
+        );
+      case "execution.delta":
+        return client.sendExecutionDelta(
+          payload as unknown as ExecutionDeltaPayload,
+        );
+      case "execution.event":
+        return client.sendExecutionEvent(
+          payload as unknown as ExecutionEventPayload,
+        );
+      case "execution.complete":
+        return client.sendExecutionComplete(
+          payload as unknown as ExecutionCompletePayload,
+        );
+      case "execution.failed":
+        return client.sendExecutionFailed(
+          payload as unknown as ExecutionFailedPayload,
+        );
+      case "execution.paused":
+        return client.sendExecutionPaused(
+          payload as unknown as ExecutionPausedPayload,
+        );
+      case "execution.cancelled":
+        return client.sendExecutionCancelled(
+          payload as unknown as ExecutionCancelledPayload,
+        );
+      case "execution.cancel":
+        return client.sendExecutionCancel(
+          payload as unknown as ExecutionCancelPayload,
+        );
+      case "execution.approval.requested":
+        return client.sendExecutionApprovalRequested(
+          payload as unknown as ExecutionApprovalRequestedPayload,
+        );
+      case "protocol.error":
+        return client.sendProtocolError(
+          payload as unknown as ProtocolErrorPayload,
+        );
+      default:
+        this.log.warn("Unknown worker frame type — dropped:", frame.type);
+    }
   }
 }

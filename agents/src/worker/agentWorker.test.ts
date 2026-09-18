@@ -4,7 +4,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { AgentWorker } from "./agentWorker.js";
 import type { WorkerInbound, WorkerOutbound } from "./agentWorkerProtocol.js";
-import { MessageType } from "../protocol/messages.js";
 import { MessageType as UnifiedMessageType } from "../protocol/unifiedFrames.js";
 import type { ChatModelFactory, SessionToolFactory } from "../executor/providers.js";
 import type { ChatModel, ModelStreamChunk } from "../executor/types.js";
@@ -94,7 +93,7 @@ describe("AgentWorker", () => {
     });
 
     // Session must be opened before execution.start can resolve the model.
-    await worker.handle(inbound(MessageType.SESSION_OPEN, sessionOpenPayload()));
+    await worker.handle(inbound(UnifiedMessageType.SESSION_OPEN, sessionOpenPayload()));
 
     worker.handle(inbound(UnifiedMessageType.EXECUTION_START, executionStartPayload(true)));
 
@@ -188,7 +187,7 @@ describe("AgentWorker", () => {
       chatModelFactory: resolvingChatModelFactory,
       sessionToolFactory: noopSessionToolFactory,
     });
-    await worker.handle(inbound(MessageType.SESSION_OPEN, sessionOpenPayload()));
+    await worker.handle(inbound(UnifiedMessageType.SESSION_OPEN, sessionOpenPayload()));
 
     worker.handle(
       inbound(UnifiedMessageType.EXECUTION_POLICY_UPDATE, {
@@ -214,7 +213,7 @@ describe("AgentWorker", () => {
       chatModelFactory: resolvingChatModelFactory,
       sessionToolFactory: noopSessionToolFactory,
     });
-    await worker.handle(inbound(MessageType.SESSION_OPEN, sessionOpenPayload()));
+    await worker.handle(inbound(UnifiedMessageType.SESSION_OPEN, sessionOpenPayload()));
 
     // Seed local accounting above the frame's usage.
     const enforcer = (worker as unknown as {
@@ -253,7 +252,7 @@ describe("AgentWorker", () => {
       chatModelFactory: resolvingChatModelFactory,
       sessionToolFactory: noopSessionToolFactory,
     });
-    await worker.handle(inbound(MessageType.SESSION_OPEN, sessionOpenPayload()));
+    await worker.handle(inbound(UnifiedMessageType.SESSION_OPEN, sessionOpenPayload()));
     const enforcers = (worker as unknown as {
       sessions: {
         enforcerFor: (id: string) => {

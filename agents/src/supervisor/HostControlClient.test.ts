@@ -711,7 +711,7 @@ describe("HostControlClient §7.5 channel handshake", () => {
   });
 
   it("does NOT open a channel socket when session.open carries channel null", async () => {
-    const { client, conn, lifecycle, channelConns } = makeSubject();
+    const { client, conn, channelConns } = makeSubject();
     await client.start();
     await conn.simulateInbound(hostOpenedFrame(60));
 

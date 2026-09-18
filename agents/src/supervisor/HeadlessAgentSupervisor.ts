@@ -4,13 +4,15 @@
 /**
  * The cluster Supervisor: non-interactive, registration-key bootstrap.
  *
- * Implements seam 1 (authenticate) via the Engine registration endpoint and
- * the token lifecycle (refresh / re-register) the reconnect policy calls into
- * (REQ-A-001/002). Per §9.7 it owns the engine socket and delegates execution
- * to an Agent worker thread: inbound control frames are forwarded into the
- * worker, and the frames the worker emits are routed straight onto the socket
- * (seam 4 = engine only). Seam 3 (workspace clone) is layered on by a later
- * slice; `resolveWorkspace` throws until then so the gap is loud.
+ * Implements seam 1 (authenticate) via the Engine HOST registration endpoint
+ * and the token lifecycle (refresh / re-register) the unified client's
+ * reconnect machinery calls into (REQ-A-001/002). Per §9.7 it owns the
+ * host-control socket (via the base's `HostControlClient`) and delegates
+ * execution to an Agent worker thread: inbound unified frames are forwarded
+ * into the worker, and the frames the worker emits are routed onto the
+ * unified wire through the base's typed `post()` (seam 4 = engine only).
+ * Seam 3 (workspace clone) is layered on by a later slice; `resolveWorkspace`
+ * throws until then so the gap is loud.
  */
 import { AgentSupervisor } from "./AgentSupervisor.js";
 import { EngineHttpClient } from "../transport/httpClient.js";
@@ -18,9 +20,19 @@ import {
   AgentWorkerHost,
   spawnAgentWorkerHost,
 } from "../worker/AgentWorkerHost.js";
-import type { RawEnvelope } from "../protocol/envelope.js";
-import type { AgentProvisions } from "../protocol/hostFrames.js";
-import type { AuthContext, Logger, Task, WorkspaceHandle } from "../models/index.js";
+import { makeEnvelope, type Envelope, type RawEnvelope } from "../protocol/envelope.js";
+import type {
+  AuthContext,
+  Logger,
+  Task,
+  WorkspaceHandle,
+} from "../models/index.js";
+import type {
+  ExecutionCancelPayload,
+  ExecutionStartPayload,
+  OrchestrationExecutionStartPayload,
+  SessionOpenPayload,
+} from "../protocol/unifiedFrames.js";
 
 export interface HeadlessAgentSupervisorOptions {
   engineUrl: string;
@@ -28,8 +40,16 @@ export interface HeadlessAgentSupervisorOptions {
   sdkVersion?: string;
   metadata?: Record<string, unknown>;
   logger?: Logger;
-  /** Tools + runtime this host advertises as installed (host.announce). */
-  provisions?: AgentProvisions;
+  /**
+   * Host capabilities (tools + runtime catalog) reported in `host.open` —
+   * the supply side of reserve-time matching (replaces legacy provisions).
+   */
+  capabilities?: Record<string, unknown>;
+  /**
+   * CPU/RAM capacity the pool was auto-sized from (host.open + heartbeat).
+   * Defaults to empty (the client sends what it has).
+   */
+  reportedCapacity?: Record<string, unknown>;
   /** Iteration cap forwarded to the worker's executor. */
   maxIterations?: number;
   /** Max bytes an image attachment may be to inline as a native image part
@@ -50,7 +70,14 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
       engineUrl: options.engineUrl,
       role: "HEADLESS",
       logger: options.logger,
-      ...(options.provisions !== undefined ? { provisions: options.provisions } : {}),
+      // V1 headless pool size = 1; auto-sizing to N is a later slice.
+      poolSize: 1,
+      ...(options.capabilities !== undefined
+        ? { capabilities: options.capabilities }
+        : {}),
+      ...(options.reportedCapacity !== undefined
+        ? { reportedCapacity: options.reportedCapacity }
+        : {}),
     });
     this.http = new EngineHttpClient({
       engineUrl: options.engineUrl,
@@ -115,9 +142,11 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
 
   // ==================== Worker pool ====================
 
-  protected async spawnWorkers(): Promise<void> {
-    // V1 headless pool size = 1 for this slice; auto-sizing to N is a later
-    // slice (the pool count is config, not a seam — §9.3).
+  /**
+   * Bring up the Agent worker pool. V1 headless pool size = 1 (config, not a
+   * seam — §9.3); auto-sizing to N is a later slice.
+   */
+  protected override async spawnWorkers(): Promise<void> {
     this.host = spawnAgentWorkerHost({
       onFrame: (frame) => this.routeWorkerFrame(frame),
       config: {
@@ -154,39 +183,76 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
     });
   }
 
-  protected async stopWorkers(): Promise<void> {
+  protected override async stopWorkers(): Promise<void> {
     await this.host?.stop();
     this.host = null;
   }
 
-  // ==================== Envelope forwarding ====================
+  // ==================== Inbound → worker forwarding ====================
 
-  // Seam 4 (headless) = engine only: every control frame is forwarded to the
-  // worker, and the worker's output frames are routed by type onto the control
-  // or conversation socket via the `onFrame` → routeWorkerFrame sink wired in
-  // spawnWorkers.
-  protected async onTaskAssign(frame: RawEnvelope): Promise<void> {
-    this.forwardToWorker(frame);
+  // Seam 4 (headless) = engine only: every unified command frame is forwarded
+  // to the worker (as a legacy-shaped Envelope — the worker's dispatch speaks
+  // that shape), and the worker's output frames are routed onto the unified
+  // wire via the `onFrame` → routeWorkerFrame sink wired in spawnWorkers.
+
+  protected override async onExecutionStart(
+    frame: Parameters<
+      import("./HostControlClient.js").ExecutionHandler
+    >[0],
+  ): Promise<void> {
+    // The engine pushes BOTH payload shapes on execution.start:
+    //  - conversation: ExecutionStartPayload → forward as "execution.start"
+    //    (the worker dispatches it to the inference executor).
+    //  - orchestration: OrchestrationExecutionStartPayload (dispatchId +
+    //    assignmentDigest) → the worker's orchestration executor resolves
+    //    the assignment from the session opened for the dispatch.
+    const payload = frame.payload as
+      | ExecutionStartPayload
+      | OrchestrationExecutionStartPayload;
+    this.forwardToWorkerEnvelope(
+      makeEnvelope("execution.start", payload as Record<string, unknown>),
+    );
   }
 
-  protected async onTaskCancel(frame: RawEnvelope): Promise<void> {
-    this.forwardToWorker(frame);
+  protected override async onExecutionCancel(
+    frame: Parameters<
+      import("./HostControlClient.js").ExecutionCancelHandler
+    >[0],
+  ): Promise<void> {
+    const payload = frame.payload as ExecutionCancelPayload;
+    this.forwardToWorkerEnvelope(
+      makeEnvelope("execution.cancel", payload as Record<string, unknown>),
+    );
   }
 
-  protected async onConversationTurnAssign(frame: RawEnvelope): Promise<void> {
-    this.forwardToWorker(frame);
+  /**
+   * A `session.open` the client dispatched after its own transport-side
+   * bookkeeping (channel bind, opened reply). The worker's registry needs it
+   * to establish the model + tools for the session.
+   */
+  protected override onSessionOpen(payload: SessionOpenPayload): void {
+    this.forwardToWorkerEnvelope(
+      makeEnvelope("session.open", payload as Record<string, unknown>),
+    );
   }
 
-  protected async onApprovalDecision(frame: RawEnvelope): Promise<void> {
-    this.forwardToWorker(frame);
+  /** A `session.close` the client dispatched — forward to the worker. */
+  protected override onSessionClose(payload: { sessionId: string }): void {
+    this.forwardToWorkerEnvelope(
+      makeEnvelope("session.close", payload as Record<string, unknown>),
+    );
   }
 
-  protected forwardToWorker(frame: RawEnvelope): void {
+  protected override forwardToWorker(frame: RawEnvelope): void {
     if (!this.host) {
       this.log.warn("Dropping frame; no worker spawned yet:", frame.type);
       return;
     }
     this.host.dispatch(frame);
+  }
+
+  protected override async routeWorkerFrame(frame: Envelope): Promise<void> {
+    await this.post(frame);
   }
 
   protected async resolveWorkspace(_task: Task): Promise<WorkspaceHandle> {
