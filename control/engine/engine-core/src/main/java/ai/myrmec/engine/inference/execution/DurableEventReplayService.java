@@ -8,6 +8,7 @@ import ai.myrmec.engine.node.HostFrameRelayService;
 import ai.myrmec.engine.websocket.host.ChannelConnectionRegistry;
 import ai.myrmec.engine.websocket.host.HostProtocol;
 import ai.myrmec.engine.websocket.host.HostProtocolEnvelope;
+import ai.myrmec.engine.websocket.host.payload.ProtocolErrorPayload;
 import ai.myrmec.engine.workflow.ExecutionEvent;
 import ai.myrmec.engine.workflow.ExecutionEventRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -73,6 +74,21 @@ public class DurableEventReplayService {
                 .sorted(Comparator.comparing(ExecutionEvent::getSequenceNumber))
                 .toList();
 
+        // §12.3/§14 REPLAY_WINDOW_EXPIRED: when the host's cursor predates the
+        // retained window the earliest retained row leaves a gap (cursor+1 is
+        // gone) — the ENGINE reports the gap (retryable=false-by-error-table
+        // is "continue with recorded gap") and continues from the oldest
+        // retained event. Not an INVALID/UNSUPPORTED error: a notice that the
+        // replay is lossy at the head.
+        long lowestRetained = events.stream()
+                .map(ExecutionEvent::getSequenceNumber)
+                .map(Long::longValue)
+                .findFirst()
+                .orElse(-1L);
+        if (!events.isEmpty() && lowestRetained > fromSequence + 1) {
+            sendReplayWindowExpired(session, fromSequence, lowestRetained);
+        }
+
         int sent = 0;
         for (ExecutionEvent event : events) {
             if (replayEvent(session, event)) {
@@ -80,10 +96,45 @@ public class DurableEventReplayService {
             }
         }
         if (!events.isEmpty()) {
-            log.info("Replayed {} durable event(s) for session {} after sequence {}",
-                    sent, sessionId, fromSequence);
+            log.info("Replayed {} durable event(s) for session {} after sequence {}{}",
+                    sent, sessionId, fromSequence,
+                    lowestRetained > fromSequence + 1
+                            ? " (replay window expired — gap from " + (fromSequence + 1)
+                                + " to " + (lowestRetained - 1) + ")"
+                            : "");
         }
         return sent;
+    }
+
+    /**
+     * §12.3: report the retention gap on the session's transport with the
+     * handler's protocol.error wire shape — code {@code REPLAY_WINDOW_EXPIRED},
+     * scope SESSION, and the replay CONTINUES from the earliest retained row
+     * (the "continue with recorded gap" semantics; the gap is observability,
+     * not an execution failure). The frame rides the relay like any other
+     * engine→host frame (channel-first, node-aware).
+     */
+    private void sendReplayWindowExpired(Session session, long cursor, long lowestRetained) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("requestedFromSequence", cursor);
+        details.put("lowestRetainedSequence", lowestRetained);
+        HostProtocolEnvelope envelope = HostProtocolEnvelope.reply(
+                HostProtocol.PROTOCOL_ERROR, null,
+                new ProtocolErrorPayload(HostProtocol.REPLAY_WINDOW_EXPIRED,
+                        "Durable-event replay requested before the retention window — "
+                                + "continuing from the earliest retained event",
+                        true, null, "SESSION", details),
+                objectMapper);
+        envelope.setSessionId(session.getId());
+        try {
+            boolean sent = frameRelayService.send(session.getId(), session.getHostInstanceId(),
+                    objectMapper.writeValueAsString(envelope));
+            log.info("REPLAY_WINDOW_EXPIRED notice for session {} (cursor {}, lowest retained {}) — {}",
+                    session.getId(), cursor, lowestRetained, sent ? "sent" : "undeliverable");
+        } catch (Exception e) {
+            log.warn("Failed sending REPLAY_WINDOW_EXPIRED notice for session {}: {}",
+                    session.getId(), e.getMessage());
+        }
     }
 
     /**

@@ -64,6 +64,7 @@ public class ExecutionBridge {
     private final ai.myrmec.engine.workflow.WorkflowTaskRepository workflowTaskRepository;
     private final ConversationRepository conversationRepository;
     private final AgentProfileVersionRepository agentProfileVersionRepository;
+    private final ai.myrmec.engine.inference.SessionRepository sessionRepository;
     private final ObjectMapper objectMapper;
 
     /**
@@ -362,6 +363,94 @@ public class ExecutionBridge {
         } catch (IllegalArgumentException unknown) {
             log.warn("execution.terminal {} for unknown dispatch {} — dropped", executionId, dispatchId);
         }
+    }
+
+    /**
+     * §8.7 conversation approval: the same message with NO {@code dispatchId}
+     * (§8.7). Persists through the SAME seam the paused arm uses —
+     * {@link ConversationService#appendApprovalRequest} — with the §8.7
+     * normalized pending action (stable action/call ID, tool name, digest) in
+     * the encrypted-at-rest payload marker. Expiry comes from the §8.7 frame's
+     * {@code expiresAt}; when absent the profile TTL default applies (the same
+     * engine-owned expiry rule the paused path enforces).
+     */
+    @Transactional
+    public void onConversationApprovalRequested(UUID sessionId, UUID agentId,
+                                                ExecutionApprovalRequestedPayload payload) {
+        UUID conversationId = conversationRepository.findById(sessionId)
+                .map(ai.myrmec.engine.conversation.Conversation::getId)
+                .orElse(null);
+        // The session's refId IS the conversation id for CONVERSATION sessions;
+        // resolve it defensively for a direct session-row lookup.
+        if (conversationId == null) {
+            conversationId = sessionRefIdOf(sessionId);
+        }
+        if (conversationId == null) {
+            log.warn("Discarding conversation approval.requested — no conversation for session {}",
+                    sessionId);
+            return;
+        }
+        if (payload == null || payload.approvalRequestId() == null) {
+            log.warn("Discarding conversation approval.requested — missing approvalRequestId");
+            return;
+        }
+
+        Map<String, Object> marker = new LinkedHashMap<>();
+        marker.put("approvalRequestId", payload.approvalRequestId());
+        if (payload.action() != null) {
+            marker.put("pendingActionId", payload.action().actionId());
+            marker.put("pendingActionType", payload.action().type());
+            marker.put("pendingActionRiskClass", payload.action().riskClass());
+            marker.put("pendingActionSummary", payload.action().summary());
+            marker.put("pendingActionDigest", payload.action().digest());
+        }
+        if (payload.snapshotTreeHash() != null) {
+            marker.put("snapshotTreeHash", payload.snapshotTreeHash());
+        }
+        if (payload.stateDigest() != null) {
+            marker.put("stateDigest", payload.stateDigest());
+        }
+        String payloadJson;
+        try {
+            payloadJson = objectMapper.writeValueAsString(marker);
+        } catch (Exception e) {
+            payloadJson = "{}";
+        }
+
+        try {
+            Instant expiresAt = payload.expiresAt() != null
+                    ? payload.expiresAt() : defaultConversationApprovalExpiry(sessionId);
+            conversationService.appendApprovalRequest(
+                    conversationId, agentId,
+                    "Approval required before continuing execution: "
+                            + (payload.action() == null || payload.action().actionId() == null
+                                ? payload.approvalRequestId()
+                                : payload.action().actionId()),
+                    payloadJson, expiresAt);
+            log.info("Conversation approval {} persisted for conv {} (execution {})",
+                    payload.approvalRequestId(), conversationId, sessionId);
+        } catch (Exception e) {
+            log.warn("Failed to persist conversation approval.requested for conv {}: {}",
+                    conversationId, e.getMessage(), e);
+        }
+    }
+
+    /** The conversation id behind a session row (refId), null when unknown. */
+    private UUID sessionRefIdOf(UUID sessionId) {
+        return sessionRepository.findById(sessionId)
+                .map(ai.myrmec.engine.inference.Session::getRefId)
+                .orElse(null);
+    }
+
+    /**
+     * §8.7: when the approval frame carries no expiry, the engine stamps its
+     * own — the serving profile's TTL, else the platform default (the paused
+     * arm's rule, so both approval surfaces expire identically).
+     */
+    private Instant defaultConversationApprovalExpiry(UUID conversationId) {
+        Long ttl = profileApprovalTtlSeconds(conversationId);
+        long ttlSeconds = ttl != null && ttl > 0 ? ttl : DEFAULT_APPROVAL_TTL_SECONDS;
+        return Instant.now().plusSeconds(ttlSeconds);
     }
 
     /**

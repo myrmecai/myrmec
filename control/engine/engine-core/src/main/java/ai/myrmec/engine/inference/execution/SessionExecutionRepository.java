@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -20,6 +21,13 @@ public interface SessionExecutionRepository extends JpaRepository<SessionExecuti
     @Query("SELECT e FROM SessionExecution e WHERE e.sessionId = :sid AND e.state IN :states")
     List<SessionExecution> findWithLockBySessionIdAndStateIn(
             @Param("sid") UUID sessionId, @Param("states") List<SessionExecution.State> states);
+
+    /**
+     * §12.2 execution.start timeout sweep input: STARTING rows created before
+     * the cutoff — the host neither accepted nor rejected them inside the
+     * window, so they are dispatch-lost.
+     */
+    List<SessionExecution> findByStateAndCreatedAtBefore(SessionExecution.State state, Instant cutoff);
 
     Optional<SessionExecution> findByIdAndTerminalMessageIdIsNull(UUID id);
 

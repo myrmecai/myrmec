@@ -179,6 +179,49 @@ class SessionAllocatorTest extends IntegrationTestBase {
                 project.getId(), instance.getAgentHostId())).isPresent();
     }
 
+    /**
+     * §12.2 session.open timeout (§11.1 INITIALIZING → CLOSED): accept
+     * re-arms the offer column as the initialization deadline; a session
+     * accepted but never opened inside the window sweeps CLOSED with
+     * close_reason=OFFER_EXPIRED, while ACTIVE sessions are untouched.
+     */
+    @Test
+    void initializationTimeoutSweepsStuckInitializingSessionsClosed() {
+        AgentHostInstance instance = openInstance(3);
+        Project project = project();
+
+        UUID stuck = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
+                project.getId(), instance.getAgentHostId()).orElseThrow();
+        assertThat(allocator.accept(stuck)).isTrue();
+        // accept() re-arms the deadline — verify before aging it.
+        assertThat(sessionRepository.findById(stuck).orElseThrow().getOfferExpiresAt())
+                .isAfter(Instant.now());
+
+        UUID opened = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
+                project.getId(), instance.getAgentHostId()).orElseThrow();
+        allocator.accept(opened);
+        allocator.confirmOpened(opened, "slot-thread-1");
+
+        // Age BOTH rows' lease past the window: the INITIALIZING one must
+        // sweep, the ACTIVE one must not (idle lease is a different column).
+        Session stuckRow = sessionRepository.findById(stuck).orElseThrow();
+        stuckRow.setOfferExpiresAt(Instant.now().minusSeconds(60));
+        sessionRepository.saveAndFlush(stuckRow);
+
+        int swept = allocator.expireOffers(Instant.now());
+        assertThat(swept).isEqualTo(1);
+        Session closedRow = sessionRepository.findById(stuck).orElseThrow();
+        assertThat(closedRow.getAllocationState()).isEqualTo(SessionAllocator.ALLOC_STATE_CLOSED);
+        assertThat(closedRow.getCloseReason()).isEqualTo("OFFER_EXPIRED");
+        assertThat(closedRow.getClosedAt()).isNotNull();
+
+        Session activeRow = sessionRepository.findById(opened).orElseThrow();
+        assertThat(activeRow.getAllocationState()).isEqualTo(SessionAllocator.ALLOC_STATE_ACTIVE);
+        // Capacity returned for the swept slot.
+        assertThat(allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
+                project.getId(), instance.getAgentHostId())).isPresent();
+    }
+
     @Test
     void concurrentOffersCannotOversubscribeThePool() throws Exception {
         AgentHostInstance instance = openInstance(2);
@@ -266,7 +309,7 @@ class SessionAllocatorTest extends IntegrationTestBase {
         // Enabled half: a directly-constructed allocator with enabled=true must sweep
         // the expired offer to CLOSED.
         SessionAllocator enabledSweep = new SessionAllocator(sessionRepository,
-                instances, agentRepository, nodeRegistryService, 10, 1800, 300, true);
+                instances, agentRepository, nodeRegistryService, 10, 30, 1800, 300, true);
         enabledSweep.sweepAllocation();
         assertThat(sessionRepository.findById(sessionId).orElseThrow().getAllocationState())
                 .isEqualTo(SessionAllocator.ALLOC_STATE_CLOSED);

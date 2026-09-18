@@ -28,6 +28,14 @@ public interface SessionRepository extends JpaRepository<Session, UUID> {
     /** §7.1 offer-expiry sweep input: pending reservations past their lease. */
     List<Session> findByAllocationStateAndOfferExpiresAtBefore(String allocationState, Instant cutoff);
 
+    /**
+     * §7.1/§12.2 sweep input: pending offers AND accepted-but-unopened
+     * sessions past their lease (the same column re-armed as the
+     * initialization deadline at accept).
+     */
+    List<Session> findByAllocationStateInAndOfferExpiresAtBefore(Collection<String> allocationStates,
+                                                                 Instant cutoff);
+
     /** §12.2 idle-lease sweep input: ACTIVE conversations past expiry. */
     List<Session> findByAllocationStateAndIdleLeaseExpiresAtBefore(String allocationState, Instant cutoff);
 

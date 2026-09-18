@@ -86,12 +86,14 @@ public class SessionExecution {
     @Column(name = "terminal_at")
     private Instant terminalAt;
 
-    @Column(name = "created_at", nullable = false, updatable = false)
+    @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
     @PrePersist
     void onCreate() {
-        createdAt = Instant.now();
+        if (createdAt == null) {
+            createdAt = Instant.now();
+        }
         if (state == null) {
             state = State.STARTING;
         }

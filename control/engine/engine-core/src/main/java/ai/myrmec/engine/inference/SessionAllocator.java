@@ -7,6 +7,7 @@ import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.node.NodeRegistryService;
+import ai.myrmec.engine.websocket.host.payload.SessionCloseReason;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -48,6 +49,7 @@ public class SessionAllocator {
     private final NodeRegistryService nodeRegistryService;
 
     private final int offerTimeoutSeconds;
+    private final int openTimeoutSeconds;
     private final int idleTimeoutSeconds;
     private final boolean enabled;
     private final java.time.Duration recoveryRetainFor;
@@ -58,6 +60,7 @@ public class SessionAllocator {
             AgentRepository agentRepository,
             NodeRegistryService nodeRegistryService,
             @Value("${myrmec.host.offer-timeout-seconds:10}") int offerTimeoutSeconds,
+            @Value("${myrmec.host.open-timeout-seconds:30}") int openTimeoutSeconds,
             @Value("${myrmec.host.session-idle-timeout-seconds:1800}") int idleTimeoutSeconds,
             @Value("${myrmec.host.recovery.retain-seconds:300}") int recoveryRetainSeconds,
             @Value("${myrmec.host.allocation-sweep.enabled:true}") boolean enabled) {
@@ -66,6 +69,7 @@ public class SessionAllocator {
         this.agentRepository = agentRepository;
         this.nodeRegistryService = nodeRegistryService;
         this.offerTimeoutSeconds = offerTimeoutSeconds;
+        this.openTimeoutSeconds = openTimeoutSeconds;
         this.idleTimeoutSeconds = idleTimeoutSeconds;
         this.recoveryRetainFor = Duration.ofSeconds(recoveryRetainSeconds);
         this.enabled = enabled;
@@ -137,6 +141,11 @@ public class SessionAllocator {
             return false;
         }
         session.setAllocationState(ALLOC_STATE_INITIALIZING);
+        // §12.2 session.open timeout (§11.1 INITIALIZING → CLOSED): the offer
+        // column is re-armed as the initialization deadline — a session that
+        // never records session.opened inside the window is swept CLOSED with
+        // the same OFFER_EXPIRED semantics the offer arm uses.
+        session.setOfferExpiresAt(Instant.now().plus(Duration.ofSeconds(openTimeoutSeconds)));
         sessionRepository.save(session);
         return true;
     }
@@ -274,16 +283,26 @@ public class SessionAllocator {
                             || ALLOC_STATE_INITIALIZING.equals(s.getAllocationState())));
     }
 
-    /** §7.1 offer-expiry sweep body. */
+    /**
+     * §7.1 offer-expiry sweep body, extended to the §12.2 session.open
+     * timeout (§11.1 INITIALIZING → CLOSED): the same {@code offer_expires_at}
+     * column carries the initialization deadline after accept, so one sweep
+     * drains both the un-answered offers and the accepted-but-never-opened
+     * sessions.
+     */
     @Transactional
     public int expireOffers(Instant now) {
 
-        List<Session> stale = sessionRepository.findByAllocationStateAndOfferExpiresAtBefore(
-                ALLOC_STATE_OFFERED, now);
+        List<Session> stale = sessionRepository.findByAllocationStateInAndOfferExpiresAtBefore(
+                List.of(ALLOC_STATE_OFFERED, ALLOC_STATE_INITIALIZING), now);
         for (Session session : stale) {
-            session.setAllocationState(ALLOC_STATE_CLOSED);
-            session.setClosedAt(Instant.now());
-            sessionRepository.save(session);
+            close(session.getId(), SessionCloseReason.OFFER_EXPIRED);
+            // Stamp the close reason on the row (close() leaves it to callers).
+            Session locked = sessionRepository.findWithLockById(session.getId()).orElse(null);
+            if (locked != null) {
+                locked.setCloseReason(SessionCloseReason.OFFER_EXPIRED);
+                sessionRepository.save(locked);
+            }
         }
         return stale.size();
     }

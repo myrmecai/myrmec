@@ -34,6 +34,8 @@ public final class HostProtocol {
     public static final String UNSUPPORTED_MESSAGE = "UNSUPPORTED_MESSAGE";
     public static final String INVALID_STATE = "INVALID_STATE";
     public static final String IDENTITY_MISMATCH = "IDENTITY_MISMATCH";
+    /** §14 addition (extensible table): the §12.2 execution.start window lapsed. */
+    public static final String DISPATCH_TIMEOUT = "DISPATCH_TIMEOUT";
 
     // ---- Session allocation (§5 catalogue, §7 payloads) ----
     public static final String SESSION_OFFER = "session.offer";

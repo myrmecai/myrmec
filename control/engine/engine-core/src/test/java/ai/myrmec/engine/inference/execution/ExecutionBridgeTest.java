@@ -492,8 +492,89 @@ class ExecutionBridgeTest extends IntegrationTestBase {
     }
 
     // =================================================================
+    // §8.7 conversation approval.requested bridge
+    // =================================================================
+
+    @Test
+    void conversationApprovalRequestedPersistsThroughTheTranscriptSeam() {
+        Project project = data.project().named("bridge-appr").create();
+        AgentHostCreationResult hostResult = data.agent().named("bridge-appr-host").withMaxAgents(10).create();
+        AgentHost host = hostResult.agent();
+        Conversation conversation = data.conversation().inProject(project).create();
+        conversation.setAgentId(host.getId());
+        conversationRepository.save(conversation);
+
+        ai.myrmec.engine.inference.Session session = session();
+        session.setServiceType("CONVERSATION");
+        session.setRefId(conversation.getId());
+        session.setProjectId(project.getId());
+        sessionRepository.save(session);
+
+        Instant expiresAt = Instant.now().plusSeconds(600)
+                .truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
+        ExecutionApprovalRequestedPayload.Action action = new ExecutionApprovalRequestedPayload.Action(
+                "call-1", "RUN_COMMAND", "DESTRUCTIVE", "rm -rf build", "digest-9");
+        executionBridge.onConversationApprovalRequested(session.getId(), host.getId(),
+                new ExecutionApprovalRequestedPayload(
+                        UUID.randomUUID(), null, "approval-conv-1",
+                        action, "tree-hash", "state-digest", expiresAt));
+
+        List<ConversationMessage> messages = conversationMessageRepository
+                .findByConversationIdOrderBySequenceNoAsc(conversation.getId());
+        assertThat(messages).hasSize(1);
+        ConversationMessage approval = messages.get(0);
+        assertThat(approval.getRole()).isEqualTo(ConversationMessage.Role.APPROVAL_REQUEST);
+        assertThat(approval.getApprovalStatus()).isEqualTo(ConversationMessage.ApprovalStatus.PENDING);
+        assertThat(approval.getPayloadJson()).contains("approval-conv-1");
+        assertThat(approval.getPayloadJson()).contains("call-1");
+        assertThat(approval.getPayloadJson()).contains("DESTRUCTIVE");
+        assertThat(approval.getPayloadJson()).contains("digest-9");
+        assertThat(approval.getExpiresAt()).isEqualTo(expiresAt);
+        assertThat(approval.getAuthorAgentId()).isEqualTo(host.getId());
+    }
+
+    @Test
+    void conversationApprovalRequestedWithoutExpiryStampsProfileDefault() {
+        Project project = data.project().named("bridge-apr-def").create();
+        AgentHostCreationResult hostResult = data.agent().named("bridge-apr-host").withMaxAgents(10).create();
+        AgentHost host = hostResult.agent();
+        Conversation conversation = data.conversation().inProject(project).create();
+        conversation.setAgentId(host.getId());
+        conversationRepository.save(conversation);
+
+        ai.myrmec.engine.inference.Session session = session();
+        session.setServiceType("CONVERSATION");
+        session.setRefId(conversation.getId());
+        session.setProjectId(project.getId());
+        sessionRepository.save(session);
+
+        Instant before = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
+        executionBridge.onConversationApprovalRequested(session.getId(), host.getId(),
+                new ExecutionApprovalRequestedPayload(
+                        UUID.randomUUID(), null, "approval-conv-2", null, null, null, null));
+
+        ConversationMessage approval = conversationMessageRepository
+                .findByConversationIdOrderBySequenceNoAsc(conversation.getId())
+                .get(0);
+        Instant after = Instant.now().plusSeconds(1).truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
+        assertThat(approval.getExpiresAt())
+                .as("no frame expiry → engine-owned default TTL (900s)")
+                .isNotNull()
+                .isAfterOrEqualTo(before.plusSeconds(900))
+                .isBeforeOrEqualTo(after.plusSeconds(900));
+    }
+
+    // =================================================================
     // Helpers
     // =================================================================
+
+    /** A bare session row (no instance pin — the approval arm needs none). */
+    private ai.myrmec.engine.inference.Session session() {
+        ai.myrmec.engine.inference.Session session = new ai.myrmec.engine.inference.Session();
+        session.setStatus("ACTIVE");
+        session.setAllocationState(ai.myrmec.engine.inference.SessionAllocator.ALLOC_STATE_ACTIVE);
+        return session;
+    }
 
     private final class OrchestrationFixture {
         final WorkflowRequest request;

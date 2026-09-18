@@ -227,6 +227,10 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             case HostProtocol.EXECUTION_FAILED -> handleExecutionFailed(session, envelope);
             case HostProtocol.EXECUTION_PAUSED -> handleExecutionPaused(session, envelope);
             case HostProtocol.EXECUTION_CANCELLED -> handleExecutionCancelled(session, envelope);
+            // §5/§8.7: the host publishes an approval request BEFORE the
+            // terminal execution.paused — durable receipt acknowledged (§12.3).
+            case HostProtocol.EXECUTION_APPROVAL_REQUESTED ->
+                    handleExecutionApprovalRequested(session, envelope);
             case HostProtocol.EXECUTION_START, HostProtocol.EXECUTION_CANCEL ->
                     logEngineToHostIgnored(session, envelope);
             // §8.7 (A4): execution.policy.update is an ENGINE→host frame — a
@@ -900,6 +904,88 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         handleTerminal(session, envelope, SessionExecution.State.PAUSED);
     }
 
+    /**
+     * §5/§8.7: the host publishes an approval request before its terminal
+     * {@code execution.paused}. Orchestration approvals resolve the task from
+     * the execution's engine-authored {@code dispatchId} and persist on the
+     * WorkflowTask (ExecutionApprovalService); conversation approvals (no
+     * {@code dispatchId}) persist through the same transcript seam the paused
+     * arm uses — {@code ConversationService.appendApprovalRequest} — carrying
+     * the §8.7 normalized pending action in the payload marker. Durable frame:
+     * acknowledged after persist (§12.3).
+     */
+    private void handleExecutionApprovalRequested(WebSocketSession session,
+                                                  HostProtocolEnvelope envelope) {
+        UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
+        if (instanceId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                    "execution.approval.requested before host.opened", false, "EXECUTION", null);
+            return;
+        }
+        if (envelope.getExecutionId() == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "executionId is required", false, "EXECUTION", null);
+            return;
+        }
+        try {
+            var payload = objectMapper.treeToValue(envelope.getPayload(),
+                    ExecutionApprovalRequestedPayload.class);
+            SessionExecution execution = executionRepository.findById(envelope.getExecutionId())
+                    .orElse(null);
+            if (execution == null) {
+                sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                        "execution.approval.requested for unknown execution", false, "EXECUTION", null);
+                return;
+            }
+            // §14 correlation: the execution must belong to the authenticated
+            // connection's session (mirrors handleExecutionEvent's identity walk).
+            if (!instanceId.equals(executionSessionInstanceId(execution))) {
+                sendError(session, envelope.getMessageId(), HostProtocol.IDENTITY_MISMATCH,
+                        "execution does not belong to this connection's session", false,
+                        "EXECUTION", null);
+                return;
+            }
+            if ("WORKFLOW".equals(execution.getServiceType())) {
+                if (execution.getDispatchId() == null) {
+                    log.debug("Ordinary workflow execution {} approval.requested — no task sink",
+                            execution.getId());
+                } else {
+                    executionBridge.onOrchestrationApprovalRequested(
+                            execution.getDispatchId(), payload);
+                }
+            } else if ("CONVERSATION".equals(execution.getServiceType())) {
+                executionBridge.onConversationApprovalRequested(
+                        execution.getSessionId(), agentIdOfExecution(execution), payload);
+            } else {
+                log.debug("Ignoring execution.approval.requested for execution {} (serviceType {})",
+                        execution.getId(), execution.getServiceType());
+            }
+            acknowledge(session, envelope.getMessageId(), execution.getSessionId(), 0L);
+        } catch (Exception e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "execution.approval.requested payload invalid: " + e.getMessage(),
+                    false, "EXECUTION", null);
+        }
+    }
+
+    /** The host instance id of the session an execution rode (null when unresolvable). */
+    private UUID executionSessionInstanceId(SessionExecution execution) {
+        return sessionRepository.findById(execution.getSessionId())
+                .map(ai.myrmec.engine.inference.Session::getHostInstanceId)
+                .orElse(null);
+    }
+
+    /** The durable host serving the execution's session (null when unresolvable). */
+    private UUID agentIdOfExecution(SessionExecution execution) {
+        UUID sessionIdInstance = executionSessionInstanceId(execution);
+        if (sessionIdInstance == null) {
+            return null;
+        }
+        return instanceRepository.findById(sessionIdInstance)
+                .map(AgentHostInstance::getAgentHostId)
+                .orElse(null);
+    }
+
     /** §8.8: terminal cancellation. */
     private void handleExecutionCancelled(WebSocketSession session, HostProtocolEnvelope envelope) {
         handleTerminal(session, envelope, SessionExecution.State.CANCELLED);
@@ -1145,6 +1231,10 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             case HostProtocol.EXECUTION_FAILED -> handleExecutionFailed(channelSocket, envelope);
             case HostProtocol.EXECUTION_PAUSED -> handleExecutionPaused(channelSocket, envelope);
             case HostProtocol.EXECUTION_CANCELLED -> handleExecutionCancelled(channelSocket, envelope);
+            // §8.7: approval requests ride the channel exactly like the
+            // other host→engine execution frames.
+            case HostProtocol.EXECUTION_APPROVAL_REQUESTED ->
+                    handleExecutionApprovalRequested(channelSocket, envelope);
             default -> sendError(channelSocket, envelope.getMessageId(),
                     HostProtocol.INVALID_MESSAGE,
                     "Frame type " + type + " is not permitted on the dedicated channel",
