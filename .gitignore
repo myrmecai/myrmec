@@ -7,6 +7,10 @@
 .project
 .settings/
 
+# Agent working state (superpowers scratch, git worktrees)
+.superpowers/
+.worktrees/
+
 # Build outputs
 target/
 build/
