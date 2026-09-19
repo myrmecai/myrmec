@@ -11,7 +11,6 @@ import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.conversation.ConversationEventReason;
 import ai.myrmec.engine.conversation.ConversationEventService;
 import ai.myrmec.engine.conversation.ConversationRepository;
-import ai.myrmec.engine.node.NodeRegistryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -27,7 +26,7 @@ import java.util.UUID;
 
 /**
  * Service that manages {@link AgentHost} entities (CRUD, registration-key
- * generation, host telemetry) and routes runtime operations to the
+ * generation) and routes runtime operations to the
  * underlying {@link Agent} instances via {@link AgentRepository}.
  *
  * <p>This service manages agent <em>hosts</em> (the durable definition a
@@ -47,8 +46,6 @@ public class AgentHostService {
     private final AgentRepository agentInstanceRepository;
     private final ConversationRepository conversationRepository;
     private final ConversationEventService conversationEventService;
-    private final NodeRegistryService nodeRegistryService;
-    private final ai.myrmec.engine.spi.crypto.EncryptionService encryptionService;
     private final ModelAccessModeValidator modelAccessModeValidator;
 
     // ========== Admin Operations ==========
@@ -82,13 +79,6 @@ public class AgentHostService {
         // Generate registration key
         String registrationKey = generateRegistrationKey();
 
-        // Feature 10 (§16.1/§17.2): generate the session-credential PSK,
-        // return it ONCE, persist only the at-rest-encrypted copy.
-        String pskKeyId = "psk-" + java.util.UUID.randomUUID()
-                .toString().substring(0, 12);
-        byte[] psk = new byte[32];
-        RANDOM.nextBytes(psk);
-        String pskBase64 = java.util.Base64.getEncoder().encodeToString(psk);
         AgentHost agent = new AgentHost();
         agent.setName(name);
         agent.setDescription(description);
@@ -98,14 +88,12 @@ public class AgentHostService {
         agent.setConfig(config);
         agent.setMaxAgents(maxAgents != null ? maxAgents : 1);
         agent.setStatus(AgentHost.Status.ACTIVE);
-        agent.setPskKeyId(pskKeyId);
-        agent.setPskEncrypted(encryptionService.encrypt(pskBase64));
         agent.setModelAccessMode(mode);
 
         agent = agentHostRepository.save(agent);
         log.info("Created agent: {} ({})", agent.getName(), agent.getId());
 
-        return new AgentHostCreationResult(agent, registrationKey, pskKeyId, pskBase64);
+        return new AgentHostCreationResult(agent, registrationKey);
     }
 
     /**
@@ -270,9 +258,6 @@ public class AgentHostService {
         host.setStatus(AgentHost.Status.ACTIVE);
         host.setHostType(AgentHostType.LOCAL);
         host.setOwnerUserId(userId);
-        // Local agents are single-node by definition: the extension host is
-        // the control node for the lifetime of the local host.
-        host.setControlNodeId(nodeRegistryService.getSelfNodeId());
 
         host = agentHostRepository.save(host);
         log.info("Created local agent host {} for user {} (project {})",
@@ -304,23 +289,6 @@ public class AgentHostService {
                 .ack(true)
                 .serverTime(Instant.now())
                 .build();
-    }
-
-    /**
-     * Record a host.announce from a Supervisor: overwrite the host's advertised
-     * provisions and reported capacity. The host is the source of truth, so
-     * each announce replaces the previous values (re-asserted on reconnect).
-     */
-    @Transactional
-    public void recordHostAnnounce(UUID hostId, Map<String, Object> provisions,
-                                   Map<String, Object> reportedCapacity) {
-        AgentHost host = agentHostRepository.findById(hostId)
-                .orElseThrow(() -> ResourceNotFoundException.agent(hostId));
-        host.setProvisions(provisions);
-        host.setReportedCapacity(reportedCapacity);
-        host.setControlNodeId(nodeRegistryService.getSelfNodeId());
-        agentHostRepository.save(host);
-        log.debug("Recorded host.announce for host {} ({})", host.getName(), hostId);
     }
 
     /**

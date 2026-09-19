@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Drop the vestigial per-host columns whose authoritative homes moved
+        to agent_host_instances (unified protocol; design 2026-09-11):
+
+          - psk_key_id / psk_encrypted (born 003, the pre-instance per-host
+            PSK) — superseded by the per-run instance PSK (changelog 025);
+            the legacy registration-time mint was dead code (the admin
+            create response returned it to nobody).
+          - control_node_id (born 003, host half of 018) — routing truth
+            lives on agent_host_instances.control_node_id (A3 relays read
+            THAT); the API stopped surfacing it.
+
+        agent_hosts.owner_user_id is deliberately KEPT: it is the live
+        per-user LOCAL-host identity key (uk_agent_hosts_type_owner +
+        findByHostTypeAndOwnerUserId used by local registration §4.1), and
+        the host.open handshake carries no user identity (§18 token
+        isolation) to seed the instance owner without it.
+    -->
+
+    <changeSet id="030-host-psk-columns-drop" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="agent_hosts"/>
+                <columnExists tableName="agent_hosts" columnName="psk_key_id"/>
+                <columnExists tableName="agent_hosts" columnName="psk_encrypted"/>
+            </and>
+        </preConditions>
+        <dropColumn tableName="agent_hosts" columnName="psk_key_id"/>
+        <dropColumn tableName="agent_hosts" columnName="psk_encrypted"/>
+    </changeSet>
+
+    <changeSet id="030-host-control-node-drop" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="agent_hosts"/>
+                <columnExists tableName="agent_hosts" columnName="control_node_id"/>
+            </and>
+        </preConditions>
+        <dropForeignKeyConstraint baseTableName="agent_hosts"
+                                  constraintName="fk_agent_hosts_control_node"/>
+        <dropIndex tableName="agent_hosts" indexName="idx_agent_hosts_control_node"/>
+        <dropColumn tableName="agent_hosts" columnName="control_node_id"/>
+    </changeSet>
+
+</databaseChangeLog>

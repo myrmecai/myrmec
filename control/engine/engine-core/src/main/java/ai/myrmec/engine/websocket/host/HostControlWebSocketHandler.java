@@ -281,6 +281,10 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
+        // §2.3: the durable host record carries the owner for LOCAL/DEDICATED
+        // hosts (MANAGED rows are NULL) — the per-run instance row seeds its
+        // ownerUserId copy from it; host.open's HOST_JWT carries no user
+        // identity (§18 token isolation), so the host column is the seed.
         UUID ownerUserId = host.getHostType() == ai.myrmec.engine.agent.AgentHostType.MANAGED
                 ? null : host.getOwnerUserId();
         int announced = open.poolSize() > 0 ? open.poolSize() : 1;

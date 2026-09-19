@@ -306,7 +306,7 @@ public class TestDataBuilder {
 
     /**
      * Builder for {@link AgentHost} fixtures. Yields the {@link
- *   AgentHostCreationResult} (agent + plaintext registration key) so tests
+     * AgentHostCreationResult} (agent + plaintext registration key) so tests
      * that need to drive the agent SDK against the freshly-created agent
      * can read the key directly.
      */
@@ -372,8 +372,7 @@ public class TestDataBuilder {
                     maxAgents,
                     modelAccessMode
             );
-            return new AgentHostCreationResult(
-                    result.agent(), result.registrationKey(), result.pskKeyId(), result.pskBase64());
+            return result;
         }
     }
 

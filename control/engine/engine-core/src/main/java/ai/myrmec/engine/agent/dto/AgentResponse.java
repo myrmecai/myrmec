@@ -25,7 +25,6 @@ public class AgentResponse {
     private Integer maxAgents;
     private AgentHost.Status status;
     private ai.myrmec.engine.agent.ModelAccessMode modelAccessMode;
-    private String controlNodeId;
     private int activeInstanceCount;
     private Instant createdAt;
     private Instant updatedAt;
@@ -52,7 +51,6 @@ public class AgentResponse {
                 .maxAgents(agent.getMaxAgents())
                 .status(agent.getStatus())
                 .modelAccessMode(agent.getModelAccessMode())
-                .controlNodeId(agent.getControlNodeId())
                 .activeInstanceCount(activeInstanceCount)
                 .createdAt(agent.getCreatedAt())
                 .updatedAt(agent.getUpdatedAt())

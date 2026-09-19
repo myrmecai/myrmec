@@ -113,31 +113,12 @@ public class AgentHost {
 
     /**
      * The owning user for LOCAL/DEDICATED hosts; NULL for MANAGED (§2.3).
+     * Live identity key for the per-user LOCAL host lookup (§4.1) — NOT a
+     * vestigial host copy of the instance owner (agent_host_instances
+     * carries the per-run copy).
      */
     @Column(name = "owner_user_id")
     private UUID ownerUserId;
-
-    /**
-     * Replica currently holding this Host's control socket (slice 4a). Null
-     * when no control socket is attached; on a single node it resolves to
-     * "self". The cross-node router (slice 4b) reads this to forward Host
-     * control messages to the owning replica.
-     */
-    @Column(name = "control_node_id", length = 255)
-    private String controlNodeId;
-
-    /**
-     * Session-credential PSK identity (design §16.1/§17.2 — Feature 10).
-     * The engine generates a 32-byte PSK with this keyId at Host
-     * registration and returns it ONCE in the creation response over TLS;
-     * only the EncryptionService-encrypted copy persists.
-     */
-    @Column(name = "psk_key_id", length = 64)
-    private String pskKeyId;
-
-    /** At-rest-encrypted PSK (never the raw key after creation). */
-    @Column(name = "psk_encrypted", columnDefinition = "bytea")
-    private byte[] pskEncrypted;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
