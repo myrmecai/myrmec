@@ -196,4 +196,107 @@ describe("AgentProtocolOrchestrationEventSink (§16.3)", () => {
     );
     expect(approvals).toHaveLength(1);
   });
+
+  // ── §8.4/§15 rule 12: capture-policy enforcement on the sink ──
+
+  test("an oversized event payload truncates to maxBytes", async () => {
+    const sent: unknown[] = [];
+    const { outbox } = makeOutbox(async (envelope) => {
+      sent.push(envelope);
+      return true;
+    });
+    const sink = new AgentProtocolOrchestrationEventSink({
+      outbox,
+      // Tiny budget for the test — the wire shape is unchanged.
+      capturePolicy: { level: "METADATA", maxBytes: 120 },
+    });
+
+    await sink.emitEvent({
+      dispatch,
+      type: "WORKER_COMPLETED",
+      workerName: "coder",
+      status: "COMPLETED",
+      callId: "call-1",
+      durationMs: 5,
+      usage: { workerCalls: 1, rejectionCount: 0, totalTokens: 42 },
+    });
+
+    // The budget forces the ladder on the DATA map only: the fixed
+    // envelope framing (schemaVersion/eventId/dispatch/type/sequence/
+    // occurredAt) is protocol identity, not captured content (§15 rule
+    // 12 scopes capture to tool args/results/prompts/provider payloads) —
+    // and the dispatch is already implied by the deterministic
+    // eventId. So the assertion is: framing bytes + data ≤ budget.
+    const event = sent.find((e) => (e as { type: string }).type === "orchestration.event");
+    expect(event).toBeDefined();
+    const payload = event!.payload as Record<string, unknown>;
+    const framing = { ...payload };
+    delete framing.status;
+    delete framing.workerName;
+    delete framing.callId;
+    delete framing.candidateTreeHash;
+    delete framing.durationMs;
+    delete framing.usage;
+    expect(
+      Buffer.byteLength(JSON.stringify(payload)) - Buffer.byteLength(JSON.stringify(framing)),
+    ).toBeLessThanOrEqual(120);
+  });
+
+  test("a payload carrying an args-like key is filtered at METADATA", async () => {
+    const sent: unknown[] = [];
+    const { outbox } = makeOutbox(async (envelope) => {
+      sent.push(envelope);
+      return true;
+    });
+    // METADATA (the default; explicit here for the contract).
+    const sink = new AgentProtocolOrchestrationEventSink({
+      outbox,
+      capturePolicy: { level: "METADATA", maxBytes: 262_144 },
+    });
+
+    // A §8.4-table type whose required metadata includes the call context:
+    // a future caller embedding tool arguments alongside it gets filtered.
+    await sink.emitEvent({
+      dispatch,
+      type: "ORCHESTRATION_FUNCTION_COMPLETED",
+      callId: "call-1",
+      outcome: "COMPLETED",
+      usage: { workerCalls: 1, rejectionCount: 0, totalTokens: 42 },
+      // Sensitive embedding a naive caller might add:
+      args: { instruction: "SECRET-INSTRUCTION" },
+      result: "SECRET-RESULT",
+    } as never);
+
+    const event = sent.find((e) => (e as { type: string }).type === "orchestration.event");
+    const payload = event!.payload as Record<string, unknown>;
+    const serialized = JSON.stringify(payload);
+    // The metadata columns pass; the sensitive keys never land in the
+    // outbox (and therefore never reach the wire).
+    expect(serialized).not.toContain("SECRET-INSTRUCTION");
+    expect(serialized).not.toContain("SECRET-RESULT");
+    expect(payload.outcome).toBe("COMPLETED");
+    expect(payload.callId).toBe("call-1");
+  });
+
+  test("a null capture policy fails closed to METADATA on the sink", async () => {
+    const sent: unknown[] = [];
+    const { outbox } = makeOutbox(async (envelope) => {
+      sent.push(envelope);
+      return true;
+    });
+    const sink = new AgentProtocolOrchestrationEventSink({ outbox, capturePolicy: null });
+
+    await sink.emitEvent({
+      dispatch,
+      type: "SOME_FUTURE_TYPE",
+      workerName: "coder",
+      args: { secret: "LEAK-ATTEMPT" },
+    } as never);
+
+    const event = sent.find((e) => (e as { type: string }).type === "orchestration.event");
+    const payload = event!.payload as Record<string, unknown>;
+    // Conservative fallback: unknown type keeps identifier-style keys only.
+    expect(JSON.stringify(payload)).not.toContain("LEAK-ATTEMPT");
+    expect(Object.keys(payload)).not.toContain("args");
+  });
 });

@@ -15,9 +15,20 @@
 import type { OrchestrationOutbox } from "./OrchestrationOutbox.js";
 import { ORCHESTRATION_EVENT_NS, uuidV5 } from "../orchestration/constants.js";
 import type { DispatchIdentity } from "../orchestration/types.js";
+import { CaptureFilter } from "../executor/CaptureFilter.js";
+import type { CapturePolicy } from "./unifiedFrames.js";
+import type { Logger } from "../models/index.js";
 
 export interface AgentProtocolOrchestrationEventSinkOptions {
   outbox: OrchestrationOutbox;
+  /**
+   * §8.4/§15 rule 12: the session's capture policy the dispatch rides.
+   * Absent/null ⇒ METADATA (fail closed) — the orchestration progress
+   * stream is metadata by construction, and an unknown policy must not
+   * widen what the sink emits. maxBytes truncation applies regardless.
+   */
+  capturePolicy?: CapturePolicy | null;
+  logger?: Logger;
 }
 
 export interface OrchestrationProgressEvent {
@@ -30,6 +41,18 @@ export interface OrchestrationProgressEvent {
   candidateTreeHash?: string;
   durationMs?: number;
   usage?: { workerCalls: number; rejectionCount: number; totalTokens: number };
+  /** ┬º8.4 metadata columns (ORCHESTRATION_FUNCTION_* / VERIFICATION / CHECKPOINT / PROGRESS). */
+  outcome?: string;
+  functionName?: string;
+  modelCode?: string;
+  purpose?: string;
+  verifierName?: string;
+  verdict?: string;
+  commitHash?: string;
+  treeHash?: string;
+  changedFileCount?: number;
+  progressMessage?: string;
+  percentage?: number;
 }
 
 export interface TerminalResult {
@@ -52,8 +75,24 @@ export interface ApprovalProposal {
 export class AgentProtocolOrchestrationEventSink {
   private readonly sequences = new Map<string, number>();
   private readonly emitted = new Set<string>();
+  /** §15 rule 12: the session's capture filter (null policy ⇒ METADATA). */
+  private captureFilter: CaptureFilter;
 
-  constructor(private readonly options: AgentProtocolOrchestrationEventSinkOptions) {}
+  constructor(private readonly options: AgentProtocolOrchestrationEventSinkOptions) {
+    this.captureFilter = new CaptureFilter(options.capturePolicy ?? null, options.logger);
+  }
+
+  /**
+   * §7.3/§15 rule 12: bind the executing dispatch's session capture policy
+   * before the run's side effects begin (a dispatch admitted from a session
+   * with a capture block filters its progress stream with it). Called by
+   * the executor at dispatch start; one sink serves the serialized
+   * execution chain (§17.6: one dispatch at a time), so the binding is
+   * unambiguous.
+   */
+  bindCapturePolicy(capture: CapturePolicy | null): void {
+    this.captureFilter = new CaptureFilter(capture ?? null, this.options.logger);
+  }
 
   /** Deterministic dispatch-local event id for a sequence slot. */
   eventIdFor(dispatchId: string, sequence: number): string {
@@ -65,6 +104,10 @@ export class AgentProtocolOrchestrationEventSink {
    * dispatch-local sequence, derives the deterministic eventId, persists
    * the record durably, then sends. Throws OutboxUnhealthyError when the
    * outbox is down — the runner stops before the next side effect.
+   *
+   * §8.4/§15 rule 12: the built payload passes the session's CaptureFilter
+   * (event type → allowlist; conservative fallback for the orchestration
+   * progress types) and the maxBytes budget before it is enqueued.
    */
   async emitEvent(event: OrchestrationProgressEvent): Promise<string> {
     this.assertHealthy();
@@ -77,25 +120,70 @@ export class AgentProtocolOrchestrationEventSink {
     if (this.emitted.has(eventId)) return eventId;
     this.emitted.add(eventId);
 
+    // §15 rule 12: filter + truncate BEFORE the durable record exists —
+    // sensitive content must not land in the outbox either.
+    const filter = this.captureFilter;
+    const raw: Record<string, unknown> = {
+      ...(event.status !== undefined ? { status: event.status } : {}),
+      ...(event.workerName !== undefined ? { workerName: event.workerName } : {}),
+      ...(event.callId !== undefined ? { callId: event.callId } : {}),
+      ...(event.candidateTreeHash !== undefined
+        ? { candidateTreeHash: event.candidateTreeHash }
+        : {}),
+      ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
+      ...(event.usage !== undefined ? { usage: event.usage } : {}),
+      // ┬º8.4 metadata columns (the sensitive ladder strips anything else).
+      ...(event.outcome !== undefined ? { outcome: event.outcome } : {}),
+      ...(event.functionName !== undefined ? { functionName: event.functionName } : {}),
+      ...(event.modelCode !== undefined ? { modelCode: event.modelCode } : {}),
+      ...(event.purpose !== undefined ? { purpose: event.purpose } : {}),
+      ...(event.verifierName !== undefined ? { verifierName: event.verifierName } : {}),
+      ...(event.verdict !== undefined ? { verdict: event.verdict } : {}),
+      ...(event.commitHash !== undefined ? { commitHash: event.commitHash } : {}),
+      ...(event.treeHash !== undefined ? { treeHash: event.treeHash } : {}),
+      ...(event.changedFileCount !== undefined
+        ? { changedFileCount: event.changedFileCount }
+        : {}),
+      ...(event.progressMessage !== undefined
+        ? { progressMessage: event.progressMessage }
+        : {}),
+      ...(event.percentage !== undefined ? { percentage: event.percentage } : {}),
+    };
+    const filtered =
+      filter.level === "METADATA"
+        ? filter.filterEvent(event.type, raw)
+        : raw;
+    // Budget the WHOLE payload: the envelope's fixed keys (schemaVersion,
+    // eventId, dispatch, type, sequence, occurredAt) are unavoidable overhead —
+    // only the remainder of maxBytes is available to the data map.
+    const fixedPayload = {
+      schemaVersion: "1.0",
+      eventId,
+      dispatch: event.dispatch,
+      type: event.type,
+      sequence,
+      occurredAt: event.occurredAt ?? new Date().toISOString(),
+    };
+    const overheadBytes = CaptureFilter.encodedByteLength({
+      ...fixedPayload,
+      ...CaptureFilter.EMPTY_PLACEHOLDER,
+    });
+    const dataBudget =
+      filter.maxBytes === null
+        ? null
+        : Math.max(0, filter.maxBytes - overheadBytes);
+    const safeData =
+      dataBudget === null
+        ? filter.truncate(filtered, event.type)
+        : filter.truncate(filtered, event.type, dataBudget);
+
     await this.options.outbox.enqueue({
       id: eventId,
       kind: "event",
       sequence,
       payload: {
-        schemaVersion: "1.0",
-        eventId,
-        dispatch: event.dispatch,
-        type: event.type,
-        sequence,
-        occurredAt: event.occurredAt ?? new Date().toISOString(),
-        ...(event.status !== undefined ? { status: event.status } : {}),
-        ...(event.workerName !== undefined ? { workerName: event.workerName } : {}),
-        ...(event.callId !== undefined ? { callId: event.callId } : {}),
-        ...(event.candidateTreeHash !== undefined
-          ? { candidateTreeHash: event.candidateTreeHash }
-          : {}),
-        ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
-        ...(event.usage !== undefined ? { usage: event.usage } : {}),
+        ...fixedPayload,
+        ...safeData,
       },
     });
     await this.options.outbox.drain();

@@ -18,6 +18,8 @@ import type { Logger } from "../models/index.js";
 import { InferenceExecutor } from "../executor/InferenceExecutor.js";
 import { SessionRegistry } from "../session/SessionRegistry.js";
 import { ApprovalCoordinator } from "../executor/ApprovalCoordinator.js";
+import { ConversationEventReporter } from "../executor/ConversationEventReporter.js";
+import { CaptureFilter } from "../executor/CaptureFilter.js";
 import type {
   ExecutionCancelPayload,
   ExecutionStartPayload,
@@ -57,6 +59,8 @@ export class AgentWorker {
   private readonly sessions: SessionRegistry;
   private readonly inference: InferenceExecutor;
   private readonly orchestration: AgentOrchestrationExecutor | null;
+  /** ┬º8.4/┬º15 rule 12: re-bound per session.open (fail-closed METADATA default). */
+  private readonly eventReporter: ConversationEventReporter;
   private readonly log: Logger;
   private readonly executionSender: ExecutionFrameSender;
 
@@ -100,6 +104,17 @@ export class AgentWorker {
       logger: this.log,
     });
 
+    // §8.4/§15 rule 12: the conversation event stream — TurnExecutor
+    // callbacks → execution.event frames, each data map filtered through
+    // the session's capture policy (null ⇒ METADATA, fail closed; the
+    // engine always populates the block). The reporter binds to the
+    // per-turn executionId inside the executor.
+    const events = (this.eventReporter = new ConversationEventReporter({
+      sender: this.executionSender,
+      filter: new CaptureFilter(null, this.log),
+      logger: this.log,
+    }));
+
     this.inference = new InferenceExecutor({
       registry: this.sessions,
       sender: this.executionSender,
@@ -107,6 +122,7 @@ export class AgentWorker {
       agentAccessToken: options.agentAccessToken,
       maxIterations: options.maxIterations,
       approvals,
+      events,
       logger: this.log,
     });
   }
@@ -328,6 +344,15 @@ export class AgentWorker {
       if (open.policy) {
         this.orchestration?.recordSessionPolicy(open.sessionId, open.policy);
       }
+      // §7.3/§15 rule 12: capture the session's capture block so an
+      // orchestration session's progress stream rides its capture limits.
+      if (open.capture) {
+        this.orchestration?.recordSessionCapture(open.sessionId, open.capture);
+      }
+      // §8.4/§15 rule 12: the conversation event reporter re-binds the
+      // same block — its constructor default is METADATA (fail closed)
+      // until the session's real policy arrives.
+      this.eventReporter?.bindCapturePolicy(open.capture ?? null);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.log.error("AgentWorker: failed to open session:", message);

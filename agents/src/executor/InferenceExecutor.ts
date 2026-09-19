@@ -42,6 +42,7 @@ import type {
   CancellationSignal,
   ChatModel,
   ConversationMessage,
+  ExecutorEvents,
   ModelResponse,
   ModelStreamChunk,
   ModelToolCall,
@@ -71,6 +72,10 @@ export interface InferenceExecutorOptions {
   /** Shared HITL approval coordinator; when supplied the tool loop can gate
    * DESTRUCTIVE/IRREVERSIBLE tools on human approval. Optional. */
   approvals?: ApprovalCoordinator;
+  /** §8.4 conversation event stream (TurnExecutor callbacks → execution.event
+   * frames, capture-filtered). Optional; when absent the turn runs silently
+   * exactly as before this seam existed. */
+  events?: ExecutorEvents;
   /** Logger; defaults to a no-op logger. */
   logger?: Logger;
 }
@@ -99,6 +104,7 @@ export class InferenceExecutor {
   private readonly agentAccessToken?: string;
   private readonly maxIterations: number;
   private readonly approvals?: ApprovalCoordinator;
+  private readonly events?: ExecutorEvents;
   private readonly log: Logger;
 
   /** In-flight executions keyed by `executionId`, each with its abort controller
@@ -115,6 +121,7 @@ export class InferenceExecutor {
     this.agentAccessToken = options.agentAccessToken;
     this.maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS;
     this.approvals = options.approvals;
+    this.events = options.events;
     this.log = options.logger ?? noopLogger;
   }
 
@@ -197,6 +204,10 @@ export class InferenceExecutor {
       // 2. Emit execution.accept.
       await this.emitAccept(executionId, sessionId, payload);
 
+      // §8.4: bind the event reporter to THIS execution for the turn, so
+      // every emitted frame carries the executionId (cleared in `finally`).
+      this.events?.beginExecution?.(executionId);
+
       // 3. Convert wire messages to internal transcript.
       const messages = this.toConversationMessages(payload.input?.messages ?? []);
 
@@ -271,6 +282,9 @@ export class InferenceExecutor {
       );
     } finally {
       this.inFlight.delete(executionId);
+      // §8.4: drop the per-turn reporter binding so a stale execution id
+      // can never ride a later callback.
+      this.events?.endExecution?.();
     }
   }
 
@@ -550,7 +564,27 @@ export class InferenceExecutor {
           this.log.info(`Approval for ${call.name} approved — proceeding with tool execution`);
         }
 
+        // §8.4 TOOL_STARTED — metadata only (toolName + callId); the
+        // record's args never pass the session's capture filter.
+        await this.events?.onToolStart?.({
+          toolCallId: call.id,
+          toolName: call.name,
+          args: call.args,
+          startedAt: Date.now(),
+        });
+
         const result = await this.runTool(call, toolMap);
+
+        // §8.4 TOOL_COMPLETED — metadata only (toolName, callId, durationMs,
+        // isError); the result/error content never passes the filter.
+        await this.events?.onToolEnd?.({
+          toolCallId: call.id,
+          toolName: call.name,
+          args: call.args,
+          startedAt: Date.now(),
+          completedAt: Date.now(),
+          ...(result.isError ? { error: result.content } : { result: result.content }),
+        });
 
         messages.push({
           role: "tool",

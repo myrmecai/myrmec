@@ -135,4 +135,12 @@ export interface ExecutorEvents {
   onToolStart?(record: ToolCallRecord): void | Promise<void>;
   /** Fired once a tool settles (record has result/error + completedAt). */
   onToolEnd?(record: ToolCallRecord): void | Promise<void>;
+  /**
+   * §8.4: bound at turn start so event frames carry the executionId. All
+   * callbacks the loop fires between `begin` and `end` belong to THIS
+   * execution; optional so reporters without a per-turn binding ignore it.
+   */
+  beginExecution?(executionId: string): void;
+  /** Turn-end counterpart of {@link beginExecution}. */
+  endExecution?(): void;
 }

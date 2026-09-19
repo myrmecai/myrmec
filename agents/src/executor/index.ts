@@ -7,3 +7,5 @@ export * from "./stub.js";
 export * from "./TurnExecutor.js";
 export * from "./ApprovalCoordinator.js";
 export * from "./InferenceExecutor.js";
+export * from "./CaptureFilter.js";
+export * from "./ConversationEventReporter.js";

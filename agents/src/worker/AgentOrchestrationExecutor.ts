@@ -103,6 +103,15 @@ export class AgentOrchestrationExecutor {
     import("../protocol/unifiedFrames.js").SessionPolicy
   >();
   /**
+   * §7.3/§15 rule 12: the session's capture policy, keyed the same way —
+   * the sink the dispatch executes through filters its progress stream
+   * with it (null/absent ⇒ METADATA, fail closed).
+   */
+  private readonly sessionCapturePolicies = new Map<
+    string,
+    import("../protocol/unifiedFrames.js").CapturePolicy
+  >();
+  /**
    * §8.7 (A4): the live tighten-only allowance per dispatch — mutated by
    * execution.policy.update frames while the dispatch executes; the runner
    * reads through this object at every worker-call boundary.
@@ -228,7 +237,7 @@ export class AgentOrchestrationExecutor {
     const previous = this.executionChain;
     this.executionChain = (async () => {
       await previous.catch(() => undefined);
-      await this.executeDispatch(assignment);
+      await this.executeDispatch(assignment, payload.sessionId);
     })().catch((err) => {
       this.log.error("orchestration dispatch failed:", err);
     });
@@ -257,6 +266,26 @@ export class AgentOrchestrationExecutor {
     if (policy) {
       this.sessionPolicies.set(sessionId, policy);
     }
+  }
+
+  /**
+   * §7.3/§15 rule 12: the worker records the session.open capture block so
+   * the orchestration sink's progress stream respects it.
+   */
+  recordSessionCapture(
+    sessionId: string,
+    capture: import("../protocol/unifiedFrames.js").CapturePolicy | null | undefined,
+  ): void {
+    if (capture) {
+      this.sessionCapturePolicies.set(sessionId, capture);
+    }
+  }
+
+  /** The capture policy bound to a dispatch's session (undefined = none). */
+  private sessionCaptureOf(
+    sessionId: string | null | undefined,
+  ): import("../protocol/unifiedFrames.js").CapturePolicy | undefined {
+    return sessionId ? this.sessionCapturePolicies.get(sessionId) : undefined;
   }
 
   /** The policy a dispatch's session carried (undefined = none captured). */
@@ -358,12 +387,20 @@ export class AgentOrchestrationExecutor {
   }
 
   /** Run one admitted dispatch end to end. */
-  private async executeDispatch(assignment: OrchestrationAssignment): Promise<void> {
+  private async executeDispatch(
+    assignment: OrchestrationAssignment,
+    sessionId: string | null,
+  ): Promise<void> {
     const { dispatch, source, step } = assignment;
     const o = step.orchestration;
     const runId = dispatch.runId;
     const generation = 1;
     this.runWorkflow.set(runId, dispatch.workflowId);
+
+    // §7.3/§15 rule 12: bind the dispatch's session capture policy to the
+    // sink BEFORE any side effect reports progress — the progress stream
+    // rides this session's capture limits (null/absent ⇒ METADATA).
+    this.sink.bindCapturePolicy(this.sessionCaptureOf(sessionId) ?? null);
 
     // §7.3/§8.7 (A4): the policy/allowance captured at admission (bound to
     // this dispatch) — the runner enforces the host limits and reads the
