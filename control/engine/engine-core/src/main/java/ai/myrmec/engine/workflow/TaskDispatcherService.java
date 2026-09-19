@@ -41,6 +41,7 @@ public class TaskDispatcherService {
     private final WorkflowTaskRepository taskRepository;
     private final WorkflowRequestRepository requestRepository;
     private final AgentHostRepository agentRepository;
+    private final HostSelectionService hostSelectionService;
     private final AgentRepository agentInstanceRepository;
     private final AgentConnectionManager connectionManager;
     private final AgentWebSocketHandler webSocketHandler;
@@ -155,17 +156,19 @@ public class TaskDispatcherService {
         }
 
         UUID profileId = task.getAgentProfile().getId();
-        
-        // Find agents with matching profile
-        List<AgentHost> matchingAgents = agentRepository.findActiveByProfileId(profileId);
-        
-        if (matchingAgents.isEmpty()) {
-            log.debug("No active agents found for profile {}", profileId);
+        UUID projectId = task.getRequest().getWorkflow().getProject().getId();
+
+        // §3.7: host selection is capacity-based and project-preferring,
+        // never profile-keyed. The task still owns its profile binding.
+        List<AgentHost> candidates = hostSelectionService.selectCandidatesForProject(projectId);
+
+        if (candidates.isEmpty()) {
+            log.debug("No live hosts available for project {} (task profile {})", projectId, profileId);
             return;
         }
-        
+
         // Find an available agent instance (online, idle)
-        for (AgentHost agent : matchingAgents) {
+        for (AgentHost agent : candidates) {
             Optional<Agent> availableInstance = findAvailableInstance(agent.getId());
             
             if (availableInstance.isPresent()) {
@@ -213,6 +216,15 @@ public class TaskDispatcherService {
         }
         
         log.debug("No available agent instances for task {}", task.getId());
+    }
+
+    /**
+     * §3.7 candidates: project-scoped live hosts first, then unscoped live
+     * hosts. Delegates to {@link HostSelectionService#selectCandidatesForProject}.
+     */
+    private List<AgentHost> candidateHosts(WorkflowTask task) {
+        UUID projectId = task.getRequest().getWorkflow().getProject().getId();
+        return hostSelectionService.selectCandidatesForProject(projectId);
     }
 
     /**
