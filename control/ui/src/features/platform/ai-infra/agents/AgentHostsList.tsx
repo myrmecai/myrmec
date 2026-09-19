@@ -7,10 +7,12 @@ import {
   agentHostsApi,
   projectsApi,
   type AgentHost,
+  type AgentHostType,
   type AgentHostWithKey,
   type AgentWorker,
   type AgentWorkerStatus,
   type CreateAgentHostRequest,
+  type ModelAccessMode,
   type UpdateAgentHostRequest,
   type Project,
 } from '@/lib/api'
@@ -163,6 +165,16 @@ export function AgentHostsList() {
         ) : (
           <Badge variant="secondary">Inactive</Badge>
         ),
+    },
+    {
+      accessorKey: 'hostType',
+      header: 'Type',
+      cell: ({ row }) => <HostTypeBadge hostType={row.original.hostType} />,
+    },
+    {
+      accessorKey: 'modelAccessMode',
+      header: 'Model access',
+      cell: ({ row }) => <ModelAccessBadge mode={row.original.modelAccessMode} />,
     },
     {
       id: 'actions',
@@ -346,6 +358,29 @@ function WorkerStatusBadge({ status }: { status: AgentWorkerStatus | null }) {
   return <Badge className={WORKER_STATUS_STYLES[status]}>{status}</Badge>
 }
 
+const HOST_TYPE_BADGE: Record<AgentHostType, { variant: 'secondary' | 'outline' | 'default'; className?: string }> = {
+  MANAGED: { variant: 'secondary' },
+  LOCAL: { variant: 'outline', className: 'border-blue-500 text-blue-600' },
+  DEDICATED: { variant: 'outline', className: 'border-amber-500 text-amber-600' },
+}
+
+function HostTypeBadge({ hostType }: { hostType: AgentHostType }) {
+  const badge = HOST_TYPE_BADGE[hostType]
+  return (
+    <Badge variant={badge.variant} className={badge.className}>
+      {hostType}
+    </Badge>
+  )
+}
+
+function ModelAccessBadge({ mode }: { mode: ModelAccessMode }) {
+  return mode === 'GATEWAY' ? (
+    <Badge variant="default" className="bg-purple-600">GATEWAY</Badge>
+  ) : (
+    <Badge variant="secondary">DIRECT</Badge>
+  )
+}
+
 function formatTimestamp(value: string | null): string {
   if (!value) return '—'
   return new Date(value).toLocaleString()
@@ -489,6 +524,7 @@ function AgentHostForm({ projects, onSubmit, isLoading, error }: AgentHostFormPr
   const [description, setDescription] = useState('')
   const [projectId, setProjectId] = useState<string>('')
   const [maxInstances, setMaxInstances] = useState('1')
+  const [modelAccessMode, setModelAccessMode] = useState<ModelAccessMode>('DIRECT')
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -497,6 +533,9 @@ function AgentHostForm({ projects, onSubmit, isLoading, error }: AgentHostFormPr
       description: description || undefined,
       projectId: projectId || undefined,
       maxAgents: parseInt(maxInstances) || 1,
+      // GATEWAY is the only value worth sending: DIRECT is the backend
+      // default, and the field is platform-admin-gated (403 for others).
+      modelAccessMode: modelAccessMode === 'GATEWAY' ? 'GATEWAY' : undefined,
     })
   }
 
@@ -564,6 +603,21 @@ function AgentHostForm({ projects, onSubmit, isLoading, error }: AgentHostFormPr
             Maximum concurrent instances allowed
           </p>
         </div>
+        <div className="space-y-2">
+          <Label htmlFor="modelAccessMode">Model access</Label>
+          <select
+            id="modelAccessMode"
+            value={modelAccessMode}
+            onChange={(e) => setModelAccessMode(e.target.value as ModelAccessMode)}
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <option value="DIRECT">DIRECT</option>
+            <option value="GATEWAY">GATEWAY</option>
+          </select>
+          <p className="text-xs text-muted-foreground">
+            GATEWAY routes model calls through the org model gateway — requires the gateway enabled; settable by platform admins only
+          </p>
+        </div>
       </div>
       <DialogFooter>
         <Button type="submit" disabled={isLoading}>
@@ -588,6 +642,7 @@ function AgentHostEditForm({ agentHost, projects, onSubmit, isLoading, error }: 
   const [projectId, setProjectId] = useState(agentHost.projectId || '')
   const [maxInstances, setMaxInstances] = useState(String(agentHost.maxAgents))
   const [status, setStatus] = useState(agentHost.status)
+  const [modelAccessMode, setModelAccessMode] = useState<ModelAccessMode>(agentHost.modelAccessMode ?? 'DIRECT')
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -597,6 +652,11 @@ function AgentHostEditForm({ agentHost, projects, onSubmit, isLoading, error }: 
       projectId: projectId || undefined,
       maxAgents: parseInt(maxInstances) || 1,
       status,
+      // Only send the mode when it actually changed — the field is
+      // platform-admin-gated and the backend 403s any non-null mode from
+      // non-admin principals, even an unchanged value.
+      modelAccessMode:
+        modelAccessMode !== (agentHost.modelAccessMode ?? 'DIRECT') ? modelAccessMode : undefined,
     })
   }
 
@@ -656,6 +716,21 @@ function AgentHostEditForm({ agentHost, projects, onSubmit, isLoading, error }: 
             value={maxInstances}
             onChange={(e) => setMaxInstances(e.target.value)}
           />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="edit-modelAccessMode">Model access</Label>
+          <select
+            id="edit-modelAccessMode"
+            value={modelAccessMode}
+            onChange={(e) => setModelAccessMode(e.target.value as ModelAccessMode)}
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <option value="DIRECT">DIRECT</option>
+            <option value="GATEWAY">GATEWAY</option>
+          </select>
+          <p className="text-xs text-muted-foreground">
+            Settable by platform admins only
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <input

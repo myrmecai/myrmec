@@ -797,6 +797,8 @@ export const agentProfilesApi = {
 
 // Agent Hosts API
 export type AgentStatus = 'ACTIVE' | 'INACTIVE'
+export type AgentHostType = 'MANAGED' | 'LOCAL' | 'DEDICATED'
+export type ModelAccessMode = 'DIRECT' | 'GATEWAY'
 
 export interface AgentHost {
   id: string
@@ -808,6 +810,8 @@ export interface AgentHost {
   config: Record<string, unknown> | null
   maxAgents: number
   status: AgentStatus
+  hostType: AgentHostType
+  modelAccessMode: ModelAccessMode
   activeInstanceCount: number
   createdAt: string
   updatedAt: string | null
@@ -825,6 +829,7 @@ export interface CreateAgentHostRequest {
   modelOverride?: string
   config?: Record<string, unknown>
   maxAgents?: number
+  modelAccessMode?: ModelAccessMode
 }
 
 export interface UpdateAgentHostRequest {
@@ -835,6 +840,7 @@ export interface UpdateAgentHostRequest {
   config?: Record<string, unknown>
   maxAgents?: number
   status?: AgentStatus
+  modelAccessMode?: ModelAccessMode
 }
 
 export const agentHostsApi = {
@@ -843,6 +849,8 @@ export const agentHostsApi = {
   create: (data: CreateAgentHostRequest) => api.post<AgentHostWithKey>('/admin/agent-hosts', data),
   update: (id: string, data: UpdateAgentHostRequest) =>
     api.put<AgentHost>(`/admin/agent-hosts/${id}`, data),
+  setModelAccessMode: (id: string, modelAccessMode: ModelAccessMode) =>
+    api.put<AgentHost>(`/admin/agent-hosts/${id}/model-access-mode`, { modelAccessMode }),
   delete: (id: string) => api.delete<void>(`/admin/agent-hosts/${id}`),
   regenerateKey: (id: string) =>
     api.post<{ registrationKey: string }>(`/admin/agent-hosts/${id}/regenerate-key`),
