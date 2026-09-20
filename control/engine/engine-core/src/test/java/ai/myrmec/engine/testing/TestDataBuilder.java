@@ -2,6 +2,7 @@ package ai.myrmec.engine.testing;
 
 import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentHostCreationResult;
+import ai.myrmec.engine.agent.AgentHostType;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileService;
 import ai.myrmec.engine.agent.AgentHostService;
@@ -318,6 +319,7 @@ public class TestDataBuilder {
         private String modelOverride;
         private Integer maxAgents = 1;
         private ModelAccessMode modelAccessMode;
+        private AgentHostType hostType;
 
         public AgentBuilder named(String base) {
             this.name = base;
@@ -361,6 +363,11 @@ public class TestDataBuilder {
             return this;
         }
 
+        public AgentBuilder withHostType(AgentHostType hostType) {
+            this.hostType = hostType;
+            return this;
+        }
+
         public AgentHostCreationResult create() {
             String effectiveName = autoSuffix ? unique(name) : name;
             AgentHostCreationResult result = agentService.createAgent(
@@ -370,7 +377,8 @@ public class TestDataBuilder {
                     modelOverride,
                     null,
                     maxAgents,
-                    modelAccessMode
+                    modelAccessMode,
+                    hostType
             );
             return result;
         }

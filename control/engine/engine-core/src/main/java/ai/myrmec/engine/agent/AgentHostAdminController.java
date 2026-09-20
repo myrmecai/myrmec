@@ -133,7 +133,11 @@ public class AgentHostAdminController {
                 request.getModelOverride(),
                 request.getConfig(),
                 request.getMaxAgents(),
-                mode
+                mode,
+                // Local-owner model (§3.7): MANAGED default; LOCAL allowed to
+                // pre-provision a per-user IDE seat (owner arrives at
+                // host.open). Host type is immutable after creation.
+                request.getHostType()
         );
 
         String projectName = null;

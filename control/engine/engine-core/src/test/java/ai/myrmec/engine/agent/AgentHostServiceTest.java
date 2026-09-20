@@ -22,6 +22,7 @@ import static org.mockito.Mockito.when;
 class AgentHostServiceTest {
 
     @Mock private AgentHostRepository agentHostRepository;
+    @Mock private AgentHostInstanceRepository agentHostInstanceRepository;
     @Mock private AgentRepository agentInstanceRepository;
     @Mock private ConversationRepository conversationRepository;
     @Mock private ConversationEventService conversationEventService;

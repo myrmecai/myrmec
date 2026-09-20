@@ -6,6 +6,8 @@ import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine._system.exception.InvalidRegistrationKeyException;
 import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentHostCreationResult;
+import ai.myrmec.engine.agent.AgentHostRepository;
+import ai.myrmec.engine.agent.AgentHostType;
 import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.auth.dto.HostLocalRegisterRequest;
 import ai.myrmec.engine.auth.dto.HostRegisterRequest;
@@ -23,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class HostAuthServiceTest extends IntegrationTestBase {
 
     @Autowired HostAuthService hostAuthService;
+    @Autowired AgentHostRepository agentHostRepository;
     @Autowired AgentRepository agentRepository;
     @Autowired TestDataBuilder data;
     @Autowired JdbcTemplate jdbcTemplate;
@@ -71,6 +74,28 @@ class HostAuthServiceTest extends IntegrationTestBase {
                 .isInstanceOf(InvalidRegistrationKeyException.class);
     }
 
+    /**
+     * Local-owner model (§4.1): only MANAGED hosts consume registration
+     * keys. A LOCAL host's key is a dormant placeholder — presenting it to
+     * the managed path is rejected.
+     */
+    @Test
+    void managedRegistrationRejectsALocalHostKey() {
+        HostRegisterResponse local = hostAuthService.registerLocal(
+                TEST_ADMIN_ID, new HostLocalRegisterRequest(), "dev-laptop");
+        AgentHost localHost = agentHostRepository.findById(local.getHostId()).orElseThrow();
+        assertThat(localHost.getHostType()).isEqualTo(AgentHostType.LOCAL);
+
+        HostRegisterRequest managedPath = new HostRegisterRequest();
+        managedPath.setRegistrationKey(localHost.getRegistrationKey());
+        managedPath.setHostname("dev-laptop");
+        managedPath.setRuntimeVersion("1.8.0");
+
+        assertThatThrownBy(() -> hostAuthService.registerManaged(managedPath))
+                .isInstanceOf(InvalidRegistrationKeyException.class)
+                .hasMessageContaining("LOCAL");
+    }
+
     @Test
     void localRegistrationResolvesOrCreatesTheUsersHost() {
         // Changeset 024 dropped the 017 seed: no default local profile exists.
@@ -90,8 +115,5 @@ class HostAuthServiceTest extends IntegrationTestBase {
         assertThat(response.getHostId()).isNotNull();
         assertThat(response.getAccessToken()).isNotBlank();
         assertThat(response.getRefreshToken()).isNotBlank();
-        // The local host is per user — upsertLocalAgentHost reuses it.
-        HostRegisterResponse second = hostAuthService.registerLocal(TEST_ADMIN_ID, request, "developer-laptop");
-        assertThat(second.getHostId()).isEqualTo(response.getHostId());
     }
 }

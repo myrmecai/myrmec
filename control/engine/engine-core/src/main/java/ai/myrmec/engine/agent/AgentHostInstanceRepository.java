@@ -26,6 +26,15 @@ public interface AgentHostInstanceRepository extends JpaRepository<AgentHostInst
     Optional<AgentHostInstance> findByAgentHostIdAndOwnerUserIdAndStatus(
             UUID agentHostId, UUID ownerUserId, AgentHostInstance.Status status);
 
+    /**
+     * Local-owner model (§4.1): the live OPEN instance owned by a user —
+     * the local registration matching key. agent_host_instances.owner_user_id
+     * is the ONLY owner record (agent_hosts.owner_user_id is dropped); a
+     * user's VS Code plugin reuses the LOCAL host whose live instance it owns.
+     */
+    Optional<AgentHostInstance> findByOwnerUserIdAndStatus(
+            UUID ownerUserId, AgentHostInstance.Status status);
+
     /** §6.1 replay-idempotency lookup: the live run with this nonce, if any. */
     Optional<AgentHostInstance> findByAgentHostIdAndInstanceNonceAndStatus(
             UUID agentHostId, String instanceNonce, AgentHostInstance.Status status);

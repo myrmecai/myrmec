@@ -111,15 +111,6 @@ public class AgentHost {
     @Column(name = "model_access_mode", nullable = false, length = 20)
     private ModelAccessMode modelAccessMode = ModelAccessMode.DIRECT;
 
-    /**
-     * The owning user for LOCAL/DEDICATED hosts; NULL for MANAGED (§2.3).
-     * Live identity key for the per-user LOCAL host lookup (§4.1) — NOT a
-     * vestigial host copy of the instance owner (agent_host_instances
-     * carries the per-run copy).
-     */
-    @Column(name = "owner_user_id")
-    private UUID ownerUserId;
-
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

@@ -1,5 +1,6 @@
 package ai.myrmec.engine.agent.dto;
 
+import ai.myrmec.engine.agent.AgentHostType;
 import ai.myrmec.engine.agent.ModelAccessMode;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -50,4 +51,12 @@ public class CreateAgentRequest {
      * PLATFORM_ADMIN-only to change; absent means DIRECT (dev-phase default).
      */
     private ModelAccessMode modelAccessMode;
+
+    /**
+     * Durable host type (§2.3/§3.7): MANAGED (default) for cluster/headless
+     * supervisors; LOCAL pre-provisions a per-user IDE seat — the owner is
+     * unknown at creation and arrives when the user's plugin connects.
+     * LOCAL hosts are per-user, never project-scoped.
+     */
+    private AgentHostType hostType;
 }

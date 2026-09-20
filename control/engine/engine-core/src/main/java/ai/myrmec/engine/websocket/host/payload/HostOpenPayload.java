@@ -14,5 +14,13 @@ public record HostOpenPayload(
         List<Integer> supportedProtocolVersions,
         int poolSize,
         Map<String, Object> capabilities,
-        Map<String, Object> reportedCapacity) {
+        Map<String, Object> reportedCapacity,
+        /**
+         * Local-owner model (§3.7/§4.1, additive): the id of the user logged
+         * into the VS Code plugin whose local workspace opened the instance.
+         * REQUIRED (non-null) for LOCAL hosts, MUST be absent (null) for
+         * MANAGED hosts — the HOST_JWT carries no user identity (§18 token
+         * isolation), so this payload field is the only owner channel.
+         */
+        UUID ownerUserId) {
 }

@@ -6,6 +6,7 @@ import ai.myrmec.engine._system.exception.InvalidRegistrationKeyException;
 import ai.myrmec.engine._system.exception.InvalidTokenException;
 import ai.myrmec.engine._system.security.JwtTokenProvider;
 import ai.myrmec.engine.agent.AgentHost;
+import ai.myrmec.engine.agent.AgentHostType;
 import ai.myrmec.engine.agent.AgentHostRepository;
 import ai.myrmec.engine.agent.AgentHostService;
 import ai.myrmec.engine.auth.dto.HostLocalRegisterRequest;
@@ -45,6 +46,14 @@ public class HostAuthService {
 
         if (host.getStatus() != AgentHost.Status.ACTIVE) {
             throw new InvalidRegistrationKeyException("Agent host definition is not active");
+        }
+
+        // Local-owner model (§4.1): only MANAGED hosts consume registration
+        // keys. A LOCAL host's key is a dormant placeholder — the plugin
+        // authenticates via registerLocal + the user's JWT.
+        if (host.getHostType() != AgentHostType.MANAGED) {
+            throw new InvalidRegistrationKeyException(
+                    "Registration key is not valid for a LOCAL host");
         }
 
         registrationKeyService.findByKeyValue(request.getRegistrationKey())

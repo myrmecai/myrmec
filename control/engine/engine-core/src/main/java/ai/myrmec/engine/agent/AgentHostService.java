@@ -43,6 +43,7 @@ public class AgentHostService {
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final AgentHostRepository agentHostRepository;
+    private final AgentHostInstanceRepository agentHostInstanceRepository;
     private final AgentRepository agentInstanceRepository;
     private final ConversationRepository conversationRepository;
     private final ConversationEventService conversationEventService;
@@ -60,21 +61,33 @@ public class AgentHostService {
 
     /**
      * Create a new agent host with auto-generated registration key.
+     *
+     * @param hostType MANAGED for cluster/headless supervisors (default);
+     *                 LOCAL pre-provisions a per-user IDE seat — the owner
+     *                 is unknown at creation and arrives when the user's
+     *                 plugin connects (host.open stamps the instance).
+     *                 LOCAL hosts are per-user, never project-scoped.
      */
     @Transactional
     public AgentHostCreationResult createAgent(String name, String description,
                                            UUID projectId, String modelOverride,
                                            Map<String, Object> config, Integer maxAgents,
-                                           ModelAccessMode modelAccessMode) {
+                                           ModelAccessMode modelAccessMode,
+                                           AgentHostType hostType) {
         // Validate name uniqueness
         if (agentHostRepository.existsByName(name)) {
             throw new BadRequestException("Agent with name '" + name + "' already exists");
         }
 
+        AgentHostType type = hostType != null ? hostType : AgentHostType.MANAGED;
+        if (type == AgentHostType.LOCAL && projectId != null) {
+            throw new BadRequestException("A LOCAL agent host cannot be project-scoped");
+        }
+
         // Credential-envelope design §5.2: validate the requested mode against
         // the gateway configuration + governance mandate BEFORE persisting.
         ModelAccessMode mode = modelAccessMode != null ? modelAccessMode : ModelAccessMode.DIRECT;
-        modelAccessModeValidator.validate(AgentHostType.MANAGED, mode);
+        modelAccessModeValidator.validate(type, mode);
 
         // Generate registration key
         String registrationKey = generateRegistrationKey();
@@ -89,6 +102,7 @@ public class AgentHostService {
         agent.setMaxAgents(maxAgents != null ? maxAgents : 1);
         agent.setStatus(AgentHost.Status.ACTIVE);
         agent.setModelAccessMode(mode);
+        agent.setHostType(type);
 
         agent = agentHostRepository.save(agent);
         log.info("Created agent: {} ({})", agent.getName(), agent.getId());
@@ -212,12 +226,17 @@ public class AgentHostService {
     /**
      * Create or reuse the ephemeral local {@link AgentHost} for a signed-in user.
      *
-     * <p>At most one local host per user is enforced by the unique index on
-     * {@code agent_hosts(host_type, owner_user_id)}. If the user already has a
-     * local host, its profile may be updated and the existing host is returned.
-     * A fresh local host gets no durable registration key — the extension
-     * authenticates with short-lived agent JWTs minted against the returned
-     * host/instance.</p>
+     * <p>Local-owner model (§3.7/§4.1): the ONLY owner record lives on
+     * {@code agent_host_instances.owner_user_id} — the host row is a
+     * per-user placeholder. Matching is by live-instance ownership: if the
+     * user already has an OPEN local instance, its host is reused (profile
+     * may be refreshed; the host is re-asserted ACTIVE). Otherwise a fresh
+     * LOCAL host is created WITHOUT an owner — the owner stamps the
+     * instance when the plugin's first {@code host.open} (carrying
+     * {@code ownerUserId}) arrives. A fresh local host still gets a durable
+     * registration key (LOCAL hosts never consume it — registration keys
+     * are MANAGED-only); the extension authenticates with short-lived
+     * agent JWTs minted against the returned host/instance.</p>
      *
      * @param userId    the authenticated user who owns the local agent
      * @param projectId project scope recorded at creation for governance
@@ -233,11 +252,16 @@ public class AgentHostService {
             throw new BadRequestException("userId is required for a local agent host");
         }
 
-        // Per-USER local host (design 2026-09-11 §1.3): not project-scoped.
-        Optional<AgentHost> existing =
-                agentHostRepository.findByHostTypeAndOwnerUserId(AgentHostType.LOCAL, userId);
-        if (existing.isPresent()) {
-            AgentHost host = existing.get();
+        // Per-USER matching rides the live instance (local-owner model):
+        // the host whose OPEN instance this user owns is theirs.
+        AgentHostInstance existingInstance =
+                agentHostInstanceRepository.findByOwnerUserIdAndStatus(
+                        userId, AgentHostInstance.Status.OPEN).orElse(null);
+        if (existingInstance != null) {
+            AgentHost host = agentHostRepository.findById(existingInstance.getAgentHostId())
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Live instance " + existingInstance.getId()
+                                    + " references a missing host"));
             if (hostname != null) {
                 host.setName(buildLocalHostName(userId, hostname));
             }
@@ -248,7 +272,16 @@ public class AgentHostService {
         }
 
         AgentHost host = new AgentHost();
-        host.setName(buildLocalHostName(userId, hostname));
+        // Keep the per-user name scheme, but a fresh host can coexist with a
+        // previous (now unmatchable) host of the same user+hostname — e.g.
+        // the staleness sweep closed the user's stale OPEN instance, the
+        // laptop resumed, and the plugin re-registered. Suffix on collision
+        // instead of a 500 on the name unique index.
+        String name = buildLocalHostName(userId, hostname);
+        if (agentHostRepository.existsByName(name)) {
+            name = name + "-" + UUID.randomUUID().toString().substring(0, 8);
+        }
+        host.setName(name);
         host.setDescription("Local IDE agent for user " + userId);
         // Project scope recorded at creation for governance display only;
         // reuse is per-user, so it is not updated on later registrations.
@@ -257,10 +290,10 @@ public class AgentHostService {
         host.setMaxAgents(1);
         host.setStatus(AgentHost.Status.ACTIVE);
         host.setHostType(AgentHostType.LOCAL);
-        host.setOwnerUserId(userId);
 
         host = agentHostRepository.save(host);
-        log.info("Created local agent host {} for user {} (project {})",
+        log.info("Created local agent host {} for user {} (project {}) — owner stamps "
+                        + "the instance at host.open",
                 host.getId(), userId, projectId);
         return host;
     }

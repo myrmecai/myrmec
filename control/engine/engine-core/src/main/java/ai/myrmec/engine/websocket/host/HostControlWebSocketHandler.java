@@ -6,6 +6,7 @@ import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentHostRepository;
+import ai.myrmec.engine.agent.AgentHostType;
 import ai.myrmec.engine.spi.crypto.EncryptionService;
 import ai.myrmec.engine.inference.SessionAllocator;
 import ai.myrmec.engine.inference.SessionContextAssembler;
@@ -281,12 +282,26 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
-        // §2.3: the durable host record carries the owner for LOCAL/DEDICATED
-        // hosts (MANAGED rows are NULL) — the per-run instance row seeds its
-        // ownerUserId copy from it; host.open's HOST_JWT carries no user
-        // identity (§18 token isolation), so the host column is the seed.
-        UUID ownerUserId = host.getHostType() == ai.myrmec.engine.agent.AgentHostType.MANAGED
-                ? null : host.getOwnerUserId();
+        // Local-owner model (§3.7/§4.1): agent_hosts.owner_user_id is gone —
+        // the ONLY owner record is agent_host_instances.owner_user_id, seeded
+        // from the additive host.open payload field (the HOST_JWT carries no
+        // user identity, §18 token isolation). Validation matrix:
+        //   LOCAL  + ownerUserId        → instance stamped with the owner;
+        //   LOCAL  + ownerUserId == null → allowed (owner stays null), but
+        //         logged — the VS Code plugin always sends it;
+        //   MANAGED + ownerUserId != null → protocol violation (a headless
+        //         supervisor must never claim an owner).
+        boolean localHost = host.getHostType() != AgentHostType.MANAGED;
+        UUID ownerUserId = open.ownerUserId();
+        if (!localHost && ownerUserId != null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "MANAGED hosts do not carry an owner", false, "CONNECTION", null);
+            return;
+        }
+        if (localHost && ownerUserId == null) {
+            log.debug("host.open for LOCAL host {} carries no ownerUserId — "
+                    + "instance owner stays null", hostId);
+        }
         int announced = open.poolSize() > 0 ? open.poolSize() : 1;
         int effective = Math.min(announced, host.getMaxAgents());
 
