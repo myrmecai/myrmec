@@ -81,6 +81,17 @@ export class AgentWorkerHost {
     this.worker.postMessage(message);
   }
 
+  /**
+   * Hand the run PSK (design 2026-09-16 §6/§10) to the worker. The bytes
+   * cross as a plain array (structured clone); the worker reconstructs the
+   * Uint8Array and stores it in process memory only. MUST be called after
+   * spawn and BEFORE any session.open carrying credential envelopes.
+   */
+  setPsk(psk: Uint8Array): void {
+    const message: WorkerInbound = { kind: "psk", psk: Array.from(psk) };
+    this.worker.postMessage(message);
+  }
+
   /** Terminate the worker thread. */
   async stop(): Promise<void> {
     await this.worker.terminate();

@@ -17,15 +17,28 @@ import type { Envelope, RawEnvelope } from "../protocol/envelope.js";
 
 /**
  * Parent → worker. Carries a decoded control frame for the worker to dispatch
- * to its task / conversation handlers. The `kind` discriminant leaves room for
- * future lifecycle messages (e.g. drain) without churn.
+ * to its task / conversation handlers.
  */
 export interface WorkerEnvelopeMessage {
   kind: "envelope";
   frame: RawEnvelope;
 }
 
-export type WorkerInbound = WorkerEnvelopeMessage;
+/**
+ * Parent → worker. Delivers the run PSK (design
+ * 2026-09-16-credential-envelope-delivery.md §6/§10) decoded from
+ * `host.opened` on the parent's control socket. The worker stores it in
+ * process memory only (the SessionRegistry vault) — it is never logged and
+ * never persisted. Bytes travel as a plain array because structured clone
+ * cannot cross the boundary with a typed-buffer view guarantee; the worker
+ * reconstructs the Uint8Array.
+ */
+export interface WorkerPskMessage {
+  kind: "psk";
+  psk: number[];
+}
+
+export type WorkerInbound = WorkerEnvelopeMessage | WorkerPskMessage;
 
 /**
  * Worker → parent. A frame the worker produced (a `message.delta`,

@@ -174,6 +174,13 @@ export class AgentWorker {
 
   /** Dispatch an inbound message from the Supervisor. */
   async handle(message: WorkerInbound): Promise<void> {
+    if (message.kind === "psk") {
+      // §6/§10: the parent decoded the run PSK from host.opened and handed
+      // it across the thread boundary; the registry keeps it in memory only
+      // and uses it to derive per-session keys for envelope unwrapping.
+      this.sessions.setPsk(new Uint8Array(message.psk));
+      return;
+    }
     if (message.kind !== "envelope") {
       this.log.warn("AgentWorker: unknown inbound message", message);
       return;
