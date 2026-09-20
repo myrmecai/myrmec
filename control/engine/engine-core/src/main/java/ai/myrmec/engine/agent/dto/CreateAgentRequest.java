@@ -8,7 +8,6 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -28,17 +27,6 @@ public class CreateAgentRequest {
      * Optional project scope. Null means system-wide agent.
      */
     private UUID projectId;
-
-    /**
-     * Optional model override. Null uses profile's default model.
-     */
-    @Size(max = 50, message = "Model override cannot exceed 50 characters")
-    private String modelOverride;
-
-    /**
-     * Optional agent-specific configuration.
-     */
-    private Map<String, Object> config;
 
     /**
      * Maximum concurrent Agents (workers) this host may run.

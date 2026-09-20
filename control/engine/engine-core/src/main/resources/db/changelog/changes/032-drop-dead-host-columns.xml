@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Drop three dead agent_hosts columns (unified protocol cutover;
+        design 2026-09-11). Each is stored/echoed only, with no consumer:
+
+          - model_override (born 003, FK fk_agent_hosts_model added by 004):
+            the per-session model comes from the published profile version,
+            so the per-host override was never read by dispatch, session
+            assembly, or model resolution.
+          - config (born 003): agent-specific configuration blob; the only
+            getConfig() reads in the engine target other entities' configs.
+          - reported_capacity (born 003): the authoritative copy lives on
+            agent_host_instances.reported_capacity (born 018) and is stamped
+            by host.open/host.capacity; the host-entity copy had its last
+            writer (recordHostAnnounce) deleted in the 5579986 cutover.
+
+        Dev phase - no data migration; the columns hold dead data.
+        agent_hosts.provisions is deliberately KEPT here (same dead-data
+        category, scheduled separately).
+    -->
+
+    <changeSet id="032-host-model-override-fk-drop" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="agent_hosts"/>
+                <foreignKeyConstraintExists foreignKeyName="fk_agent_hosts_model"/>
+            </and>
+        </preConditions>
+        <dropForeignKeyConstraint baseTableName="agent_hosts"
+                                  constraintName="fk_agent_hosts_model"/>
+    </changeSet>
+
+    <changeSet id="032-host-model-override-column-drop" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <columnExists tableName="agent_hosts" columnName="model_override"/>
+        </preConditions>
+        <dropColumn tableName="agent_hosts" columnName="model_override"/>
+    </changeSet>
+
+    <changeSet id="032-host-config-column-drop" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <columnExists tableName="agent_hosts" columnName="config"/>
+        </preConditions>
+        <dropColumn tableName="agent_hosts" columnName="config"/>
+    </changeSet>
+
+    <changeSet id="032-host-reported-capacity-column-drop" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <columnExists tableName="agent_hosts" columnName="reported_capacity"/>
+        </preConditions>
+        <dropColumn tableName="agent_hosts" columnName="reported_capacity"/>
+    </changeSet>
+
+</databaseChangeLog>

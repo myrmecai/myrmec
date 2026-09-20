@@ -20,8 +20,6 @@ public class AgentResponse {
     private String description;
     private UUID projectId;
     private String projectName;
-    private String modelOverride;
-    private Map<String, Object> config;
     private Integer maxAgents;
     private AgentHost.Status status;
     private ai.myrmec.engine.agent.AgentHostType hostType;
@@ -47,8 +45,6 @@ public class AgentResponse {
                 .description(agent.getDescription())
                 .projectId(agent.getProjectId())
                 .projectName(projectName)
-                .modelOverride(agent.getModelOverride())
-                .config(agent.getConfig())
                 .maxAgents(agent.getMaxAgents())
                 .status(agent.getStatus())
                 .hostType(agent.getHostType())

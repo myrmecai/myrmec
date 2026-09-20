@@ -6,7 +6,6 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -25,17 +24,6 @@ public class UpdateAgentRequest {
      * Project scope can be changed.
      */
     private UUID projectId;
-
-    /**
-     * Model override. Set to empty string to clear.
-     */
-    @Size(max = 50, message = "Model override cannot exceed 50 characters")
-    private String modelOverride;
-
-    /**
-     * Agent-specific configuration.
-     */
-    private Map<String, Object> config;
 
     /**
      * Maximum concurrent Agents (workers) this host may run.

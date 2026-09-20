@@ -70,8 +70,7 @@ public class AgentHostService {
      */
     @Transactional
     public AgentHostCreationResult createAgent(String name, String description,
-                                           UUID projectId, String modelOverride,
-                                           Map<String, Object> config, Integer maxAgents,
+                                           UUID projectId, Integer maxAgents,
                                            ModelAccessMode modelAccessMode,
                                            AgentHostType hostType) {
         // Validate name uniqueness
@@ -97,8 +96,6 @@ public class AgentHostService {
         agent.setDescription(description);
         agent.setProjectId(projectId);
         agent.setRegistrationKey(registrationKey);
-        agent.setModelOverride(modelOverride);
-        agent.setConfig(config);
         agent.setMaxAgents(maxAgents != null ? maxAgents : 1);
         agent.setStatus(AgentHost.Status.ACTIVE);
         agent.setModelAccessMode(mode);
@@ -115,8 +112,7 @@ public class AgentHostService {
      */
     @Transactional
     public AgentHost updateAgent(UUID agentId, String name, String description,
-                             UUID projectId, String modelOverride,
-                             Map<String, Object> config, Integer maxAgents, AgentHost.Status status,
+                             UUID projectId, Integer maxAgents, AgentHost.Status status,
                              ModelAccessMode modelAccessMode) {
         AgentHost agent = agentHostRepository.findById(agentId)
                 .orElseThrow(() -> ResourceNotFoundException.agent(agentId));
@@ -134,14 +130,6 @@ public class AgentHostService {
 
         if (projectId != null) {
             agent.setProjectId(projectId);
-        }
-
-        if (modelOverride != null) {
-            agent.setModelOverride(modelOverride.isEmpty() ? null : modelOverride);
-        }
-
-        if (config != null) {
-            agent.setConfig(config);
         }
 
         if (maxAgents != null) {

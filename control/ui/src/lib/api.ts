@@ -806,8 +806,6 @@ export interface AgentHost {
   description: string | null
   projectId: string | null
   projectName: string | null
-  modelOverride: string | null
-  config: Record<string, unknown> | null
   maxAgents: number
   status: AgentStatus
   hostType: AgentHostType
@@ -826,8 +824,6 @@ export interface CreateAgentHostRequest {
   name: string
   description?: string
   projectId?: string
-  modelOverride?: string
-  config?: Record<string, unknown>
   maxAgents?: number
   modelAccessMode?: ModelAccessMode
   /**
@@ -842,8 +838,6 @@ export interface UpdateAgentHostRequest {
   name?: string
   description?: string
   projectId?: string
-  modelOverride?: string
-  config?: Record<string, unknown>
   maxAgents?: number
   status?: AgentStatus
   modelAccessMode?: ModelAccessMode

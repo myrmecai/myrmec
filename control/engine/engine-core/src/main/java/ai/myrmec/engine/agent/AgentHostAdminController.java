@@ -130,8 +130,6 @@ public class AgentHostAdminController {
                 request.getName(),
                 request.getDescription(),
                 request.getProjectId(),
-                request.getModelOverride(),
-                request.getConfig(),
                 request.getMaxAgents(),
                 mode,
                 // Local-owner model (§3.7): MANAGED default; LOCAL allowed to
@@ -181,8 +179,6 @@ public class AgentHostAdminController {
                 request.getName(),
                 request.getDescription(),
                 request.getProjectId(),
-                request.getModelOverride(),
-                request.getConfig(),
                 request.getMaxAgents(),
                 request.getStatus(),
                 mode
@@ -247,7 +243,7 @@ public class AgentHostAdminController {
             @PathVariable UUID id,
             @Valid @RequestBody SetModelAccessModeRequest request) {
         AgentHost agent = agentHostService.updateAgent(
-                id, null, null, null, null, null, null, null, request.getModelAccessMode());
+                id, null, null, null, null, null, request.getModelAccessMode());
 
         String projectName = null;
         if (agent.getProjectId() != null) {

@@ -316,7 +316,6 @@ public class TestDataBuilder {
         private boolean autoSuffix = true;
         private String description = "Test agent";
         private UUID projectId;
-        private String modelOverride;
         private Integer maxAgents = 1;
         private ModelAccessMode modelAccessMode;
         private AgentHostType hostType;
@@ -348,11 +347,6 @@ public class TestDataBuilder {
             return this;
         }
 
-        public AgentBuilder withModelOverride(String modelCode) {
-            this.modelOverride = modelCode;
-            return this;
-        }
-
         public AgentBuilder withMaxAgents(int max) {
             this.maxAgents = max;
             return this;
@@ -374,8 +368,6 @@ public class TestDataBuilder {
                     effectiveName,
                     description,
                     projectId,
-                    modelOverride,
-                    null,
                     maxAgents,
                     modelAccessMode,
                     hostType

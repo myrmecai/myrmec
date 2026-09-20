@@ -54,19 +54,6 @@ public class AgentHost {
     private String registrationKey;
 
     /**
-     * Override the profile's default model.
-     */
-    @Column(name = "model_override", length = 50)
-    private String modelOverride;
-
-    /**
-     * Agent-specific configuration.
-     */
-    @Convert(converter = JsonMapConverter.class)
-    @Column(name = "config")
-    private Map<String, Object> config;
-
-    /**
      * Advertised provisions used for reserve-time capability matching:
      * installed tools + runtime environment. Shape: { tools: [...], runtime: [...] }.
      */
@@ -79,14 +66,6 @@ public class AgentHost {
      */
     @Column(name = "max_agents", nullable = false)
     private Integer maxAgents = 1;
-
-    /**
-     * CPU/RAM the Supervisor auto-sized its warm pool from. Host-reported,
-     * re-asserted on each control-socket announce.
-     */
-    @Convert(converter = JsonMapConverter.class)
-    @Column(name = "reported_capacity")
-    private Map<String, Object> reportedCapacity;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
