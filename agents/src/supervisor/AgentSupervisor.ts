@@ -337,6 +337,29 @@ export abstract class AgentSupervisor {
   }
 
   /**
+   * Reconcile the session identity on a re-wrapped execution frame.
+   *
+   * Engine convention (§8.1): the envelope-level `sessionId` on
+   * execution.start/cancel is the allocator-owned session id (stamped by
+   * ExecutionCommandSender from the session row), while the payload's own
+   * `sessionId` field carries the CONVERSATION id for conversation turns.
+   * The worker's SessionRegistry, however, keys sessions by the id from
+   * session.open (the session id) — so a forwarded frame must carry the
+   * transport-level id or the executor's registry lookup misses and the
+   * turn dead-ends (SESSION_NOT_OPEN → a terminal without an accept →
+   * engine INVALID_STATE).
+   */
+  protected static reconcileTransportSessionId(
+    payload: Record<string, unknown>,
+    frameSessionId: string | null | undefined,
+  ): Record<string, unknown> {
+    if (frameSessionId && payload.sessionId !== frameSessionId) {
+      return { ...payload, sessionId: frameSessionId };
+    }
+    return payload;
+  }
+
+  /**
    * Route a frame the worker produced onto the unified wire. Under the
    * unified protocol (P6-T6) every worker frame rides the host control
    * socket — the per-conversation socket split is gone with the legacy wire

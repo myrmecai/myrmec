@@ -210,7 +210,13 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
       | ExecutionStartPayload
       | OrchestrationExecutionStartPayload;
     this.forwardToWorkerEnvelope(
-      makeEnvelope("execution.start", payload as Record<string, unknown>),
+      makeEnvelope(
+        "execution.start",
+        AgentSupervisor.reconcileTransportSessionId(
+          payload as Record<string, unknown>,
+          frame.sessionId,
+        ),
+      ),
     );
   }
 
@@ -221,7 +227,13 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
   ): Promise<void> {
     const payload = frame.payload as ExecutionCancelPayload;
     this.forwardToWorkerEnvelope(
-      makeEnvelope("execution.cancel", payload as Record<string, unknown>),
+      makeEnvelope(
+        "execution.cancel",
+        AgentSupervisor.reconcileTransportSessionId(
+          payload as Record<string, unknown>,
+          frame.sessionId,
+        ),
+      ),
     );
   }
 
