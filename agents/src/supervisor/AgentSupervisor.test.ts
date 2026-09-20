@@ -69,12 +69,19 @@ class TestSupervisor extends AgentSupervisor {
   readonly cancelled: unknown[] = [];
   token = "tok-1";
 
-  constructor(logger?: Logger, connection?: HostControlConnection) {
+  constructor(
+    logger?: Logger,
+    connection?: HostControlConnection,
+    options: { ownerUserId?: string } = {},
+  ) {
     super({
       engineUrl: "http://engine.local",
       role: "HEADLESS",
       ...(logger ? { logger } : {}),
       ...(connection ? { connection } : {}),
+      ...(options.ownerUserId !== undefined
+        ? { ownerUserId: options.ownerUserId }
+        : {}),
     });
     this.ctx.agentId = "agent-1";
   }
@@ -190,6 +197,20 @@ describe("AgentSupervisor on the unified wire (composition root)", () => {
     expect(sup.isRunning).toBe(true);
     await sup.stop();
     expect(conn.connected).toBe(false);
+  });
+
+  it("forwards ownerUserId from supervisor options into the composed client's host.open (§3.7)", async () => {
+    const ownerUserId = "88888888-8888-4888-8888-888888888888";
+    const conn = new FakeHostControlConnection();
+    const sup = new TestSupervisor(silentLogger, conn, { ownerUserId });
+    await sup.start();
+
+    const open = conn.sent
+      .map((raw) => JSON.parse(raw))
+      .find((f) => f.type === MessageType.HOST_OPEN);
+    expect(open).toBeDefined();
+    expect(open.payload.ownerUserId).toBe(ownerUserId);
+    await sup.stop();
   });
 
   it("routes execution.start through the client to the overridable hook", async () => {

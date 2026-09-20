@@ -89,6 +89,12 @@ export interface HostControlClientOptions {
   capabilities?: Record<string, unknown>;
   /** Optional capacity map reported in `host.open` and heartbeat. */
   reportedCapacity?: Record<string, unknown>;
+  /**
+   * Local-owner model (§3.7/§4.1): the id of the user logged into the
+   * plugin (LOCAL hosts) — stamped onto `host.open` so the engine pins
+   * instance ownership. Absent (headless/MANAGED) → field omitted.
+   */
+  ownerUserId?: string;
   /** Maximum dedupe cache entries for inbound messageId values. */
   dedupeLimit?: number;
   /** Connection override (tests inject a fake). */
@@ -651,6 +657,8 @@ export class HostControlClient {
   private readonly poolSize: number;
   private readonly capabilities: Record<string, unknown>;
   private readonly reportedCapacity: Record<string, unknown>;
+  /** §3.7: the plugin's logged-in user id stamped onto host.open (LOCAL). */
+  private readonly ownerUserId: string | undefined;
 
   private connection: HostControlConnection;
   private state: HostControlState = "IDLE";
@@ -711,6 +719,7 @@ export class HostControlClient {
     this.poolSize = options.poolSize ?? 1;
     this.capabilities = options.capabilities ?? {};
     this.reportedCapacity = options.reportedCapacity ?? {};
+    this.ownerUserId = options.ownerUserId;
     this.seen = new MessageIdDedupe(options.dedupeLimit ?? 256);
     this.onPsk = options.onPsk;
     this.sessionLifecycle = options.sessionLifecycle ?? null;
@@ -1174,6 +1183,9 @@ export class HostControlClient {
       poolSize: this.poolSize,
       capabilities: this.capabilities,
       reportedCapacity: this.reportedCapacity,
+      // §3.7 local-owner model: present only for LOCAL/plugin hosts —
+      // spreading undefined keeps the field off the MANAGED wire.
+      ...(this.ownerUserId !== undefined ? { ownerUserId: this.ownerUserId } : {}),
     };
     await this.sendFrame({
       protocolVersion: SUPPORTED_PROTOCOL_VERSION,

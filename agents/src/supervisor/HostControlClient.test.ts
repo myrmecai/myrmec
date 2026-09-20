@@ -169,6 +169,7 @@ interface TestSubject {
 function makeSubject(options: {
   failOpen?: boolean;
   poolSize?: number;
+  ownerUserId?: string;
 } = {}): TestSubject {
   const conn = new FakeHostControlConnection();
   conn.failOpen = options.failOpen ?? false;
@@ -182,6 +183,9 @@ function makeSubject(options: {
     connection: conn,
     poolSize: options.poolSize ?? 4,
     runtimeVersion: "1.8.0",
+    ...(options.ownerUserId !== undefined
+      ? { ownerUserId: options.ownerUserId }
+      : {}),
     sessionLifecycle: lifecycle,
     channelConnectionFactory: () => {
       const c = new FakeChannelConnection();
@@ -282,6 +286,28 @@ describe("HostControlClient lifecycle", () => {
     expect(open.payload.supportedProtocolVersions).toEqual([1]);
     expect(open.payload.poolSize).toBe(4);
     expect(client.currentState).toBe("CONNECTING");
+  });
+
+  it("stamps ownerUserId onto host.open when the option is set (§3.7)", async () => {
+    const ownerUserId = "77777777-7777-4777-8777-777777777777";
+    const { client, conn } = makeSubject({ ownerUserId });
+
+    await client.start();
+
+    const open = parseFirstByType(conn.sent, MessageType.HOST_OPEN);
+    expect(open).toBeDefined();
+    expect(open.payload.ownerUserId).toBe(ownerUserId);
+  });
+
+  it("omits ownerUserId from host.open when the option is absent (MANAGED)", async () => {
+    const { client, conn } = makeSubject();
+
+    await client.start();
+
+    const open = parseFirstByType(conn.sent, MessageType.HOST_OPEN);
+    expect(open).toBeDefined();
+    expect("ownerUserId" in open.payload).toBe(false);
+    expect(open.payload.ownerUserId).toBeUndefined();
   });
 
   it("transitions to OPEN on host.opened and emits heartbeat at interval", async () => {

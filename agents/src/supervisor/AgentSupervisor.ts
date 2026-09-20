@@ -79,6 +79,12 @@ export interface AgentSupervisorOptions {
    */
   reportedCapacity?: Record<string, unknown>;
   /**
+   * Local-owner model (§3.7/§4.1): the id of the logged-in user the plugin
+   * supplies — forwarded into the client's host.open payload (LOCAL hosts
+   * stamp instance ownership from it). Headless/MANAGED leaves it unset.
+   */
+  ownerUserId?: string;
+  /**
    * Connection override (tests inject a fake) — forwarded to the client.
    */
   connection?: HostControlConnection;
@@ -95,6 +101,8 @@ export abstract class AgentSupervisor {
   protected readonly poolSize: number;
   protected readonly capabilities: Record<string, unknown>;
   protected readonly reportedCapacity: Record<string, unknown>;
+  /** §3.7: the plugin's logged-in user id (LOCAL hosts), else undefined. */
+  protected readonly ownerUserId: string | undefined;
   protected ctx: SupervisorContext;
   protected auth: AuthContext | null = null;
 
@@ -120,6 +128,7 @@ export abstract class AgentSupervisor {
     this.poolSize = options.poolSize ?? 1;
     this.capabilities = options.capabilities ?? {};
     this.reportedCapacity = options.reportedCapacity ?? {};
+    this.ownerUserId = options.ownerUserId;
     this.path = options.path;
     this.optionsConnection = options.connection;
     this.ctx = {
@@ -189,6 +198,9 @@ export abstract class AgentSupervisor {
       poolSize: this.poolSize,
       capabilities: this.capabilities,
       reportedCapacity: this.reportedCapacity,
+      // §3.7 local-owner model: the plugin's logged-in user id rides
+      // host.open; headless supervisors leave it undefined (field omitted).
+      ...(this.ownerUserId !== undefined ? { ownerUserId: this.ownerUserId } : {}),
       // Runtime version constant: the SDK version (§6 host.open contract).
       runtimeVersion: "0.1.0",
       ...(this.path ? { path: this.path } : {}),

@@ -101,6 +101,14 @@ export const hostOpenPayloadSchema = z.object({
   poolSize: z.number().int(),
   capabilities: mapUnknown,
   reportedCapacity: mapUnknown,
+  /**
+   * Local-owner model (§3.7/§4.1, additive): the id of the user logged into
+   * the VS Code plugin whose local workspace opened the instance. Required
+   * (non-null) for LOCAL hosts, MUST be absent for MANAGED hosts — the
+   * HOST_JWT carries no user identity, so this field is the only owner
+   * channel. Mirrors the engine's HostOpenPayload.ownerUserId.
+   */
+  ownerUserId: uuid.nullish(),
 });
 export type HostOpenPayload = z.infer<typeof hostOpenPayloadSchema>;
 

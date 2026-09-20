@@ -165,6 +165,53 @@ describe("host.open / host.opened", () => {
     expect(hostOpenPayloadSchema.safeParse(payload).success).toBe(false);
   });
 
+  it("accepts host.open with the additive ownerUserId (§3.7 local-owner model)", () => {
+    const payload = {
+      instanceNonce: nonce,
+      hostname: "developer-laptop",
+      runtimeVersion: "1.8.0",
+      supportedProtocolVersions: [1],
+      poolSize: 1,
+      capabilities: {},
+      reportedCapacity: {},
+      ownerUserId: "77777777-7777-4777-8777-777777777777",
+    };
+    const frame = parseUnifiedFrame(JSON.stringify(envelope(payload, MessageType.HOST_OPEN)));
+    expect(frame.type).toBe("host.open");
+    expect(
+      (frame.payload as { ownerUserId?: string | null }).ownerUserId,
+    ).toBe("77777777-7777-4777-8777-777777777777");
+  });
+
+  it("parses host.open with ownerUserId null and absent (MANAGED hosts)", () => {
+    const base = {
+      instanceNonce: nonce,
+      hostname: "cluster-node",
+      runtimeVersion: "1.8.0",
+      supportedProtocolVersions: [1],
+      poolSize: 4,
+      capabilities: {},
+      reportedCapacity: {},
+    };
+    expect(hostOpenPayloadSchema.parse({ ...base, ownerUserId: null }).ownerUserId).toBeNull();
+    const frame = parseUnifiedFrame(JSON.stringify(envelope({ ...base }, MessageType.HOST_OPEN)));
+    expect((frame.payload as { ownerUserId?: string | null }).ownerUserId).toBeUndefined();
+  });
+
+  it("rejects host.open with a malformed ownerUserId", () => {
+    const payload = {
+      instanceNonce: nonce,
+      hostname: "developer-laptop",
+      runtimeVersion: "1.8.0",
+      supportedProtocolVersions: [1],
+      poolSize: 1,
+      capabilities: {},
+      reportedCapacity: {},
+      ownerUserId: "not-a-uuid",
+    };
+    expect(hostOpenPayloadSchema.safeParse(payload).success).toBe(false);
+  });
+
   it("accepts the canonical host.opened fixture", () => {
     const payload = {
       hostInstanceId,
