@@ -7,7 +7,7 @@
  * with the SAME stub factory the engine adapter uses — no engine, no
  * socket; the sink collects frames. Reproduces slice-F smoke stalls.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -21,13 +21,37 @@ import type { Envelope } from "../protocol/envelope.js";
 const exec = promisify(execFile);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Locate the sibling `myrmec-ee` checkout by probing upward from `here`
+ * (works both from the main checkout — `myrmec/agents/src/worker` needs 5
+ * levels up — and from worktrees — `.worktrees/<name>/agents/src/worker`
+ * needs 6). Returns the directory containing
+ * `e2e/fixtures/stubs/orchestration-minimal.ts`, or null when absent.
+ */
+function findSiblingRepoRoot(from: string): string | null {
+  let dir = from;
+  for (let i = 0; i < 10; i++) {
+    const candidate = path.resolve(dir, "myrmec-ee");
+    if (
+      existsSync(path.join(candidate, "e2e", "fixtures", "stubs", "orchestration-minimal.ts"))
+    ) {
+      return candidate;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
 // The stub factory loads the SAME module the engine adapter uses. In the
 // main checkout the sibling myrmec-ee/ sits next to myrmec/; in a git
 // worktree (.worktrees/<name>/agents) the checkout root has no sibling
 // myrmec-ee, so walk up past .worktrees/<name> to myrmecai/ and use the
 // real myrmec-ee there. MYRMEC_EE_ROOT overrides both.
-const repoRoot = process.env.MYRMEC_EE_ROOT
-  ?? path.resolve(here, "..", "..", "..", "..", "..", "..", "myrmec-ee");
+const repoRoot =
+  process.env.MYRMEC_EE_ROOT ?? findSiblingRepoRoot(here) ?? path.resolve(here, "myrmec-ee");
 const stubModule = path.resolve(
   repoRoot, "e2e", "fixtures", "stubs", "orchestration-minimal.ts",
 );
