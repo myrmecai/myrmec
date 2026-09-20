@@ -698,6 +698,16 @@ export class HostControlClient {
   private previousHostInstanceId: string | null = null;
   /** §13 (A2): pending retention-expiry timer (armed on drop). */
   private retentionTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * §8.4/§12.3: the host-assigned durable sequence for `execution.event`
+   * envelopes — monotonic per sender and session (protocol doc, envelope
+   * field table: "sequence | ordered session events | Monotonic per sender
+   * and session"). The engine requires it on execution.event (rejects the
+   * frame with INVALID_MESSAGE otherwise) and echoes it back on the
+   * protocol.ack cursor. Terminal frames are keyed by messageId instead and
+   * are acknowledged with 0; only the event stream carries this cursor.
+   */
+  private readonly durableEventSequences = new Map<string, number>();
   /** §13 (A2): guard so one resume runs per reconnection. */
   private resumePending: Promise<void> | null = null;
   /** §13 (A2): whether the current connection resumed (vs fresh host.open). */
@@ -996,12 +1006,23 @@ export class HostControlClient {
 
   /** Send a durable execution.event. */
   async sendExecutionEvent(payload: ExecutionEventPayload): Promise<void> {
+    // §12.3: stamp the per-session monotonic sequence BEFORE the send — the
+    // engine validates the field and tracks it as the session's durable
+    // cursor. A session without a cursor starts at 1.
+    const sessionId = this.executionSessions.get(payload.executionId) ?? null;
+    let sequence: number | null = null;
+    if (sessionId) {
+      const next = (this.durableEventSequences.get(sessionId) ?? 0) + 1;
+      this.durableEventSequences.set(sessionId, next);
+      sequence = next;
+    }
     await this.sendFrame({
       protocolVersion: SUPPORTED_PROTOCOL_VERSION,
       messageId: this.nextMessageId(),
       type: UnifiedMessageType.EXECUTION_EVENT,
       sentAt: new Date().toISOString(),
       executionId: payload.executionId,
+      sequence,
       payload,
     });
   }
