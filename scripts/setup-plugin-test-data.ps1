@@ -333,6 +333,24 @@ function Create-OrFetchAgent {
         if ($existing) {
             $AgentIds[$name] = $existing.id
             Write-Host "   Agent exists: $name" -ForegroundColor Yellow
+            # Host type is immutable after creation. A host created before the
+            # type field existed defaults to MANAGED, which the plugin's
+            # local/register path will never match (it only matches LOCAL).
+            # Recreate the host under a versioned name instead.
+            if ($existing.hostType -ne $AgentRequest.hostType) {
+                $newName = "$name (LOCAL v2)"
+                Write-Host "   Existing host is $($existing.hostType); type is immutable - recreating as '$newName'" -ForegroundColor Red
+                $AgentRequest.name = $newName
+                $recreated = Invoke-Api -Method POST -Uri "$ApiUrl/admin/agent-hosts" -Headers $adminHeaders -Body $AgentRequest -IgnoreError
+                if ($recreated -and $recreated.agent) {
+                    $AgentIds[$newName] = $recreated.agent.id
+                    $key = $recreated.registrationKey
+                    Write-Host "   Created: $newName (LOCAL)" -ForegroundColor Green
+                } else {
+                    Write-Host "   Could not recreate $newName - delete the old MANAGED host and re-run" -ForegroundColor Red
+                }
+                return $key
+            }
             if ($existing.profileId -ne $AgentRequest.profileId) {
                 Invoke-Api -Method PUT -Uri "$ApiUrl/admin/agent-hosts/$($existing.id)" -Headers $adminHeaders -Body @{
                     profileId = $AgentRequest.profileId
@@ -358,6 +376,9 @@ $regKey = Create-OrFetchAgent -AgentRequest @{
     description = "Full-stack agent for the Address Book application"
     profileId = $profileIds["governed-coding"]
     maxAgents = 5
+    # LOCAL: per-user VS Code seat (the plugin registers with a USER token;
+    # only LOCAL hosts match the plugin's local/register path).
+    hostType = "LOCAL"
 } -AgentIds $agentIds
 
 $chatRegKey = Create-OrFetchAgent -AgentRequest @{
@@ -365,6 +386,8 @@ $chatRegKey = Create-OrFetchAgent -AgentRequest @{
     description = "General-purpose conversational assistant"
     profileId = $profileIds["Chat Assistant"]
     maxAgents = 3
+    # LOCAL: per-user VS Code seat for the plugin's chat sessions.
+    hostType = "LOCAL"
 } -AgentIds $agentIds
 
 if (-not $regKey) {
