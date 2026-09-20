@@ -525,6 +525,7 @@ function AgentHostForm({ projects, onSubmit, isLoading, error }: AgentHostFormPr
   const [projectId, setProjectId] = useState<string>('')
   const [maxInstances, setMaxInstances] = useState('1')
   const [modelAccessMode, setModelAccessMode] = useState<ModelAccessMode>('DIRECT')
+  const [hostType, setHostType] = useState<'MANAGED' | 'LOCAL'>('MANAGED')
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -536,6 +537,9 @@ function AgentHostForm({ projects, onSubmit, isLoading, error }: AgentHostFormPr
       // GATEWAY is the only value worth sending: DIRECT is the backend
       // default, and the field is platform-admin-gated (403 for others).
       modelAccessMode: modelAccessMode === 'GATEWAY' ? 'GATEWAY' : undefined,
+      // MANAGED is the backend default — omit; LOCAL pre-provisions the
+      // per-user IDE seat (owner stamps on the plugin's first connection).
+      hostType: hostType === 'LOCAL' ? 'LOCAL' : undefined,
     })
   }
 
@@ -554,6 +558,26 @@ function AgentHostForm({ projects, onSubmit, isLoading, error }: AgentHostFormPr
             {error}
           </div>
         )}
+        <div className="space-y-2">
+          <Label htmlFor="hostType">Type<RequiredMark /></Label>
+          <select
+            id="hostType"
+            value={hostType}
+            onChange={(e) => setHostType(e.target.value as 'MANAGED' | 'LOCAL')}
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <option value="MANAGED">MANAGED</option>
+            <option value="LOCAL">LOCAL</option>
+          </select>
+          <p className="text-xs text-muted-foreground">
+            {hostType === 'MANAGED'
+              ? 'Cluster / headless supervisor'
+              : 'Per-user IDE supervisor (VS Code plugin) — the seat a plugin connects to; owner stamps on first connection'}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Host type is fixed at creation and cannot be changed.
+          </p>
+        </div>
         <div className="space-y-2">
           <Label htmlFor="name">Name<RequiredMark /></Label>
           <Input
@@ -673,6 +697,22 @@ function AgentHostEditForm({ agentHost, projects, onSubmit, isLoading, error }: 
             {error}
           </div>
         )}
+        <div className="space-y-2">
+          <Label>Type</Label>
+          <div className="flex items-center gap-2">
+            <HostTypeBadge hostType={agentHost.hostType} />
+            <span className="text-xs text-muted-foreground">
+              {agentHost.hostType === 'LOCAL'
+                ? 'Per-user IDE supervisor — set at registration'
+                : agentHost.hostType === 'DEDICATED'
+                  ? 'Seat-pinned workstation — set at registration'
+                  : 'Cluster / headless supervisor'}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Host type is fixed at creation and cannot be changed.
+          </p>
+        </div>
         <div className="space-y-2">
           <Label htmlFor="edit-name">Name</Label>
           <Input

@@ -830,6 +830,12 @@ export interface CreateAgentHostRequest {
   config?: Record<string, unknown>
   maxAgents?: number
   modelAccessMode?: ModelAccessMode
+  /**
+   * Durable host type (§3.7): MANAGED (backend default, omit on create) or
+   * LOCAL — pre-provisions a per-user IDE seat whose owner stamps when the
+   * user's plugin first connects. Not settable after creation.
+   */
+  hostType?: 'MANAGED' | 'LOCAL'
 }
 
 export interface UpdateAgentHostRequest {
