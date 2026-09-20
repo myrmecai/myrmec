@@ -798,6 +798,7 @@ export class HostControlClient {
     this.running = true;
     this.state = "CONNECTING";
 
+    this.log.info(`Host control connecting: ${this.engineUrl}${this.path}`);
     await this.connectWithRetry();
   }
 
@@ -809,11 +810,16 @@ export class HostControlClient {
         const token = await this.tokenProvider.getAccessToken();
         await this.connection.connect(token);
         return;
-      } catch {
+      } catch (err) {
+        this.log.warn(
+          "Host control connect failed; retrying:",
+          err instanceof Error ? err.message : String(err),
+        );
         await this.sleep(this.backoffMs);
         this.backoffMs = Math.min(this.backoffMs * 2, MAX_BACKOFF_MS);
       }
     }
+    this.log.warn("Host control reconnect loop ended (stop requested)");
   }
 
   /**
