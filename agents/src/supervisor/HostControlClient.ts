@@ -1251,7 +1251,21 @@ export class HostControlClient {
       return;
     }
 
-    const shouldReconnect = await this.handleDisconnectCode(code);
+    let shouldReconnect: boolean;
+    try {
+      shouldReconnect = await this.handleDisconnectCode(code);
+    } catch (err) {
+      // A failing refresh/re-register (e.g. an expired HOST refresh token
+      // after sleep, or a stale USER bearer during re-registration) must not
+      // kill the loop as an unhandled rejection. Log it and fall through to
+      // the backoff retry — the next connect attempt re-runs the provider and
+      // a later close code can still route to re-register.
+      this.log.warn(
+        "Token refresh/re-register failed on disconnect; will retry:",
+        err instanceof Error ? err.message : String(err),
+      );
+      shouldReconnect = true;
+    }
     if (shouldReconnect && this.running) {
       await this.connectWithRetry();
     }
