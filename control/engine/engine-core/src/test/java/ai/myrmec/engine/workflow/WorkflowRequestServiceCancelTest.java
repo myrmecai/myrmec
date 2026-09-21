@@ -141,7 +141,7 @@ class WorkflowRequestServiceCancelTest {
                 .thenReturn(Optional.of(attempt));
         when(taskAttemptRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(sessionRepository.findByRefIdAndServiceType(requestId, "WORKFLOW"))
-                .thenReturn(Optional.of(session));
+                .thenReturn(List.of(session));
         when(executionRepository.findWithLockBySessionIdAndStateIn(
                 org.mockito.ArgumentMatchers.eq(session.getId()), any()))
                 .thenReturn(List.of(inFlight));

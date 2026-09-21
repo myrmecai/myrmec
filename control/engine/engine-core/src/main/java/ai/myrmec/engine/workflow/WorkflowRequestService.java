@@ -296,7 +296,7 @@ public class WorkflowRequestService {
         try {
             Session session = sessionRepository
                     .findByRefIdAndServiceType(task.getRequest().getId(), "WORKFLOW")
-                    .orElse(null);
+                    .stream().findFirst().orElse(null);
             if (session == null) {
                 log.debug("No WORKFLOW session for request {} — task {} cancel is state-only",
                         task.getRequest().getId(), task.getId());

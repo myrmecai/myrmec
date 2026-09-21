@@ -19,7 +19,15 @@ import java.util.UUID;
  */
 public interface SessionRepository extends JpaRepository<Session, UUID> {
 
-    Optional<Session> findByRefIdAndServiceType(UUID refId, String serviceType);
+    /**
+     * All sessions for a ref id (conversation id or workflow request id).
+     * Historically this was a single-result Optional, but crashed reconnects
+     * can leave several rows for one conversation; a single-result query then
+     * fails with IncorrectResultSizeDataAccessException and - the caller being
+     * inside a joined transaction - silently poisons it, so the outer commit
+     * dies with UnexpectedRollbackException (archive 500). Callers iterate.
+     */
+    List<Session> findByRefIdAndServiceType(UUID refId, String serviceType);
 
     List<Session> findByRefId(UUID refId);
 

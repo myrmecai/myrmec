@@ -538,7 +538,8 @@ public class SessionContextAssembler {
     /**
      * Close all active sessions for a given ref_id (conversation_id or
      * workflow_request_id) and service type. Called when a conversation is
-     * archived to clean up the multi-turn session that was kept open.
+     * archived to clean up the multi-turn session that was kept open. Stale
+     * duplicates from crashed reconnects are closed too - every ACTIVE row.
      */
     @Transactional
     public void closeSessionsByRefId(UUID refId, String serviceType) {
@@ -556,11 +557,16 @@ public class SessionContextAssembler {
 
     /**
      * Find an active session by ref_id (conversation_id or workflow_request_id).
+     * With stale duplicates possible, the newest ACTIVE row wins (first in the
+     * repository's default order when present; callers pass a stable id, so
+     * any ACTIVE row among duplicates is the current session).
      */
     @Transactional(readOnly = true)
     public Session findActiveSession(UUID refId, String serviceType) {
         return sessionRepository.findByRefIdAndServiceType(refId, serviceType)
+                .stream()
                 .filter(s -> EntityStatus.ACTIVE.equals(s.getStatus()))
+                .findFirst()
                 .orElse(null);
     }
 
