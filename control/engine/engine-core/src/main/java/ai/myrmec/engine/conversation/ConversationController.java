@@ -11,6 +11,10 @@ import ai.myrmec.engine.conversation.dto.MessageFeedbackRequest;
 import ai.myrmec.engine.conversation.dto.PinMessageRequest;
 import ai.myrmec.engine.conversation.dto.PostUserMessageRequest;
 import ai.myrmec.engine.conversation.dto.UpdateConversationRequest;
+import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
+import ai.myrmec.engine.websocket.message.MessageType;
+import ai.myrmec.engine.websocket.message.WebSocketMessage;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -30,6 +34,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -60,6 +65,10 @@ public class ConversationController {
     private final ai.myrmec.engine.attachment.AttachmentService attachmentService;
     private final ConversationSummaryService conversationSummaryService;
     private final ai.myrmec.engine.agent.AgentHostService agentService;
+    /** 2026-09-21 close/archive lifecycle design 5.1: the controller owns the
+     * conversation.state SSE push (the service must not hold the broker). */
+    private final ConversationStreamBroker streamBroker;
+    private final ObjectMapper objectMapper;
 
     @PostMapping
     @Operation(summary = "Create a new conversation under a project")
@@ -119,8 +128,12 @@ public class ConversationController {
     public ResponseEntity<ConversationResponse> close(
             @PathVariable UUID id,
             @CurrentUser UUID userId) {
-        return ResponseEntity.ok(
-                ConversationResponse.from(conversationService.closeConversation(id, userId)));
+        ConversationResponse response =
+                ConversationResponse.from(conversationService.closeConversation(id, userId));
+        // Design 5.1: broadcast after the service call succeeded - the SSE
+        // viewers learn the conversation just went terminal.
+        broadcastState(id, "CLOSED", "USER_ENDED");
+        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/{id}/archive")
@@ -132,8 +145,11 @@ public class ConversationController {
     public ResponseEntity<ConversationResponse> archive(
             @PathVariable UUID id,
             @CurrentUser UUID userId) {
-        return ResponseEntity.ok(
-                ConversationResponse.from(conversationService.archiveConversation(id, userId)));
+        ConversationResponse response =
+                ConversationResponse.from(conversationService.archiveConversation(id, userId));
+        // Design 5.1: broadcast after the service call succeeded.
+        broadcastState(id, "ARCHIVED", "USER_ARCHIVED");
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/{id}/messages")
@@ -220,6 +236,29 @@ public class ConversationController {
     public ResponseEntity<Map<String, Boolean>> cancelTurn(@PathVariable UUID id) {
         boolean delivered = turnDispatcher.cancel(id);
         return ResponseEntity.ok(Map.of("delivered", delivered));
+    }
+
+    /**
+     * SSE conversation.state frame to the conversation's viewers (2026-09-21
+     * close/archive lifecycle design section 5.1) - same best-effort
+     * broadcast pattern as ApprovalExpirySweeper's approval.decision frame.
+     * The host session.close push is the event listener's job; viewers get
+     * exactly one frame per transition.
+     */
+    private void broadcastState(UUID conversationId, String state, String reason) {
+        try {
+            Map<String, Object> payload = Map.of(
+                    "conversationId", conversationId.toString(),
+                    "state", state,
+                    "reason", reason,
+                    "at", Instant.now().toString());
+            String json = objectMapper.writeValueAsString(
+                    WebSocketMessage.of(MessageType.CONVERSATION_STATE, payload));
+            streamBroker.broadcast(conversationId, json);
+        } catch (Exception e) {
+            log.warn("conversation.state broadcast for conversation {} failed: {}",
+                    conversationId, e.getMessage());
+        }
     }
 
     @PostMapping("/{id}/summarise")

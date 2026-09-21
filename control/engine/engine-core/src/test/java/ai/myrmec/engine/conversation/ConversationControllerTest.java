@@ -7,6 +7,8 @@ import ai.myrmec.engine.conversation.dto.ConversationMessageResponse;
 import ai.myrmec.engine.conversation.dto.ConversationResponse;
 import ai.myrmec.engine.conversation.dto.CreateConversationRequest;
 import ai.myrmec.engine.conversation.dto.PostUserMessageRequest;
+import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
+import ai.myrmec.engine.conversation.stream.ConversationSubscriber;
 import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.AuthenticationProvider;
@@ -31,6 +33,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -55,6 +60,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Autowired
     private ConversationService conversationService;
+
+    @Autowired
+    private ConversationStreamBroker streamBroker;
 
     @Autowired
     private UserRepository userRepository;
@@ -577,6 +585,52 @@ class ConversationControllerTest extends IntegrationTestBase {
                 .containsExactlyInAnyOrder(activeId, closedId, archivedId);
     }
 
+    @Test
+    void closeAndArchiveBroadcastConversationStateFramesToSseViewers() throws Exception {
+        Project project = data.project().named("conv-ctrl-sse-state").create();
+        CreateConversationRequest body = new CreateConversationRequest(
+                project.getId(), null, "SSE state frames", null);
+        UUID conversationId = restTemplate.exchange(
+                "/api/v1/conversations",
+                HttpMethod.POST,
+                new HttpEntity<>(body, adminHeaders()),
+                ConversationResponse.class).getBody().id();
+
+        // Subscribe a stub viewer before the lifecycle transitions (same
+        // pattern as ApprovalExpirySweeperTest).
+        BlockingQueue<String> viewerInbound = new LinkedBlockingQueue<>();
+        ConversationSubscriber viewer = stubSubscriber(viewerInbound);
+        streamBroker.subscribe(conversationId, viewer);
+
+        // Close: the viewer must receive the conversation.state CLOSED frame.
+        HttpResponse<String> closed = post("/api/v1/conversations/" + conversationId + "/close");
+        assertThat(closed.statusCode()).isEqualTo(200);
+        String closeFrame = viewerInbound.poll(2, TimeUnit.SECONDS);
+        assertThat(closeFrame).as("viewer must see the conversation.state CLOSED frame").isNotNull();
+        JsonNode closeEnvelope = JSON.readTree(closeFrame);
+        assertThat(closeEnvelope.path("type").asText()).isEqualTo("conversation.state");
+        JsonNode closePayload = closeEnvelope.path("payload");
+        assertThat(closePayload.path("conversationId").asText()).isEqualTo(conversationId.toString());
+        assertThat(closePayload.path("state").asText()).isEqualTo("CLOSED");
+        assertThat(closePayload.path("reason").asText()).isEqualTo("USER_ENDED");
+        assertThat(closePayload.path("at").isNull()).isFalse();
+
+        // Archive: the viewer must receive the conversation.state ARCHIVED frame.
+        HttpResponse<String> archived = post("/api/v1/conversations/" + conversationId + "/archive");
+        assertThat(archived.statusCode()).isEqualTo(200);
+        String archiveFrame = viewerInbound.poll(2, TimeUnit.SECONDS);
+        assertThat(archiveFrame).as("viewer must see the conversation.state ARCHIVED frame").isNotNull();
+        JsonNode archiveEnvelope = JSON.readTree(archiveFrame);
+        assertThat(archiveEnvelope.path("type").asText()).isEqualTo("conversation.state");
+        JsonNode archivePayload = archiveEnvelope.path("payload");
+        assertThat(archivePayload.path("conversationId").asText()).isEqualTo(conversationId.toString());
+        assertThat(archivePayload.path("state").asText()).isEqualTo("ARCHIVED");
+        assertThat(archivePayload.path("reason").asText()).isEqualTo("USER_ARCHIVED");
+        assertThat(archivePayload.path("at").isNull()).isFalse();
+
+        streamBroker.unsubscribe(conversationId, viewer);
+    }
+
     /**
      * POST helper (the close endpoint has no body).
      */
@@ -605,6 +659,15 @@ class ConversationControllerTest extends IntegrationTestBase {
                 .build();
         return HttpClient.newHttpClient()
                 .send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private ConversationSubscriber stubSubscriber(BlockingQueue<String> outbound) {
+        return new ConversationSubscriber() {
+            private final String id = "conv-state-stub-" + UUID.randomUUID();
+            @Override public String id() { return id; }
+            @Override public boolean isOpen() { return true; }
+            @Override public void send(String jsonFrame) { outbound.add(jsonFrame); }
+        };
     }
 
     @Test

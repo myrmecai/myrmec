@@ -199,6 +199,13 @@ public final class MessageType {
     /** Engine → Agent. Tear down a session (conversation unbind / execution end). */
     public static final String SESSION_CLOSE = "session.close";
 
+    /**
+     * Engine to UI SSE viewers. Live conversation state change - IDLE from
+     * the idle-lease sweep, CLOSED/ARCHIVED from the lifecycle endpoints.
+     * Carries { conversationId, state, reason, at }.
+     */
+    public static final String CONVERSATION_STATE = "conversation.state";
+
     /** Engine → Agent. One LLM turn/step: assembled messages[], active tools, generation config. */
     public static final String INFERENCE_ASSIGN = "inference.assign";
 

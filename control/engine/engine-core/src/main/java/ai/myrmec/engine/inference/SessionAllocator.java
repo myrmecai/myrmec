@@ -8,10 +8,12 @@ import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
+import ai.myrmec.engine.conversation.event.IdleSessionExpiredEvent;
 import ai.myrmec.engine.node.NodeRegistryService;
 import ai.myrmec.engine.websocket.host.payload.SessionCloseReason;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -60,6 +62,7 @@ public class SessionAllocator {
     private final AgentRepository agentRepository;
     private final NodeRegistryService nodeRegistryService;
     private final SessionExecutionRepository executionRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     private final int offerTimeoutSeconds;
     private final int openTimeoutSeconds;
@@ -73,6 +76,7 @@ public class SessionAllocator {
             AgentRepository agentRepository,
             NodeRegistryService nodeRegistryService,
             SessionExecutionRepository executionRepository,
+            ApplicationEventPublisher eventPublisher,
             @Value("${myrmec.host.offer-timeout-seconds:10}") int offerTimeoutSeconds,
             @Value("${myrmec.host.open-timeout-seconds:30}") int openTimeoutSeconds,
             @Value("${myrmec.host.session-idle-timeout-seconds:1800}") int idleTimeoutSeconds,
@@ -83,6 +87,7 @@ public class SessionAllocator {
         this.agentRepository = agentRepository;
         this.nodeRegistryService = nodeRegistryService;
         this.executionRepository = executionRepository;
+        this.eventPublisher = eventPublisher;
         this.offerTimeoutSeconds = offerTimeoutSeconds;
         this.openTimeoutSeconds = openTimeoutSeconds;
         this.idleTimeoutSeconds = idleTimeoutSeconds;
@@ -344,6 +349,18 @@ public class SessionAllocator {
             }
             close(session.getId(), "IDLE_LEASE_EXPIRED");
             closed++;
+            // 2026-09-21 close/archive lifecycle design section 5.3: notify
+            // UIs (and the host, via the AFTER_COMMIT listener) that the
+            // conversation's live session went idle. Only CONVERSATION
+            // sessions carry a conversation refId; publication is skipped
+            // when no host instance is bound. The sweep's counting logic is
+            // unchanged.
+            if ("CONVERSATION".equals(session.getServiceType())
+                    && session.getRefId() != null
+                    && session.getHostInstanceId() != null) {
+                eventPublisher.publishEvent(new IdleSessionExpiredEvent(
+                        session.getId(), session.getRefId(), session.getHostInstanceId()));
+            }
         }
         return closed;
     }

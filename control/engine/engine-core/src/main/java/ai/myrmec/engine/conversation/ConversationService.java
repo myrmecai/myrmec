@@ -9,10 +9,13 @@ import ai.myrmec.engine.assistant.AssistantRepository;
 import ai.myrmec.engine.assistant.AssistantVersion;
 import ai.myrmec.engine.assistant.AssistantVersionRepository;
 import ai.myrmec.engine.audit.AuditEventService;
+import ai.myrmec.engine.conversation.event.ConversationArchivedEvent;
+import ai.myrmec.engine.conversation.event.ConversationClosedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -57,6 +60,10 @@ public class ConversationService {
     private final ai.myrmec.engine.inference.SessionContextAssembler sessionContextAssembler;
     private final ai.myrmec.engine.governance.GovernancePolicyResolver governancePolicyResolver;
     private final ai.myrmec.engine.context.InstructionAssetVersionResolver instructionAssetVersionResolver;
+    /** 2026-09-21 close/archive design 5.2: host session.close pushes ride the
+     * event listener (injecting HostControlWebSocketHandler here would cycle
+     * with ConversationService). */
+    private final ApplicationEventPublisher eventPublisher;
 
     /** Create a new conversation and seed an OWNER participant row. */
     @Transactional
@@ -729,7 +736,11 @@ public class ConversationService {
         conversation.setCloseReason("USER_ENDED");
         conversation.setClosedBy(userId);
         releaseBoundWorker(conversationId);
-        return conversationRepository.save(conversation);
+        Conversation saved = conversationRepository.save(conversation);
+        // Design 5.2: the host session.close push for the torn-down sessions
+        // runs on the AFTER_COMMIT listener (SSE frame is the controller's).
+        eventPublisher.publishEvent(new ConversationClosedEvent(conversationId, "USER_ENDED"));
+        return saved;
     }
 
     /**
@@ -769,6 +780,11 @@ public class ConversationService {
                 conversation.setClosedBy(userId);
             }
             releaseBoundWorker(conversationId);
+            // Design 5.2: host session.close push on the AFTER_COMMIT listener
+            // (only the teardown path publishes - a CLOSED archive kept no
+            // sessions).
+            eventPublisher.publishEvent(
+                    new ConversationArchivedEvent(conversationId, "USER_ARCHIVED"));
         }
         return conversationRepository.save(conversation);
     }

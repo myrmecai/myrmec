@@ -10,6 +10,7 @@ import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentRepository;
+import ai.myrmec.engine.conversation.event.IdleSessionExpiredEvent;
 import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
 import ai.myrmec.engine.node.NodeRegistryService;
@@ -313,6 +314,7 @@ class SessionAllocatorTest extends IntegrationTestBase {
         // the expired offer to CLOSED.
         SessionAllocator enabledSweep = new SessionAllocator(sessionRepository,
                 instances, agentRepository, nodeRegistryService, executionRepository,
+                new org.springframework.context.support.StaticApplicationContext(),
                 10, 30, 1800, 300, true);
         enabledSweep.sweepAllocation();
         assertThat(sessionRepository.findById(sessionId).orElseThrow().getAllocationState())
@@ -341,6 +343,79 @@ class SessionAllocatorTest extends IntegrationTestBase {
         e.setState(state);
         e.setCreatedAt(Instant.now());
         return executionRepository.saveAndFlush(e);
+    }
+
+    /**
+     * 2026-09-21 close/archive lifecycle design section 5.3: the idle-lease
+     * sweep publishes IdleSessionExpiredEvent for closed CONVERSATION sessions
+     * with a bound host instance - and not for other service types. Transactional
+     * like the sibling sweep test: the directly-constructed recording allocator
+     * bypasses the Spring proxy, so its locking queries run inside the test
+     * transaction.
+     */
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void idleLeaseSweepPublishesIdleEventForConversationSessionsOnly() {
+        AgentHostInstance instance = openInstance(3);
+        Project project = project();
+
+        // A CONVERSATION session (activeSession) with a bound host: must publish.
+        UUID conversationSession = activeSession(instance, project);
+        UUID conversationId = UUID.randomUUID();
+        Session convRow = sessionRepository.findById(conversationSession).orElseThrow();
+        convRow.setRefId(conversationId);
+        sessionRepository.saveAndFlush(convRow);
+        ageIdleLease(conversationSession);
+
+        // A non-CONVERSATION session: must not publish. The sweep's count
+        // covers every ACTIVE session past expiry, so the WORKFLOW row needs
+        // an aged idle lease too (a fresh ACTIVE row carries one).
+        UUID workflowSession = allocator.offer("WORKFLOW", UUID.randomUUID(), "WORKFLOW",
+                project.getId(), instance.getAgentHostId()).orElseThrow();
+        allocator.accept(workflowSession);
+        allocator.confirmOpened(workflowSession, "wf-slot");
+        Session wfRow = sessionRepository.findById(workflowSession).orElseThrow();
+        wfRow.setServiceType("WORKFLOW");
+        sessionRepository.saveAndFlush(wfRow);
+        ageIdleLease(workflowSession);
+
+        RecordingPublisher publisher = new RecordingPublisher();
+        SessionAllocator recording = new SessionAllocator(sessionRepository,
+                instances, agentRepository, nodeRegistryService, executionRepository,
+                publisher, 10, 30, 1800, 300, true);
+
+        int closed = recording.expireIdleLeases(Instant.now());
+
+        // Both rows sweep, but only the CONVERSATION session publishes.
+        assertThat(closed).isEqualTo(2);
+        assertThat(publisher.events).hasSize(1);
+        IdleSessionExpiredEvent event = publisher.events.get(0);
+        assertThat(event.sessionId()).isEqualTo(conversationSession);
+        assertThat(event.conversationId()).isEqualTo(conversationId);
+        assertThat(event.hostInstanceId()).isEqualTo(instance.getId());
+    }
+
+    /** Captures published events without needing a Spring context. */
+    private static final class RecordingPublisher
+            implements org.springframework.context.ApplicationEventPublisher {
+        final java.util.List<IdleSessionExpiredEvent> events = new java.util.ArrayList<>();
+        @Override
+        public void publishEvent(org.springframework.context.ApplicationEvent event) {
+            // Never raised by the publishEvent(Object) callers used here.
+        }
+        @Override
+        public void publishEvent(Object event) {
+            if (event instanceof IdleSessionExpiredEvent idle) {
+                events.add(idle);
+            }
+        }
+    }
+
+    /** Ages the idle lease of a session past the sweep window. */
+    private void ageIdleLease(UUID sessionId) {
+        Session row = sessionRepository.findById(sessionId).orElseThrow();
+        row.setIdleLeaseExpiresAt(Instant.now().minusSeconds(60));
+        sessionRepository.saveAndFlush(row);
     }
 
     /**
