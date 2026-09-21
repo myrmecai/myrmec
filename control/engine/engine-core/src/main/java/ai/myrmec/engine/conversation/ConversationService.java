@@ -703,7 +703,20 @@ public class ConversationService {
         }
         return conversationRepository.save(conversation);
     }
-
+    /**
+     * Close a conversation (owner-only ⋯ menu action): the same server-side
+     * teardown as archiving — release any worker and end live inference
+     * sessions — WITHOUT changing the conversation's status. The chat stays
+     * ACTIVE and visible; the next user message re-offers a fresh session
+     * through the normal dispatch path. Returns the untouched conversation.
+     */
+    @Transactional
+    public Conversation closeConversation(UUID conversationId) {
+        Conversation conversation = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Conversation", conversationId));
+        releaseBoundWorker(conversationId);
+        return conversation;
+    }
     // ------------------------------------------------------------------
     // HITL (Phase 7a)
     // ------------------------------------------------------------------

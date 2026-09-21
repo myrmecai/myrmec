@@ -399,6 +399,45 @@ class ConversationControllerTest extends IntegrationTestBase {
         assertThat(rejected.statusCode()).isEqualTo(400);
     }
 
+    @Test
+    void ownerCanCloseConversationWithoutChangingStatus() throws Exception {
+        Project project = data.project().named("conv-ctrl-close").create();
+        CreateConversationRequest body = new CreateConversationRequest(
+                project.getId(), null, "Close me", null);
+        ResponseEntity<ConversationResponse> created = restTemplate.exchange(
+                "/api/v1/conversations",
+                HttpMethod.POST,
+                new HttpEntity<>(body, adminHeaders()),
+                ConversationResponse.class);
+        UUID conversationId = created.getBody().id();
+
+        // Close: worker release + session teardown server-side, status kept.
+        HttpResponse<String> closed = post("/api/v1/conversations/" + conversationId + "/close");
+        assertThat(closed.statusCode()).isEqualTo(200);
+        JsonNode closeBody = JSON.readTree(closed.body());
+        assertThat(closeBody.get("id").asText()).isEqualTo(conversationId.toString());
+        assertThat(closeBody.get("status").asText()).isEqualTo("ACTIVE");
+
+        // Idempotent: a second close is still fine.
+        HttpResponse<String> again = post("/api/v1/conversations/" + conversationId + "/close");
+        assertThat(again.statusCode()).isEqualTo(200);
+        assertThat(JSON.readTree(again.body()).get("status").asText()).isEqualTo("ACTIVE");
+    }
+
+    /**
+     * POST helper (the close endpoint has no body).
+     */
+    private HttpResponse<String> post(String path) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(restTemplate.getRootUri() + path))
+                .header("Authorization", adminHeaders().getFirst("Authorization"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        return HttpClient.newHttpClient()
+                .send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
     /**
      * The default {@link org.springframework.boot.test.web.client.TestRestTemplate}
      * request factory (no Apache HttpComponents on the test classpath)

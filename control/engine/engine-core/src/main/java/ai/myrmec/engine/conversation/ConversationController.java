@@ -106,6 +106,15 @@ public class ConversationController {
         return ResponseEntity.ok(ConversationResponse.from(updated));
     }
 
+    @PostMapping("/{id}/close")
+    @Operation(summary = "Close a conversation (owner-only menu action): release the "
+            + "worker and end live sessions server-side while keeping the "
+            + "conversation ACTIVE and re-openable")
+    @PreAuthorize("@conversationAccess.canOwn(#id, authentication)")
+    public ResponseEntity<ConversationResponse> close(@PathVariable UUID id) {
+        return ResponseEntity.ok(ConversationResponse.from(conversationService.closeConversation(id)));
+    }
+
     @GetMapping("/{id}/messages")
     @Operation(summary = "List messages in a conversation in sequence order; "
             + "pass limit (and optional before cursor) to page scrollback")
