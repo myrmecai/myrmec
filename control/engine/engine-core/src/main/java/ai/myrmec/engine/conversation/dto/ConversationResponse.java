@@ -17,7 +17,13 @@ public record ConversationResponse(
         String systemPromptOverride,
         UUID createdBy,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        Instant closedAt,
+        String closeReason,
+        UUID closedBy,
+        Instant archivedAt,
+        String archiveReason,
+        UUID archivedBy
 ) {
     public static ConversationResponse from(Conversation c) {
         return new ConversationResponse(
@@ -32,7 +38,13 @@ public record ConversationResponse(
                 c.getSystemPromptOverride(),
                 c.getCreatedBy(),
                 c.getCreatedAt(),
-                c.getUpdatedAt()
+                c.getUpdatedAt(),
+                c.getClosedAt(),
+                c.getCloseReason(),
+                c.getClosedBy(),
+                c.getArchivedAt(),
+                c.getArchiveReason(),
+                c.getArchivedBy()
         );
     }
 }

@@ -85,34 +85,55 @@ public class ConversationController {
     }
 
     @GetMapping
-    @Operation(summary = "List conversations under a project (most recently updated first)")
+    @Operation(summary = "List conversations under a project (most recently updated first). "
+            + "CLOSED and ARCHIVED conversations are hidden unless includeClosed/includeArchived "
+            + "are passed as true")
     @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
     public ResponseEntity<List<ConversationResponse>> listByProject(
-            @RequestParam UUID projectId) {
-        List<ConversationResponse> body = conversationService.listByProject(projectId).stream()
+            @RequestParam UUID projectId,
+            @RequestParam(defaultValue = "false") boolean includeClosed,
+            @RequestParam(defaultValue = "false") boolean includeArchived) {
+        List<ConversationResponse> body = conversationService
+                .listByProject(projectId, includeClosed, includeArchived).stream()
                 .map(ConversationResponse::from)
                 .toList();
         return ResponseEntity.ok(body);
     }
 
     @PatchMapping("/{id}")
-    @Operation(summary = "Rename and/or archive a conversation (owner-only ⋯ menu actions)")
+    @Operation(summary = "Rename a conversation (owner-only menu action; rename-only - "
+            + "status transitions moved to POST /{id}/close and POST /{id}/archive)")
     @PreAuthorize("@conversationAccess.canOwn(#id, authentication)")
     public ResponseEntity<ConversationResponse> update(
             @PathVariable UUID id,
             @Valid @RequestBody UpdateConversationRequest request) {
-        Conversation updated = conversationService.updateConversation(
-                id, request.title(), request.status());
+        Conversation updated = conversationService.updateConversation(id, request.title());
         return ResponseEntity.ok(ConversationResponse.from(updated));
     }
 
     @PostMapping("/{id}/close")
-    @Operation(summary = "Close a conversation (owner-only menu action): release the "
-            + "worker and end live sessions server-side while keeping the "
-            + "conversation ACTIVE and re-openable")
+    @Operation(summary = "Close a conversation (owner-only menu action): flips ACTIVE "
+            + "to the terminal CLOSED state, stamps the close audit trail and runs the "
+            + "worker release + session teardown. Idempotent; archiving first is rejected")
     @PreAuthorize("@conversationAccess.canOwn(#id, authentication)")
-    public ResponseEntity<ConversationResponse> close(@PathVariable UUID id) {
-        return ResponseEntity.ok(ConversationResponse.from(conversationService.closeConversation(id)));
+    public ResponseEntity<ConversationResponse> close(
+            @PathVariable UUID id,
+            @CurrentUser UUID userId) {
+        return ResponseEntity.ok(
+                ConversationResponse.from(conversationService.closeConversation(id, userId)));
+    }
+
+    @PostMapping("/{id}/archive")
+    @Operation(summary = "Archive a conversation (owner-only menu action): soft-deletes "
+            + "an ACTIVE or CLOSED conversation, stamping the archive audit trail. Archiving "
+            + "an ACTIVE conversation also stamps an implicit close (closeReason=ARCHIVED) "
+            + "and runs the teardown. Idempotent; no un-archive")
+    @PreAuthorize("@conversationAccess.canOwn(#id, authentication)")
+    public ResponseEntity<ConversationResponse> archive(
+            @PathVariable UUID id,
+            @CurrentUser UUID userId) {
+        return ResponseEntity.ok(
+                ConversationResponse.from(conversationService.archiveConversation(id, userId)));
     }
 
     @GetMapping("/{id}/messages")

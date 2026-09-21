@@ -363,44 +363,7 @@ class ConversationControllerTest extends IntegrationTestBase {
     }
 
     @Test
-    void ownerCanRenameAndArchiveAndUnarchiveConversation() throws Exception {
-        Project project = data.project().named("conv-ctrl-patch").create();
-        CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "Original title", null);
-        ResponseEntity<ConversationResponse> created = restTemplate.exchange(
-                "/api/v1/conversations",
-                HttpMethod.POST,
-                new HttpEntity<>(body, adminHeaders()),
-                ConversationResponse.class);
-        UUID conversationId = created.getBody().id();
-
-        // Rename + archive in one call.
-        HttpResponse<String> archived = patch(
-                "/api/v1/conversations/" + conversationId,
-                "{\"title\":\"Renamed\",\"status\":\"ARCHIVED\"}");
-        assertThat(archived.statusCode()).isEqualTo(200);
-        JsonNode archivedBody = JSON.readTree(archived.body());
-        assertThat(archivedBody.get("title").asText()).isEqualTo("Renamed");
-        assertThat(archivedBody.get("status").asText()).isEqualTo("ARCHIVED");
-
-        // Unarchive — title is left untouched because it is omitted.
-        HttpResponse<String> reactivated = patch(
-                "/api/v1/conversations/" + conversationId,
-                "{\"status\":\"ACTIVE\"}");
-        assertThat(reactivated.statusCode()).isEqualTo(200);
-        JsonNode reactivatedBody = JSON.readTree(reactivated.body());
-        assertThat(reactivatedBody.get("title").asText()).isEqualTo("Renamed");
-        assertThat(reactivatedBody.get("status").asText()).isEqualTo("ACTIVE");
-
-        // The destructive DELETED transition is not reachable through PATCH.
-        HttpResponse<String> rejected = patch(
-                "/api/v1/conversations/" + conversationId,
-                "{\"status\":\"DELETED\"}");
-        assertThat(rejected.statusCode()).isEqualTo(400);
-    }
-
-    @Test
-    void ownerCanCloseConversationWithoutChangingStatus() throws Exception {
+    void closeFlipsToTerminalClosedStampsTrailAndStaysRenamable() throws Exception {
         Project project = data.project().named("conv-ctrl-close").create();
         CreateConversationRequest body = new CreateConversationRequest(
                 project.getId(), null, "Close me", null);
@@ -411,17 +374,207 @@ class ConversationControllerTest extends IntegrationTestBase {
                 ConversationResponse.class);
         UUID conversationId = created.getBody().id();
 
-        // Close: worker release + session teardown server-side, status kept.
+        // Close: ACTIVE -> CLOSED, close trail stamped, teardown runs.
         HttpResponse<String> closed = post("/api/v1/conversations/" + conversationId + "/close");
         assertThat(closed.statusCode()).isEqualTo(200);
         JsonNode closeBody = JSON.readTree(closed.body());
         assertThat(closeBody.get("id").asText()).isEqualTo(conversationId.toString());
-        assertThat(closeBody.get("status").asText()).isEqualTo("ACTIVE");
+        assertThat(closeBody.get("status").asText()).isEqualTo("CLOSED");
+        assertThat(closeBody.get("closeReason").asText()).isEqualTo("USER_ENDED");
+        assertThat(closeBody.get("closedBy").asText()).isEqualTo(TEST_ADMIN_ID.toString());
+        assertThat(closeBody.get("closedAt").isNull()).isFalse();
 
-        // Idempotent: a second close is still fine.
+        // Idempotent: a second close returns the row unchanged.
         HttpResponse<String> again = post("/api/v1/conversations/" + conversationId + "/close");
         assertThat(again.statusCode()).isEqualTo(200);
-        assertThat(JSON.readTree(again.body()).get("status").asText()).isEqualTo("ACTIVE");
+        JsonNode againBody = JSON.readTree(again.body());
+        assertThat(againBody.get("status").asText()).isEqualTo("CLOSED");
+        assertThat(againBody.get("closeReason").asText()).isEqualTo("USER_ENDED");
+
+        // Read-only is about messages, not the title: PATCH renames a CLOSED row.
+        HttpResponse<String> renamed = patch(
+                "/api/v1/conversations/" + conversationId,
+                "{\"title\":\"Renamed after close\"}");
+        assertThat(renamed.statusCode()).isEqualTo(200);
+        JsonNode renamedBody = JSON.readTree(renamed.body());
+        assertThat(renamedBody.get("title").asText()).isEqualTo("Renamed after close");
+        assertThat(renamedBody.get("status").asText()).isEqualTo("CLOSED");
+    }
+
+    @Test
+    void archiveFromActiveStampsBothTrailsAndIsIdempotent() throws Exception {
+        Project project = data.project().named("conv-ctrl-archive-active").create();
+        CreateConversationRequest body = new CreateConversationRequest(
+                project.getId(), null, "Archive from active", null);
+        ResponseEntity<ConversationResponse> created = restTemplate.exchange(
+                "/api/v1/conversations",
+                HttpMethod.POST,
+                new HttpEntity<>(body, adminHeaders()),
+                ConversationResponse.class);
+        UUID conversationId = created.getBody().id();
+
+        // Archive a never-closed conversation: implicit close trail (ARCHIVED)
+        // plus the USER_ARCHIVED archive trail.
+        HttpResponse<String> archived = post("/api/v1/conversations/" + conversationId + "/archive");
+        assertThat(archived.statusCode()).isEqualTo(200);
+        JsonNode archiveBody = JSON.readTree(archived.body());
+        assertThat(archiveBody.get("status").asText()).isEqualTo("ARCHIVED");
+        assertThat(archiveBody.get("closeReason").asText()).isEqualTo("ARCHIVED");
+        assertThat(archiveBody.get("closedBy").asText()).isEqualTo(TEST_ADMIN_ID.toString());
+        assertThat(archiveBody.get("archiveReason").asText()).isEqualTo("USER_ARCHIVED");
+        assertThat(archiveBody.get("archivedBy").asText()).isEqualTo(TEST_ADMIN_ID.toString());
+        assertThat(archiveBody.get("archivedAt").isNull()).isFalse();
+
+        // Idempotent: archiving again returns the row unchanged.
+        HttpResponse<String> again = post("/api/v1/conversations/" + conversationId + "/archive");
+        assertThat(again.statusCode()).isEqualTo(200);
+        JsonNode againBody = JSON.readTree(again.body());
+        assertThat(againBody.get("status").asText()).isEqualTo("ARCHIVED");
+        assertThat(againBody.get("archiveReason").asText()).isEqualTo("USER_ARCHIVED");
+    }
+
+    @Test
+    void archiveFromClosedPreservesTheExistingCloseTrail() throws Exception {
+        Project project = data.project().named("conv-ctrl-archive-closed").create();
+        CreateConversationRequest body = new CreateConversationRequest(
+                project.getId(), null, "Archive from closed", null);
+        UUID conversationId = restTemplate.exchange(
+                "/api/v1/conversations",
+                HttpMethod.POST,
+                new HttpEntity<>(body, adminHeaders()),
+                ConversationResponse.class).getBody().id();
+
+        HttpResponse<String> closed = post("/api/v1/conversations/" + conversationId + "/close");
+        assertThat(closed.statusCode()).isEqualTo(200);
+
+        // Archiving a CLOSED row must not overwrite the USER_ENDED close trail.
+        HttpResponse<String> archived = post("/api/v1/conversations/" + conversationId + "/archive");
+        assertThat(archived.statusCode()).isEqualTo(200);
+        JsonNode archiveBody = JSON.readTree(archived.body());
+        assertThat(archiveBody.get("status").asText()).isEqualTo("ARCHIVED");
+        assertThat(archiveBody.get("closeReason").asText()).isEqualTo("USER_ENDED");
+        assertThat(archiveBody.get("archiveReason").asText()).isEqualTo("USER_ARCHIVED");
+        assertThat(archiveBody.get("archivedBy").asText()).isEqualTo(TEST_ADMIN_ID.toString());
+    }
+
+    @Test
+    void patchIgnoresStatusFieldAndOnlyRenames() throws Exception {
+        Project project = data.project().named("conv-ctrl-patch").create();
+        CreateConversationRequest body = new CreateConversationRequest(
+                project.getId(), null, "Original title", null);
+        ResponseEntity<ConversationResponse> created = restTemplate.exchange(
+                "/api/v1/conversations",
+                HttpMethod.POST,
+                new HttpEntity<>(body, adminHeaders()),
+                ConversationResponse.class);
+        UUID conversationId = created.getBody().id();
+
+        // The status property is silently dropped (Jackson ignores unknown
+        // properties); only the rename applies and the row stays ACTIVE.
+        HttpResponse<String> renamed = patch(
+                "/api/v1/conversations/" + conversationId,
+                "{\"title\":\"Renamed\",\"status\":\"ARCHIVED\"}");
+        assertThat(renamed.statusCode()).isEqualTo(200);
+        JsonNode renamedBody = JSON.readTree(renamed.body());
+        assertThat(renamedBody.get("title").asText()).isEqualTo("Renamed");
+        assertThat(renamedBody.get("status").asText()).isEqualTo("ACTIVE");
+        assertThat(renamedBody.get("archivedAt").isNull()).isTrue();
+    }
+
+    @Test
+    void closedConversationRejectsNewUserMessages() throws Exception {
+        Project project = data.project().named("conv-ctrl-readonly").create();
+        CreateConversationRequest body = new CreateConversationRequest(
+                project.getId(), null, "Read only after close", null);
+        UUID conversationId = restTemplate.exchange(
+                "/api/v1/conversations",
+                HttpMethod.POST,
+                new HttpEntity<>(body, adminHeaders()),
+                ConversationResponse.class).getBody().id();
+
+        HttpResponse<String> closed = post("/api/v1/conversations/" + conversationId + "/close");
+        assertThat(closed.statusCode()).isEqualTo(200);
+
+        ResponseEntity<String> rejected = restTemplate.exchange(
+                "/api/v1/conversations/" + conversationId + "/messages",
+                HttpMethod.POST,
+                new HttpEntity<>(new PostUserMessageRequest("hello again"), adminHeaders()),
+                String.class);
+        assertThat(rejected.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(rejected.getBody()).contains("CLOSED");
+    }
+
+    @Test
+    void listFiltersHideClosedAndArchivedByDefault() throws Exception {
+        Project project = data.project().named("conv-ctrl-list-filters").create();
+        CreateConversationRequest body = new CreateConversationRequest(
+                project.getId(), null, "stays active", null);
+        UUID activeId = restTemplate.exchange(
+                "/api/v1/conversations",
+                HttpMethod.POST,
+                new HttpEntity<>(body, adminHeaders()),
+                ConversationResponse.class).getBody().id();
+        CreateConversationRequest closeBody = new CreateConversationRequest(
+                project.getId(), null, "gets closed", null);
+        UUID closedId = restTemplate.exchange(
+                "/api/v1/conversations",
+                HttpMethod.POST,
+                new HttpEntity<>(closeBody, adminHeaders()),
+                ConversationResponse.class).getBody().id();
+        CreateConversationRequest archiveBody = new CreateConversationRequest(
+                project.getId(), null, "gets archived", null);
+        UUID archivedId = restTemplate.exchange(
+                "/api/v1/conversations",
+                HttpMethod.POST,
+                new HttpEntity<>(archiveBody, adminHeaders()),
+                ConversationResponse.class).getBody().id();
+
+        assertThat(post("/api/v1/conversations/" + closedId + "/close").statusCode())
+                .isEqualTo(200);
+        assertThat(post("/api/v1/conversations/" + archivedId + "/archive").statusCode())
+                .isEqualTo(200);
+
+        // Default: only the ACTIVE conversation is listed.
+        ResponseEntity<List<ConversationResponse>> defaults = restTemplate.exchange(
+                "/api/v1/conversations?projectId=" + project.getId(),
+                HttpMethod.GET,
+                new HttpEntity<>(adminHeaders()),
+                new ParameterizedTypeReference<List<ConversationResponse>>() {});
+        assertThat(defaults.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(defaults.getBody())
+                .extracting(ConversationResponse::id)
+                .containsExactlyInAnyOrder(activeId);
+
+        // Opt-in: closed rows come back with includeClosed=true.
+        ResponseEntity<List<ConversationResponse>> withClosed = restTemplate.exchange(
+                "/api/v1/conversations?projectId=" + project.getId() + "&includeClosed=true",
+                HttpMethod.GET,
+                new HttpEntity<>(adminHeaders()),
+                new ParameterizedTypeReference<List<ConversationResponse>>() {});
+        assertThat(withClosed.getBody())
+                .extracting(ConversationResponse::id)
+                .containsExactlyInAnyOrder(activeId, closedId);
+
+        // Opt-in: archived rows come back with includeArchived=true.
+        ResponseEntity<List<ConversationResponse>> withArchived = restTemplate.exchange(
+                "/api/v1/conversations?projectId=" + project.getId() + "&includeArchived=true",
+                HttpMethod.GET,
+                new HttpEntity<>(adminHeaders()),
+                new ParameterizedTypeReference<List<ConversationResponse>>() {});
+        assertThat(withArchived.getBody())
+                .extracting(ConversationResponse::id)
+                .containsExactlyInAnyOrder(activeId, archivedId);
+
+        // Both opt-ins return the full set.
+        ResponseEntity<List<ConversationResponse>> withBoth = restTemplate.exchange(
+                "/api/v1/conversations?projectId=" + project.getId()
+                        + "&includeClosed=true&includeArchived=true",
+                HttpMethod.GET,
+                new HttpEntity<>(adminHeaders()),
+                new ParameterizedTypeReference<List<ConversationResponse>>() {});
+        assertThat(withBoth.getBody())
+                .extracting(ConversationResponse::id)
+                .containsExactlyInAnyOrder(activeId, closedId, archivedId);
     }
 
     /**

@@ -33,7 +33,16 @@ import java.util.UUID;
 @NoArgsConstructor
 public class Conversation {
 
-    public enum Status { ACTIVE, ARCHIVED, DELETED }
+    /**
+     * Lifecycle state (2026-09-21 close/archive design section 2.1):
+     * ACTIVE - live chat; CLOSED - user-ended terminal state, transcript
+     * stays readable but no new messages; ARCHIVED - soft delete that
+     * subsumes the old DELETED (no un-archive). A row-level IDLE state is
+     * deliberately absent - idle is a live signal from the session
+     * allocation layer, and the row stays ACTIVE so the next message
+     * transparently re-offers a fresh session.
+     */
+    public enum Status { ACTIVE, ARCHIVED, CLOSED }
 
     /** Where the conversation was started from (#96, External API seam). */
     public enum Source { WEB_UI, EXTERNAL_API }
@@ -103,6 +112,33 @@ public class Conversation {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private Status status = Status.ACTIVE;
+
+    /** When the conversation was closed (USER_ENDED or implicit ARCHIVED close). */
+    @Column(name = "closed_at")
+    private Instant closedAt;
+
+    /**
+     * Why the conversation closed: USER_ENDED (explicit close), ARCHIVED
+     * (implicit close of an ACTIVE row at archive time). Null while ACTIVE.
+     */
+    @Column(name = "close_reason", length = 64)
+    private String closeReason;
+
+    /** User who closed the conversation. Null for engine-driven closes. */
+    @Column(name = "closed_by")
+    private UUID closedBy;
+
+    /** When the conversation was archived. Null until archived. */
+    @Column(name = "archived_at")
+    private Instant archivedAt;
+
+    /** Why the conversation was archived (USER_ARCHIVED). Null until archived. */
+    @Column(name = "archive_reason", length = 64)
+    private String archiveReason;
+
+    /** User who archived the conversation. Null for engine-driven archives. */
+    @Column(name = "archived_by")
+    private UUID archivedBy;
 
     /** Per-conversation system-prompt override (#9). Null means inherit profile. */
     @Column(name = "system_prompt_override", columnDefinition = "text")

@@ -207,6 +207,17 @@ public class ConversationService {
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Conversation", conversationId));
 
+        if (role == ConversationMessage.Role.USER
+                && conversation.getStatus() != Conversation.Status.ACTIVE) {
+            // Read-only guard (2026-09-21 close/archive lifecycle design
+            // section 4.5): a CLOSED or ARCHIVED conversation is a frozen
+            // transcript. Engine-internal rows (ASSISTANT / SYSTEM /
+            // CONTEXT_SUMMARY) are unaffected so in-flight completions can
+            // still land after a close.
+            throw new BadRequestException("Conversation is " + conversation.getStatus()
+                    + " and cannot receive new messages");
+        }
+
         long nextSequence = messageRepository
                 .findFirstByConversationIdOrderBySequenceNoDesc(conversationId)
                 .map(m -> m.getSequenceNo() + 1)
@@ -606,10 +617,18 @@ public class ConversationService {
      * List conversations under a project ordered by most-recently-updated
      * first. Used by the chat sidebar to show the user the threads they
      * can resume.
+     *
+     * <p>2026-09-21 close/archive lifecycle design section 4.4: CLOSED and
+     * ARCHIVED rows are hidden unless the caller opts in via
+     * {@code includeClosed} / {@code includeArchived}, so the default list
+     * shows only resumable ACTIVE chats.</p>
      */
     @Transactional(readOnly = true)
-    public List<Conversation> listByProject(UUID projectId) {
-        return conversationRepository.findByProjectIdOrderByUpdatedAtDesc(projectId);
+    public List<Conversation> listByProject(UUID projectId, boolean includeClosed, boolean includeArchived) {
+        return conversationRepository.findByProjectIdOrderByUpdatedAtDesc(projectId).stream()
+                .filter(c -> includeClosed || c.getStatus() != Conversation.Status.CLOSED)
+                .filter(c -> includeArchived || c.getStatus() != Conversation.Status.ARCHIVED)
+                .toList();
     }
 
     /**
@@ -666,56 +685,92 @@ public class ConversationService {
     }
 
     /**
-     * Apply an owner-editable partial update (rename / archive / unarchive)
-     * from the chat {@code â‹¯} menu. A {@code null} argument leaves that
-     * field untouched.
-     *
-     * <p>Only {@link Conversation.Status#ACTIVE} and
-     * {@link Conversation.Status#ARCHIVED} are reachable here â€” the
-     * destructive {@code DELETED} transition is rejected so an archive
-     * action can never accidentally tombstone a thread.</p>
+     * Rename-only owner update (2026-09-21 close/archive lifecycle design
+     * section 4.3): the {@code status} transition surface that used to live
+     * here is gone - closing is {@link #closeConversation} and archiving is
+     * {@link #archiveConversation}. A {@code null} title leaves the row
+     * untouched. Read-only is about messages, not the title: renaming a
+     * CLOSED or ARCHIVED conversation is allowed.
      */
     @Transactional
-    public Conversation updateConversation(UUID conversationId, String title, String status) {
+    public Conversation updateConversation(UUID conversationId, String title) {
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Conversation", conversationId));
 
         if (title != null) {
             conversation.setTitle(title);
         }
-        if (status != null) {
-            Conversation.Status target;
-            try {
-                target = Conversation.Status.valueOf(status.trim().toUpperCase());
-            } catch (IllegalArgumentException e) {
-                throw new IllegalArgumentException("Unknown conversation status: " + status);
-            }
-            if (target != Conversation.Status.ACTIVE && target != Conversation.Status.ARCHIVED) {
-                throw new IllegalArgumentException(
-                        "Status may only be set to ACTIVE or ARCHIVED, got " + target);
-            }
-            conversation.setStatus(target);
-            // Â§9.5 â€” when a conversation is archived, release any BOUND worker
-            // back to the warm pool so it can serve other conversations.
-            if (target == Conversation.Status.ARCHIVED) {
-                releaseBoundWorker(conversationId);
-            }
-        }
         return conversationRepository.save(conversation);
     }
+
     /**
-     * Close a conversation (owner-only ⋯ menu action): the same server-side
-     * teardown as archiving — release any worker and end live inference
-     * sessions — WITHOUT changing the conversation's status. The chat stays
-     * ACTIVE and visible; the next user message re-offers a fresh session
-     * through the normal dispatch path. Returns the untouched conversation.
+     * Close a conversation (owner-only {@code POST /{id}/close}; 2026-09-21
+     * close/archive lifecycle design section 4.1): ACTIVE becomes the
+     * terminal CLOSED state and the same teardown as archiving runs
+     * ({@link #releaseBoundWorker}: worker release + session close). The
+     * close trail is stamped with reason {@code USER_ENDED}.
+     *
+     * <p>Closing an already-CLOSED conversation is idempotent and returns
+     * the row unchanged. Closing an ARCHIVED conversation is rejected with
+     * {@link IllegalArgumentException} (mapped to 400).</p>
      */
     @Transactional
-    public Conversation closeConversation(UUID conversationId) {
+    public Conversation closeConversation(UUID conversationId, UUID userId) {
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Conversation", conversationId));
+        if (conversation.getStatus() == Conversation.Status.CLOSED) {
+            return conversation;
+        }
+        if (conversation.getStatus() == Conversation.Status.ARCHIVED) {
+            throw new IllegalArgumentException("Cannot close an archived conversation");
+        }
+        conversation.setStatus(Conversation.Status.CLOSED);
+        conversation.setClosedAt(Instant.now());
+        conversation.setCloseReason("USER_ENDED");
+        conversation.setClosedBy(userId);
         releaseBoundWorker(conversationId);
-        return conversation;
+        return conversationRepository.save(conversation);
+    }
+
+    /**
+     * Archive a conversation (owner-only {@code POST /{id}/archive};
+     * 2026-09-21 close/archive lifecycle design section 4.2) - the soft
+     * delete that subsumes the old DELETED. No un-archive.
+     *
+     * <ul>
+     *   <li>CLOSED - only the archive trail is stamped
+     *       ({@code USER_ARCHIVED}); the existing close trail is preserved.</li>
+     *   <li>ACTIVE - both trails are stamped: the archive trail plus an
+     *       implicit close with {@code close_reason = ARCHIVED}, and the
+     *       {@link #releaseBoundWorker} teardown runs.</li>
+     *   <li>ARCHIVED - idempotent, row returned unchanged.</li>
+     * </ul>
+     */
+    @Transactional
+    public Conversation archiveConversation(UUID conversationId, UUID userId) {
+        Conversation conversation = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Conversation", conversationId));
+        if (conversation.getStatus() == Conversation.Status.ARCHIVED) {
+            return conversation;
+        }
+        conversation.setArchivedAt(Instant.now());
+        conversation.setArchiveReason("USER_ARCHIVED");
+        conversation.setArchivedBy(userId);
+        if (conversation.getStatus() == Conversation.Status.CLOSED) {
+            conversation.setStatus(Conversation.Status.ARCHIVED);
+        } else {
+            // Implicit close of a never-closed ACTIVE row: stamp the close
+            // trail with ARCHIVED so the row carries a complete history,
+            // and run the same teardown an explicit close would have run.
+            conversation.setStatus(Conversation.Status.ARCHIVED);
+            conversation.setClosedAt(Instant.now());
+            conversation.setCloseReason("ARCHIVED");
+            if (userId != null) {
+                conversation.setClosedBy(userId);
+            }
+            releaseBoundWorker(conversationId);
+        }
+        return conversationRepository.save(conversation);
     }
     // ------------------------------------------------------------------
     // HITL (Phase 7a)

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Conversation close / archive lifecycle audit trail (design
+        2026-09-21-conversation-close-archive-lifecycle.md section 3). The
+        conversations table gains two parallel audit trails, both NULL-able:
+
+          - close trail:    closed_at / close_reason / closed_by
+            (close_reason USER_ENDED for an explicit close, ARCHIVED for
+            the implicit close when an ACTIVE conversation is archived)
+          - archive trail:  archived_at / archive_reason / archived_by
+            (archive_reason USER_ARCHIVED)
+
+        closed_by / archived_by reference users(id). No data backfill -
+        existing rows keep NULL trails and stay ACTIVE.
+    -->
+
+    <changeSet id="033-conversation-lifecycle-audit-columns" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="conversations"/>
+                <not>
+                    <columnExists tableName="conversations" columnName="closed_at"/>
+                </not>
+            </and>
+        </preConditions>
+        <addColumn tableName="conversations">
+            <column name="closed_at" type="timestamp with time zone"/>
+            <column name="close_reason" type="varchar(64)"/>
+            <column name="closed_by" type="uuid"/>
+            <column name="archived_at" type="timestamp with time zone"/>
+            <column name="archive_reason" type="varchar(64)"/>
+            <column name="archived_by" type="uuid"/>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="033-conversation-closed-by-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="conversations"/>
+                <tableExists tableName="users"/>
+                <columnExists tableName="conversations" columnName="closed_by"/>
+                <not>
+                    <foreignKeyConstraintExists foreignKeyName="fk_conversation_closed_by"/>
+                </not>
+            </and>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="conversations"
+            baseColumnNames="closed_by"
+            referencedTableName="users"
+            referencedColumnNames="id"
+            constraintName="fk_conversation_closed_by"/>
+    </changeSet>
+
+    <changeSet id="033-conversation-archived-by-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="conversations"/>
+                <tableExists tableName="users"/>
+                <columnExists tableName="conversations" columnName="archived_by"/>
+                <not>
+                    <foreignKeyConstraintExists foreignKeyName="fk_conversation_archived_by"/>
+                </not>
+            </and>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="conversations"
+            baseColumnNames="archived_by"
+            referencedTableName="users"
+            referencedColumnNames="id"
+            constraintName="fk_conversation_archived_by"/>
+    </changeSet>
+
+</databaseChangeLog>
