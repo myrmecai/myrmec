@@ -30,9 +30,14 @@ public interface AgentRepository extends JpaRepository<Agent, UUID> {
     List<Agent> findByAgentHostIdAndStatus(UUID agentId, Agent.Status status);
 
     /**
-     * Find the worker bound to a specific conversation (at most one).
+     * Find all workers still linked to a conversation (status IDLE or BOUND).
+     * Historically this was a single-row Optional, but crashed reconnects can
+     * leave several rows pointing at the same conversation; a single-result
+     * query then fails with IncorrectResultSizeDataAccessException and (since
+     * the caller is inside a joined transaction) silently poisons it — the
+     * outer commit dies with UnexpectedRollbackException. Callers now iterate.
      */
-    Optional<Agent> findByConversationIdAndStatus(UUID conversationId, Agent.Status status);
+    List<Agent> findByConversationIdAndStatus(UUID conversationId, Agent.Status status);
 
     /**
      * Find instances that haven't sent a heartbeat since the given time.

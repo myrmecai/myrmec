@@ -617,20 +617,50 @@ public class ConversationService {
      * pool (§9.5). Called when the conversation is archived or closed.
      * Also closes any active inference sessions for this conversation.
      */
+    /**
+     * Release any workers still linked to this conversation back to the warm
+     * pool (§9.5). Called when the conversation is archived or closed.
+     * Also closes any active inference sessions for this conversation.
+     *
+     * <p>Stale rows are the norm after crashed reconnects: several instances
+     * can point at one conversation. Every one of them is released. The whole
+     * release is best-effort — but each step is isolated so one failure cannot
+     * poison the caller's transaction (an exception thrown through a joined
+     * inner @Transactional marks it rollback-only even when caught here, and
+     * the outer commit then dies with UnexpectedRollbackException).</p>
+     */
     private void releaseBoundWorker(UUID conversationId) {
+        List<UUID> instanceIds;
         try {
-            agentInstanceRepository
+            instanceIds = agentInstanceRepository
                     .findByConversationIdAndStatus(conversationId, ai.myrmec.engine.agent.Agent.Status.BOUND)
-                    .ifPresent(instance -> {
-                        agentService.releaseInstance(instance.getId());
-                        log.info("Released BOUND worker {} for archived conversation {}",
-                                instance.getId(), conversationId);
-                    });
+                    .stream()
+                    .map(ai.myrmec.engine.agent.Agent::getId)
+                    .toList();
+        } catch (Exception e) {
+            log.warn("Failed to look up bound workers for conversation {}: {}",
+                    conversationId, e.getMessage());
+            instanceIds = List.of();
+        }
+        for (UUID instanceId : instanceIds) {
+            try {
+                agentService.releaseInstance(instanceId);
+                log.info("Released BOUND worker {} for archived conversation {}",
+                        instanceId, conversationId);
+            } catch (Exception e) {
+                // Isolated per-instance: a failure here must not abort the
+                // remaining releases (and it must never leak into the outer
+                // transaction's commit — see the javadoc above).
+                log.warn("Failed to release worker {} for archived conversation {}: {}",
+                        instanceId, conversationId, e.getMessage());
+            }
+        }
+        try {
             // Close any active CONVERSATION sessions for this conversation
             // (the session stays open across turns; close it here on archive).
             sessionContextAssembler.closeSessionsByRefId(conversationId, "CONVERSATION");
         } catch (Exception e) {
-            log.warn("Failed to release BOUND worker for conversation {}: {}",
+            log.warn("Failed to close sessions for archived conversation {}: {}",
                     conversationId, e.getMessage());
         }
     }
