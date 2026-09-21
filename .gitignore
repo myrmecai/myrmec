@@ -62,3 +62,4 @@ control/ui/playwright-run.log
 evals/.promptfoo/
 evals/promptfoo-output.*
 evals/.cache/
+control/engine/engine-core/data/attachments/
