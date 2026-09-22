@@ -94,7 +94,7 @@ class AgentProfileVersionServiceTest extends IntegrationTestBase {
                 null);
     }
 
-    // ── identity-only create opens a draft v1 (2026-09-22, section 2.1) ──
+    // -- identity-only create opens a draft v1 (2026-09-22, section 2.1) --
 
     @Test
     @DisplayName("identity-only create opens a DRAFT v1 with no published version")
@@ -165,7 +165,7 @@ class AgentProfileVersionServiceTest extends IntegrationTestBase {
         assertThat(second.getId()).isEqualTo(first.getId());
     }
 
-    // ── identity-only update skips versioning (2026-09-22, section 2.2) ──
+    // -- identity-only update skips versioning (2026-09-22, section 2.2) --
 
     @Test
     @DisplayName("PUT with only name/description changes identity and no new version row")

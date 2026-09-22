@@ -142,7 +142,7 @@ public class AgentProfileVersionService {
      * clone from (identity-only creation; the instruction-asset pattern).
      * The draft starts with empty behaviour content (no system prompt, no
      * default model, no capabilities) and is filled in and published
-     * through the normal Draft/Publish cycle. Idempotent — an already
+     * through the normal Draft/Publish cycle. Idempotent - an already
      * open draft is returned unchanged (single-draft invariant, mirrors
      * createDraft). Profiles that HAVE a published version must use
      * createDraft, which clones that content instead.
@@ -298,7 +298,7 @@ public class AgentProfileVersionService {
     // ── Draft/Publish lifecycle surface (§16.1, the UI Draft/Publish
     //    actions' engine API — mirrors the AssistantVersion pattern) ──
 
-    /** The single open DRAFT — throws when none exists (404-mapped). The
+    /** The single open DRAFT - throws when none exists (404-mapped). The
      * fetch-join variant initializes the tools collection for response
      * assembly outside the transaction (open-in-view off). */
     @Transactional(readOnly = true)

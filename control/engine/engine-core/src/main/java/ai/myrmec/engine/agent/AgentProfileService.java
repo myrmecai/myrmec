@@ -27,8 +27,8 @@ import java.util.stream.Collectors;
  * initial version 1 when behaviour content is supplied; an identity-only
  * create (no behaviour content) opens version 1 as a DRAFT instead and
  * publishes nothing. {@link #updateProfile} updates Zone 1 directly and,
- * when Zone 2 content is supplied, runs a draft → publish cycle only
- * when the content actually differs from the published version — a
+ * when Zone 2 content is supplied, runs a draft -> publish cycle only
+ * when the content actually differs from the published version - a
  * Zone-1-only rename never creates a spurious version, and an
  * identity-only PUT never touches the versions at all.
  */
@@ -71,7 +71,7 @@ public class AgentProfileService {
      * version 1" for content-bearing creates). Dual behavior:
      * <ul>
      *   <li>With behaviour content (capabilities, toolCodes, systemPrompt
-     *       or defaultModel present) version 1 is PUBLISHED immediately —
+     *       or defaultModel present) version 1 is PUBLISHED immediately -
      *       the historical behavior, kept for backward compatibility.</li>
      *   <li>With NO behaviour content (all four fields null/blank/empty)
      *       version 1 opens as a DRAFT instead: no published version
@@ -123,7 +123,7 @@ public class AgentProfileService {
      * the §17.4 approval-request TTL that bounds the decision window.
      *
      * <p>Identity-only create (no behaviour AND no policy content) opens
-     * a DRAFT v1 instead of publishing — same rule as the plain overload.</p>
+     * a DRAFT v1 instead of publishing - same rule as the plain overload.</p>
      */
     @Transactional
     public AgentProfile createProfile(String name, String description,
@@ -170,10 +170,10 @@ public class AgentProfileService {
      * <p>Identity-only guard (design 2026-09-22, section 2.2): when every
      * Zone 2 field is null/empty (capabilities, toolCodes, systemPrompt,
      * defaultModel), only the identity row changes and the version
-     * machinery is left untouched — no draft opened, no publish, no new
-     * version row. When Zone 2 content IS present, the draft → publish
-     * cycle runs — editing a published field requires a new version
-     * (design §16.1); an identical-content update publishes nothing.</p>
+     * machinery is left untouched - no draft opened, no publish, no new
+     * version row. When Zone 2 content IS present, the draft -> publish
+     * cycle runs - editing a published field requires a new version
+     * (design section 16.1); an identical-content update publishes nothing.</p>
      *
      * @param supportedTools deprecated legacy parameter — accepted for
      *                      API compatibility, ignored
@@ -196,7 +196,7 @@ public class AgentProfileService {
 
         // Identity-only PUT (design 2026-09-22, section 2.2): with no
         // behaviour content supplied the name/description change is the
-        // whole request — return without touching the versions (no draft
+        // whole request - return without touching the versions (no draft
         // open, no publish, no new version row).
         if (!hasBehaviourContent(capabilities, toolCodes, systemPrompt, defaultModel)) {
             log.info("Updated agent profile identity only (no version churn): {} ({})",
@@ -208,7 +208,7 @@ public class AgentProfileService {
         Optional<AgentProfileVersion> published = versionService.findPublished(id);
         if (published.isEmpty()) {
             // No published version yet. When an initial draft is open
-            // (identity-only create), fill and publish THAT draft — a
+            // (identity-only create), fill and publish THAT draft - a
             // direct publish of v1 would collide with the draft's
             // version_number. A bare profile with no version rows at all
             // keeps the legacy direct publish of v1.
