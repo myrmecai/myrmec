@@ -1,22 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
+
+import { Link, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import React, { useState, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
 import {
   agentProfilesApi,
-  modelsApi,
-  toolsApi,
   type AgentProfile,
   type CreateAgentProfileRequest,
-  type UpdateAgentProfileRequest,
-  type Model,
-  type Tool,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { RequiredMark } from '@/components/ui/required-marks'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
@@ -25,7 +21,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog'
 import {
   Card,
@@ -35,37 +30,25 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Cpu, Wrench, Plus, Trash2, Power, PowerOff, MoreVertical, Eye } from 'lucide-react'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { MultiSelect, type MultiSelectOption } from '@/components/ui/multi-select'
-import { ContentAreaLayout } from '@/components/content-area-layout'
-import {
-  Plus,
-  Pencil,
-  Trash2,
-  CheckCircle,
-  XCircle,
-  Power,
-  PowerOff,
-  Cpu,
-  Wrench,
-  FilePlus,
-  FileX,
-  Upload,
-} from 'lucide-react'
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { dialogService } from '@/services/dialog-service'
+import { ContentAreaLayout } from '@/components/content-area-layout'
 import DataTable2 from '@/components/data-table2/data-table2'
 import { SortedColumnHeader } from '@/components/data-table2/sorted-column-header'
+import { RequiredMark } from '@/components/ui/required-marks'
+import { StatusBadge } from './shared/StatusBadge'
 
 export function AgentProfilesList() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [createOpen, setCreateOpen] = useState(false)
-  const [editProfile, setEditProfile] = useState<AgentProfile | null>(null)
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
 
   const {
     data: profiles,
@@ -76,46 +59,20 @@ export function AgentProfilesList() {
     queryFn: () => agentProfilesApi.list(),
   })
 
+  // Identity-only create (design 3.3): the engine opens a v1 DRAFT when the
+  // request carries no behaviour content; the draft is completed on the
+  // detail page, mirroring the instruction-asset creation flow.
   const createMutation = useMutation({
-    mutationFn: agentProfilesApi.create,
-    onSuccess: () => {
+    mutationFn: (data: CreateAgentProfileRequest) => agentProfilesApi.create(data),
+    onSuccess: (newProfile) => {
       queryClient.invalidateQueries({ queryKey: ['agent-profiles'] })
       setCreateOpen(false)
-    },
-  })
-
-  const updateMutation = useMutation({
-    // §16.1 explicit lifecycle: with an open draft, behaviour edits PATCH
-    // the DRAFT (never the immutable published version); without one, the
-    // legacy PUT path runs the internal draft→publish cycle (compat).
-    mutationFn: async ({
-      profile,
-      data,
-    }: {
-      profile: AgentProfile
-      data: UpdateAgentProfileRequest
-    }) => {
-      if (profile.draftVersionId) {
-        await agentProfilesApi.updateDraft(profile.id, {
-          capabilities: data.capabilities,
-          toolCodes: data.toolCodes,
-          systemPrompt: data.systemPrompt,
-          defaultModel: data.defaultModel,
-        })
-        return agentProfilesApi.get(profile.id)
-      }
-      return agentProfilesApi.update(profile.id, data)
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['agent-profiles'] })
-      setEditProfile(null)
-    },
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: agentProfilesApi.delete,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['agent-profiles'] })
+      setToastMessage('Agent profile created - complete the draft and publish.')
+      setTimeout(() => setToastMessage(null), 5000)
+      navigate({
+        to: '/platform/ai-infra/agent-profiles/$id',
+        params: { id: newProfile.id },
+      })
     },
   })
 
@@ -133,23 +90,8 @@ export function AgentProfilesList() {
     },
   })
 
-  // ── §16.1 Draft/Publish lifecycle actions ──
-  const openDraftMutation = useMutation({
-    mutationFn: agentProfilesApi.openDraft,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['agent-profiles'] })
-    },
-  })
-
-  const publishMutation = useMutation({
-    mutationFn: agentProfilesApi.publish,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['agent-profiles'] })
-    },
-  })
-
-  const discardDraftMutation = useMutation({
-    mutationFn: agentProfilesApi.discardDraft,
+  const deleteMutation = useMutation({
+    mutationFn: agentProfilesApi.delete,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agent-profiles'] })
     },
@@ -160,33 +102,37 @@ export function AgentProfilesList() {
       accessorKey: 'name',
       header: ({ table, column }) => <SortedColumnHeader table={table} column={column} title="Name" />,
       cell: ({ row }) => (
-        <div>
-          <div className="font-medium">
+        <div className="font-medium">
+          <Link
+            to="/platform/ai-infra/agent-profiles/$id"
+            params={{ id: row.original.id }}
+            className="hover:underline"
+          >
             {row.original.name}
-            {/* §16.1 version banner — the published version is what runs */}
-            {row.original.publishedVersionNumber != null ? (
-              <Badge variant="outline" className="ml-2 text-xs font-mono">
-                v{row.original.publishedVersionNumber}
-              </Badge>
-            ) : (
-              <Badge variant="destructive" className="ml-2 text-xs">
-                unpublished
-              </Badge>
-            )}
-            {/* §16.1 draft banner — an open draft awaits Publish/Discard */}
-            {row.original.draftVersionId && (
-              <Badge
-                className="ml-2 text-xs font-mono bg-amber-100 text-amber-900 hover:bg-amber-100"
-                title={`Draft v${row.original.draftVersionNumber} is open — publish to make it live, or discard it`}
-              >
-                draft v{row.original.draftVersionNumber}
-              </Badge>
-            )}
-          </div>
+          </Link>
+          {/* Version banner - the published version is what runs */}
+          {row.original.publishedVersionNumber != null ? (
+            <Badge variant="outline" className="ml-2 text-xs font-mono">
+              v{row.original.publishedVersionNumber}
+            </Badge>
+          ) : (
+            <Badge variant="destructive" className="ml-2 text-xs">
+              unpublished
+            </Badge>
+          )}
+          {/* Draft banner - an open draft awaits Publish/Discard */}
+          {row.original.draftVersionId && (
+            <Badge
+              className="ml-2 text-xs font-mono bg-amber-100 text-amber-900 hover:bg-amber-100"
+              title={`Draft v${row.original.draftVersionNumber} is open - publish to make it live, or discard it`}
+            >
+              draft v{row.original.draftVersionNumber}
+            </Badge>
+          )}
           {row.original.description && (
-            <div className="text-xs text-muted-foreground truncate max-w-[200px]">
+            <span className="text-xs text-muted-foreground block max-w-[220px] truncate">
               {row.original.description}
-            </div>
+            </span>
           )}
         </div>
       ),
@@ -260,115 +206,50 @@ export function AgentProfilesList() {
       enableSorting: false,
       cell: ({ row }) => {
         const profile = row.original
-        const hasDraft = !!profile.draftVersionId
         return (
-          <div className="flex items-center gap-1">
-            {profile.status === 'ACTIVE' ? (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => deactivateMutation.mutate(profile.id)}
-                title="Deactivate"
-              >
-                <PowerOff className="h-4 w-4" />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" aria-label="More actions">
+                <MoreVertical className="h-4 w-4" />
               </Button>
-            ) : (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => activateMutation.mutate(profile.id)}
-                title="Activate"
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem asChild>
+                <Link to="/platform/ai-infra/agent-profiles/$id" params={{ id: profile.id }}>
+                  <Eye className="h-4 w-4 mr-2" /> Open Detail
+                </Link>
+              </DropdownMenuItem>
+              {profile.status === 'ACTIVE' ? (
+                <DropdownMenuItem onClick={() => deactivateMutation.mutate(profile.id)}>
+                  <PowerOff className="h-4 w-4 mr-2" /> Deactivate
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onClick={() => activateMutation.mutate(profile.id)}>
+                  <Power className="h-4 w-4 mr-2" /> Activate
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem
+                className="text-destructive"
+                onClick={async () => {
+                  const confirmed = await dialogService.showConfirmDialog({
+                    title: 'Delete Agent Profile',
+                    message: `Delete "${profile.name}"? This cannot be undone.`,
+                    severity: 'error',
+                    type: 'warning',
+                    confirmLabel: 'Delete',
+                    cancelLabel: 'Cancel',
+                  })
+                  if (confirmed) deleteMutation.mutate(profile.id)
+                }}
               >
-                <Power className="h-4 w-4" />
-              </Button>
-            )}
-            {/* §16.1 explicit Draft/Publish lifecycle actions */}
-            {!hasDraft && profile.publishedVersionId && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => openDraftMutation.mutate(profile.id)}
-                title="Open Draft — clone the published version for editing"
-                disabled={openDraftMutation.isPending}
-              >
-                <FilePlus className="h-4 w-4" />
-              </Button>
-            )}
-            {hasDraft && (
-              <>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="text-green-600 hover:text-green-700"
-                  onClick={async () => {
-                    const confirmed = await dialogService.showConfirmDialog({
-                      title: 'Publish Agent Profile',
-                      message: `Publish draft v${profile.draftVersionNumber} of "${profile.name}"? The draft becomes the live published version immediately; the previous published version is archived.`,
-                      severity: 'info',
-                      type: 'info',
-                      confirmLabel: 'Publish',
-                      cancelLabel: 'Cancel',
-                    })
-                    if (confirmed) publishMutation.mutate(profile.id)
-                  }}
-                  title="Publish the open draft"
-                  disabled={publishMutation.isPending}
-                >
-                  <Upload className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="text-destructive hover:text-destructive"
-                  onClick={async () => {
-                    const confirmed = await dialogService.showConfirmDialog({
-                      title: 'Discard Draft',
-                      message: `Discard draft v${profile.draftVersionNumber} of "${profile.name}"? Unsaved changes are lost; the published version stays untouched.`,
-                      severity: 'error',
-                      type: 'warning',
-                      confirmLabel: 'Discard',
-                      cancelLabel: 'Cancel',
-                    })
-                    if (confirmed) discardDraftMutation.mutate(profile.id)
-                  }}
-                  title="Discard the open draft"
-                  disabled={discardDraftMutation.isPending}
-                >
-                  <FileX className="h-4 w-4" />
-                </Button>
-              </>
-            )}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setEditProfile(profile)}
-              title={hasDraft ? 'Edit Draft' : 'Edit'}
-            >
-              <Pencil className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={async () => {
-                const confirmed = await dialogService.showConfirmDialog({
-                  title: 'Delete Agent Profile',
-                  message: 'Are you sure you want to delete this profile? This cannot be undone.',
-                  severity: 'error',
-                  type: 'warning',
-                  confirmLabel: 'Delete',
-                  cancelLabel: 'Cancel',
-                })
-                if (confirmed) deleteMutation.mutate(profile.id)
-              }}
-              title="Delete"
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
+                <Trash2 className="h-4 w-4 mr-2" /> Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )
       },
     },
-  ], [activateMutation, deactivateMutation, deleteMutation, openDraftMutation, publishMutation, discardDraftMutation])
+  ], [activateMutation, deactivateMutation, deleteMutation])
 
   if (isLoading) {
     return (
@@ -388,285 +269,132 @@ export function AgentProfilesList() {
 
   return (
     <ContentAreaLayout>
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-bold">Agent Profiles</h1>
-          <p className="text-muted-foreground">
-            Define agent capabilities and supported tools
-          </p>
+      <div className="space-y-6">
+        {toastMessage && (
+          <div
+            className="fixed bottom-4 right-4 z-50 rounded-lg border bg-background p-4 shadow-lg"
+            role="status"
+            aria-live="polite"
+          >
+            <p className="text-sm">{toastMessage}</p>
+          </div>
+        )}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Agent Profiles</h1>
+            <p className="text-muted-foreground">
+              Define agent capabilities and supported tools
+            </p>
+          </div>
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            New Profile
+          </Button>
         </div>
 
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              New Profile
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <ProfileForm
-              onSubmit={(data) => createMutation.mutate(data)}
-              isLoading={createMutation.isPending}
-              error={createMutation.error?.message}
+        <Card>
+          <CardHeader>
+            <CardTitle>All Profiles</CardTitle>
+            <CardDescription>
+              {profiles?.length || 0} agent profiles configured
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <DataTable2
+              columns={columns}
+              data={profiles ?? []}
+              pagination={true}
+              loading={isLoading}
+              showRowSelection={false}
             />
-          </DialogContent>
-        </Dialog>
+          </CardContent>
+        </Card>
+
+        <CreateAgentProfileDialog
+          open={createOpen}
+          onOpenChange={(nextOpen) => {
+            setCreateOpen(nextOpen)
+            if (nextOpen) createMutation.reset()
+          }}
+          onCreate={(data) => createMutation.mutate(data)}
+          isPending={createMutation.isPending}
+          error={createMutation.error?.message}
+        />
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>All Profiles</CardTitle>
-          <CardDescription>
-            {profiles?.length || 0} agent profiles configured
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <DataTable2
-            columns={columns}
-            data={profiles ?? []}
-            pagination={true}
-            loading={isLoading}
-            showRowSelection={false}
-          />
-        </CardContent>
-      </Card>
-
-      {/* Edit Profile Dialog */}
-      <Dialog
-        open={!!editProfile}
-        onOpenChange={(open) => !open && setEditProfile(null)}
-      >
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          {editProfile && (
-            <ProfileForm
-              profile={editProfile}
-              onSubmit={(data) =>
-                updateMutation.mutate({ profile: editProfile, data })
-              }
-              isLoading={updateMutation.isPending}
-              error={updateMutation.error?.message}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
     </ContentAreaLayout>
   )
 }
 
-function StatusBadge({ status }: { status: 'ACTIVE' | 'INACTIVE' }) {
-  if (status === 'ACTIVE') {
-    return (
-      <span className="inline-flex items-center gap-1 text-green-600 text-sm">
-        <CheckCircle className="h-4 w-4" />
-        Active
-      </span>
-    )
-  }
-  return (
-    <span className="inline-flex items-center gap-1 text-muted-foreground text-sm">
-      <XCircle className="h-4 w-4" />
-      Inactive
-    </span>
-  )
-}
-
-interface ProfileFormProps {
-  profile?: AgentProfile
-  onSubmit: (data: CreateAgentProfileRequest | UpdateAgentProfileRequest) => void
-  isLoading: boolean
+/** Identity-only create dialog - behaviour is configured on the detail draft. */
+function CreateAgentProfileDialog({
+  open,
+  onOpenChange,
+  onCreate,
+  isPending,
+  error,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onCreate: (data: CreateAgentProfileRequest) => void
+  isPending: boolean
   error?: string
-}
+}) {
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
 
-function ProfileForm({ profile, onSubmit, isLoading, error }: ProfileFormProps) {
-  const [capabilities, setCapabilities] = useState<string>(
-    profile?.capabilities?.join('\n') || ''
-  )
-  const [toolCodes, setToolCodes] = useState<string[]>(
-    profile?.toolCodes ?? []
-  )
-  const [systemPrompt, setSystemPrompt] = useState<string>(
-    profile?.systemPrompt || ''
-  )
-  const [defaultModel, setDefaultModel] = useState<string>(
-    profile?.defaultModel || ''
-  )
-
-  const { data: models, isLoading: modelsLoading } = useQuery({
-    queryKey: ['models'],
-    queryFn: () => modelsApi.list(),
-  })
-
-  const { data: tools } = useQuery({
-    queryKey: ['tools'],
-    queryFn: () => toolsApi.list(),
-  })
-
-  const toolOptions: MultiSelectOption[] = React.useMemo(
-    () =>
-      (tools ?? [])
-        .filter((t: Tool) => t.status === 'ACTIVE')
-        .map((t: Tool) => ({
-          value: t.code,
-          label: t.name,
-          description: t.toolType,
-        })),
-    [tools],
-  )
-
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    const formData = new FormData(e.currentTarget)
-
+    // Identity-only payload: with no behaviour content the engine opens a
+    // v1 draft instead of publishing (design 3.3).
     const data: CreateAgentProfileRequest = {
-      name: formData.get('name') as string,
-      description: (formData.get('description') as string) || undefined,
-      capabilities: capabilities
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean),
-      toolCodes,
-      systemPrompt: systemPrompt.trim() || undefined,
-      defaultModel: defaultModel || undefined,
+      name: name.trim(),
+      description: description.trim() || undefined,
     }
-
-    onSubmit(data)
+    onCreate(data)
+    setName('')
+    setDescription('')
   }
 
   return (
-    <form onSubmit={handleSubmit}>
-      <DialogHeader>
-        <DialogTitle>
-          {profile
-            ? profile.draftVersionId
-              ? 'Edit Agent Profile Draft'
-              : 'Edit Agent Profile'
-            : 'Create Agent Profile'}
-        </DialogTitle>
-        <DialogDescription>
-          {profile
-            ? profile.draftVersionId
-              ? `Changes apply to draft v${profile.draftVersionNumber} — publish the draft to make them live (§16.1 Draft → Publish).`
-              : 'Update the agent profile configuration'
-            : 'Define a new agent profile with capabilities and tools'}
-        </DialogDescription>
-      </DialogHeader>
-
-      <div className="grid gap-4 py-4">
-        <div className="grid gap-2">
-          <Label htmlFor="name">Name<RequiredMark /></Label>
-          <Input
-            id="name"
-            name="name"
-            defaultValue={profile?.name}
-            placeholder="Python ML Agent"
-            required
-          />
-        </div>
-
-        <div className="grid gap-2">
-          <Label htmlFor="description">Description</Label>
-          <Textarea
-            id="description"
-            name="description"
-            defaultValue={profile?.description || ''}
-            placeholder="Agent profile for machine learning tasks with Python"
-            rows={2}
-          />
-        </div>
-
-        <div className="grid gap-2">
-          <Label htmlFor="defaultModel">
-            Default Model
-            <span className="text-muted-foreground text-xs ml-2">
-              (LLM for task execution)
-            </span>
-          </Label>
-          <Select value={defaultModel} onValueChange={setDefaultModel}>
-            <SelectTrigger>
-              <SelectValue placeholder={modelsLoading ? "Loading models..." : "Select a model"} />
-            </SelectTrigger>
-            <SelectContent>
-              {models?.filter((m: Model) => m.status === 'ACTIVE').map((model: Model) => (
-                <SelectItem key={model.code} value={model.code}>
-                  {model.name} ({model.code})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            The LLM model that agents with this profile will use for task execution.
-          </p>
-        </div>
-
-        <div className="grid gap-2">
-          <Label htmlFor="systemPrompt">
-            System Prompt
-            <span className="text-muted-foreground text-xs ml-2">
-              (expertise/personality)
-            </span>
-          </Label>
-          <Textarea
-            id="systemPrompt"
-            value={systemPrompt}
-            onChange={(e) => setSystemPrompt(e.target.value)}
-            placeholder="You are an expert Python developer with deep knowledge of machine learning frameworks. You write clean, well-documented code following PEP 8 conventions."
-            rows={4}
-          />
-          <p className="text-xs text-muted-foreground">
-            Defines the agent's expertise and personality. This prompt is sent to the LLM for all tasks assigned to agents with this profile.
-          </p>
-        </div>
-
-        <div className="grid gap-2">
-          <Label htmlFor="capabilities">
-            Capabilities
-            <span className="text-muted-foreground text-xs ml-2">
-              (one per line)
-            </span>
-          </Label>
-          <Textarea
-            id="capabilities"
-            value={capabilities}
-            onChange={(e) => setCapabilities(e.target.value)}
-            placeholder="python:3.11&#10;cuda:12.4&#10;docker"
-            rows={4}
-            className="font-mono text-sm"
-          />
-          <p className="text-xs text-muted-foreground">
-            Software, libraries, or hardware capabilities.
-            Examples: python:3.11, cuda:12.4, docker, gpu:nvidia
-          </p>
-        </div>
-
-        <div className="grid gap-2">
-          <Label htmlFor="toolCodes">
-            Tools
-            <span className="text-muted-foreground text-xs ml-2">
-              (from the tools registry)
-            </span>
-          </Label>
-          <MultiSelect
-            options={toolOptions}
-            selected={toolCodes}
-            onChange={setToolCodes}
-            placeholder="Select tools..."
-            searchPlaceholder="Search tools by name or code..."
-          />
-          <p className="text-xs text-muted-foreground">
-            Tools available to agents with this profile. Only active tools are shown.
-          </p>
-        </div>
-      </div>
-
-      {error && (
-        <div className="text-destructive text-sm mb-4">{error}</div>
-      )}
-
-      <DialogFooter>
-        <Button type="submit" disabled={isLoading}>
-          {isLoading ? 'Saving...' : profile ? 'Update Profile' : 'Create Profile'}
-        </Button>
-      </DialogFooter>
-    </form>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Create Agent Profile</DialogTitle>
+          <DialogDescription>
+            Define the identity first. Complete the behaviour draft and publish on the detail page.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="profile-name">
+              Name<RequiredMark />
+            </Label>
+            <Input
+              id="profile-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Python ML Agent"
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="profile-description">Description</Label>
+            <Textarea
+              id="profile-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Agent profile for machine learning tasks with Python"
+              rows={2}
+            />
+          </div>
+          {error && <div className="text-destructive text-sm">{error}</div>}
+          <DialogFooter>
+            <Button type="submit" disabled={isPending || name.trim() === ''}>
+              {isPending ? 'Creating...' : 'Create Profile'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
