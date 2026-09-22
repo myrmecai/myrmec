@@ -138,6 +138,39 @@ public class AgentProfileVersionService {
     }
 
     /**
+     * Open the profile's first DRAFT when no published version exists to
+     * clone from (identity-only creation; the instruction-asset pattern).
+     * The draft starts with empty behaviour content (no system prompt, no
+     * default model, no capabilities) and is filled in and published
+     * through the normal Draft/Publish cycle. Idempotent — an already
+     * open draft is returned unchanged (single-draft invariant, mirrors
+     * createDraft). Profiles that HAVE a published version must use
+     * createDraft, which clones that content instead.
+     */
+    @Transactional
+    public AgentProfileVersion openInitialDraft(UUID profileId) {
+        profileRepository.findById(profileId)
+                .orElseThrow(() -> ResourceNotFoundException.agentProfile(profileId));
+        Optional<AgentProfileVersion> openDraft =
+                versionRepository.findByProfileIdAndStatus(profileId, AgentProfileVersion.Status.DRAFT);
+        if (openDraft.isPresent()) {
+            return openDraft.get();
+        }
+        AgentProfileVersion draft = new AgentProfileVersion();
+        draft.setProfileId(profileId);
+        draft.setVersionNumber(nextVersionNumber(profileId));
+        draft.setCapabilities(List.of());
+        draft.setSystemPrompt(null);
+        draft.setDefaultModel(null);
+        draft.setInteractionMode(AgentProfileVersion.InteractionMode.ONE_SHOT);
+        draft.setStatus(AgentProfileVersion.Status.DRAFT);
+        draft = versionRepository.save(draft);
+        log.info("Opened initial draft v{} for agent profile {} (no published version yet)",
+                draft.getVersionNumber(), profileId);
+        return draft;
+    }
+
+    /**
      * Edit the open draft's content. Editing a published version requires
      * the draft → publish cycle — this method rejects non-DRAFT rows.
      */
@@ -164,7 +197,10 @@ public class AgentProfileVersionService {
         if (toolCodes != null) {
             assignTools(saved, toolCodes);
         }
-        return saved;
+        // Re-fetch with the tools collection initialized so the response
+        // DTO can be assembled after this transaction closes (open-in-view
+        // off) without a LazyInitializationException.
+        return versionRepository.findByIdWithTools(saved.getId()).orElse(saved);
     }
 
     /**
@@ -205,7 +241,9 @@ public class AgentProfileVersionService {
         AgentProfileVersion result = versionRepository.save(draft);
         log.info("Published agent profile {} version v{}",
                 profileId, result.getVersionNumber());
-        return result;
+        // Re-fetch with the tools collection initialized so the response
+        // DTO can be assembled after this transaction closes.
+        return versionRepository.findByIdWithTools(result.getId()).orElse(result);
     }
 
     /**
@@ -249,20 +287,24 @@ public class AgentProfileVersionService {
         return versionRepository.findByIdWithTools(versionId);
     }
 
-    /** All versions of a profile, newest first. */
+    /** All versions of a profile, newest first. The fetch-join variant
+     * initializes the tools collection so response assembly outside the
+     * transaction (open-in-view off) cannot hit a lazy proxy. */
     @Transactional(readOnly = true)
     public List<AgentProfileVersion> listVersions(UUID profileId) {
-        return versionRepository.findByProfileIdOrderByVersionNumberDesc(profileId);
+        return versionRepository.findAllByProfileIdWithTools(profileId);
     }
 
     // ── Draft/Publish lifecycle surface (§16.1, the UI Draft/Publish
     //    actions' engine API — mirrors the AssistantVersion pattern) ──
 
-    /** The single open DRAFT — throws when none exists (404-mapped). */
+    /** The single open DRAFT — throws when none exists (404-mapped). The
+     * fetch-join variant initializes the tools collection for response
+     * assembly outside the transaction (open-in-view off). */
     @Transactional(readOnly = true)
     public AgentProfileVersion getOpenDraft(UUID profileId) {
         return versionRepository
-                .findByProfileIdAndStatus(profileId, AgentProfileVersion.Status.DRAFT)
+                .findWithTools(profileId, AgentProfileVersion.Status.DRAFT)
                 .orElseThrow(() -> ResourceNotFoundException.of(
                         "AgentProfileVersion", "open draft for profile " + profileId));
     }

@@ -28,6 +28,15 @@ public interface AgentProfileVersionRepository extends JpaRepository<AgentProfil
             @Param("profileId") UUID profileId,
             @Param("status") AgentProfileVersion.Status status);
 
+    /** Any single-status version of a profile with its tools collection
+     * fetched eagerly (same open-in-view rationale as
+     * findPublishedWithTools; used for the open-draft lookup). */
+    @Query("SELECT v FROM AgentProfileVersion v LEFT JOIN FETCH v.tools "
+            + "WHERE v.profileId = :profileId AND v.status = :status")
+    Optional<AgentProfileVersion> findWithTools(
+            @Param("profileId") UUID profileId,
+            @Param("status") AgentProfileVersion.Status status);
+
     /** All versions of a profile, newest first. */
     List<AgentProfileVersion> findByProfileIdOrderByVersionNumberDesc(UUID profileId);
 

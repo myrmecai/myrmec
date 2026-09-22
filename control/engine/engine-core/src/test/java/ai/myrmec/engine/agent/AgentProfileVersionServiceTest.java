@@ -82,6 +82,154 @@ class AgentProfileVersionServiceTest extends IntegrationTestBase {
                 defaultModel);
     }
 
+    /** An identity-only profile: no behaviour content, so v1 opens as a draft. */
+    private AgentProfile newIdentityOnlyProfile() {
+        return agentProfileService.createProfile(
+                "f0-draft-create-" + System.nanoTime(),
+                "Feature 0 identity-only profile",
+                null,
+                null,
+                null,
+                null,
+                null);
+    }
+
+    // ── identity-only create opens a draft v1 (2026-09-22, section 2.1) ──
+
+    @Test
+    @DisplayName("identity-only create opens a DRAFT v1 with no published version")
+    void identityOnlyCreateOpensDraftV1() {
+        AgentProfile profile = newIdentityOnlyProfile();
+
+        // No published version exists.
+        assertThat(versionService.findPublished(profile.getId())).isEmpty();
+
+        // The version list carries exactly one row: the DRAFT v1.
+        List<AgentProfileVersion> versions = versionService.listVersions(profile.getId());
+        assertThat(versions).hasSize(1);
+        AgentProfileVersion v1 = versions.get(0);
+        assertThat(v1.getVersionNumber()).isEqualTo(1);
+        assertThat(v1.getStatus()).isEqualTo(AgentProfileVersion.Status.DRAFT);
+        assertThat(v1.getSystemPrompt()).isNull();
+        assertThat(v1.getDefaultModel()).isNull();
+        assertThat(v1.getCapabilities()).isEmpty();
+
+        // The single open draft IS that v1 row.
+        assertThat(versionService.findOpenDraft(profile.getId()))
+                .map(AgentProfileVersion::getId)
+                .contains(v1.getId());
+    }
+
+    @Test
+    @DisplayName("create with a systemPrompt still publishes v1 (backward compatible)")
+    void createWithSystemPromptPublishesV1() {
+        AgentProfile profile = newProfile("identity-compat prompt", null);
+
+        Optional<AgentProfileVersion> published =
+                versionService.findPublished(profile.getId());
+        assertThat(published).isPresent();
+        assertThat(published.get().getVersionNumber()).isEqualTo(1);
+        assertThat(published.get().getStatus()).isEqualTo(AgentProfileVersion.Status.PUBLISHED);
+        assertThat(versionService.findOpenDraft(profile.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("the draft v1 from an identity-only create is editable and publishes as v1")
+    void identityOnlyDraftCanBeEditedAndPublished() {
+        AgentProfile profile = newIdentityOnlyProfile();
+
+        AgentProfileVersion draft = versionService.getOpenDraft(profile.getId());
+        versionService.updateDraft(
+                draft.getId(), List.of("docker"), Set.of(), "first real prompt", null, null);
+        AgentProfileVersion published = versionService.publish(profile.getId(), null);
+
+        assertThat(published.getStatus()).isEqualTo(AgentProfileVersion.Status.PUBLISHED);
+        assertThat(published.getVersionNumber()).isEqualTo(1);
+        assertThat(published.getSystemPrompt()).isEqualTo("first real prompt");
+
+        // Exactly one PUBLISHED row, nothing archived, no draft left open.
+        List<AgentProfileVersion> versions = versionService.listVersions(profile.getId());
+        assertThat(versions).hasSize(1);
+        assertThat(versions.get(0).getStatus()).isEqualTo(AgentProfileVersion.Status.PUBLISHED);
+        assertThat(versionService.findOpenDraft(profile.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("openInitialDraft is idempotent and returns the same open draft")
+    void openInitialDraftIsIdempotent() {
+        AgentProfile profile = newIdentityOnlyProfile();
+
+        AgentProfileVersion first = versionService.openInitialDraft(profile.getId());
+        AgentProfileVersion second = versionService.openInitialDraft(profile.getId());
+
+        assertThat(second.getId()).isEqualTo(first.getId());
+    }
+
+    // ── identity-only update skips versioning (2026-09-22, section 2.2) ──
+
+    @Test
+    @DisplayName("PUT with only name/description changes identity and no new version row")
+    void identityOnlyUpdateDoesNotCreateVersions() {
+        AgentProfile profile = newProfile("before prompt", null);
+
+        AgentProfileVersion publishedBefore = versionService.requirePublished(profile.getId());
+        AgentProfileVersion draftBefore = versionService.createDraft(profile.getId());
+
+        AgentProfile renamed = agentProfileService.updateProfile(
+                profile.getId(), "renamed-" + System.nanoTime(), "new description",
+                null, null, null, null, null);
+
+        // The identity row changed.
+        assertThat(renamed.getId()).isEqualTo(profile.getId());
+        assertThat(renamed.getName()).startsWith("renamed-");
+        assertThat(renamed.getDescription()).isEqualTo("new description");
+
+        // The versions are untouched: same published row, same draft row,
+        // and the version list still has exactly the two original rows.
+        assertThat(versionService.requirePublished(profile.getId()).getId())
+                .isEqualTo(publishedBefore.getId());
+        assertThat(versionService.findOpenDraft(profile.getId())
+                .map(AgentProfileVersion::getId))
+                .contains(draftBefore.getId());
+        assertThat(versionService.listVersions(profile.getId())).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("identity-only PUT works on a versionless draft-created profile too")
+    void identityOnlyUpdateOnDraftOnlyProfile() {
+        AgentProfile profile = newIdentityOnlyProfile();
+
+        AgentProfileVersion draftBefore = versionService.getOpenDraft(profile.getId());
+
+        AgentProfile renamed = agentProfileService.updateProfile(
+                profile.getId(), "renamed-draft-" + System.nanoTime(), null,
+                null, null, null, null, null);
+
+        assertThat(renamed.getName()).startsWith("renamed-draft-");
+        // Still no published version; the draft row is unchanged.
+        assertThat(versionService.findPublished(profile.getId())).isEmpty();
+        assertThat(versionService.findOpenDraft(profile.getId())
+                .map(AgentProfileVersion::getId))
+                .contains(draftBefore.getId());
+        assertThat(versionService.listVersions(profile.getId())).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("empty-string/empty-collection behaviour fields do not count as content")
+    void emptyBehaviourFieldsAreNotContent() {
+        // capabilities as empty list + blank prompt: no content -> draft v1.
+        AgentProfile profile = agentProfileService.createProfile(
+                "f0-blank-create-" + System.nanoTime(),
+                null,
+                List.of(),
+                List.of(),
+                Set.of(),
+                "   ",
+                "");
+        assertThat(versionService.findPublished(profile.getId())).isEmpty();
+        assertThat(versionService.findOpenDraft(profile.getId())).isPresent();
+    }
+
     // ── seed rule: createProfile publishes v1 ─────────────────
 
     @Test

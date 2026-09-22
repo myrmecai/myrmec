@@ -24,12 +24,13 @@ import java.util.stream.Collectors;
  * {@link AgentProfileVersionService} Draft → Publish cycle.
  *
  * <p>Dev-phase API semantics: {@link #createProfile} publishes an
- * initial version 1 with the supplied behaviour content (the plan's
- * "seed data publishes version 1" rule generalized to runtime creation);
- * {@link #updateProfile} updates Zone 1 directly and runs a draft →
- * publish cycle only when the Zone 2 content actually differs from the
- * published version — a Zone-1-only rename never creates a spurious
- * version.
+ * initial version 1 when behaviour content is supplied; an identity-only
+ * create (no behaviour content) opens version 1 as a DRAFT instead and
+ * publishes nothing. {@link #updateProfile} updates Zone 1 directly and,
+ * when Zone 2 content is supplied, runs a draft → publish cycle only
+ * when the content actually differs from the published version — a
+ * Zone-1-only rename never creates a spurious version, and an
+ * identity-only PUT never touches the versions at all.
  */
 @Service
 @RequiredArgsConstructor
@@ -65,9 +66,19 @@ public class AgentProfileService {
     }
 
     /**
-     * Create a new agent profile: Zone 1 identity row plus a published
-     * version 1 carrying the behaviour contract (dev phase — plan
-     * Feature 0: "seed data publishes version 1").
+     * Create a new agent profile: Zone 1 identity row plus the version-1
+     * behaviour contract (dev phase; plan Feature 0 "seed data publishes
+     * version 1" for content-bearing creates). Dual behavior:
+     * <ul>
+     *   <li>With behaviour content (capabilities, toolCodes, systemPrompt
+     *       or defaultModel present) version 1 is PUBLISHED immediately —
+     *       the historical behavior, kept for backward compatibility.</li>
+     *   <li>With NO behaviour content (all four fields null/blank/empty)
+     *       version 1 opens as a DRAFT instead: no published version
+     *       exists until the draft is edited and published, and the
+     *       create response carries draftVersionId with a null
+     *       publishedVersionId.</li>
+     * </ul>
      *
      * @param supportedTools deprecated legacy parameter — accepted for
      *                      API compatibility, ignored (the canonical tool
@@ -87,12 +98,21 @@ public class AgentProfileService {
         profile.setStatus(AgentProfile.Status.ACTIVE);
         profile = profileRepository.save(profile);
 
-        versionService.publishInitial(
-                profile.getId(), capabilities, toolCodes,
-                systemPrompt, defaultModel, AgentProfileVersion.InteractionMode.ONE_SHOT);
-
-        log.info("Created agent profile: {} ({}) with published version 1",
-                profile.getName(), profile.getId());
+        if (hasBehaviourContent(capabilities, toolCodes, systemPrompt, defaultModel)) {
+            versionService.publishInitial(
+                    profile.getId(), capabilities, toolCodes,
+                    systemPrompt, defaultModel, AgentProfileVersion.InteractionMode.ONE_SHOT);
+            log.info("Created agent profile: {} ({}) with published version 1",
+                    profile.getName(), profile.getId());
+        } else {
+            // Identity-only create: open the first draft (v1) with empty
+            // behaviour content; the publish happens later through the
+            // draft flow, so nothing is published at creation time.
+            versionService.openInitialDraft(profile.getId());
+            log.info("Created agent profile: {} ({}) with draft version 1 "
+                            + "(identity-only create, nothing published)",
+                    profile.getName(), profile.getId());
+        }
         return profile;
     }
 
@@ -101,6 +121,9 @@ public class AgentProfileService {
      * version 1 carries the command templates + approval policy the
      * assignment assembler projects into the ExecutionPolicy block, plus
      * the §17.4 approval-request TTL that bounds the decision window.
+     *
+     * <p>Identity-only create (no behaviour AND no policy content) opens
+     * a DRAFT v1 instead of publishing — same rule as the plain overload.</p>
      */
     @Transactional
     public AgentProfile createProfile(String name, String description,
@@ -118,22 +141,39 @@ public class AgentProfileService {
         profile.setStatus(AgentProfile.Status.ACTIVE);
         profile = profileRepository.save(profile);
 
-        versionService.publishInitial(profile.getId(), capabilities, toolCodes,
-                systemPrompt, defaultModel,
-                AgentProfileVersion.InteractionMode.ONE_SHOT,
-                commandTemplates, approvalPolicy, approvalRequestTtlSeconds);
-        log.info("Created agent profile: {} ({}) with published version 1 "
-                        + "(orchestration policy attached)",
-                profile.getName(), profile.getId());
+        if (hasBehaviourContent(capabilities, toolCodes, systemPrompt, defaultModel)
+                || hasOrchestrationContent(
+                        commandTemplates, approvalPolicy, approvalRequestTtlSeconds)) {
+            versionService.publishInitial(profile.getId(), capabilities, toolCodes,
+                    systemPrompt, defaultModel,
+                    AgentProfileVersion.InteractionMode.ONE_SHOT,
+                    commandTemplates, approvalPolicy, approvalRequestTtlSeconds);
+            log.info("Created agent profile: {} ({}) with published version 1 "
+                            + "(orchestration policy attached)",
+                    profile.getName(), profile.getId());
+        } else {
+            // Identity-only create: open the first draft (v1) with empty
+            // behaviour content; the publish happens later through the
+            // draft flow, so no orchestration policy is lost to a draft.
+            versionService.openInitialDraft(profile.getId());
+            log.info("Created agent profile: {} ({}) with draft version 1 "
+                            + "(identity-only create, nothing published)",
+                    profile.getName(), profile.getId());
+        }
         return profile;
     }
 
     /**
      * Update an existing agent profile. Zone 1 fields (name, description)
-     * update directly. Zone 2 fields (capabilities, tools, system prompt,
-     * default model) run the draft → publish cycle — editing a published
-     * field requires a new version (design §16.1); an identical-content
-     * update publishes nothing.
+     * update directly.
+     *
+     * <p>Identity-only guard (design 2026-09-22, section 2.2): when every
+     * Zone 2 field is null/empty (capabilities, toolCodes, systemPrompt,
+     * defaultModel), only the identity row changes and the version
+     * machinery is left untouched — no draft opened, no publish, no new
+     * version row. When Zone 2 content IS present, the draft → publish
+     * cycle runs — editing a published field requires a new version
+     * (design §16.1); an identical-content update publishes nothing.</p>
      *
      * @param supportedTools deprecated legacy parameter — accepted for
      *                      API compatibility, ignored
@@ -154,14 +194,36 @@ public class AgentProfileService {
         profile.setDescription(description);
         profileRepository.save(profile);
 
+        // Identity-only PUT (design 2026-09-22, section 2.2): with no
+        // behaviour content supplied the name/description change is the
+        // whole request — return without touching the versions (no draft
+        // open, no publish, no new version row).
+        if (!hasBehaviourContent(capabilities, toolCodes, systemPrompt, defaultModel)) {
+            log.info("Updated agent profile identity only (no version churn): {} ({})",
+                    profile.getName(), profile.getId());
+            return profile;
+        }
+
         // Zone 2: draft → publish only when the behaviour contract changes.
         Optional<AgentProfileVersion> published = versionService.findPublished(id);
         if (published.isEmpty()) {
-            // No published version yet (edge case): publish v1 with the
-            // supplied content.
-            versionService.publishInitial(
-                    id, capabilities, toolCodes, systemPrompt, defaultModel,
-                    AgentProfileVersion.InteractionMode.ONE_SHOT);
+            // No published version yet. When an initial draft is open
+            // (identity-only create), fill and publish THAT draft — a
+            // direct publish of v1 would collide with the draft's
+            // version_number. A bare profile with no version rows at all
+            // keeps the legacy direct publish of v1.
+            Optional<AgentProfileVersion> openDraft = versionService.findOpenDraft(id);
+            if (openDraft.isPresent()) {
+                versionService.updateDraft(
+                        openDraft.get().getId(), capabilities, toolCodes,
+                        systemPrompt, defaultModel,
+                        AgentProfileVersion.InteractionMode.ONE_SHOT);
+                versionService.publish(id, null);
+            } else {
+                versionService.publishInitial(
+                        id, capabilities, toolCodes, systemPrompt, defaultModel,
+                        AgentProfileVersion.InteractionMode.ONE_SHOT);
+            }
         } else {
             AgentProfileVersion current = published.get();
             boolean behaviourChanged = !Objects.equals(current.getCapabilities(), capabilities)
@@ -232,5 +294,33 @@ public class AgentProfileService {
         return version.getTools() == null
                 ? Set.of()
                 : version.getTools().stream().map(Tool::getCode).collect(Collectors.toSet());
+    }
+
+    /**
+     * True when any Zone 2 behaviour field carries content. Blank strings
+     * and empty collections do not count as content (the legacy API
+     * historically accepted and published them as empty values).
+     */
+    private static boolean hasBehaviourContent(
+            List<String> capabilities, Set<String> toolCodes,
+            String systemPrompt, String defaultModel) {
+        return (capabilities != null && !capabilities.isEmpty())
+                || (toolCodes != null && !toolCodes.isEmpty())
+                || (systemPrompt != null && !systemPrompt.isBlank())
+                || (defaultModel != null && !defaultModel.isBlank());
+    }
+
+    /**
+     * True when any orchestration policy field (design 7 / 17.4) carries
+     * content; for the orchestration overload policy content counts as
+     * publishable behaviour (dropping it into a draft would lose it).
+     */
+    private static boolean hasOrchestrationContent(
+            java.util.Map<String, Object> commandTemplates,
+            java.util.Map<String, Object> approvalPolicy,
+            Integer approvalRequestTtlSeconds) {
+        return (commandTemplates != null && !commandTemplates.isEmpty())
+                || (approvalPolicy != null && !approvalPolicy.isEmpty())
+                || approvalRequestTtlSeconds != null;
     }
 }

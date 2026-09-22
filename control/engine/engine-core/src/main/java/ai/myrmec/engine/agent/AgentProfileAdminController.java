@@ -112,9 +112,14 @@ public class AgentProfileAdminController {
                         request.getSystemPrompt(),
                         request.getDefaultModel()
                 );
+        // Same response shape as the list/get endpoints: the draft pointer
+        // is resolved too, so an identity-only create reports draftVersionId
+        // set and publishedVersionId null.
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(AgentProfileResponse.from(
-                        profile, versionService.findPublishedWithTools(profile.getId()).orElse(null)));
+                        profile,
+                        versionService.findPublishedWithTools(profile.getId()).orElse(null),
+                        versionService.findOpenDraft(profile.getId()).orElse(null)));
     }
 
     @Operation(summary = "Update an agent profile")
@@ -139,8 +144,12 @@ public class AgentProfileAdminController {
                 request.getSystemPrompt(),
                 request.getDefaultModel()
         );
+        // Same response shape as the list/get endpoints: the draft pointer
+        // is resolved so the identity-only PUT keeps the draft state visible.
         return ResponseEntity.ok(AgentProfileResponse.from(
-                profile, versionService.findPublishedWithTools(id).orElse(null)));
+                profile,
+                versionService.findPublishedWithTools(id).orElse(null),
+                versionService.findOpenDraft(id).orElse(null)));
     }
 
     @Operation(summary = "Delete an agent profile")
