@@ -43,6 +43,9 @@ export interface AgentWorkerOptions {
   httpClient?: EngineHttpClient;
   /** Current agent access token for auth on RPC calls. Optional. */
   agentAccessToken?: string;
+  /** Hard cap, in bytes, on a single inlined image attachment (native
+   * image parts). Undefined = no size cap. Forwarded to the executor. */
+  maxImageBytes?: number;
   logger?: Logger;
   /** Feature 10 (§17.1): workspace root for orchestration runs. Required
    * for orchestration dispatches; absent → orchestration assigns fail
@@ -63,9 +66,13 @@ export class AgentWorker {
   private readonly eventReporter: ConversationEventReporter;
   private readonly log: Logger;
   private readonly executionSender: ExecutionFrameSender;
+  /** Native image parts (design section 5.4): byte cap forwarded to the
+   * InferenceExecutor; undefined = no size cap. */
+  private readonly maxImageBytes?: number;
 
   constructor(options: AgentWorkerOptions) {
     this.log = options.logger ?? console;
+    this.maxImageBytes = options.maxImageBytes;
 
     // Unified outbound sender: every execution.* frame the worker produces
     // is wrapped in the legacy Envelope shape (type is the unified frame
@@ -121,6 +128,7 @@ export class AgentWorker {
       httpClient: options.httpClient,
       agentAccessToken: options.agentAccessToken,
       maxIterations: options.maxIterations,
+      maxImageBytes: this.maxImageBytes,
       approvals,
       events,
       logger: this.log,

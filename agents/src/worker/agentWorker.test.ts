@@ -174,6 +174,21 @@ describe("AgentWorker", () => {
     expect(() => new AgentWorker({ post, chatModelFactory: noopChatModelFactory, sessionToolFactory: noopSessionToolFactory })).not.toThrow();
   });
 
+  it("threads maxImageBytes into the InferenceExecutor", () => {
+    const { post } = sink();
+    const worker = new AgentWorker({
+      post,
+      chatModelFactory: noopChatModelFactory,
+      sessionToolFactory: noopSessionToolFactory,
+      maxImageBytes: 12345,
+    });
+
+    const executor = (worker as unknown as {
+      inference: { maxImageBytes?: number };
+    }).inference;
+    expect(executor.maxImageBytes).toBe(12345);
+  });
+
   // ── §8.7 (A4): execution.policy.update enforcement ──
 
   const resolvingChatModelFactory: ChatModelFactory = {

@@ -43,6 +43,7 @@ import type {
   ChatModel,
   ConversationMessage,
   ExecutorEvents,
+  MessageContentPart,
   ModelResponse,
   ModelStreamChunk,
   ModelToolCall,
@@ -67,6 +68,10 @@ export interface InferenceExecutorOptions {
   httpClient?: EngineHttpClient;
   /** Agent access token authorising {@link httpClient} calls. */
   agentAccessToken?: string;
+  /** Hard cap, in bytes, on a single inlined image attachment. When defined,
+   * fetched images larger than this are skipped (text-only degrade).
+   * Undefined = no size cap. */
+  maxImageBytes?: number;
   /** Hard cap on model↔tool iterations (default 25, matching TurnExecutor). */
   maxIterations?: number;
   /** Shared HITL approval coordinator; when supplied the tool loop can gate
@@ -102,6 +107,7 @@ export class InferenceExecutor {
   private readonly sender: ExecutionFrameSender;
   private readonly httpClient?: EngineHttpClient;
   private readonly agentAccessToken?: string;
+  private readonly maxImageBytes?: number;
   private readonly maxIterations: number;
   private readonly approvals?: ApprovalCoordinator;
   private readonly events?: ExecutorEvents;
@@ -119,6 +125,7 @@ export class InferenceExecutor {
     this.sender = options.sender;
     this.httpClient = options.httpClient;
     this.agentAccessToken = options.agentAccessToken;
+    this.maxImageBytes = options.maxImageBytes;
     this.maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS;
     this.approvals = options.approvals;
     this.events = options.events;
@@ -208,8 +215,11 @@ export class InferenceExecutor {
       // every emitted frame carries the executionId (cleared in `finally`).
       this.events?.beginExecution?.(executionId);
 
-      // 3. Convert wire messages to internal transcript.
-      const messages = this.toConversationMessages(payload.input?.messages ?? []);
+      // 3. Convert wire messages to internal transcript (async: image parts
+      //    are fetched and inlined when the HTTP client + token are wired).
+      const messages = await this.toConversationMessagesAsync(
+        payload.input?.messages ?? [],
+      );
 
       // 4. Select active tools from the session's tool map.
       const activeToolNames = payload.toolPolicy?.activeToolNames ?? [];
@@ -322,19 +332,22 @@ export class InferenceExecutor {
 
   /**
    * Map the wire {@link InferenceMessage} format to the internal
-   * {@link ConversationMessage} format.
+   * {@link ConversationMessage} format, inlining native image parts.
    *
    * `InferenceMessage` carries `{ role, content, parts?, toolCalls? }`;
-   * `ConversationMessage` carries `{ role, content, toolCalls?, toolCallId? }`.
-   * Text content passes through directly. Image `parts` are noted via their
-   * `readContentPath` for later byte fetching — for now we pass text content
-   * through and leave image inlining as a future optimisation (the
-   * {@link ConversationDispatcher} already does native image inlining on the
-   * conversation path).
+   * `ConversationMessage` carries `{ role, content, parts?, toolCalls?,
+   * toolCallId? }`. Text content always passes through directly. When a user
+   * message carries image parts and both an engine HTTP client and agent
+   * access token are wired, each image's bytes are fetched via its
+   * `readContentPath` and inlined as a `data:` URL part (design section 5.4);
+   * the message then gains a leading text part followed by the image parts.
+   * Any failure (missing client/token, missing readContentPath, oversize
+   * image, fetch error) degrades that part silently to text-only - the
+   * execution turn never fails because of an attachment.
    */
-  private toConversationMessages(
+  private async toConversationMessagesAsync(
     messages: InferenceMessage[],
-  ): ConversationMessage[] {
+  ): Promise<ConversationMessage[]> {
     const out: ConversationMessage[] = [];
     for (const m of messages) {
       const content = m.content ?? "";
@@ -350,14 +363,84 @@ export class InferenceExecutor {
       const toolCallId =
         m.role === "tool" ? this.toolCallIdFor(m) : undefined;
 
+      // Native image inlining (user turns only); other roles pass through
+      // exactly as before.
+      const imageParts =
+        m.role === "user" ? await this.inlineImageParts(m) : [];
+
       out.push({
         role: m.role as ConversationMessage["role"],
         content,
+        ...(imageParts.length > 0
+          ? {
+              parts: [
+                { type: "text", text: content },
+                ...imageParts,
+              ],
+            }
+          : {}),
         ...(toolCalls ? { toolCalls } : {}),
         ...(toolCallId ? { toolCallId } : {}),
       });
     }
     return out;
+  }
+
+  /**
+   * Fetch and convert the image parts of one wire message into internal
+   * `image_url` parts. Returns an empty array when nothing can be inlined
+   * (no image parts, no HTTP client/token, no readContentPath, oversize
+   * image, or fetch failure); callers then keep the message text-only with
+   * no `parts` key.
+   */
+  private async inlineImageParts(
+    m: InferenceMessage,
+  ): Promise<MessageContentPart[]> {
+    const imageParts = (m.parts ?? []).filter((p) => p.type === "image");
+    if (imageParts.length === 0) {
+      return [];
+    }
+    if (!this.httpClient || !this.agentAccessToken) {
+      this.log.warn(
+        "Wire message carries image parts but no engine HTTP client/token is wired; degrading to text-only",
+      );
+      return [];
+    }
+    const inlined: MessageContentPart[] = [];
+    for (const part of imageParts) {
+      if (!part.readContentPath) {
+        this.log.warn(
+          `Image part (attachmentId: ${part.attachmentId ?? "none"}) has no readContentPath; skipping`,
+        );
+        continue;
+      }
+      try {
+        const bytes = await this.httpClient.fetchAttachmentContent(
+          this.agentAccessToken,
+          part.readContentPath,
+        );
+        if (
+          this.maxImageBytes !== undefined &&
+          bytes.byteLength > this.maxImageBytes
+        ) {
+          this.log.warn(
+            `Image attachment ${part.attachmentId ?? part.readContentPath} is ${bytes.byteLength} bytes, over the ${this.maxImageBytes}-byte cap; skipping`,
+          );
+          continue;
+        }
+        const mediaType = part.mediaType ?? "application/octet-stream";
+        const url = `data:${mediaType};base64,${Buffer.from(bytes).toString("base64")}`;
+        inlined.push({ type: "image_url", image_url: { url } });
+      } catch (err) {
+        // Fetch failures degrade to text-only for this part; they must
+        // never fail the execution turn.
+        this.log.warn(
+          `Failed to fetch image attachment ${part.attachmentId ?? part.readContentPath}:`,
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
+    return inlined;
   }
 
   /**

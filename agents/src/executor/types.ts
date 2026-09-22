@@ -45,6 +45,10 @@ export type MessageContentPart =
 export interface ConversationMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string | MessageContentPart[];
+  /** Multimodal user turns (native image inlining): a leading text part
+   * followed by the inlined `image_url` parts. Present only when at least
+   * one image was successfully inlined; otherwise absent (text-only). */
+  parts?: MessageContentPart[];
   /** assistant turns: the tool calls the model asked for. */
   toolCalls?: ModelToolCall[];
   /** tool turns: which call this message answers. */

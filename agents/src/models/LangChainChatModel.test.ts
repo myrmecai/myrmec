@@ -8,7 +8,7 @@ import {
   type BaseMessage,
 } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import { LangChainChatModel } from "./LangChainChatModel.js";
+import { LangChainChatModel, toLangChainMessage } from "./LangChainChatModel.js";
 import type { ConversationMessage, ToolSpec } from "../executor/types.js";
 
 /** A fake LangChain model that records what it received and returns a fixed
@@ -180,5 +180,70 @@ describe("LangChainChatModel", () => {
       { usage: { promptTokens: 3, completionTokens: 2, totalTokens: 5 } },
     ]);
     expect(seen.map((m) => m.getType())).toEqual(["human"]);
+  });
+
+  // -- multimodal user messages (design section 5.4) -------------------------
+
+  it("builds text + image_url content blocks for a user message with parts", async () => {
+    const reply = new AIMessage({ content: "ok" });
+    const { model, seen } = fakeModel(reply);
+    const adapter = new LangChainChatModel(model);
+
+    const url = "data:image/png;base64,QUJD";
+    await adapter.invoke(
+      [
+        {
+          role: "user",
+          content: "What is in this image?",
+          parts: [
+            { type: "text", text: "What is in this image?" },
+            { type: "image_url", image_url: { url } },
+          ],
+        },
+      ],
+      [],
+    );
+
+    const human = seen.messages[0];
+    expect(human.getType()).toBe("human");
+    expect(human.content).toEqual([
+      { type: "text", text: "What is in this image?" },
+      { type: "image_url", image_url: { url } },
+    ]);
+  });
+
+  it("keeps plain string content for a user message without parts", async () => {
+    const reply = new AIMessage({ content: "ok" });
+    const { model, seen } = fakeModel(reply);
+    const adapter = new LangChainChatModel(model);
+
+    await adapter.invoke([{ role: "user", content: "plain" }], []);
+
+    const human = seen.messages[0];
+    expect(human.getType()).toBe("human");
+    expect(human.content).toBe("plain");
+  });
+
+  it("maps a user message with image_url parts directly through toLangChainMessage", () => {
+    const url = "data:image/jpeg;base64,REVG";
+    const message = toLangChainMessage({
+      role: "user",
+      content: "look",
+      parts: [
+        { type: "text", text: "look" },
+        { type: "image_url", image_url: { url } },
+      ],
+    });
+    expect(message.getType()).toBe("human");
+    expect(message.content).toEqual([
+      { type: "text", text: "look" },
+      { type: "image_url", image_url: { url } },
+    ]);
+  });
+
+  it("maps a user message without parts to plain string content via toLangChainMessage", () => {
+    const message = toLangChainMessage({ role: "user", content: "hi" });
+    expect(message.getType()).toBe("human");
+    expect(message.content).toBe("hi");
   });
 });

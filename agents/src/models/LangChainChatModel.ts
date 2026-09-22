@@ -18,6 +18,7 @@ import {
   ToolMessage,
   type BaseMessage,
   type MessageContent,
+  type MessageContentComplex,
 } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type {
@@ -93,8 +94,9 @@ export class LangChainChatModel implements ChatModel {
   }
 }
 
-/** Map one transcript message to its LangChain equivalent. */
-function toLangChainMessage(message: ConversationMessage): BaseMessage {
+/** Map one transcript message to its LangChain equivalent. Exported for
+ * unit testing of the multimodal content-block mapping. */
+export function toLangChainMessage(message: ConversationMessage): BaseMessage {
   switch (message.role) {
     case "system":
       return new SystemMessage({ content: message.content });
@@ -114,8 +116,26 @@ function toLangChainMessage(message: ConversationMessage): BaseMessage {
         tool_call_id: message.toolCallId ?? "",
       });
     case "user":
-    default:
+    default: {
+      // Multimodal user turn: when the transcript carries inlined image
+      // parts, emit LangChain content blocks (text run + image_url) instead
+      // of the plain string (design section 5.4).
+      const parts = message.parts;
+      if (parts && parts.length > 0) {
+        const blocks = parts.map(
+          (part): MessageContentComplex =>
+            part.type === "text"
+              ? { type: "text", text: part.text }
+              : { type: "image_url", image_url: { url: part.image_url.url } },
+        );
+        // This LangChain version types HumanMessage content as the structured
+        // ContentBlock union; the deprecated image_url block above is still
+        // accepted at runtime, so cast locally (minimal, not global).
+        const content: MessageContent = blocks as unknown as MessageContent;
+        return new HumanMessage({ content });
+      }
       return new HumanMessage({ content: message.content });
+    }
   }
 }
 

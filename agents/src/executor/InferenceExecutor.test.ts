@@ -16,9 +16,13 @@ import type {
   ToolSpec,
 } from "./types.js";
 import type { ExecutionFrameSender } from "./ExecutionFrameSender.js";
+import type { EngineHttpClient } from "../transport/httpClient.js";
 import { ApprovalCoordinator } from "./ApprovalCoordinator.js";
 import { PolicyEnforcer } from "./PolicyEnforcer.js";
-import type { ExecutionStartPayload } from "../protocol/unifiedFrames.js";
+import type {
+  ExecutionStartPayload,
+  InferenceMessage,
+} from "../protocol/unifiedFrames.js";
 
 // ── helpers ───────────────────────────────────────────────────────
 
@@ -664,5 +668,238 @@ describe("InferenceExecutor unified emissions", () => {
     const complete = sent.find((f) => f.type === "execution.complete");
     expect(complete).toBeDefined();
     expect(complete!.payload.result).toMatchObject({ content: "done" });
+  });
+});
+
+// -- native image parts (design section 5.4) ----------------------------------
+
+describe("InferenceExecutor native image parts", () => {
+  const SESSION_ID = "33333333-3333-4333-8333-333333333333";
+  const ATTACH_PATH = "/api/v1/agent/attachments/att-1/content";
+
+  let registry: FakeRegistry;
+
+  beforeEach(() => {
+    registry = new FakeRegistry();
+  });
+
+  /** Executor wired like the describe-local makeExecutor above, plus the
+   * image-part options under test here. */
+  function makeExecutor(
+    opts: Partial<InferenceExecutorOptions> = {},
+  ): { executor: InferenceExecutor; sent: CapturedFrame[] } {
+    const { sender, sent } = makeSenderCapture();
+    const executor = new InferenceExecutor({
+      registry: registry as SessionRegistry,
+      sender,
+      logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+      ...opts,
+    });
+    return { executor, sent };
+  }
+
+  /** A stub EngineHttpClient whose fetchAttachmentContent is a vi.fn. */
+  function stubHttpClient(
+    impl: (path: string) => Promise<Uint8Array>,
+  ): { httpClient: EngineHttpClient; fetch: ReturnType<typeof vi.fn> } {
+    const fetch = vi.fn((_token: string, path: string) => impl(path));
+    const httpClient = { fetchAttachmentContent: fetch } as unknown as EngineHttpClient;
+    return { httpClient, fetch };
+  }
+
+  /** One wire user message carrying a single image part. */
+  function imageMessage(overrides: {
+    readContentPath?: string | null;
+    mediaType?: string | null;
+  } = {}): InferenceMessage[] {
+    return [
+      {
+        role: "user",
+        content: "What is in this image?",
+        parts: [
+          {
+            type: "image",
+            text: null,
+            attachmentId: "att-1",
+            mediaType: overrides.mediaType ?? "image/png",
+            readContentPath:
+              overrides.readContentPath === undefined
+                ? ATTACH_PATH
+                : overrides.readContentPath,
+          },
+        ],
+        toolCalls: null,
+      },
+    ];
+  }
+
+  it("inlines fetched image parts as image_url data URLs after a leading text part", async () => {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const { httpClient, fetch } = stubHttpClient(async () => bytes);
+    const model = new ScriptedModel([{ content: "a cat" }]);
+    registry.set(SESSION_ID, makeSession(model));
+
+    const { executor, sent } = makeExecutor({
+      httpClient,
+      agentAccessToken: "agent-token",
+    });
+
+    await executor.handleStart(
+      makeStartPayload({ stream: false, input: { messages: imageMessage(), attachments: null, conversationContinuation: null } }),
+    );
+
+    // The fetch used the wire readContentPath and the agent token.
+    expect(fetch).toHaveBeenCalledWith("agent-token", ATTACH_PATH);
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    const userMessage = model.calls[0].messages[0];
+    expect(userMessage.role).toBe("user");
+    expect(userMessage.content).toBe("What is in this image?");
+    const expectedUrl = `data:image/png;base64,${Buffer.from(bytes).toString("base64")}`;
+    expect(userMessage.parts).toEqual([
+      { type: "text", text: "What is in this image?" },
+      { type: "image_url", image_url: { url: expectedUrl } },
+    ]);
+
+    // The turn itself completes normally.
+    const complete = sent.find((f) => f.type === "execution.complete");
+    expect(complete).toBeDefined();
+  });
+
+  it("keeps the message text-only (no parts key) when no httpClient is configured", async () => {
+    const model = new ScriptedModel([{ content: "ok" }]);
+    registry.set(SESSION_ID, makeSession(model));
+
+    const { executor, sent } = makeExecutor({ agentAccessToken: "agent-token" });
+
+    await executor.handleStart(
+      makeStartPayload({ stream: false, input: { messages: imageMessage(), attachments: null, conversationContinuation: null } }),
+    );
+
+    const userMessage = model.calls[0].messages[0];
+    expect(userMessage.content).toBe("What is in this image?");
+    expect("parts" in userMessage).toBe(false);
+    expect(sent.find((f) => f.type === "execution.complete")).toBeDefined();
+  });
+
+  it("keeps the message text-only (no parts key) when no agent token is configured", async () => {
+    const { httpClient, fetch } = stubHttpClient(async () => new Uint8Array([1]));
+    const model = new ScriptedModel([{ content: "ok" }]);
+    registry.set(SESSION_ID, makeSession(model));
+
+    const { executor, sent } = makeExecutor({ httpClient });
+
+    await executor.handleStart(
+      makeStartPayload({ stream: false, input: { messages: imageMessage(), attachments: null, conversationContinuation: null } }),
+    );
+
+    expect(fetch).not.toHaveBeenCalled();
+    const userMessage = model.calls[0].messages[0];
+    expect("parts" in userMessage).toBe(false);
+    expect(sent.find((f) => f.type === "execution.complete")).toBeDefined();
+  });
+
+  it("skips image parts without a readContentPath (warns, no parts key)", async () => {
+    const { httpClient, fetch } = stubHttpClient(async () => new Uint8Array([1]));
+    const model = new ScriptedModel([{ content: "ok" }]);
+    registry.set(SESSION_ID, makeSession(model));
+
+    const { executor, sent } = makeExecutor({
+      httpClient,
+      agentAccessToken: "agent-token",
+    });
+
+    await executor.handleStart(
+      makeStartPayload({
+        stream: false,
+        input: { messages: imageMessage({ readContentPath: null }), attachments: null, conversationContinuation: null },
+      }),
+    );
+
+    expect(fetch).not.toHaveBeenCalled();
+    const userMessage = model.calls[0].messages[0];
+    expect("parts" in userMessage).toBe(false);
+    expect(sent.find((f) => f.type === "execution.complete")).toBeDefined();
+  });
+
+  it("skips an image over maxImageBytes (text-only, no parts key)", async () => {
+    const bytes = new Uint8Array([1, 2, 3, 4, 5]); // 5 bytes > the 4-byte cap
+    const { httpClient, fetch } = stubHttpClient(async () => bytes);
+    const model = new ScriptedModel([{ content: "ok" }]);
+    registry.set(SESSION_ID, makeSession(model));
+
+    const { executor, sent } = makeExecutor({
+      httpClient,
+      agentAccessToken: "agent-token",
+      maxImageBytes: 4,
+    });
+
+    await executor.handleStart(
+      makeStartPayload({ stream: false, input: { messages: imageMessage(), attachments: null, conversationContinuation: null } }),
+    );
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const userMessage = model.calls[0].messages[0];
+    expect(userMessage.content).toBe("What is in this image?");
+    expect("parts" in userMessage).toBe(false);
+    expect(sent.find((f) => f.type === "execution.complete")).toBeDefined();
+  });
+
+  it("degrades to text-only when fetchAttachmentContent rejects", async () => {
+    const { httpClient, fetch } = stubHttpClient(async () => {
+      throw new Error("attachment fetch 404");
+    });
+    const model = new ScriptedModel([{ content: "answer anyway" }]);
+    registry.set(SESSION_ID, makeSession(model));
+
+    const { executor, sent } = makeExecutor({
+      httpClient,
+      agentAccessToken: "agent-token",
+    });
+
+    await executor.handleStart(
+      makeStartPayload({ stream: false, input: { messages: imageMessage(), attachments: null, conversationContinuation: null } }),
+    );
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const userMessage = model.calls[0].messages[0];
+    expect("parts" in userMessage).toBe(false);
+
+    // The turn still completes; the failure never reaches execution.failed.
+    const failed = sent.find((f) => f.type === "execution.failed");
+    expect(failed).toBeUndefined();
+    const complete = sent.find((f) => f.type === "execution.complete");
+    expect(complete).toBeDefined();
+    expect(complete!.payload.result).toMatchObject({ content: "answer anyway" });
+  });
+
+  it("passes non-user roles and messages without image parts through unchanged", async () => {
+    const model = new ScriptedModel([{ content: "ok" }]);
+    registry.set(SESSION_ID, makeSession(model));
+
+    const { executor, sent } = makeExecutor({
+      httpClient: undefined,
+      agentAccessToken: "agent-token",
+    });
+
+    await executor.handleStart(
+      makeStartPayload({
+        stream: false,
+        input: {
+          messages: [
+            { role: "system", content: "sys", parts: null, toolCalls: null },
+            { role: "user", content: "plain text", parts: null, toolCalls: null },
+          ],
+          attachments: null,
+          conversationContinuation: null,
+        },
+      }),
+    );
+
+    expect(model.calls[0].messages.map((m) => m.role)).toEqual(["system", "user"]);
+    for (const m of model.calls[0].messages) {
+      expect("parts" in m).toBe(false);
+    }
+    expect(sent.find((f) => f.type === "execution.complete")).toBeDefined();
   });
 });
