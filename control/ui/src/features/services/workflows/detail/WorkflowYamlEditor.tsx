@@ -17,6 +17,7 @@ import {
   validateWorkflowYaml,
   type WorkflowYamlContext,
 } from '@/lib/workflow-yaml-schema'
+import { setupWorkflowYamlEditor } from '@/lib/monaco-yaml-setup'
 import {
   yamlToWorkflow,
   workflowToYaml,
@@ -74,6 +75,13 @@ export function WorkflowYamlEditor({
     }),
     [profiles, models]
   )
+
+  // Schema-aware Monaco YAML (autocomplete, hover, inline validation)
+  // against the live profile/model enums. Must run before the Editor
+  // mounts; loader.config is idempotent and reconfigures on changes.
+  useEffect(() => {
+    setupWorkflowYamlEditor(profiles, models)
+  }, [profiles, models])
 
   const initialYaml = useMemo(
     () =>

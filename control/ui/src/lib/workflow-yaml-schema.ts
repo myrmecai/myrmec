@@ -23,87 +23,142 @@ const STEP_ID = z
   .min(1, 'Step ID is required.')
   .max(50, 'Step ID must be 50 characters or fewer.')
   .regex(STEP_ID_PATTERN, 'Use letters, digits, hyphens or underscores only.')
+  .describe('Unique step ID; letters, digits, hyphens or underscores.')
 
 const agentProfileCode = z
   .string()
   .min(1, 'agentProfileCode is required.')
+  .describe('Agent profile code that runs this step.')
 
 const inferenceStepSchema = z
   .object({
     id: STEP_ID,
-    name: z.string().min(1, 'Name is required.').max(100),
-    taskType: z.literal('INFERENCE').optional(),
+    name: z.string().min(1, 'Name is required.').max(100).describe('Display name of the step.'),
+    taskType: z.literal('INFERENCE').optional().describe('Leave INFERENCE for model-call steps.'),
     agentProfileCode,
-    prompt: z.string().max(50_000).optional(),
-    dependsOn: z.array(z.string()).default([]),
-    transitions: z.record(z.string()).optional(),
-    timeoutSeconds: z.number().int().min(1).max(86_400).optional(),
-    maxRetries: z.number().int().min(0).max(10).optional(),
-    pauseMode: z.enum(['NONE', 'BEFORE', 'AFTER', 'BOTH']).default('NONE'),
+    prompt: z.string().max(50_000).optional().describe('Prompt sent to the agent profile.'),
+    dependsOn: z.array(z.string()).default([]).describe('Step IDs that must run before this step.'),
+    transitions: z
+      .record(z.string())
+      .optional()
+      .describe('Map of transition names to next step IDs.'),
+    timeoutSeconds: z
+      .number()
+      .int()
+      .min(1)
+      .max(86_400)
+      .optional()
+      .describe('Step timeout in seconds (1 to 86400).'),
+    maxRetries: z
+      .number()
+      .int()
+      .min(0)
+      .max(10)
+      .optional()
+      .describe('Retry attempts on failure (0 to 10).'),
+    pauseMode: z
+      .enum(['NONE', 'BEFORE', 'AFTER', 'BOTH'])
+      .default('NONE')
+      .describe('Pause the run before, after, or around this step.'),
   })
   .strict()
 
 const retryPolicySchema = z
   .object({
-    maxRetries: z.number().int().min(0).max(10).default(0),
-    initialBackoffSeconds: z.number().int().min(1).default(2),
-    maxBackoffSeconds: z.number().int().min(1).default(60),
+    maxRetries: z.number().int().min(0).max(10).default(0).describe('Retry attempts (0 to 10).'),
+    initialBackoffSeconds: z
+      .number()
+      .int()
+      .min(1)
+      .default(2)
+      .describe('First retry backoff in seconds.'),
+    maxBackoffSeconds: z
+      .number()
+      .int()
+      .min(1)
+      .default(60)
+      .describe('Upper bound for retry backoff in seconds.'),
   })
   .strict()
+  .describe('Retry behavior for the orchestrator step.')
 
 const workerSchema = z
   .object({
-    name: z.string().min(1),
-    modelCode: z.string().min(1),
-    capability: z.string().min(1),
-    allowedTools: z.array(
-      z.enum(['read_file', 'list_directory', 'create_directory', 'write_file', 'execute_command'])
-    ),
-    allowedCommands: z.array(z.string()).default([]),
+    name: z.string().min(1).describe('Worker name; verifiers refer to it.'),
+    modelCode: z.string().min(1).describe('Model code from the models catalog.'),
+    capability: z.string().min(1).describe('Short description of what this worker does.'),
+    allowedTools: z
+      .array(
+        z.enum(['read_file', 'list_directory', 'create_directory', 'write_file', 'execute_command'])
+      )
+      .describe('File and command tools this worker may use.'),
+    allowedCommands: z
+      .array(z.string())
+      .default([])
+      .describe('Shell commands this worker may execute.'),
   })
   .strict()
 
 const orchestrationSchema = z
   .object({
-    modelCode: z.string().min(1),
-    goal: z.string().min(1),
-    specPath: z.string().nullable().default(null),
-    sourceSubPath: z.string().min(1).default('.'),
-    workers: z.array(workerSchema).min(1),
+    modelCode: z.string().min(1).describe('Model code for the orchestrator.'),
+    goal: z.string().min(1).describe('What the orchestrator should achieve.'),
+    specPath: z.string().nullable().default(null).describe('Repo-relative path to the spec file.'),
+    sourceSubPath: z.string().min(1).default('.').describe('Subdirectory the work applies to.'),
+    workers: z.array(workerSchema).min(1).describe('Worker catalog for this step.'),
     checkpointStrategy: z
       .object({
-        mode: z.literal('ON_VERIFICATION_PASS'),
-        commitMessage: z.string().min(1).max(72),
-        pushToRemote: z.boolean(),
-        allowNoChanges: z.boolean(),
+        mode: z.literal('ON_VERIFICATION_PASS').describe('When to commit checkpoints.'),
+        commitMessage: z
+          .string()
+          .min(1)
+          .max(72)
+          .describe('Commit message used for checkpoints (max 72 chars).'),
+        pushToRemote: z.boolean().describe('Push checkpoint commits to the remote.'),
+        allowNoChanges: z.boolean().describe('Accept a checkpoint when nothing changed.'),
       })
-      .strict(),
+      .strict()
+      .describe('How checkpoints are committed.'),
     completionCriteria: z
       .object({
-        definitionOfDone: z.string().min(1),
-        requireVerificationBy: z.array(z.string()),
+        definitionOfDone: z.string().min(1).describe('Conditions that finish the task.'),
+        requireVerificationBy: z
+          .array(z.string())
+          .describe('Worker names that must verify completion.'),
       })
-      .strict(),
+      .strict()
+      .describe('What counts as done and who verifies it.'),
     budget: z
       .object({
-        maxTokens: z.number().int().min(1),
-        maxWorkerCalls: z.number().int().min(1),
-        maxVerifierRejectionsPerAttempt: z.number().int().min(0),
-        maxOrchestratorIterations: z.number().int().min(1),
-        maxWorkerIterations: z.number().int().min(1),
-        onBudgetExceeded: z.enum(['FAIL', 'PAUSE_FOR_HUMAN_REVIEW']),
+        maxTokens: z.number().int().min(1).describe('Maximum total tokens for the step.'),
+        maxWorkerCalls: z.number().int().min(1).describe('Maximum number of worker calls.'),
+        maxVerifierRejectionsPerAttempt: z
+          .number()
+          .int()
+          .min(0)
+          .describe('Verifier rejections allowed per attempt.'),
+        maxOrchestratorIterations: z
+          .number()
+          .int()
+          .min(1)
+          .describe('Maximum orchestrator loop iterations.'),
+        maxWorkerIterations: z.number().int().min(1).describe('Maximum worker loop iterations.'),
+        onBudgetExceeded: z
+          .enum(['FAIL', 'PAUSE_FOR_HUMAN_REVIEW'])
+          .describe('What happens when the budget is exhausted.'),
       })
-      .strict(),
+      .strict()
+      .describe('Spending and iteration limits for this step.'),
   })
   .strict()
 
 const orchestratorStepSchema = z
   .object({
     id: STEP_ID,
-    name: z.string().min(1, 'Name is required.').max(100),
-    taskType: z.literal('ORCHESTRATOR'),
+    name: z.string().min(1, 'Name is required.').max(100).describe('Display name of the step.'),
+    taskType: z.literal('ORCHESTRATOR').describe('Set ORCHESTRATOR for agentic steps.'),
     agentProfileCode,
-    dependsOn: z.array(z.string()).default([]),
+    dependsOn: z.array(z.string()).default([]).describe('Step IDs that must run before this step.'),
     retryPolicy: retryPolicySchema,
     orchestration: orchestrationSchema,
   })
@@ -116,28 +171,31 @@ const stepSchema = z.discriminatedUnion('taskType', [
 
 const modelEntrySchema = z
   .object({
-    code: z.string().min(1),
-    modelId: z.string().optional(),
-    description: z.string().optional(),
+    code: z.string().min(1).describe('Model code referenced by orchestration steps.'),
+    modelId: z.string().optional().describe('Engine model identifier for this entry.'),
+    description: z.string().optional().describe('Human-readable note about this model.'),
   })
   .strict()
 
 const sourceSchema = z
   .object({
-    repoUrl: z.string().min(1),
-    sourceBranch: z.string().optional(),
-    targetBranch: z.string().optional(),
+    repoUrl: z.string().min(1).describe('Repository URL the workflow operates on.'),
+    sourceBranch: z.string().optional().describe('Branch the workflow reads from.'),
+    targetBranch: z.string().optional().describe('Branch the workflow writes results to.'),
   })
   .strict()
 
 export const uiWorkflowYamlDocSchema = z
   .object({
-    version: z.literal('1.0'),
-    id: z.string().optional(),
-    name: z.string().min(1, 'Name is required.').max(120),
-    models: z.array(modelEntrySchema).optional(),
-    source: sourceSchema.optional(),
-    workflow: z.array(stepSchema).min(1, 'At least one step is required.'),
+    version: z.literal('1.0').describe('Document schema version; keep 1.0.'),
+    id: z.string().optional().describe('Workflow identifier; leave unset for new workflows.'),
+    name: z.string().min(1, 'Name is required.').max(120).describe('Display name of the workflow.'),
+    models: z.array(modelEntrySchema).optional().describe('Model codes available to this workflow.'),
+    source: sourceSchema.optional().describe('Source repository and branches.'),
+    workflow: z
+      .array(stepSchema)
+      .min(1, 'At least one step is required.')
+      .describe('Ordered list of steps to execute.'),
   })
   .strict()
 
