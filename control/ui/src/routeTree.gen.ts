@@ -49,13 +49,13 @@ import { Route as AuthenticatedPlatformConnectionsIdRouteImport } from './routes
 import { Route as AuthenticatedPlatformAiInfraToolsRouteImport } from './routes/_authenticated/platform/ai-infra/tools'
 import { Route as AuthenticatedPlatformAiInfraProvidersRouteImport } from './routes/_authenticated/platform/ai-infra/providers'
 import { Route as AuthenticatedPlatformAiInfraModelsRouteImport } from './routes/_authenticated/platform/ai-infra/models'
-import { Route as AuthenticatedPlatformAiInfraAgentProfilesRouteImport } from './routes/_authenticated/platform/ai-infra/agent-profiles'
 import { Route as AuthenticatedPlatformAiInfraAgentHostsRouteImport } from './routes/_authenticated/platform/ai-infra/agent-hosts'
 import { Route as AuthenticatedPlatformAiContextGovernanceProfileRouteImport } from './routes/_authenticated/platform/ai-context/governance-profile'
 import { Route as AuthenticatedBudgetsProjectsProjectIdRouteImport } from './routes/_authenticated/budgets/projects/$projectId'
 import { Route as AuthenticatedBudgetsGroupsGroupIdRouteImport } from './routes/_authenticated/budgets/groups/$groupId'
 import { Route as AuthenticatedBudgetsEditQuotaIdRouteImport } from './routes/_authenticated/budgets/edit/$quotaId'
 import { Route as AuthenticatedAssistantsAssistantIdEditRouteImport } from './routes/_authenticated/assistants/$assistantId.edit'
+import { Route as AuthenticatedPlatformAiInfraAgentProfilesIndexRouteImport } from './routes/_authenticated/platform/ai-infra/agent-profiles/index'
 import { Route as AuthenticatedPlatformAiContextKnowledgeSourcesIndexRouteImport } from './routes/_authenticated/platform/ai-context/knowledge-sources/index'
 import { Route as AuthenticatedPlatformAiContextKnowledgeProvidersIndexRouteImport } from './routes/_authenticated/platform/ai-context/knowledge-providers/index'
 import { Route as AuthenticatedPlatformAiContextInstructionAssetsIndexRouteImport } from './routes/_authenticated/platform/ai-context/instruction-assets/index'
@@ -294,12 +294,6 @@ const AuthenticatedPlatformAiInfraModelsRoute =
     path: '/models',
     getParentRoute: () => AuthenticatedPlatformAiInfraRoute,
   } as any)
-const AuthenticatedPlatformAiInfraAgentProfilesRoute =
-  AuthenticatedPlatformAiInfraAgentProfilesRouteImport.update({
-    id: '/agent-profiles',
-    path: '/agent-profiles',
-    getParentRoute: () => AuthenticatedPlatformAiInfraRoute,
-  } as any)
 const AuthenticatedPlatformAiInfraAgentHostsRoute =
   AuthenticatedPlatformAiInfraAgentHostsRouteImport.update({
     id: '/agent-hosts',
@@ -335,6 +329,12 @@ const AuthenticatedAssistantsAssistantIdEditRoute =
     id: '/assistants/$assistantId/edit',
     path: '/assistants/$assistantId/edit',
     getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedPlatformAiInfraAgentProfilesIndexRoute =
+  AuthenticatedPlatformAiInfraAgentProfilesIndexRouteImport.update({
+    id: '/agent-profiles/',
+    path: '/agent-profiles/',
+    getParentRoute: () => AuthenticatedPlatformAiInfraRoute,
   } as any)
 const AuthenticatedPlatformAiContextKnowledgeSourcesIndexRoute =
   AuthenticatedPlatformAiContextKnowledgeSourcesIndexRouteImport.update({
@@ -374,9 +374,9 @@ const AuthenticatedProjectsProjectIdInstructionAssetsIdRoute =
   } as any)
 const AuthenticatedPlatformAiInfraAgentProfilesIdRoute =
   AuthenticatedPlatformAiInfraAgentProfilesIdRouteImport.update({
-    id: '/$id',
-    path: '/$id',
-    getParentRoute: () => AuthenticatedPlatformAiInfraAgentProfilesRoute,
+    id: '/agent-profiles/$id',
+    path: '/agent-profiles/$id',
+    getParentRoute: () => AuthenticatedPlatformAiInfraRoute,
   } as any)
 const AuthenticatedPlatformAiContextKnowledgeSourcesIdRoute =
   AuthenticatedPlatformAiContextKnowledgeSourcesIdRouteImport.update({
@@ -434,7 +434,6 @@ export interface FileRoutesByFullPath {
   '/budgets/projects/$projectId': typeof AuthenticatedBudgetsProjectsProjectIdRouteWithChildren
   '/platform/ai-context/governance-profile': typeof AuthenticatedPlatformAiContextGovernanceProfileRoute
   '/platform/ai-infra/agent-hosts': typeof AuthenticatedPlatformAiInfraAgentHostsRoute
-  '/platform/ai-infra/agent-profiles': typeof AuthenticatedPlatformAiInfraAgentProfilesRouteWithChildren
   '/platform/ai-infra/models': typeof AuthenticatedPlatformAiInfraModelsRoute
   '/platform/ai-infra/providers': typeof AuthenticatedPlatformAiInfraProvidersRoute
   '/platform/ai-infra/tools': typeof AuthenticatedPlatformAiInfraToolsRoute
@@ -461,6 +460,7 @@ export interface FileRoutesByFullPath {
   '/platform/ai-context/instruction-assets/': typeof AuthenticatedPlatformAiContextInstructionAssetsIndexRoute
   '/platform/ai-context/knowledge-providers/': typeof AuthenticatedPlatformAiContextKnowledgeProvidersIndexRoute
   '/platform/ai-context/knowledge-sources/': typeof AuthenticatedPlatformAiContextKnowledgeSourcesIndexRoute
+  '/platform/ai-infra/agent-profiles/': typeof AuthenticatedPlatformAiInfraAgentProfilesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -491,7 +491,6 @@ export interface FileRoutesByTo {
   '/budgets/projects/$projectId': typeof AuthenticatedBudgetsProjectsProjectIdRouteWithChildren
   '/platform/ai-context/governance-profile': typeof AuthenticatedPlatformAiContextGovernanceProfileRoute
   '/platform/ai-infra/agent-hosts': typeof AuthenticatedPlatformAiInfraAgentHostsRoute
-  '/platform/ai-infra/agent-profiles': typeof AuthenticatedPlatformAiInfraAgentProfilesRouteWithChildren
   '/platform/ai-infra/models': typeof AuthenticatedPlatformAiInfraModelsRoute
   '/platform/ai-infra/providers': typeof AuthenticatedPlatformAiInfraProvidersRoute
   '/platform/ai-infra/tools': typeof AuthenticatedPlatformAiInfraToolsRoute
@@ -518,6 +517,7 @@ export interface FileRoutesByTo {
   '/platform/ai-context/instruction-assets': typeof AuthenticatedPlatformAiContextInstructionAssetsIndexRoute
   '/platform/ai-context/knowledge-providers': typeof AuthenticatedPlatformAiContextKnowledgeProvidersIndexRoute
   '/platform/ai-context/knowledge-sources': typeof AuthenticatedPlatformAiContextKnowledgeSourcesIndexRoute
+  '/platform/ai-infra/agent-profiles': typeof AuthenticatedPlatformAiInfraAgentProfilesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -552,7 +552,6 @@ export interface FileRoutesById {
   '/_authenticated/budgets/projects/$projectId': typeof AuthenticatedBudgetsProjectsProjectIdRouteWithChildren
   '/_authenticated/platform/ai-context/governance-profile': typeof AuthenticatedPlatformAiContextGovernanceProfileRoute
   '/_authenticated/platform/ai-infra/agent-hosts': typeof AuthenticatedPlatformAiInfraAgentHostsRoute
-  '/_authenticated/platform/ai-infra/agent-profiles': typeof AuthenticatedPlatformAiInfraAgentProfilesRouteWithChildren
   '/_authenticated/platform/ai-infra/models': typeof AuthenticatedPlatformAiInfraModelsRoute
   '/_authenticated/platform/ai-infra/providers': typeof AuthenticatedPlatformAiInfraProvidersRoute
   '/_authenticated/platform/ai-infra/tools': typeof AuthenticatedPlatformAiInfraToolsRoute
@@ -579,6 +578,7 @@ export interface FileRoutesById {
   '/_authenticated/platform/ai-context/instruction-assets/': typeof AuthenticatedPlatformAiContextInstructionAssetsIndexRoute
   '/_authenticated/platform/ai-context/knowledge-providers/': typeof AuthenticatedPlatformAiContextKnowledgeProvidersIndexRoute
   '/_authenticated/platform/ai-context/knowledge-sources/': typeof AuthenticatedPlatformAiContextKnowledgeSourcesIndexRoute
+  '/_authenticated/platform/ai-infra/agent-profiles/': typeof AuthenticatedPlatformAiInfraAgentProfilesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -613,7 +613,6 @@ export interface FileRouteTypes {
     | '/budgets/projects/$projectId'
     | '/platform/ai-context/governance-profile'
     | '/platform/ai-infra/agent-hosts'
-    | '/platform/ai-infra/agent-profiles'
     | '/platform/ai-infra/models'
     | '/platform/ai-infra/providers'
     | '/platform/ai-infra/tools'
@@ -640,6 +639,7 @@ export interface FileRouteTypes {
     | '/platform/ai-context/instruction-assets/'
     | '/platform/ai-context/knowledge-providers/'
     | '/platform/ai-context/knowledge-sources/'
+    | '/platform/ai-infra/agent-profiles/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -670,7 +670,6 @@ export interface FileRouteTypes {
     | '/budgets/projects/$projectId'
     | '/platform/ai-context/governance-profile'
     | '/platform/ai-infra/agent-hosts'
-    | '/platform/ai-infra/agent-profiles'
     | '/platform/ai-infra/models'
     | '/platform/ai-infra/providers'
     | '/platform/ai-infra/tools'
@@ -697,6 +696,7 @@ export interface FileRouteTypes {
     | '/platform/ai-context/instruction-assets'
     | '/platform/ai-context/knowledge-providers'
     | '/platform/ai-context/knowledge-sources'
+    | '/platform/ai-infra/agent-profiles'
   id:
     | '__root__'
     | '/'
@@ -730,7 +730,6 @@ export interface FileRouteTypes {
     | '/_authenticated/budgets/projects/$projectId'
     | '/_authenticated/platform/ai-context/governance-profile'
     | '/_authenticated/platform/ai-infra/agent-hosts'
-    | '/_authenticated/platform/ai-infra/agent-profiles'
     | '/_authenticated/platform/ai-infra/models'
     | '/_authenticated/platform/ai-infra/providers'
     | '/_authenticated/platform/ai-infra/tools'
@@ -757,6 +756,7 @@ export interface FileRouteTypes {
     | '/_authenticated/platform/ai-context/instruction-assets/'
     | '/_authenticated/platform/ai-context/knowledge-providers/'
     | '/_authenticated/platform/ai-context/knowledge-sources/'
+    | '/_authenticated/platform/ai-infra/agent-profiles/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -1047,13 +1047,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPlatformAiInfraModelsRouteImport
       parentRoute: typeof AuthenticatedPlatformAiInfraRoute
     }
-    '/_authenticated/platform/ai-infra/agent-profiles': {
-      id: '/_authenticated/platform/ai-infra/agent-profiles'
-      path: '/agent-profiles'
-      fullPath: '/platform/ai-infra/agent-profiles'
-      preLoaderRoute: typeof AuthenticatedPlatformAiInfraAgentProfilesRouteImport
-      parentRoute: typeof AuthenticatedPlatformAiInfraRoute
-    }
     '/_authenticated/platform/ai-infra/agent-hosts': {
       id: '/_authenticated/platform/ai-infra/agent-hosts'
       path: '/agent-hosts'
@@ -1095,6 +1088,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/assistants/$assistantId/edit'
       preLoaderRoute: typeof AuthenticatedAssistantsAssistantIdEditRouteImport
       parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/platform/ai-infra/agent-profiles/': {
+      id: '/_authenticated/platform/ai-infra/agent-profiles/'
+      path: '/agent-profiles'
+      fullPath: '/platform/ai-infra/agent-profiles/'
+      preLoaderRoute: typeof AuthenticatedPlatformAiInfraAgentProfilesIndexRouteImport
+      parentRoute: typeof AuthenticatedPlatformAiInfraRoute
     }
     '/_authenticated/platform/ai-context/knowledge-sources/': {
       id: '/_authenticated/platform/ai-context/knowledge-sources/'
@@ -1140,10 +1140,10 @@ declare module '@tanstack/react-router' {
     }
     '/_authenticated/platform/ai-infra/agent-profiles/$id': {
       id: '/_authenticated/platform/ai-infra/agent-profiles/$id'
-      path: '/$id'
+      path: '/agent-profiles/$id'
       fullPath: '/platform/ai-infra/agent-profiles/$id'
       preLoaderRoute: typeof AuthenticatedPlatformAiInfraAgentProfilesIdRouteImport
-      parentRoute: typeof AuthenticatedPlatformAiInfraAgentProfilesRoute
+      parentRoute: typeof AuthenticatedPlatformAiInfraRoute
     }
     '/_authenticated/platform/ai-context/knowledge-sources/$id': {
       id: '/_authenticated/platform/ai-context/knowledge-sources/$id'
@@ -1245,41 +1245,29 @@ const AuthenticatedPlatformAiContextRouteWithChildren =
     AuthenticatedPlatformAiContextRouteChildren,
   )
 
-interface AuthenticatedPlatformAiInfraAgentProfilesRouteChildren {
-  AuthenticatedPlatformAiInfraAgentProfilesIdRoute: typeof AuthenticatedPlatformAiInfraAgentProfilesIdRoute
-}
-
-const AuthenticatedPlatformAiInfraAgentProfilesRouteChildren: AuthenticatedPlatformAiInfraAgentProfilesRouteChildren =
-  {
-    AuthenticatedPlatformAiInfraAgentProfilesIdRoute:
-      AuthenticatedPlatformAiInfraAgentProfilesIdRoute,
-  }
-
-const AuthenticatedPlatformAiInfraAgentProfilesRouteWithChildren =
-  AuthenticatedPlatformAiInfraAgentProfilesRoute._addFileChildren(
-    AuthenticatedPlatformAiInfraAgentProfilesRouteChildren,
-  )
-
 interface AuthenticatedPlatformAiInfraRouteChildren {
   AuthenticatedPlatformAiInfraAgentHostsRoute: typeof AuthenticatedPlatformAiInfraAgentHostsRoute
-  AuthenticatedPlatformAiInfraAgentProfilesRoute: typeof AuthenticatedPlatformAiInfraAgentProfilesRouteWithChildren
   AuthenticatedPlatformAiInfraModelsRoute: typeof AuthenticatedPlatformAiInfraModelsRoute
   AuthenticatedPlatformAiInfraProvidersRoute: typeof AuthenticatedPlatformAiInfraProvidersRoute
   AuthenticatedPlatformAiInfraToolsRoute: typeof AuthenticatedPlatformAiInfraToolsRoute
+  AuthenticatedPlatformAiInfraAgentProfilesIdRoute: typeof AuthenticatedPlatformAiInfraAgentProfilesIdRoute
+  AuthenticatedPlatformAiInfraAgentProfilesIndexRoute: typeof AuthenticatedPlatformAiInfraAgentProfilesIndexRoute
 }
 
 const AuthenticatedPlatformAiInfraRouteChildren: AuthenticatedPlatformAiInfraRouteChildren =
   {
     AuthenticatedPlatformAiInfraAgentHostsRoute:
       AuthenticatedPlatformAiInfraAgentHostsRoute,
-    AuthenticatedPlatformAiInfraAgentProfilesRoute:
-      AuthenticatedPlatformAiInfraAgentProfilesRouteWithChildren,
     AuthenticatedPlatformAiInfraModelsRoute:
       AuthenticatedPlatformAiInfraModelsRoute,
     AuthenticatedPlatformAiInfraProvidersRoute:
       AuthenticatedPlatformAiInfraProvidersRoute,
     AuthenticatedPlatformAiInfraToolsRoute:
       AuthenticatedPlatformAiInfraToolsRoute,
+    AuthenticatedPlatformAiInfraAgentProfilesIdRoute:
+      AuthenticatedPlatformAiInfraAgentProfilesIdRoute,
+    AuthenticatedPlatformAiInfraAgentProfilesIndexRoute:
+      AuthenticatedPlatformAiInfraAgentProfilesIndexRoute,
   }
 
 const AuthenticatedPlatformAiInfraRouteWithChildren =
