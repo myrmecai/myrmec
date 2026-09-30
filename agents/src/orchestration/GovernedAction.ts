@@ -10,7 +10,7 @@
 
 /** The governed action kinds that can require human approval (§7.2). */
 export type GovernedActionType =
-  | "WORKER_TOOL"
+  | "HELPER_TOOL"
   | "CHECKPOINT"
   | "PUSH"
   | "CONTINUE_BUDGET";

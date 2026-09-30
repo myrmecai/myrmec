@@ -107,16 +107,16 @@ function injectLiveEnums(
     const orchProps = (orchestration as { properties?: Record<string, unknown> }).properties
     if (!orchProps) continue
     if (modelCodes.length > 0) injectEnum(orchProps.modelCode, modelCodes)
-    const workers = orchProps.workers
-    const workerItems =
-      workers && typeof workers === 'object' && !Array.isArray(workers)
-        ? (workers as { items?: unknown }).items
+    const helpers = orchProps.helpers
+    const helperItems =
+      helpers && typeof helpers === 'object' && !Array.isArray(helpers)
+        ? (helpers as { items?: unknown }).items
         : undefined
-    const workerProps =
-      workerItems && typeof workerItems === 'object' && !Array.isArray(workerItems)
-        ? (workerItems as { properties?: Record<string, unknown> }).properties
+    const helperProps =
+      helperItems && typeof helperItems === 'object' && !Array.isArray(helperItems)
+        ? (helperItems as { properties?: Record<string, unknown> }).properties
         : undefined
-    if (workerProps && modelCodes.length > 0) injectEnum(workerProps.modelCode, modelCodes)
+    if (helperProps && modelCodes.length > 0) injectEnum(helperProps.modelCode, modelCodes)
   }
 }
 

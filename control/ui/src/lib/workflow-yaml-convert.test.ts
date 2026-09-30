@@ -53,7 +53,7 @@ workflow:
       modelCode: "glm-5.3"
       goal: "Build it"
       sourceSubPath: "app"
-      workers:
+      helpers:
         - { name: coder, modelCode: "glm-5.3", capability: "Implements", allowedTools: [read_file, write_file], allowedCommands: [] }
       checkpointStrategy: { mode: ON_VERIFICATION_PASS, commitMessage: "feat: x", pushToRemote: false, allowNoChanges: false }
       completionCriteria: { definitionOfDone: "done", requireVerificationBy: [coder] }

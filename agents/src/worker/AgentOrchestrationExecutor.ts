@@ -2,7 +2,7 @@
 // Copyright 2026 The Myrmec Authors
 
 /**
- * AgentOrchestrationExecutor (design §16.3/§17.1, Feature 10): the worker-side
+ * AgentOrchestrationExecutor (design §16.3/§17.1, Feature 10): the Agent-side
  * handler for one orchestration dispatch.
  *
  * <p>Every frame is untrusted data: the assignment is validated with the
@@ -43,7 +43,7 @@ import type {
 import { ORCHESTRATION_RESULT_NS, uuidV5 } from "../orchestration/constants.js";
 import {
   OrchestrationRunner,
-  WorkerInvoker,
+  HelperInvoker,
   GitWorkspaceManager,
   GitWorkspaceScope,
   GitWorkspaceInspector,
@@ -65,7 +65,7 @@ export interface AgentOrchestrationExecutorOptions {
   outboxRoot: string;
   /** The stub/real model factory (same seam as ordinary inference). */
   chatModelFactory: ChatModelFactory;
-  /** Emit one frame toward the engine (the worker's only sink). */
+  /** Emit one frame toward the engine (the Agent's only sink). */
   send(frame: Envelope): void;
   /** HITL (§17.4): the project's autoHitlOnDestructive matrix input —
    * captured from the orchestration session.open (default true:
@@ -96,7 +96,7 @@ export class AgentOrchestrationExecutor {
   /**
    * §7.3 (Wave 6, A4): the session's host-enforced execution policy, keyed
    * by the session the orchestration dispatch rides (captured at
-   * session.open by the worker).
+   * session.open by the Agent).
    */
   private readonly sessionPolicies = new Map<
     string,
@@ -114,7 +114,7 @@ export class AgentOrchestrationExecutor {
   /**
    * §8.7 (A4): the live tighten-only allowance per dispatch — mutated by
    * execution.policy.update frames while the dispatch executes; the runner
-   * reads through this object at every worker-call boundary.
+   * reads through this object at every helper-call boundary.
    */
   private readonly allowanceSources = new Map<
     string,
@@ -232,7 +232,7 @@ export class AgentOrchestrationExecutor {
     // Acknowledge: the exact admitted digest.
     this.sendAccept(dispatchId, payload.sessionId, digest);
 
-    // Execute the dispatch (async — the worker keeps serving frames),
+    // Execute the dispatch (async — the Agent keeps serving frames),
     // serialized behind any in-flight dispatch (§17.6: one at a time).
     const previous = this.executionChain;
     this.executionChain = (async () => {
@@ -256,7 +256,7 @@ export class AgentOrchestrationExecutor {
   }
 
   /**
-   * §7.3 (Wave 6, A4): the worker records the session.open policy block so
+   * §7.3 (Wave 6, A4): the Agent records the session.open policy block so
    * the orchestration dispatch it serves enforces the host limits.
    */
   recordSessionPolicy(
@@ -269,7 +269,7 @@ export class AgentOrchestrationExecutor {
   }
 
   /**
-   * §7.3/§15 rule 12: the worker records the session.open capture block so
+   * §7.3/§15 rule 12: the Agent records the session.open capture block so
    * the orchestration sink's progress stream respects it.
    */
   recordSessionCapture(
@@ -404,7 +404,7 @@ export class AgentOrchestrationExecutor {
 
     // §7.3/§8.7 (A4): the policy/allowance captured at admission (bound to
     // this dispatch) — the runner enforces the host limits and reads the
-    // live tighten-only allowance at every worker-call boundary.
+    // live tighten-only allowance at every helper-call boundary.
     const sessionPolicy = this.sessionPolicyOf(dispatch.dispatchId);
     const allowanceSource =
       this.allowanceSources.get(dispatch.dispatchId) ?? { maxTokens: null };
@@ -504,40 +504,40 @@ export class AgentOrchestrationExecutor {
         allowNoChanges: o.checkpointStrategy.allowNoChanges,
       });
 
-      // §21: WORKER_STARTED/WORKER_COMPLETED progress events — the §18
-      // boundary observes WORKER_COMPLETED before firing a trigger. The
-      // runner's worker invoker emits nothing itself (transport-
+        // §21: HELPER_STARTED/HELPER_COMPLETED progress events — the §18
+        // boundary observes HELPER_COMPLETED before firing a trigger. The
+      // runner's helper invoker emits nothing itself (transport-
       // independent), so the executor emits the per-call envelope around
       // each invocation through the durable outbox sink.
-      const workerEventCounters = new Map<string, number>();
-      const observingInvoker = new WorkerInvoker({
+      const helperEventCounters = new Map<string, number>();
+      const observingInvoker = new HelperInvoker({
         attemptOrdinal: dispatch.attemptOrdinal,
         chatModelFactory: this.options.chatModelFactory,
         turnExecutor: new TurnExecutor({}),
       });
       const originalInvoke = observingInvoker.invoke.bind(observingInvoker);
       observingInvoker.invoke = async (...args) => {
-        const [assignmentArg, workerName, purpose] = args;
-        const seq = (workerEventCounters.get(workerName) ?? 0) + 1;
-        workerEventCounters.set(workerName, seq);
+        const [assignmentArg, helperName, purpose] = args;
+        const seq = (helperEventCounters.get(helperName) ?? 0) + 1;
+        helperEventCounters.set(helperName, seq);
         await this.sink.emitEvent({
           dispatch,
-          type: "WORKER_STARTED",
-          workerName,
-          callId: `call-${dispatch.dispatchId}-${workerName}-${seq}`,
+          type: "HELPER_STARTED",
+          helperName,
+          callId: `call-${dispatch.dispatchId}-${helperName}-${seq}`,
         });
         const outcome = await originalInvoke(
-          assignmentArg, workerName, purpose, args[3], args[4], args[5],
+          assignmentArg, helperName, purpose, args[3], args[4], args[5],
         );
         await this.sink.emitEvent({
           dispatch,
-          type: "WORKER_COMPLETED",
-          workerName,
-          status: outcome.workerCall.status,
-          callId: outcome.workerCall.callId,
+          type: "HELPER_COMPLETED",
+          helperName,
+          status: outcome.helperCall.status,
+          callId: outcome.helperCall.callId,
           durationMs: outcome.tokenCount,
           usage: {
-            workerCalls: 1,
+            helperCalls: 1,
             rejectionCount: 0,
             totalTokens: outcome.tokenCount,
           },
@@ -547,7 +547,7 @@ export class AgentOrchestrationExecutor {
 
       const runner = new OrchestrationRunner({
         chatModelFactory: this.options.chatModelFactory,
-        workerInvoker: observingInvoker,
+        helperInvoker: observingInvoker,
         turnExecutor: new TurnExecutor({}),
         workspace: stepWorkspace,
         workspaceInspector: inspector,
@@ -599,7 +599,7 @@ export class AgentOrchestrationExecutor {
               dispatchId: input.dispatch.dispatchId,
               attemptOrdinal: input.dispatch.attemptOrdinal,
               budgetCounters: {
-                workerCalls: 0,
+                helperCalls: 0,
                 totalTokens: 0,
                 rejectionCount: 0,
               },
@@ -658,7 +658,7 @@ export class AgentOrchestrationExecutor {
           },
         },
         // §17.2/§17.5: the retry-continuation publication + restore —
-        // WORKER_FAILED (RETRYABLE) safe boundaries persist the manifest;
+        // HELPER_FAILED (RETRYABLE) safe boundaries persist the manifest;
         // the engine's retry dispatch (decision-less continuation)
         // restores completed-call identities + verifier history here.
         retryContinuationPublisher: {
@@ -752,13 +752,13 @@ export class AgentOrchestrationExecutor {
       status: "FAILED",
       retryDisposition: "TERMINAL",
       summary: message,
-      workerCalls: [],
+      helperCalls: [],
       verifierResults: [],
       commandExecutions: [],
       changedFiles: [],
       commits: [],
       cleanWorktree: true,
-      usage: { workerCalls: 0, rejectionCount: 0, totalTokens: 0 },
+      usage: { helperCalls: 0, rejectionCount: 0, totalTokens: 0 },
       errorCode: errorCode as OrchestrationRunResult["errorCode"],
     };
     await this.sink.emitResult({

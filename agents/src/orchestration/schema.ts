@@ -55,7 +55,7 @@ const retryPolicy = z
     message: "maxBackoffSeconds must be >= initialBackoffSeconds",
   });
 
-const workerAuthoring = z
+const helperAuthoring = z
   .object({
     name: z.string().min(1),
     modelCode: z.string().min(1),
@@ -80,7 +80,7 @@ const orchestrationPolicy = z
     goal: z.string().min(1),
     specPath: relativePath.nullable(),
     sourceSubPath: relativePath,
-    workers: z.array(workerAuthoring).min(1),
+    helpers: z.array(helperAuthoring).min(1),
     checkpointStrategy: z
       .object({
         mode: z.literal("ON_VERIFICATION_PASS"),
@@ -209,24 +209,24 @@ const workflowDefinition = z
       if (!modelCodes.has(o.modelCode)) {
         add(["workflow", si, "orchestration", "modelCode"], `unknown model code: ${o.modelCode}`);
       }
-      const workerNames = new Set<string>();
-      o.workers.forEach((w, wi) => {
-        if (workerNames.has(w.name)) {
-          add(["workflow", si, "orchestration", "workers", wi, "name"], "duplicate worker name");
+      const helperNames = new Set<string>();
+      o.helpers.forEach((w, wi) => {
+        if (helperNames.has(w.name)) {
+          add(["workflow", si, "orchestration", "helpers", wi, "name"], "duplicate helper name");
         }
-        workerNames.add(w.name);
+        helperNames.add(w.name);
         if (!modelCodes.has(w.modelCode)) {
           add(
-            ["workflow", si, "orchestration", "workers", wi, "modelCode"],
+            ["workflow", si, "orchestration", "helpers", wi, "modelCode"],
             `unknown model code: ${w.modelCode}`,
           );
         }
       });
       for (const [vi, verifier] of o.completionCriteria.requireVerificationBy.entries()) {
-        if (!workerNames.has(verifier)) {
+        if (!helperNames.has(verifier)) {
           add(
             ["workflow", si, "orchestration", "completionCriteria", "requireVerificationBy", vi],
-            `verifier not in worker catalog: ${verifier}`,
+            `verifier not in helper catalog: ${verifier}`,
           );
         }
       }
@@ -369,20 +369,20 @@ const orchestrationAssignment = z
 
     // Referenced templates exist in the policy.
     const templateNames = new Set(Object.keys(a.policy.commandTemplates));
-    a.step.orchestration.workers.forEach((w, wi) => {
+    a.step.orchestration.helpers.forEach((w, wi) => {
       for (const [ci, cmd] of w.allowedCommands.entries()) {
         if (!templateNames.has(cmd)) {
           add(
-            ["step", "orchestration", "workers", wi, "allowedCommands", ci],
+            ["step", "orchestration", "helpers", wi, "allowedCommands", ci],
             `command template not in policy: ${cmd}`,
           );
         }
       }
-      // Worker tools are within the policy allowlist.
+      // Helper tools are within the policy allowlist.
       for (const [ti, tool] of w.allowedTools.entries()) {
         if (!a.policy.allowedTools.includes(tool)) {
           add(
-            ["step", "orchestration", "workers", wi, "allowedTools", ti],
+            ["step", "orchestration", "helpers", wi, "allowedTools", ti],
             `tool not allowed by policy: ${tool}`,
           );
         }
@@ -394,11 +394,11 @@ const orchestrationAssignment = z
     if (!modelCodes.has(a.step.orchestration.modelCode)) {
       add(["step", "orchestration", "modelCode"], "orchestration model not in assignment models");
     }
-    a.step.orchestration.workers.forEach((w, wi) => {
+    a.step.orchestration.helpers.forEach((w, wi) => {
       if (!modelCodes.has(w.modelCode)) {
         add(
-          ["step", "orchestration", "workers", wi, "modelCode"],
-          "worker model not in assignment models",
+          ["step", "orchestration", "helpers", wi, "modelCode"],
+          "helper model not in assignment models",
         );
       }
     });
@@ -468,7 +468,7 @@ export interface CompileStepAssignmentInput {
  * Compile exactly one validated step into a self-contained runtime
  * assignment (design §7). Pure: no IO of any kind. Extracts secrets into
  * the credential scope, includes only referenced models, and restricts the
- * policy's command templates to the ones this step's workers reference.
+ * policy's command templates to the ones this step's helpers reference.
  */
 export function compileStepAssignment(input: CompileStepAssignmentInput): import("./types.js").OrchestrationAssignment {
   const { workflow, models, stepId, source, policy, dispatch } = input;
@@ -482,9 +482,9 @@ export function compileStepAssignment(input: CompileStepAssignmentInput): import
     throw new Error(`dispatch wired to a different step: ${dispatch.stepId} != ${step.id}`);
   }
 
-  // Exactly the models the step references: orchestrator + every worker.
+  // Exactly the models the step references: orchestrator + every helper.
   const referencedCodes = new Set<string>([step.orchestration.modelCode]);
-  for (const w of step.orchestration.workers) referencedCodes.add(w.modelCode);
+  for (const w of step.orchestration.helpers) referencedCodes.add(w.modelCode);
   const stepModels = models.filter((m) => referencedCodes.has(m.code));
   if (referencedCodes.size !== stepModels.length) {
     const missing = [...referencedCodes].filter(
@@ -495,7 +495,7 @@ export function compileStepAssignment(input: CompileStepAssignmentInput): import
 
   // Referenced-subset command templates.
   const referencedTemplates = new Set<string>();
-  for (const w of step.orchestration.workers) {
+  for (const w of step.orchestration.helpers) {
     for (const cmd of w.allowedCommands) referencedTemplates.add(cmd);
   }
   for (const name of referencedTemplates) {

@@ -33,14 +33,14 @@ function manifest(over: Partial<Omit<ContinuationManifest, "stateDigest">> = {})
     continuationId: "cont-1",
     dispatchId: "dispatch-1",
     attemptOrdinal: 1,
-    budgetCounters: { workerCalls: 2, totalTokens: 80, rejectionCount: 1 },
+    budgetCounters: { helperCalls: 2, totalTokens: 80, rejectionCount: 1 },
     completedCallIds: ["call-a", "call-b"],
     candidateTreeHash: "a".repeat(40),
     workspaceRevision: 2,
     verifierHistory: [
       {
         callId: "v1",
-        workerName: "verifier",
+        helperName: "verifier",
         verdict: "REJECTED",
         summary: "bad",
         issues: ["x"],
@@ -61,7 +61,7 @@ describe("LocalContinuationStateStore", () => {
     const written = store.put(manifest());
     const loaded = store.get("cont-1");
     expect(loaded).not.toBeNull();
-    expect(loaded!.budgetCounters).toEqual({ workerCalls: 2, totalTokens: 80, rejectionCount: 1 });
+    expect(loaded!.budgetCounters).toEqual({ helperCalls: 2, totalTokens: 80, rejectionCount: 1 });
     expect(loaded!.completedCallIds).toEqual(["call-a", "call-b"]);
     expect(loaded!.stateDigest).toBe(written.stateDigest);
     // A same-dispatch restart cannot reset the budget: the restored
@@ -70,7 +70,7 @@ describe("LocalContinuationStateStore", () => {
       { maxWorkerCalls: 2, maxTokens: 100, maxVerifierRejectionsPerAttempt: 1 },
       loaded!.budgetCounters,
     );
-    expect(restored.tryReserveWorkerCall()?.errorCode).toBe("WORKER_BUDGET_EXCEEDED");
+    expect(restored.tryReserveWorkerCall()?.errorCode).toBe("HELPER_BUDGET_EXCEEDED");
   });
 
   it("fails closed on a digest mismatch — never partially restores", () => {
@@ -80,7 +80,7 @@ describe("LocalContinuationStateStore", () => {
     // Tamper with the persisted bytes.
     const file = path.join(root, "cont-1.json");
     const raw = JSON.parse(readFileSync(file, "utf-8")) as Record<string, unknown>;
-    raw.budgetCounters = { workerCalls: 0, totalTokens: 0, rejectionCount: 0 };
+    raw.budgetCounters = { helperCalls: 0, totalTokens: 0, rejectionCount: 0 };
     writeFileSync(file, JSON.stringify(raw), "utf-8");
     expect(store.get("cont-1")).toBeNull();
   });
@@ -110,11 +110,11 @@ describe("RecoveryStore", () => {
     const published = store.publish({
       dispatchId: "dispatch-1",
       attemptOrdinal: 1,
-      budgetCounters: { workerCalls: 1, totalTokens: 42, rejectionCount: 0 },
+      budgetCounters: { helperCalls: 1, totalTokens: 42, rejectionCount: 0 },
       completedCalls: [
         {
           callId: "call-a",
-          workerName: "coder",
+          helperName: "coder",
           purpose: "IMPLEMENT",
           status: "COMPLETED",
           startedSequence: 1,
@@ -125,7 +125,7 @@ describe("RecoveryStore", () => {
         },
         {
           callId: "call-b",
-          workerName: "coder",
+          helperName: "coder",
           purpose: "IMPLEMENT",
           status: "FAILED",
           startedSequence: 3,
@@ -133,7 +133,7 @@ describe("RecoveryStore", () => {
           workspaceRevisionBefore: 1,
           workspaceRevisionAfter: 1,
           tokenCount: 0,
-          errorCode: "WORKER_FAILED",
+          errorCode: "HELPER_FAILED",
         },
       ],
       candidateTreeHash: "b".repeat(40),
@@ -143,7 +143,7 @@ describe("RecoveryStore", () => {
     const loaded = store.load(published.continuationId);
     expect(loaded).not.toBeNull();
     // Only COMPLETED call identities are restored (§17.5: replay
-    // deduplicates worker calls by ID; failures are not effects).
+    // deduplicates helper calls by ID; failures are not effects).
     expect(loaded!.completedCallIds).toEqual(["call-a"]);
   });
 
@@ -152,7 +152,7 @@ describe("RecoveryStore", () => {
     const published = store.publish({
       dispatchId: "d1",
       attemptOrdinal: 1,
-      budgetCounters: { workerCalls: 0, totalTokens: 0, rejectionCount: 0 },
+      budgetCounters: { helperCalls: 0, totalTokens: 0, rejectionCount: 0 },
       completedCalls: [],
       candidateTreeHash: "c".repeat(40),
       workspaceRevision: 0,

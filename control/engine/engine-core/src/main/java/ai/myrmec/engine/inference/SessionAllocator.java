@@ -200,7 +200,7 @@ public class SessionAllocator {
             return false;
         }
 
-        // Mint the worker row (§19.1): IDLE reusable, stamped to the live run.
+        // Mint the Agent row (§19.1): IDLE reusable, stamped to the live run.
         if (agentRepository.countByAgentHostInstanceIdAndStatusIn(
                 instance.getId(), List.of(Agent.Status.IDLE, Agent.Status.RESERVED, Agent.Status.BOUND)) == 0
                 || agentRepository.findByAgentHostId(instance.getAgentHostId()).stream()

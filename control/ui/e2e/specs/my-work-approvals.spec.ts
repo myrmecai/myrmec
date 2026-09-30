@@ -136,7 +136,7 @@ test.describe('My Work approvals', () => {
             projectName: 'Orchestration Approval Project',
             source: 'EXECUTION',
             assistantId: null,
-            summary: 'worker:coder:IMPLEMENT',
+            summary: 'helper:coder:IMPLEMENT',
             payloadJson: null,
             requestedByUserId: null,
             externalUserRef: null,
@@ -171,7 +171,7 @@ test.describe('My Work approvals', () => {
 
     // §17.4: the governed pending action's worker identity is the
     // summary; the row renders an Execution source badge.
-    await expect(adminPage.getByText('worker:coder:IMPLEMENT')).toBeVisible()
+    await expect(adminPage.getByText('helper:coder:IMPLEMENT')).toBeVisible()
     await expect(
       adminPage.getByRole('button', { name: 'Approve', exact: true }),
     ).toBeVisible()

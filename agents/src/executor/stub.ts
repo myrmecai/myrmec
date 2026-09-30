@@ -17,7 +17,7 @@
  *
  * Handler state is **per-worker** (loaded once), not per-session. The
  * `sessionId` field in {@link LlmStubContext} lets handlers scope their own
- * state per-session when a worker runs multiple sessions concurrently.
+ * state per-session when an Agent runs multiple sessions concurrently.
  */
 import type {
   ChatModel,
@@ -189,7 +189,7 @@ class StubChatModel implements ChatModel {
  * The handler module is loaded via dynamic `import()` **inside `resolve()`**
  * (not fire-and-forget in the constructor) to prevent a race where
  * `session.open` fires before the module finishes loading. The import promise
- * is cached so the module loads once per worker.
+ * is cached so the module loads once per worker thread.
  */
 export class StubChatModelFactory implements ChatModelFactory {
   private handlersPromise: Promise<StubHandlers | undefined> | undefined;

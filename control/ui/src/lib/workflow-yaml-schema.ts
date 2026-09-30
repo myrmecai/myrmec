@@ -82,20 +82,20 @@ const retryPolicySchema = z
   .strict()
   .describe('Retry behavior for the orchestrator step.')
 
-const workerSchema = z
+const helperSchema = z
   .object({
-    name: z.string().min(1).describe('Worker name; verifiers refer to it.'),
+    name: z.string().min(1).describe('Helper name; verifiers refer to it.'),
     modelCode: z.string().min(1).describe('Model code from the models catalog.'),
-    capability: z.string().min(1).describe('Short description of what this worker does.'),
+    capability: z.string().min(1).describe('Short description of what this helper does.'),
     allowedTools: z
       .array(
         z.enum(['read_file', 'list_directory', 'create_directory', 'write_file', 'execute_command'])
       )
-      .describe('File and command tools this worker may use.'),
+      .describe('File and command tools this helper may use.'),
     allowedCommands: z
       .array(z.string())
       .default([])
-      .describe('Shell commands this worker may execute.'),
+      .describe('Shell commands this helper may execute.'),
   })
   .strict()
 
@@ -105,7 +105,7 @@ const orchestrationSchema = z
     goal: z.string().min(1).describe('What the orchestrator should achieve.'),
     specPath: z.string().nullable().default(null).describe('Repo-relative path to the spec file.'),
     sourceSubPath: z.string().min(1).default('.').describe('Subdirectory the work applies to.'),
-    workers: z.array(workerSchema).min(1).describe('Worker catalog for this step.'),
+    helpers: z.array(helperSchema).min(1).describe('Helper catalog for this step.'),
     checkpointStrategy: z
       .object({
         mode: z.literal('ON_VERIFICATION_PASS').describe('When to commit checkpoints.'),
@@ -124,7 +124,7 @@ const orchestrationSchema = z
         definitionOfDone: z.string().min(1).describe('Conditions that finish the task.'),
         requireVerificationBy: z
           .array(z.string())
-          .describe('Worker names that must verify completion.'),
+          .describe('Helper names that must verify completion.'),
       })
       .strict()
       .describe('What counts as done and who verifies it.'),
@@ -382,14 +382,14 @@ export function validateWorkflowYaml(
     })
   }
 
-  // 6. verifiers ⊆ workers
+  // 6. verifiers ⊆ helpers
   for (const s of orchestrators) {
-    const workerNames = new Set(s.orchestration.workers.map((w) => w.name))
+    const helperNames = new Set(s.orchestration.helpers.map((w) => w.name))
     for (const verifier of s.orchestration.completionCriteria.requireVerificationBy) {
-      if (!workerNames.has(verifier)) {
+      if (!helperNames.has(verifier)) {
         cross.push({
           code: 'CROSS',
-          message: `Step '${s.id}': verifier '${verifier}' is not in the worker catalog.`,
+          message: `Step '${s.id}': verifier '${verifier}' is not in the helper catalog.`,
           stepId: s.id,
         })
       }
@@ -399,7 +399,7 @@ export function validateWorkflowYaml(
   // 7. referenced model codes ∈ models[]
   const declared = new Set((doc.models ?? []).map((m) => m.code))
   for (const s of orchestrators) {
-    const referenced = [s.orchestration.modelCode, ...s.orchestration.workers.map((w) => w.modelCode)]
+    const referenced = [s.orchestration.modelCode, ...s.orchestration.helpers.map((w) => w.modelCode)]
     for (const code of referenced) {
       if (!declared.has(code)) {
         cross.push({

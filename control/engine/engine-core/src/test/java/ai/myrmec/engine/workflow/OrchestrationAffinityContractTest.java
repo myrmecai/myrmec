@@ -33,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code host_instance_id} (§16.4's "session host binding"): the run records the
  * selected host, and every later dispatch of that run offers its session to that
  * host's live instance — the allocator is the only thing that mints serving
- * workers now, so the pin is a host pin rather than a pre-minted agent-instance
+ * Agents now, so the pin is a host pin rather than a pre-minted agent-instance
  * pin. When the pinned host has no live/capacity-bearing instance the task stays
  * PENDING with the same durable throttling, and the same deadline semantics
  * apply.</p>
@@ -337,7 +337,7 @@ class OrchestrationAffinityContractTest extends WorkflowDispatchSupport {
         orch.put("modelCode", TEST_MODEL_CODE);
         orch.put("goal", "write a module");
         orch.put("sourceSubPath", ".");
-        orch.put("workers", List.of());
+        orch.put("helpers", List.of());
         orch.put("checkpointStrategy", Map.of(
                 "mode", "ON_VERIFICATION_PASS", "commitMessage", "checkpoint",
                 "pushToRemote", false, "allowNoChanges", true));

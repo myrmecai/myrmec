@@ -3,8 +3,8 @@
 
 /**
  * Contract tests for the minimal delegation loop (design §10.1): one
- * orchestrator TurnExecutor whose only tool is `invoke_worker`, backed
- * by the WorkerInvoker through the ChatModelFactory/TurnExecutor seams.
+ * orchestrator TurnExecutor whose only tool is `invoke_helper`, backed
+ * by the HelperInvoker through the ChatModelFactory/TurnExecutor seams.
  */
 import { describe, it, expect } from "vitest";
 import { TurnExecutor } from "../executor/TurnExecutor.js";
@@ -14,7 +14,7 @@ import type {
   ModelResponse,
   ToolSpec,
 } from "../executor/types.js";
-import { WorkerInvoker } from "./WorkerInvoker.js";
+import { HelperInvoker } from "./HelperInvoker.js";
 import { OrchestrationRunner } from "./OrchestrationRunner.js";
 import type { OrchestrationAssignment } from "./types.js";
 
@@ -59,10 +59,10 @@ function assignment(): OrchestrationAssignment {
         parameters: {},
       },
       {
-        code: "worker-model",
+        code: "helper-model",
         provider: "stub",
-        modelId: "worker-model",
-        description: "worker",
+        modelId: "helper-model",
+        description: "helper",
         endpoint: null,
         credentialRef: null,
         parameters: {},
@@ -95,10 +95,10 @@ function assignment(): OrchestrationAssignment {
         goal: "Build a feature.",
         specPath: null,
         sourceSubPath: "app",
-        workers: [
+        helpers: [
           {
             name: "coder",
-            modelCode: "worker-model",
+            modelCode: "helper-model",
             capability: "Writes code",
             allowedTools: ["read_file", "write_file"],
             allowedCommands: [],
@@ -130,13 +130,13 @@ function assignment(): OrchestrationAssignment {
 /** Build a runner whose models are scripted. */
 function makeRunner(
   orchestratorModel: ChatModel,
-  workerModel: ChatModel,
+  helperModel: ChatModel,
 ): OrchestrationRunner {
-  const invoker = new WorkerInvoker({
+  const invoker = new HelperInvoker({
     attemptOrdinal: 1,
     chatModelFactory: {
       resolve: async (info) => {
-        if (info.modelId === "worker-model") return workerModel;
+        if (info.modelId === "helper-model") return helperModel;
         throw new Error(`unexpected model: ${info.modelId}`);
       },
     },
@@ -149,21 +149,21 @@ function makeRunner(
         throw new Error(`unexpected model: ${info.modelId}`);
       },
     },
-    workerInvoker: invoker,
+    helperInvoker: invoker,
     turnExecutor: new TurnExecutor({}),
   });
   return runner;
 }
 
-/** A worker invocation tool call the orchestrator makes. */
-function invokeCall(workerName: string, instruction = "Do the work."): ModelResponse {
+/** A helper invocation tool call the orchestrator makes. */
+function invokeCall(helperName: string, instruction = "Do the work."): ModelResponse {
   return {
     content: "",
     toolCalls: [
       {
         id: "call-1",
-        name: "invoke_worker",
-        args: { workerName, purpose: "IMPLEMENT", instruction },
+        name: "invoke_helper",
+        args: { helperName, purpose: "IMPLEMENT", instruction },
       },
     ],
     usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
@@ -173,7 +173,7 @@ function invokeCall(workerName: string, instruction = "Do the work."): ModelResp
 // ── the minimal delegation loop ──────────────────────────────────────
 
 describe("OrchestrationRunner minimal delegation", () => {
-  it("delegates to the named worker, feeds the result back, and completes", async () => {
+  it("delegates to the named helper, feeds the result back, and completes", async () => {
     // Orchestrator: invoke coder, then final answer.
     const orch = new ScriptedModel([
       invokeCall("coder"),
@@ -182,22 +182,22 @@ describe("OrchestrationRunner minimal delegation", () => {
         usage: { promptTokens: 20, completionTokens: 8, totalTokens: 28 },
       },
     ]);
-    // Worker: immediately returns a final answer.
-    const worker = new ScriptedModel([
+    // Helper: immediately returns a final answer.
+    const helper = new ScriptedModel([
       {
         content: "Implementation done.",
         usage: { promptTokens: 30, completionTokens: 10, totalTokens: 40 },
       },
     ]);
-    const result = await makeRunner(orch, worker).run(assignment(), {
+    const result = await makeRunner(orch, helper).run(assignment(), {
       runId: "run-uuid",
     });
 
     expect(result.status).toBe("COMPLETED");
     expect(result.summary).toBe("The coder completed the work.");
-    expect(result.workerCalls).toHaveLength(1);
-    const call = result.workerCalls[0];
-    expect(call.workerName).toBe("coder");
+    expect(result.helperCalls).toHaveLength(1);
+    const call = result.helperCalls[0];
+    expect(call.helperName).toBe("coder");
     expect(call.purpose).toBe("IMPLEMENT");
     expect(call.status).toBe("COMPLETED");
     expect(call.tokenCount).toBe(40);
@@ -206,31 +206,31 @@ describe("OrchestrationRunner minimal delegation", () => {
     expect(call.workspaceRevisionBefore).toBeDefined();
     expect(call.workspaceRevisionAfter).toBeDefined();
     // §13: the usage mirrors the budget counters — every orchestrator
-    // AND worker model response's tokens.
+    // AND helper model response's tokens.
     expect(result.usage.totalTokens).toBe(15 + 28 + 40);
-    expect(result.usage.workerCalls).toBe(1);
+    expect(result.usage.helperCalls).toBe(1);
     expect(result.errorCode).toBeUndefined();
   });
 
-  it("rejects an undeclared worker name", async () => {
+  it("rejects an undeclared helper name", async () => {
     const orch = new ScriptedModel([invokeCall("ghost")]);
-    const worker = new ScriptedModel([]);
+    const helper = new ScriptedModel([]);
 
-    const result = await makeRunner(orch, worker).run(assignment(), {
+    const result = await makeRunner(orch, helper).run(assignment(), {
       runId: "run-uuid",
     });
 
     expect(result.status).toBe("FAILED");
     // The tool failure is fed back; the orchestrator eventually fails or
     // retries. With the scripted single response exhausted, the runner
-    // reports a failure — the exact code is WORKER_FAILED-family.
+    // reports a failure — the exact code is HELPER_FAILED-family.
     expect(result.errorCode).toBeTruthy();
   });
 
-  it("rejects a worker model code absent from assignment.models", async () => {
+  it("rejects a helper model code absent from assignment.models", async () => {
     const a = assignment();
-    // Remove the worker model from the catalog but keep the reference.
-    a.models = a.models.filter((m) => m.code !== "worker-model");
+    // Remove the helper model from the catalog but keep the reference.
+    a.models = a.models.filter((m) => m.code !== "helper-model");
     const orch = new ScriptedModel([invokeCall("coder")]);
 
     const runner = new OrchestrationRunner({
@@ -240,7 +240,7 @@ describe("OrchestrationRunner minimal delegation", () => {
           throw new Error(`unexpected model: ${info.modelId}`);
         },
       },
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 1,
         chatModelFactory: {
           resolve: async () => {
@@ -257,11 +257,11 @@ describe("OrchestrationRunner minimal delegation", () => {
     expect(result.errorCode).toBe("ASSIGNMENT_VALIDATION_ERROR");
   });
 
-  it("feeds a worker failure back to the orchestrator; a recovered run completes", async () => {
+  it("feeds a helper failure back to the orchestrator; a recovered run completes", async () => {
     const orch = new ScriptedModel([
       invokeCall("coder"),
       {
-        content: "The worker failed; stopping.",
+        content: "The helper failed; stopping.",
         usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 },
       },
     ]);
@@ -275,19 +275,19 @@ describe("OrchestrationRunner minimal delegation", () => {
       runId: "run-uuid",
     });
 
-    // Design §10.1: expected worker failure is returned as a FAILED tool
+    // Design §10.1: expected helper failure is returned as a FAILED tool
     // result and fed back; the orchestrator recovered and finished.
     expect(result.status).toBe("COMPLETED");
-    expect(result.summary).toBe("The worker failed; stopping.");
-    expect(result.workerCalls[0].status).toBe("FAILED");
-    expect(result.workerCalls[0].errorCode).toBe("WORKER_FAILED");
+    expect(result.summary).toBe("The helper failed; stopping.");
+    expect(result.helperCalls[0].status).toBe("FAILED");
+    expect(result.helperCalls[0].errorCode).toBe("HELPER_FAILED");
   });
 
-  it("returns WORKER_FAILED when the orchestrator cannot recover from the worker failure", async () => {
-    // The orchestrator's turn also fails after the worker failure.
+  it("returns HELPER_FAILED when the orchestrator cannot recover from the helper failure", async () => {
+    // The orchestrator's turn also fails after the helper failure.
     const orch = new ScriptedModel([
       invokeCall("coder"),
-      // Second response also requests the (failing) worker.
+      // Second response also requests the (failing) helper.
       invokeCall("coder"),
       // Then a final failure: the scripted model is exhausted, which throws.
     ]);
@@ -303,7 +303,7 @@ describe("OrchestrationRunner minimal delegation", () => {
           throw new Error(`unexpected model: ${info.modelId}`);
         },
       },
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 1,
         chatModelFactory: {
           resolve: async () => new FailingModel(),
@@ -316,15 +316,15 @@ describe("OrchestrationRunner minimal delegation", () => {
     const result = await runner.run(assignment(), { runId: "run-uuid" });
 
     expect(result.status).toBe("FAILED");
-    expect(result.workerCalls.length).toBeGreaterThan(0);
-    expect(result.workerCalls[0].status).toBe("FAILED");
-    expect(result.workerCalls[0].errorCode).toBe("WORKER_FAILED");
+    expect(result.helperCalls.length).toBeGreaterThan(0);
+    expect(result.helperCalls[0].status).toBe("FAILED");
+    expect(result.helperCalls[0].errorCode).toBe("HELPER_FAILED");
   });
 
-  it("an unrecovered WORKER_FAILED is RETRYABLE and publishes the retry continuation (§16.6/§17.5)", async () => {
-    // The orchestrator delegates once; the worker provider fails; the
+  it("an unrecovered HELPER_FAILED is RETRYABLE and publishes the retry continuation (§16.6/§17.5)", async () => {
+    // The orchestrator delegates once; the helper provider fails; the
     // orchestrator's own turn then fails — the run result carries the
-    // worker's stable code with RETRYABLE + the §7.3 continuation.
+    // helper's stable code with RETRYABLE + the §7.3 continuation.
     const orch = new ScriptedModel([
       invokeCall("coder"),
       invokeCall("coder"),
@@ -342,7 +342,7 @@ describe("OrchestrationRunner minimal delegation", () => {
           throw new Error(`unexpected model: ${info.modelId}`);
         },
       },
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 1,
         chatModelFactory: {
           resolve: async () => new FailingModel(),
@@ -368,7 +368,7 @@ describe("OrchestrationRunner minimal delegation", () => {
     const result = await runner.run(assignment(), { runId: "run-uuid" });
 
     expect(result.status).toBe("FAILED");
-    expect(result.errorCode).toBe("WORKER_FAILED");
+    expect(result.errorCode).toBe("HELPER_FAILED");
     expect(result.retryDisposition).toBe("RETRYABLE");
     // §7.3 ContinuationRecord on the RETRYABLE result.
     expect(result.continuation).toMatchObject({
@@ -382,21 +382,21 @@ describe("OrchestrationRunner minimal delegation", () => {
   });
 
   it("enforces maxOrchestratorIterations independent of model output", async () => {
-    // Orchestrator loops requesting the worker forever. The budget
+    // Orchestrator loops requesting the helper forever. The budget
     // limits are raised so ONLY the iteration cap terminates the loop.
     const a = assignment();
     a.step.orchestration.budget.maxWorkerCalls = 100;
     a.step.orchestration.budget.maxTokens = 100000;
     const loop: ModelResponse[] = Array.from({ length: 30 }, () => invokeCall("coder"));
     const orch = new ScriptedModel(loop);
-    const worker = new ScriptedModel(
+    const helper = new ScriptedModel(
       Array.from({ length: 30 }, () => ({
         content: "done again",
         usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
       })),
     );
 
-    const result = await makeRunner(orch, worker).run(a, {
+    const result = await makeRunner(orch, helper).run(a, {
       runId: "run-uuid",
     });
 
@@ -407,9 +407,9 @@ describe("OrchestrationRunner minimal delegation", () => {
   it("fails with TOKEN_USAGE_UNAVAILABLE for a missing orchestration usage", async () => {
     // Orchestrator returns a final answer with NO usage block.
     const orch = new ScriptedModel([{ content: "Done." }]);
-    const worker = new ScriptedModel([]);
+    const helper = new ScriptedModel([]);
 
-    const result = await makeRunner(orch, worker).run(assignment(), {
+    const result = await makeRunner(orch, helper).run(assignment(), {
       runId: "run-uuid",
     });
 
@@ -423,9 +423,9 @@ describe("OrchestrationRunner minimal delegation", () => {
         throw new Error("orchestrator provider down");
       }
     }
-    const worker = new ScriptedModel([]);
+    const helper = new ScriptedModel([]);
 
-    const result = await makeRunner(new FailingOrchModel(), worker).run(assignment(), {
+    const result = await makeRunner(new FailingOrchModel(), helper).run(assignment(), {
       runId: "run-uuid",
     });
 
@@ -443,14 +443,14 @@ describe("OrchestrationRunner minimal delegation", () => {
     a.step.orchestration.budget.maxWorkerCalls = 100;
     const loop: ModelResponse[] = Array.from({ length: 10 }, () => invokeCall("coder"));
     const orch = new ScriptedModel(loop);
-    const worker = new ScriptedModel(
+    const helper = new ScriptedModel(
       Array.from({ length: 10 }, () => ({
         content: "done",
         usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
       })),
     );
 
-    const result = await makeRunner(orch, worker).run(a, {
+    const result = await makeRunner(orch, helper).run(a, {
       runId: "run-uuid",
       maxFunctionCalls: 2,
     });
@@ -458,8 +458,8 @@ describe("OrchestrationRunner minimal delegation", () => {
     expect(result.status).toBe("FAILED");
     expect(result.errorCode).toBe("ORCHESTRATOR_ITERATION_LIMIT");
     // The ceiling (not the assignment's cap of 20) terminated the run —
-    // the usage reflects 2 orchestrator iterations + 2 worker responses.
-    expect(result.usage.workerCalls).toBe(2);
+    // the usage reflects 2 orchestrator iterations + 2 helper responses.
+    expect(result.usage.helperCalls).toBe(2);
   });
 
   it("keeps the assignment budget as the cap when the host ceiling is looser", async () => {
@@ -468,7 +468,7 @@ describe("OrchestrationRunner minimal delegation", () => {
     const orch = new ScriptedModel(
       Array.from({ length: 8 }, () => invokeCall("coder")),
     );
-    const worker = new ScriptedModel(
+    const helper = new ScriptedModel(
       Array.from({ length: 8 }, () => ({
         content: "done",
         usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
@@ -476,20 +476,20 @@ describe("OrchestrationRunner minimal delegation", () => {
     );
 
     // Host ceiling of 99 never applies — the budget's 1 wins (min).
-    const result = await makeRunner(orch, worker).run(a, {
+    const result = await makeRunner(orch, helper).run(a, {
       runId: "run-uuid",
       maxFunctionCalls: 99,
     });
 
     expect(result.status).toBe("FAILED");
     expect(result.errorCode).toBe("ORCHESTRATOR_ITERATION_LIMIT");
-    expect(result.usage.workerCalls).toBe(1);
+    expect(result.usage.helperCalls).toBe(1);
   });
 
   it("pauses the attempt when the live allowance ceiling is reached", async () => {
     // The assignment budget's token ceiling is generous (100000); the
     // engine's tighten-only allowance (12) is reached after the first
-    // worker call (15 + 28 + 40 = 83 > 12) — the NEXT invoke_worker
+    // helper call (15 + 28 + 40 = 83 > 12) — the NEXT invoke_helper
     // boundary pauses the attempt.
     const allowanceSource = { maxTokens: 12 as number | null };
     const orch = new ScriptedModel([
@@ -497,12 +497,12 @@ describe("OrchestrationRunner minimal delegation", () => {
       invokeCall("coder"),
       { content: "never reached" },
     ]);
-    const worker = new ScriptedModel([
+    const helper = new ScriptedModel([
       { content: "first", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
       { content: "second", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
     ]);
 
-    const result = await makeRunner(orch, worker).run(assignment(), {
+    const result = await makeRunner(orch, helper).run(assignment(), {
       runId: "run-uuid",
       allowanceSource,
     });
@@ -519,15 +519,15 @@ describe("OrchestrationRunner minimal delegation", () => {
       invokeCall("coder"),
       { content: "final answer", usage: { promptTokens: 5, completionTokens: 5, totalTokens: 10 } },
     ]);
-    const worker = new ScriptedModel([
+    const helper = new ScriptedModel([
       { content: "done", usage: { promptTokens: 30, completionTokens: 10, totalTokens: 40 } },
     ]);
 
     // Tighten BEFORE the run: the ceiling (30) is below the accounted usage
-    // the first worker call will reach (15 + 28 + 40) — the next boundary pauses.
+    // the first helper call will reach (15 + 28 + 40) — the next boundary pauses.
     allowanceSource.maxTokens = 30;
 
-    const result = await makeRunner(orch, worker).run(assignment(), {
+    const result = await makeRunner(orch, helper).run(assignment(), {
       runId: "run-uuid",
       allowanceSource,
     });
@@ -540,16 +540,16 @@ describe("OrchestrationRunner minimal delegation", () => {
 
   it("pauses the attempt with EXECUTION_TIMEOUT when the policy timeout has elapsed", async () => {
     // A 0-second deadline arms at run start and is already elapsed by the
-    // first invoke_worker boundary — the worker never runs.
+    // first invoke_helper boundary — the helper never runs.
     const orch = new ScriptedModel([
       invokeCall("coder"),
       { content: "never reached" },
     ]);
-    const worker = new ScriptedModel([
+    const helper = new ScriptedModel([
       { content: "done", usage: { promptTokens: 30, completionTokens: 10, totalTokens: 40 } },
     ]);
 
-    const result = await makeRunner(orch, worker).run(assignment(), {
+    const result = await makeRunner(orch, helper).run(assignment(), {
       runId: "run-uuid",
       executionTimeoutSeconds: 0,
     });
@@ -558,9 +558,9 @@ describe("OrchestrationRunner minimal delegation", () => {
     expect(result.errorCode).toBe("EXECUTION_TIMEOUT");
     expect(result.suspension?.reason).toBe("EXECUTION_TIMEOUT");
     expect(result.retryDisposition).toBe("NONE");
-    // The worker was never invoked — the deadline precedes the call.
-    expect(result.workerCalls).toHaveLength(0);
-    expect(worker.invocations.length).toBe(0);
+    // The helper was never invoked — the deadline precedes the call.
+    expect(result.helperCalls).toHaveLength(0);
+    expect(helper.invocations.length).toBe(0);
   });
 
   it("completes when the policy carries no execution timeout", async () => {
@@ -571,14 +571,14 @@ describe("OrchestrationRunner minimal delegation", () => {
         usage: { promptTokens: 20, completionTokens: 8, totalTokens: 28 },
       },
     ]);
-    const worker = new ScriptedModel([
+    const helper = new ScriptedModel([
       {
         content: "Implementation done.",
         usage: { promptTokens: 30, completionTokens: 10, totalTokens: 40 },
       },
     ]);
 
-    const result = await makeRunner(orch, worker).run(assignment(), {
+    const result = await makeRunner(orch, helper).run(assignment(), {
       runId: "run-uuid",
       executionTimeoutSeconds: null,
     });
@@ -592,9 +592,9 @@ describe("OrchestrationRunner minimal delegation", () => {
 /** An assignment whose completion requires a named verifier. */
 function verifierAssignment(): OrchestrationAssignment {
   const a = assignment();
-  a.step.orchestration.workers.push({
+  a.step.orchestration.helpers.push({
     name: "verifier",
-    modelCode: "worker-model",
+    modelCode: "helper-model",
     capability: "Reviews code",
     allowedTools: ["read_file"],
     allowedCommands: [],
@@ -604,14 +604,14 @@ function verifierAssignment(): OrchestrationAssignment {
 }
 
 /** A VERIFY delegation the orchestrator makes. */
-function verifyCall(workerName: string): ModelResponse {
+function verifyCall(helperName: string): ModelResponse {
   return {
     content: "",
     toolCalls: [
       {
         id: "call-v",
-        name: "invoke_worker",
-        args: { workerName, purpose: "VERIFY", instruction: "Verify the work." },
+        name: "invoke_helper",
+        args: { helperName, purpose: "VERIFY", instruction: "Verify the work." },
       },
     ],
     usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
@@ -629,11 +629,11 @@ describe("OrchestrationRunner verification", () => {
         usage: { promptTokens: 20, completionTokens: 8, totalTokens: 28 },
       },
     ]);
-    // Coder worker: no-op final answer.
+    // Coder helper: no-op final answer.
     const coder = new ScriptedModel([
       { content: "did it", usage: { promptTokens: 30, completionTokens: 10, totalTokens: 40 } },
     ]);
-    // Verifier worker: call report_verdict once, then finish.
+    // Verifier helper: call report_verdict once, then finish.
     const verifier = new ScriptedModel([
       {
         content: "",
@@ -649,24 +649,24 @@ describe("OrchestrationRunner verification", () => {
       { content: "verified", usage: { promptTokens: 4, completionTokens: 2, totalTokens: 6 } },
     ]);
 
-    // Both workers resolve through "worker-model": the coder is invoked
+    // Both helpers resolve through "helper-model": the coder is invoked
     // first, the verifier second — serve from a queue.
-    const workerQueue: ChatModel[] = [coder, verifier];
+    const helperQueue: ChatModel[] = [coder, verifier];
     const runner = new OrchestrationRunner({
       chatModelFactory: {
         resolve: async (info) => {
           if (info.modelId === "orch-model") return orch;
-          const next = workerQueue.shift();
-          if (!next) throw new Error("worker queue exhausted");
+          const next = helperQueue.shift();
+          if (!next) throw new Error("helper queue exhausted");
           return next;
         },
       },
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 1,
         chatModelFactory: {
           resolve: async () => {
-            const next = workerQueue.shift();
-            if (!next) throw new Error("worker queue exhausted");
+            const next = helperQueue.shift();
+            if (!next) throw new Error("helper queue exhausted");
             return next;
           },
         },
@@ -679,7 +679,7 @@ describe("OrchestrationRunner verification", () => {
     expect(result.status).toBe("COMPLETED");
     expect(result.verifierResults).toHaveLength(1);
     expect(result.verifierResults[0].verdict).toBe("APPROVED");
-    expect(result.verifierResults[0].workerName).toBe("verifier");
+    expect(result.verifierResults[0].helperName).toBe("verifier");
     expect(result.verifierResults[0].attemptOrdinal).toBe(1);
     expect(result.usage.rejectionCount).toBe(0);
   });
@@ -702,7 +702,7 @@ describe("OrchestrationRunner verification", () => {
         resolve: async (info) =>
           info.modelId === "orch-model" ? orch : coder,
       },
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 1,
         chatModelFactory: { resolve: async () => coder },
         turnExecutor: new TurnExecutor({}),
@@ -756,7 +756,7 @@ describe("OrchestrationRunner verification", () => {
       chatModelFactory: {
         resolve: async (info) => (info.modelId === "orch-model" ? orch : rejectThenApprove),
       },
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 1,
         chatModelFactory: { resolve: async () => rejectThenApprove },
         turnExecutor: new TurnExecutor({}),
@@ -790,7 +790,7 @@ describe("OrchestrationRunner verification", () => {
       chatModelFactory: {
         resolve: async (info) => (info.modelId === "orch-model" ? orch : lazyVerifier),
       },
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 1,
         chatModelFactory: { resolve: async () => lazyVerifier },
         turnExecutor: new TurnExecutor({}),
@@ -799,13 +799,13 @@ describe("OrchestrationRunner verification", () => {
     });
     const result = await runner.run(verifierAssignment(), { runId: "run-uuid" });
 
-    // The worker call FAILED with INVALID_VERIFIER_RESULT and was fed
+    // The helper call FAILED with INVALID_VERIFIER_RESULT and was fed
     // back; the orchestrator finished anyway, so the completion gate
     // fails with INVALID_VERIFIER_RESULT (no APPROVED record exists).
     expect(result.status).toBe("FAILED");
     expect(result.errorCode).toBe("INVALID_VERIFIER_RESULT");
-    expect(result.workerCalls[0].status).toBe("FAILED");
-    expect(result.workerCalls[0].errorCode).toBe("INVALID_VERIFIER_RESULT");
+    expect(result.helperCalls[0].status).toBe("FAILED");
+    expect(result.helperCalls[0].errorCode).toBe("INVALID_VERIFIER_RESULT");
   });
 
   it("fails a verifier that calls report_verdict twice (first record stands)", async () => {
@@ -840,7 +840,7 @@ describe("OrchestrationRunner verification", () => {
       chatModelFactory: {
         resolve: async (info) => (info.modelId === "orch-model" ? orch : doubleVerifier),
       },
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 1,
         chatModelFactory: { resolve: async () => doubleVerifier },
         turnExecutor: new TurnExecutor({}),
@@ -858,16 +858,16 @@ describe("OrchestrationRunner verification", () => {
     expect(result.verifierResults[0].verdict).toBe("REJECTED");
   });
 
-  it("rejects a VERIFY delegation to a worker not in requireVerificationBy", async () => {
+  it("rejects a VERIFY delegation to a helper not in requireVerificationBy", async () => {
     const orch = new ScriptedModel([
-      // coder is a declared worker but NOT a required verifier.
+      // coder is a declared helper but NOT a required verifier.
       {
         content: "",
         toolCalls: [
           {
             id: "call-bad",
-            name: "invoke_worker",
-            args: { workerName: "coder", purpose: "VERIFY", instruction: "verify" },
+            name: "invoke_helper",
+            args: { helperName: "coder", purpose: "VERIFY", instruction: "verify" },
           },
         ],
         usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
@@ -885,7 +885,7 @@ describe("OrchestrationRunner verification", () => {
       chatModelFactory: {
         resolve: async (info) => (info.modelId === "orch-model" ? orch : coder),
       },
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 1,
         chatModelFactory: { resolve: async () => coder },
         turnExecutor: new TurnExecutor({}),
@@ -902,7 +902,7 @@ describe("OrchestrationRunner verification", () => {
 // ── budgets (Feature 7, design §13) ──────────────────────────────────
 
 describe("OrchestrationRunner budget enforcement", () => {
-  it("stops at maxWorkerCalls with WORKER_BUDGET_EXCEEDED (FAIL)", async () => {
+  it("stops at maxWorkerCalls with HELPER_BUDGET_EXCEEDED (FAIL)", async () => {
     const a = assignment();
     a.step.orchestration.budget.maxWorkerCalls = 1;
     a.step.orchestration.budget.onBudgetExceeded = "FAIL";
@@ -915,18 +915,18 @@ describe("OrchestrationRunner budget enforcement", () => {
         usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 },
       },
     ]);
-    const worker = new ScriptedModel([
+    const helper = new ScriptedModel([
       { content: "ok", usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 } },
     ]);
-    const result = await makeRunner(orch, worker).run(a, { runId: "run-uuid" });
+    const result = await makeRunner(orch, helper).run(a, { runId: "run-uuid" });
 
     expect(result.status).toBe("FAILED");
-    expect(result.errorCode).toBe("WORKER_BUDGET_EXCEEDED");
+    expect(result.errorCode).toBe("HELPER_BUDGET_EXCEEDED");
     expect(result.retryDisposition).toBe("TERMINAL");
-    // Exactly one worker call executed; the second was rejected before
-    // any worker execution.
-    expect(result.workerCalls).toHaveLength(1);
-    expect(result.usage.workerCalls).toBe(1);
+    // Exactly one helper call executed; the second was rejected before
+    // any helper execution.
+    expect(result.helperCalls).toHaveLength(1);
+    expect(result.usage.helperCalls).toBe(1);
   });
 
   it("stops at maxTokens with TOKEN_BUDGET_EXCEEDED when onBudgetExceeded=FAIL", async () => {
@@ -943,10 +943,10 @@ describe("OrchestrationRunner budget enforcement", () => {
         usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
       },
     ]);
-    const worker = new ScriptedModel([
+    const helper = new ScriptedModel([
       { content: "ok", usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 } },
     ]);
-    const result = await makeRunner(orch, worker).run(a, { runId: "run-uuid" });
+    const result = await makeRunner(orch, helper).run(a, { runId: "run-uuid" });
 
     expect(result.status).toBe("FAILED");
     expect(result.errorCode).toBe("TOKEN_BUDGET_EXCEEDED");
@@ -961,14 +961,14 @@ describe("OrchestrationRunner budget enforcement", () => {
       invokeCall("coder"),
       invokeCall("coder"),
     ]);
-    const worker = new ScriptedModel([
+    const helper = new ScriptedModel([
       { content: "ok", usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 } },
     ]);
-    const result = await makeRunner(orch, worker).run(a, { runId: "run-uuid" });
+    const result = await makeRunner(orch, helper).run(a, { runId: "run-uuid" });
 
     expect(result.status).toBe("PAUSED");
     expect(result.retryDisposition).toBe("NONE");
-    expect(result.errorCode).toBe("WORKER_BUDGET_EXCEEDED");
+    expect(result.errorCode).toBe("HELPER_BUDGET_EXCEEDED");
     expect(result.suspension).toBeDefined();
     expect(result.suspension!.reason).toBe("BUDGET_REVIEW");
     expect(result.suspension!.continuationId).toBeTruthy();
@@ -1011,7 +1011,7 @@ describe("OrchestrationRunner budget enforcement", () => {
       chatModelFactory: {
         resolve: async (info) => (info.modelId === "orch-model" ? orch : makeRejectingVerifier()),
       },
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 1,
         chatModelFactory: { resolve: async () => makeRejectingVerifier() },
         turnExecutor: new TurnExecutor({}),
@@ -1039,7 +1039,7 @@ describe("OrchestrationRunner budget enforcement", () => {
         usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 },
       },
     ]);
-    const worker = new ScriptedModel([
+    const helper = new ScriptedModel([
       { content: "ok", usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 } },
     ]);
     let checkpointCalls = 0;
@@ -1047,12 +1047,12 @@ describe("OrchestrationRunner budget enforcement", () => {
       chatModelFactory: {
         resolve: async (info) => {
           if (info.modelId === "orch-model") return orch;
-          return worker;
+          return helper;
         },
       },
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 1,
-        chatModelFactory: { resolve: async () => worker },
+        chatModelFactory: { resolve: async () => helper },
         turnExecutor: new TurnExecutor({}),
       }),
       turnExecutor: new TurnExecutor({}),
@@ -1079,8 +1079,8 @@ describe("OrchestrationRunner budget enforcement", () => {
 // ── HITL suspension (design §17.4) ───────────────────────────────────
 
 describe("OrchestrationRunner HITL suspension", () => {
-  it("suspends BEFORE the worker starts and returns PAUSED with the suspension record", async () => {
-    const worker = new ScriptedModel([
+  it("suspends BEFORE the helper starts and returns PAUSED with the suspension record", async () => {
+    const helper = new ScriptedModel([
       { content: "never reached", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
     ]);
     // The orchestrator delegates once; the turn then ends (the
@@ -1088,14 +1088,14 @@ describe("OrchestrationRunner HITL suspension", () => {
     const orchestrator = new ScriptedModel([invokeCall("coder")]);
 
     const requests: unknown[] = [];
-    let workerInvocations = 0;
-    const invoker = new WorkerInvoker({
+    let helperInvocations = 0;
+    const invoker = new HelperInvoker({
       attemptOrdinal: 1,
       chatModelFactory: {
         resolve: async (info) => {
-          if (info.modelId === "worker-model") {
-            workerInvocations += 1;
-            return worker;
+          if (info.modelId === "helper-model") {
+            helperInvocations += 1;
+            return helper;
           }
           throw new Error(`unexpected model: ${info.modelId}`);
         },
@@ -1110,10 +1110,10 @@ describe("OrchestrationRunner HITL suspension", () => {
           throw new Error(`unexpected model: ${info.modelId}`);
         },
       },
-      workerInvoker: invoker,
+      helperInvoker: invoker,
       turnExecutor: new TurnExecutor({}),
       approvalEvaluator: {
-        // Every worker invocation requires approval.
+        // Every helper invocation requires approval.
         evaluate: () => ({
           outcome: "REQUIRE_APPROVAL",
           expiresAt: "2026-09-07T12:00:00.000Z",
@@ -1127,15 +1127,15 @@ describe("OrchestrationRunner HITL suspension", () => {
 
     expect(result.status).toBe("PAUSED");
     expect(result.retryDisposition).toBe("NONE");
-    // §17.4: the worker NEVER started — suspension happens once, before
-    // the worker runs.
-    expect(workerInvocations).toBe(0);
+    // §17.4: the helper NEVER started — suspension happens once, before
+    // the helper runs.
+    expect(helperInvocations).toBe(0);
     // The suspension record carries the durable continuation + pending
     // action + expiry.
     expect(result.suspension).toMatchObject({
       reason: "HITL_APPROVAL",
       expiresAt: "2026-09-07T12:00:00.000Z",
-      pendingAction: { type: "WORKER_TOOL", summary: "worker:coder:IMPLEMENT" },
+      pendingAction: { type: "HELPER_TOOL", summary: "helper:coder:IMPLEMENT" },
     });
     expect(result.suspension?.approvalRequestId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
@@ -1163,11 +1163,11 @@ describe("OrchestrationRunner HITL suspension", () => {
           throw new Error(`unexpected: ${info.modelId}`);
         },
       },
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 1,
         chatModelFactory: {
           resolve: async () => {
-            throw new Error("worker must not resolve on DENY");
+            throw new Error("helper must not resolve on DENY");
           },
         },
         turnExecutor: new TurnExecutor({}),
@@ -1203,11 +1203,11 @@ describe("OrchestrationRunner HITL suspension", () => {
           throw new Error(`unexpected: ${info.modelId}`);
         },
       },
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 1,
         chatModelFactory: {
           resolve: async () => {
-            throw new Error("worker must not start");
+            throw new Error("helper must not start");
           },
         },
         turnExecutor: new TurnExecutor({}),
@@ -1232,8 +1232,8 @@ describe("OrchestrationRunner HITL suspension", () => {
     expect(result.summary).toContain("failing closed");
   });
 
-  it("SAFE worker invocations execute without approval when no policy rule applies", async () => {
-    const worker = new ScriptedModel([
+  it("SAFE helper invocations execute without approval when no policy rule applies", async () => {
+    const helper = new ScriptedModel([
       { content: "done", usage: { promptTokens: 8, completionTokens: 3, totalTokens: 11 } },
     ]);
     const orchestrator = new ScriptedModel([
@@ -1245,15 +1245,15 @@ describe("OrchestrationRunner HITL suspension", () => {
       chatModelFactory: {
         resolve: async (info) => {
           if (info.modelId === "orch-model") return orchestrator;
-          if (info.modelId === "worker-model") return worker;
+          if (info.modelId === "helper-model") return helper;
           throw new Error(`unexpected: ${info.modelId}`);
         },
       },
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 1,
         chatModelFactory: {
           resolve: async (info) => {
-            if (info.modelId === "worker-model") return worker;
+            if (info.modelId === "helper-model") return helper;
             throw new Error(`unexpected: ${info.modelId}`);
           },
         },
@@ -1270,7 +1270,7 @@ describe("OrchestrationRunner HITL suspension", () => {
     const result = await runner.run(assignment(), { runId: "run-uuid" });
 
     expect(result.status).toBe("COMPLETED");
-    expect(result.workerCalls).toHaveLength(1);
+    expect(result.helperCalls).toHaveLength(1);
   });
 });
 
@@ -1317,9 +1317,9 @@ describe("OrchestrationRunner HITL resume", () => {
       approvalRequestId: "11111111-1111-4111-8111-111111111111",
       pendingAction: {
         actionId: "action-1",
-        type: "WORKER_TOOL",
+        type: "HELPER_TOOL",
         riskClass: "DESTRUCTIVE" as const,
-        summary: "worker:coder:IMPLEMENT",
+        summary: "helper:coder:IMPLEMENT",
         digest: "a".repeat(64),
       },
       expiresAt: "2999-01-01T00:00:00Z",
@@ -1328,7 +1328,7 @@ describe("OrchestrationRunner HITL resume", () => {
 
   function makeResumeRunner(
     orchestrator: ScriptedModel,
-    worker: ScriptedModel,
+    helper: ScriptedModel,
     loader?: {
       load: (
         id: string,
@@ -1339,15 +1339,15 @@ describe("OrchestrationRunner HITL resume", () => {
       chatModelFactory: {
         resolve: async (info) => {
           if (info.modelId === "orch-model") return orchestrator;
-          if (info.modelId === "worker-model") return worker;
+          if (info.modelId === "helper-model") return helper;
           throw new Error(`unexpected: ${info.modelId}`);
         },
       },
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 2,
         chatModelFactory: {
           resolve: async (info) => {
-            if (info.modelId === "worker-model") return worker;
+            if (info.modelId === "helper-model") return helper;
             throw new Error(`unexpected: ${info.modelId}`);
           },
         },
@@ -1365,20 +1365,20 @@ describe("OrchestrationRunner HITL resume", () => {
       invokeCall("coder"),
       { content: "Resumed and done.", usage: { promptTokens: 20, completionTokens: 6, totalTokens: 26 } },
     ]);
-    const worker = new ScriptedModel([
+    const helper = new ScriptedModel([
       { content: "ok", usage: { promptTokens: 8, completionTokens: 3, totalTokens: 11 } },
     ]);
-    const result = await makeResumeRunner(orchestrator, worker).run(resumeAssignment(), {
+    const result = await makeResumeRunner(orchestrator, helper).run(resumeAssignment(), {
       runId: "run-uuid",
     });
 
     expect(result.status).toBe("COMPLETED");
-    expect(result.workerCalls).toHaveLength(1);
+    expect(result.helperCalls).toHaveLength(1);
   });
 
   it("a decision-bearing continuation without a suspension loader fails closed", async () => {
     const orchestrator = new ScriptedModel([invokeCall("coder")]);
-    const worker = new ScriptedModel([
+    const helper = new ScriptedModel([
       { content: "never", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
     ]);
     // No suspensionLoader wired.
@@ -1386,13 +1386,13 @@ describe("OrchestrationRunner HITL resume", () => {
       chatModelFactory: {
         resolve: async (info) => {
           if (info.modelId === "orch-model") return orchestrator;
-          if (info.modelId === "worker-model") return worker;
+          if (info.modelId === "helper-model") return helper;
           throw new Error(`unexpected: ${info.modelId}`);
         },
       },
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 2,
-        chatModelFactory: { resolve: async () => worker },
+        chatModelFactory: { resolve: async () => helper },
         turnExecutor: new TurnExecutor({}),
       }),
       turnExecutor: new TurnExecutor({}),
@@ -1402,15 +1402,15 @@ describe("OrchestrationRunner HITL resume", () => {
     expect(outcome.status).toBe("FAILED");
     expect(outcome.errorCode).toBe("APPROVAL_POLICY_DENIED");
     expect(outcome.summary).toContain("failing closed");
-    expect(outcome.workerCalls).toHaveLength(0);
+    expect(outcome.helperCalls).toHaveLength(0);
   });
 
   it("an unrestorable suspension (loader returns null) fails closed", async () => {
     const orchestrator = new ScriptedModel([invokeCall("coder")]);
-    const worker = new ScriptedModel([
+    const helper = new ScriptedModel([
       { content: "never", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
     ]);
-    const runner = makeResumeRunner(orchestrator, worker, {
+    const runner = makeResumeRunner(orchestrator, helper, {
       load: () => null,
     });
     const result = await runner.run(resumeAssignment(), { runId: "run-uuid" });
@@ -1418,15 +1418,15 @@ describe("OrchestrationRunner HITL resume", () => {
     expect(result.status).toBe("FAILED");
     expect(result.errorCode).toBe("APPROVAL_POLICY_DENIED");
     expect(result.summary).toContain("unrestorable");
-    expect(result.workerCalls).toHaveLength(0);
+    expect(result.helperCalls).toHaveLength(0);
   });
 
   it("a decision whose digests do not bind the suspension fails closed", async () => {
     const orchestrator = new ScriptedModel([invokeCall("coder")]);
-    const worker = new ScriptedModel([
+    const helper = new ScriptedModel([
       { content: "never", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
     ]);
-    const runner = makeResumeRunner(orchestrator, worker, {
+    const runner = makeResumeRunner(orchestrator, helper, {
       // The stored suspension drifted (state digest differs).
       load: (id) =>
         id === "cont-1"
@@ -1444,28 +1444,28 @@ describe("OrchestrationRunner HITL resume", () => {
     expect(result.status).toBe("FAILED");
     expect(result.errorCode).toBe("APPROVAL_POLICY_DENIED");
     expect(result.summary).toContain("stateDigest");
-    expect(result.workerCalls).toHaveLength(0);
+    expect(result.helperCalls).toHaveLength(0);
   });
 
   it("an expired decision fails closed with APPROVAL_EXPIRED", async () => {
     const a = resumeAssignment();
     a.continuation!.decision!.expiresAt = "2020-01-01T00:00:00Z";
     const orchestrator = new ScriptedModel([invokeCall("coder")]);
-    const worker = new ScriptedModel([
+    const helper = new ScriptedModel([
       { content: "never", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
     ]);
-    const runner = makeResumeRunner(orchestrator, worker);
+    const runner = makeResumeRunner(orchestrator, helper);
     const result = await runner.run(a, { runId: "run-uuid" });
 
     expect(result.status).toBe("FAILED");
     expect(result.errorCode).toBe("APPROVAL_EXPIRED");
-    expect(result.workerCalls).toHaveLength(0);
+    expect(result.helperCalls).toHaveLength(0);
   });
 
   it("a non-decision continuation (engine retry) fails closed without a restorable manifest", async () => {
     // §16.6/§17.5: the engine retries ONLY with a valid continuation —
     // a retry dispatch whose manifest cannot be restored fails closed
-    // (RECOVERY_SNAPSHOT_INVALID) and no worker call executes.
+    // (RECOVERY_SNAPSHOT_INVALID) and no helper call executes.
     const a = assignment();
     a.dispatch.continuationId = "cont-retry";
     a.continuation = {
@@ -1476,20 +1476,20 @@ describe("OrchestrationRunner HITL resume", () => {
       invokeCall("coder"),
       { content: "never reached", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
     ]);
-    const worker = new ScriptedModel([
+    const helper = new ScriptedModel([
       { content: "never", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
     ]);
     const runner = new OrchestrationRunner({
       chatModelFactory: {
         resolve: async (info) => {
           if (info.modelId === "orch-model") return orchestrator;
-          if (info.modelId === "worker-model") return worker;
+          if (info.modelId === "helper-model") return helper;
           throw new Error(`unexpected: ${info.modelId}`);
         },
       },
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 2,
-        chatModelFactory: { resolve: async () => worker },
+        chatModelFactory: { resolve: async () => helper },
         turnExecutor: new TurnExecutor({}),
       }),
       turnExecutor: new TurnExecutor({}),
@@ -1499,7 +1499,7 @@ describe("OrchestrationRunner HITL resume", () => {
     expect(result.status).toBe("FAILED");
     expect(result.errorCode).toBe("RECOVERY_SNAPSHOT_INVALID");
     expect(result.summary).toContain("could not be restored");
-    expect(result.workerCalls).toHaveLength(0);
+    expect(result.helperCalls).toHaveLength(0);
   });
 
   it("a retry continuation restores the verifier history and budget-free state", async () => {
@@ -1517,14 +1517,14 @@ describe("OrchestrationRunner HITL resume", () => {
       continuationId: "cont-retry",
       dispatchId: "attempt-uuid",
       attemptOrdinal: 1,
-      budgetCounters: { workerCalls: 5, totalTokens: 999, rejectionCount: 0 },
+      budgetCounters: { helperCalls: 5, totalTokens: 999, rejectionCount: 0 },
       completedCallIds: [],
       candidateTreeHash: "",
       workspaceRevision: 0,
       verifierHistory: [
         {
           callId: "11111111-1111-4111-8111-111111111111",
-          workerName: "verifier",
+          helperName: "verifier",
           verdict: "APPROVED",
           summary: "ok",
           issues: [],
@@ -1541,20 +1541,20 @@ describe("OrchestrationRunner HITL resume", () => {
       invokeCall("coder"),
       { content: "Retried and done.", usage: { promptTokens: 20, completionTokens: 6, totalTokens: 26 } },
     ]);
-    const worker = new ScriptedModel([
+    const helper = new ScriptedModel([
       { content: "ok", usage: { promptTokens: 8, completionTokens: 3, totalTokens: 11 } },
     ]);
     const runner = new OrchestrationRunner({
       chatModelFactory: {
         resolve: async (info) => {
           if (info.modelId === "orch-model") return orchestrator;
-          if (info.modelId === "worker-model") return worker;
+          if (info.modelId === "helper-model") return helper;
           throw new Error(`unexpected: ${info.modelId}`);
         },
       },
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 2,
-        chatModelFactory: { resolve: async () => worker },
+        chatModelFactory: { resolve: async () => helper },
         turnExecutor: new TurnExecutor({}),
       }),
       turnExecutor: new TurnExecutor({}),
@@ -1565,7 +1565,7 @@ describe("OrchestrationRunner HITL resume", () => {
     expect(result.status).toBe("COMPLETED");
     // §17.5: the restored verifier history rides the evidence.
     expect(
-      result.verifierResults.map((v) => ({ workerName: v.workerName, verdict: v.verdict })),
-    ).toContainEqual({ workerName: "verifier", verdict: "APPROVED" });
+      result.verifierResults.map((v) => ({ helperName: v.helperName, verdict: v.verdict })),
+    ).toContainEqual({ helperName: "verifier", verdict: "APPROVED" });
   });
 });

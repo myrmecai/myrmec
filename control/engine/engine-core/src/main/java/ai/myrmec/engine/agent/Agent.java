@@ -11,7 +11,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Agent entity - a single worker that serves one session at a time,
+ * Agent entity - a single execution body that serves one session at a time,
  * hosted by an Agent Host. Reports runtime info and heartbeat.
  */
 @Entity
@@ -43,7 +43,7 @@ public class Agent {
     private UUID agentHostId;
 
     /**
-     * The live supervisor run that minted/serves this worker (protocol §19.1
+     * The live supervisor run that minted/serves this Agent (protocol §19.1
      * decision 1: rows are minted at session.opened). FK is ON DELETE SET
      * NULL — instance retention nulls the reference, never deletes work
      * records (design §3.2a).
@@ -92,8 +92,8 @@ public class Agent {
     private Instant registeredAt;
 
     /**
-     * When this worker last changed FSM {@link Status}. The reserve/connect
-     * timeout reapers measure age from here (agent-concurrency §9.5): a worker
+     * When this Agent last changed FSM {@link Status}. The reserve/connect
+     * timeout reapers measure age from here (agent-concurrency §9.5): an Agent
      * stuck in {@code RESERVED} or {@code CONNECTING} past the cutoff is
      * reclaimed to {@code IDLE}. Distinct from {@link #lastHeartbeatAt} (which
      * tracks liveness, not lifecycle progress).
@@ -133,11 +133,11 @@ public class Agent {
 
     /**
      * Record a heartbeat from this instance. A live heartbeat from a warm,
-     * unbound worker keeps it {@code IDLE} (available in the pool); a
-     * heartbeat from a worker that had been reaped to {@code DEAD} revives
-     * it back into the pool. A worker that is mid-lifecycle
+     * unbound Agent keeps it {@code IDLE} (available in the pool); a
+     * heartbeat from an Agent that had been reaped to {@code DEAD} revives
+     * it back into the pool. An Agent that is mid-lifecycle
      * ({@code RESERVED}/{@code CONNECTING}/{@code BOUND}/{@code DRAINING})
-     * keeps that status — a heartbeat must never yank a bound worker back
+     * keeps that status — a heartbeat must never yank a bound Agent back
      * into the available pool (agent-concurrency §9.5).
      */
     public void recordHeartbeat() {
@@ -148,9 +148,9 @@ public class Agent {
     }
 
     /**
-     * Release this worker from its current binding back into the warm pool:
+     * Release this Agent from its current binding back into the warm pool:
      * {@code -> IDLE} with the conversation/profile-version binding cleared.
-     * Idempotent — safe to call on an already-idle worker.
+     * Idempotent — safe to call on an already-idle Agent.
      */
     public void release() {
         this.status = Status.IDLE;
@@ -161,8 +161,8 @@ public class Agent {
     }
 
     /**
-     * Mark this worker {@code CONNECTING} once the Agent Host has acked the
-     * {@code agent.bind} and its worker is dialing the home node
+     * Mark this Agent {@code CONNECTING} once the Agent Host has acked the
+     * {@code agent.bind} and its Agent is dialing the home node
      * (agent-concurrency §9.5). Resets the reaper clock so the connect-timeout
      * window is measured from the ack, not from the original reserve.
      */
@@ -172,7 +172,7 @@ public class Agent {
     }
 
     /**
-     * Mark this worker {@code BOUND} after its conversation socket has
+     * Mark this Agent {@code BOUND} after its conversation socket has
      * attached to the home node (agent-concurrency §9.4/§9.5). Pins the
      * replica that now holds the conversation socket so the cross-node
      * router can address turns to it.
@@ -184,13 +184,13 @@ public class Agent {
     }
 
     /**
-     * Re-home this worker after its home node was lost (agent-concurrency
+     * Re-home this Agent after its home node was lost (agent-concurrency
      * §9.11): {@code BOUND → CONNECTING}, clearing {@code home_node_id} so the
      * cross-node router stops addressing the dead replica, and re-arming the
      * connect-timeout clock via {@link #touchState()} so a failed re-home is
      * reclaimed by the existing {@code CONNECT_TIMEOUT} reaper. Under the
-     * unified protocol (P6-T6) the legacy re-homing sweep is deleted: a
-     * worker whose host instance is lost is closed, and a future dispatch
+     * unified protocol (P6-T6) the legacy re-homing sweep is deleted: an
+     * Agent whose host instance is lost is closed, and a future dispatch
      * re-offers a fresh session on a live host.
      * marked {@code DOWN} but its agent host is still alive.
      */
@@ -201,7 +201,7 @@ public class Agent {
     }
 
     /**
-     * Mark this worker {@code DRAINING} — finishing its current work before
+     * Mark this Agent {@code DRAINING} — finishing its current work before
      * being released back to the pool (agent-concurrency §9.5). Used by the
      * graceful soft-release / host-drain paths.
      */
@@ -211,7 +211,7 @@ public class Agent {
     }
 
     /**
-     * Mark this worker offline (control/connection closed). Removes it from
+     * Mark this Agent offline (control/connection closed). Removes it from
      * the warm pool by flipping it to {@code DEAD}.
      */
     public void markOffline() {
@@ -220,7 +220,7 @@ public class Agent {
     }
 
     /**
-     * Mark this worker dead after a transport error. Same terminal state as
+     * Mark this Agent dead after a transport error. Same terminal state as
      * {@link #markOffline()} — the new FSM has no separate error state.
      */
     public void markError() {

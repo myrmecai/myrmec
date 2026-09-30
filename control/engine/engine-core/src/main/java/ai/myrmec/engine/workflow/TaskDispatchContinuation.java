@@ -41,7 +41,7 @@ import java.util.UUID;
  *       &sect;6.1 context only.</li>
  *   <li>{@code session.opened} &rarr; {@link #onSessionOpened}: the session is
  *       ACTIVE &mdash; mint the execution row, ship {@code execution.start}, and
- *       bind the engine-authored attempt to the worker the allocator minted for
+ *       bind the engine-authored attempt to the Agent the allocator minted for
  *       the serving slot.</li>
  * </ol>
  *
@@ -126,7 +126,7 @@ public class TaskDispatchContinuation {
 
     /**
      * &sect;7.4/&sect;8.1: the session is ACTIVE &mdash; mint the execution row,
-     * ship {@code execution.start}, and bind the attempt to the serving worker.
+     * ship {@code execution.start}, and bind the attempt to the serving Agent.
      */
     @Transactional
     public void onSessionOpened(UUID sessionId) {
@@ -180,7 +180,7 @@ public class TaskDispatchContinuation {
             return;
         }
 
-        bindAttemptToServingWorker(session, context);
+        bindAttemptToServingAgent(session, context);
         log.info("Shipped staged workflow dispatch for session {} (task {}, execution {}, orchestration {})",
                 sessionId, context.taskId(), execution.getId(), context.orchestration());
     }
@@ -236,33 +236,33 @@ public class TaskDispatchContinuation {
                 task, session.getId(), context.stepIndex());
     }
     /**
-     * &sect;19.1: the worker serving this session is the Agent row the allocator
+     * &sect;19.1: the Agent serving this session is the Agent row the allocator
      * minted at {@code session.opened} (stamped with the request id and the live
      * instance). The attempt created at dispatch time is bound to it so
      * task/attempt reads and the orchestration outcome path resolve the
      * coordinator row exactly as they did on the legacy path.
      */
-    private void bindAttemptToServingWorker(Session session, TaskDispatchContext context) {
+    private void bindAttemptToServingAgent(Session session, TaskDispatchContext context) {
         UUID hostedBy = hostIdOf(session);
-        Agent worker = hostedBy == null ? null
+        Agent agent = hostedBy == null ? null
                 : agentRepository.findByAgentHostId(hostedBy).stream()
                         .filter(a -> session.getHostInstanceId() != null
                                 && session.getHostInstanceId().equals(a.getAgentHostInstanceId()))
                         .filter(a -> context.requestId().equals(a.getConversationId()))
                         .findFirst()
                         .orElse(null);
-        if (worker == null) {
-            log.warn("No serving worker row for session {} (request {}) â€” attempt {} left unbound",
+        if (agent == null) {
+            log.warn("No serving Agent row for session {} (request {}) â€” attempt {} left unbound",
                     session.getId(), context.requestId(), context.attemptId());
             return;
         }
         WorkflowTask task = taskRepository.findById(context.taskId()).orElse(null);
         if (task != null) {
-            task.setAgentInstance(worker);
+            task.setAgentInstance(agent);
             taskRepository.save(task);
         }
         attemptRepository.findById(context.attemptId()).ifPresent(attempt -> {
-            attempt.setAgentInstance(worker);
+            attempt.setAgentInstance(agent);
             attemptRepository.save(attempt);
         });
     }

@@ -515,7 +515,7 @@ $workflowBody = @{
                 goal = "Build a working Spring Boot REST API for address-book based on requirements."
                 specPath = "addressbook/docs/requirements.md"
                 sourceSubPath = "addressbook/backend"
-                workers = @(
+                helpers = @(
                     @{ name = "coder"; modelCode = "kimi-k2-7-code"; capability = "Writes Java, Spring Boot, JPA, and Maven configuration"; allowedTools = @("read_file", "write_file", "list_directory"); allowedCommands = @("mvnw") }
                     @{ name = "code-reviewer"; modelCode = "deepseek-v4-pro"; capability = "Reviews generated code against security, quality, and requirement specs"; allowedTools = @("read_file", "list_directory"); allowedCommands = @() }
                     @{ name = "test-runner"; modelCode = "kimi-k2-7-code"; capability = "Executes unit and integration tests, reports failures and stack traces"; allowedTools = @("execute_command", "read_file"); allowedCommands = @("mvnw") }
@@ -540,7 +540,7 @@ $workflowBody = @{
                 goal = "Implement React UI components for managing contacts."
                 specPath = "addressbook/docs/ui-requirements.md"
                 sourceSubPath = "addressbook/ui"
-                workers = @(
+                helpers = @(
                     @{ name = "fe-coder"; modelCode = "kimi-k2-7-code"; capability = "Writes React components, hooks, services, and CSS"; allowedTools = @("read_file", "write_file"); allowedCommands = @("npm-test") }
                     @{ name = "ui-reviewer"; modelCode = "deepseek-v4-pro"; capability = "Verifies component structure and accessibility standards"; allowedTools = @("read_file"); allowedCommands = @() }
                     @{ name = "ui-test-runner"; modelCode = "kimi-k2-7-code"; capability = "Executes React unit and integration tests (Vitest/Testing Library), reports failures"; allowedTools = @("execute_command", "read_file"); allowedCommands = @("npm-test") }
@@ -565,7 +565,7 @@ $workflowBody = @{
                 goal = "Write Playwright tests and run end-to-end suite against frontend and backend."
                 specPath = $null
                 sourceSubPath = "addressbook"
-                workers = @(
+                helpers = @(
                     @{ name = "e2e-tester"; modelCode = "kimi-k2-7-code"; capability = "Writes and executes Playwright integration tests"; allowedTools = @("read_file", "write_file", "execute_command"); allowedCommands = @("playwright-test") }
                     @{ name = "e2e-runner"; modelCode = "kimi-k2-7-code"; capability = "Executes Playwright end-to-end scenarios against the integrated stack"; allowedTools = @("execute_command", "read_file"); allowedCommands = @("playwright-test") }
                 )

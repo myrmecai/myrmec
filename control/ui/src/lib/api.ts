@@ -796,7 +796,7 @@ export const agentProfilesApi = {
 }
 
 // Agent Hosts API
-export type AgentStatus = 'ACTIVE' | 'INACTIVE'
+export type AgentHostStatus = 'ACTIVE' | 'INACTIVE'
 export type AgentHostType = 'MANAGED' | 'LOCAL' | 'DEDICATED'
 export type ModelAccessMode = 'DIRECT' | 'GATEWAY'
 
@@ -807,7 +807,7 @@ export interface AgentHost {
   projectId: string | null
   projectName: string | null
   maxAgents: number
-  status: AgentStatus
+  status: AgentHostStatus
   hostType: AgentHostType
   modelAccessMode: ModelAccessMode
   activeInstanceCount: number
@@ -816,7 +816,7 @@ export interface AgentHost {
 }
 
 export interface AgentHostWithKey {
-  agent: AgentHost
+  agentHost: AgentHost
   registrationKey: string
 }
 
@@ -839,7 +839,7 @@ export interface UpdateAgentHostRequest {
   description?: string
   projectId?: string
   maxAgents?: number
-  status?: AgentStatus
+  status?: AgentHostStatus
   modelAccessMode?: ModelAccessMode
 }
 
@@ -855,10 +855,10 @@ export const agentHostsApi = {
   regenerateKey: (id: string) =>
     api.post<{ registrationKey: string }>(`/admin/agent-hosts/${id}/regenerate-key`),
   /**
-   * List the ephemeral worker replicas of an agent host together with their
+   * List the ephemeral Agents of an agent host together with their
    * runtime FSM status (IDLE/RESERVED/CONNECTING/BOUND/DRAINING/DEAD).
    */
-  workers: (id: string) => api.get<AgentWorker[]>(`/admin/agent-hosts/${id}/workers`),
+  agents: (id: string) => api.get<Agent[]>(`/admin/agent-hosts/${id}/agents`),
   /**
    * Aggregated runtime-health snapshot for an agent host: online/idle/busy/
    * stale instance counts, total queue depth, and heartbeat freshness (#69).
@@ -892,8 +892,8 @@ export interface AgentHealthSnapshot {
   instances: AgentInstanceHealth[]
 }
 
-// The runtime FSM of an ephemeral worker replica (agent-concurrency §9.5).
-export type AgentWorkerStatus =
+// The runtime FSM of an ephemeral Agent (agent-concurrency §9.5).
+export type AgentStatus =
   | 'IDLE'
   | 'RESERVED'
   | 'CONNECTING'
@@ -901,14 +901,14 @@ export type AgentWorkerStatus =
   | 'DRAINING'
   | 'DEAD'
 
-export interface AgentWorker {
+export interface Agent {
   id: string
   agentHostId: string
   conversationId: string | null
   hostname: string | null
   ipAddress: string | null
   runtimeVersion: string | null
-  status: AgentWorkerStatus | null
+  status: AgentStatus | null
   registeredAt: string | null
   lastHeartbeatAt: string | null
   stateChangedAt: string | null

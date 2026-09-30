@@ -49,7 +49,7 @@ export interface RetryPolicy {
   maxBackoffSeconds: number;
 }
 
-export interface WorkerAuthoring {
+export interface HelperAuthoring {
   name: string;
   modelCode: string;
   capability: string;
@@ -62,7 +62,7 @@ export interface OrchestrationPolicyAuthoring {
   goal: string;
   specPath: string | null;
   sourceSubPath: string;
-  workers: WorkerAuthoring[];
+  helpers: HelperAuthoring[];
   checkpointStrategy: {
     mode: "ON_VERIFICATION_PASS";
     commitMessage: string;
@@ -228,9 +228,9 @@ export type OrchestrationErrorCode =
   | "ASSIGNMENT_VALIDATION_ERROR"
   | "ORCHESTRATOR_FAILED"
   | "ORCHESTRATOR_ITERATION_LIMIT"
-  | "WORKER_FAILED"
-  | "WORKER_ITERATION_LIMIT"
-  | "WORKER_BUDGET_EXCEEDED"
+  | "HELPER_FAILED"
+  | "HELPER_ITERATION_LIMIT"
+  | "HELPER_BUDGET_EXCEEDED"
   | "TOKEN_BUDGET_EXCEEDED"
   | "TOKEN_USAGE_UNAVAILABLE"
   | "REJECTION_BUDGET_EXCEEDED"
@@ -257,13 +257,13 @@ export type OrchestrationErrorCode =
 
 export type RetryDisposition = "NONE" | "RETRYABLE" | "TERMINAL";
 
-export type WorkerCallStatus = "COMPLETED" | "FAILED" | "CANCELLED";
+export type HelperCallStatus = "COMPLETED" | "FAILED" | "CANCELLED";
 
-export interface WorkerCallResult {
+export interface HelperCallResult {
   callId: string;
-  workerName: string;
+  helperName: string;
   purpose: "IMPLEMENT" | "VERIFY";
-  status: WorkerCallStatus;
+  status: HelperCallStatus;
   startedSequence: number;
   completedSequence: number;
   workspaceRevisionBefore: number;
@@ -276,7 +276,7 @@ export interface WorkerCallResult {
  * (design §7.3). Every identity field is runner-owned. */
 export interface VerifierResult {
   callId: string;
-  workerName: string;
+  helperName: string;
   verdict: "APPROVED" | "REJECTED";
   summary: string;
   issues: string[];
@@ -347,14 +347,14 @@ export interface OrchestrationRunResult {
   status: OrchestrationRunStatus;
   retryDisposition: RetryDisposition;
   summary: string;
-  workerCalls: WorkerCallResult[];
+  helperCalls: HelperCallResult[];
   verifierResults: VerifierResult[];
   commandExecutions: CommandExecutionRecord[];
   changedFiles: string[];
   commits: CheckpointCommit[];
   cleanWorktree: boolean; // Feature 6
   usage: {
-    workerCalls: number;
+    helperCalls: number;
     rejectionCount: number;
     totalTokens: number;
   };

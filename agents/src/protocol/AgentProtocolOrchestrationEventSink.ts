@@ -36,11 +36,12 @@ export interface OrchestrationProgressEvent {
   type: string;
   occurredAt?: string;
   status?: string;
-  workerName?: string;
+  /** The helper whose invocation produced this event, if any. */
+  helperName?: string;
   callId?: string;
   candidateTreeHash?: string;
   durationMs?: number;
-  usage?: { workerCalls: number; rejectionCount: number; totalTokens: number };
+  usage?: { helperCalls: number; rejectionCount: number; totalTokens: number };
   /** ┬º8.4 metadata columns (ORCHESTRATION_FUNCTION_* / VERIFICATION / CHECKPOINT / PROGRESS). */
   outcome?: string;
   functionName?: string;
@@ -125,7 +126,7 @@ export class AgentProtocolOrchestrationEventSink {
     const filter = this.captureFilter;
     const raw: Record<string, unknown> = {
       ...(event.status !== undefined ? { status: event.status } : {}),
-      ...(event.workerName !== undefined ? { workerName: event.workerName } : {}),
+      ...(event.helperName !== undefined ? { helperName: event.helperName } : {}),
       ...(event.callId !== undefined ? { callId: event.callId } : {}),
       ...(event.candidateTreeHash !== undefined
         ? { candidateTreeHash: event.candidateTreeHash }

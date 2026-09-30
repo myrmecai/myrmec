@@ -2,7 +2,7 @@
 // Copyright 2026 The Myrmec Authors
 
 /**
- * End-to-end workspace tool flow test: a scripted worker model requests
+ * End-to-end workspace tool flow test: a scripted helper model requests
  * write_file through the real WorkspaceToolFactory and the file must
  * exist in the step workspace with the expected content.
  */
@@ -15,7 +15,7 @@ import { promisify } from "node:util";
 import { TurnExecutor } from "../executor/TurnExecutor.js";
 import type { ChatModel, ConversationMessage, ModelResponse, ToolSpec } from "../executor/types.js";
 import { OrchestrationRunner } from "../orchestration/OrchestrationRunner.js";
-import { WorkerInvoker } from "../orchestration/WorkerInvoker.js";
+import { HelperInvoker } from "../orchestration/HelperInvoker.js";
 import { GitWorkspaceManager, GitWorkspaceScope } from "../workspace/GitWorkspaceManager.js";
 import { WorkspaceToolFactory } from "./WorkspaceToolFactory.js";
 import { readFileTool } from "./fileTools.js";
@@ -56,7 +56,7 @@ class ScriptedModel implements ChatModel {
 }
 
 describe("workspace tool flow", () => {
-  it("a worker writes a real file through the tools and the run completes", async () => {
+  it("a helper writes a real file through the tools and the run completes", async () => {
     // Arrange a real checkout root (no git needed — the tools only need
     // a step workspace rooted at a directory).
     const root = tmp("root");
@@ -75,7 +75,7 @@ describe("workspace tool flow", () => {
     const factory = new WorkspaceToolFactory({ workspace: stepWorkspace });
     const coder = {
       name: "coder",
-      modelCode: "work",
+      modelCode: "helper",
       capability: "C",
       allowedTools: ["write_file", "read_file"] as const,
       allowedCommands: [],
@@ -83,8 +83,8 @@ describe("workspace tool flow", () => {
     const tools = factory.resolve(coder as never);
     expect(tools.map((t) => t.name)).toEqual(["write_file", "read_file"]);
 
-    // Worker: request write_file once, then finish.
-    const worker = new ScriptedModel([
+    // Helper: request write_file once, then finish.
+    const helper = new ScriptedModel([
       {
         content: "",
         toolCalls: [
@@ -105,8 +105,8 @@ describe("workspace tool flow", () => {
         toolCalls: [
           {
             id: "o1",
-            name: "invoke_worker",
-            args: { workerName: "coder", purpose: "IMPLEMENT", instruction: "write it" },
+            name: "invoke_helper",
+            args: { helperName: "coder", purpose: "IMPLEMENT", instruction: "write it" },
           },
         ],
         usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
@@ -114,8 +114,8 @@ describe("workspace tool flow", () => {
       { content: "done", usage: { promptTokens: 6, completionTokens: 2, totalTokens: 8 } },
     ]);
 
-    const chatModelFactory = scriptedFactory({ "orch-model": orch, "worker-model": worker });
-    const invoker = new WorkerInvoker({
+    const chatModelFactory = scriptedFactory({ "orch-model": orch, "helper-model": helper });
+    const invoker = new HelperInvoker({
       attemptOrdinal: 1,
       chatModelFactory,
       turnExecutor: new TurnExecutor({}),
@@ -123,7 +123,7 @@ describe("workspace tool flow", () => {
     });
     const runner = new OrchestrationRunner({
       chatModelFactory,
-      workerInvoker: invoker,
+      helperInvoker: invoker,
       turnExecutor: new TurnExecutor({}),
     });
 
@@ -136,7 +136,7 @@ describe("workspace tool flow", () => {
         },
         models: [
           { code: "orch-model", provider: "stub", modelId: "orch-model", description: "o", endpoint: null, credentialRef: null, parameters: {} },
-          { code: "worker-model", provider: "stub", modelId: "worker-model", description: "w", endpoint: null, credentialRef: null, parameters: {} },
+          { code: "helper-model", provider: "stub", modelId: "helper-model", description: "w", endpoint: null, credentialRef: null, parameters: {} },
         ],
         source: { repoUrl: "u", sourceBranch: "b", sourceBaseCommit: "a".repeat(40), targetBranch: "t", credentialRef: null },
         policy: {
@@ -153,7 +153,7 @@ describe("workspace tool flow", () => {
           retryPolicy: { maxRetries: 0, initialBackoffSeconds: 1, maxBackoffSeconds: 1 },
           orchestration: {
             modelCode: "orch-model", goal: "G", specPath: null, sourceSubPath: "app",
-            workers: [{ name: "coder", modelCode: "worker-model", capability: "C", allowedTools: ["write_file", "read_file"], allowedCommands: [] }],
+            helpers: [{ name: "coder", modelCode: "helper-model", capability: "C", allowedTools: ["write_file", "read_file"], allowedCommands: [] }],
             checkpointStrategy: { mode: "ON_VERIFICATION_PASS", commitMessage: "m", pushToRemote: false, allowNoChanges: false },
             completionCriteria: { definitionOfDone: "D", requireVerificationBy: [] },
             budget: { maxTokens: 1000, maxWorkerCalls: 5, maxVerifierRejectionsPerAttempt: 2, maxOrchestratorIterations: 10, maxWorkerIterations: 5, onBudgetExceeded: "FAIL" },
@@ -164,8 +164,8 @@ describe("workspace tool flow", () => {
     );
 
     expect(result.status).toBe("COMPLETED");
-    expect(result.workerCalls).toHaveLength(1);
-    expect(result.workerCalls[0].status).toBe("COMPLETED");
+    expect(result.helperCalls).toHaveLength(1);
+    expect(result.helperCalls[0].status).toBe("COMPLETED");
 
     // The real file must exist with the exact content.
     const read = readFileTool({ workspace: stepWorkspace });
@@ -199,8 +199,8 @@ describe("workspace tool flow", () => {
     const scope = new GitWorkspaceScope();
     const stepWorkspace = scope.resolve(checkout, "app");
 
-    // Worker: write one file, then finish.
-    const worker = new ScriptedModel([
+    // Helper: write one file, then finish.
+    const helper = new ScriptedModel([
       {
         content: "",
         toolCalls: [
@@ -214,17 +214,17 @@ describe("workspace tool flow", () => {
       {
         content: "",
         toolCalls: [
-          { id: "o1", name: "invoke_worker", args: { workerName: "coder", purpose: "IMPLEMENT", instruction: "write it" } },
+          { id: "o1", name: "invoke_helper", args: { helperName: "coder", purpose: "IMPLEMENT", instruction: "write it" } },
         ],
         usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
       },
       { content: "done", usage: { promptTokens: 6, completionTokens: 2, totalTokens: 8 } },
     ]);
 
-    const chatModelFactory = scriptedFactory({ "orch-model": orch, "worker-model": worker });
+    const chatModelFactory = scriptedFactory({ "orch-model": orch, "helper-model": helper });
     const runner = new OrchestrationRunner({
       chatModelFactory,
-      workerInvoker: new WorkerInvoker({
+      helperInvoker: new HelperInvoker({
         attemptOrdinal: 1,
         chatModelFactory,
         turnExecutor: new TurnExecutor({}),
@@ -239,7 +239,7 @@ describe("workspace tool flow", () => {
         dispatch: { workflowId: "wf", runId: "run", stepId: "s", taskId: "t", attemptId: "a", attemptOrdinal: 1, dispatchId: "a" },
         models: [
           { code: "orch-model", provider: "stub", modelId: "orch-model", description: "o", endpoint: null, credentialRef: null, parameters: {} },
-          { code: "worker-model", provider: "stub", modelId: "worker-model", description: "w", endpoint: null, credentialRef: null, parameters: {} },
+          { code: "helper-model", provider: "stub", modelId: "helper-model", description: "w", endpoint: null, credentialRef: null, parameters: {} },
         ],
         source: { repoUrl: "u", sourceBranch: "b", sourceBaseCommit: "a".repeat(40), targetBranch: "t", credentialRef: null },
         policy: {
@@ -256,7 +256,7 @@ describe("workspace tool flow", () => {
           retryPolicy: { maxRetries: 0, initialBackoffSeconds: 1, maxBackoffSeconds: 1 },
           orchestration: {
             modelCode: "orch-model", goal: "G", specPath: null, sourceSubPath: "app",
-            workers: [{ name: "coder", modelCode: "worker-model", capability: "C", allowedTools: ["write_file"], allowedCommands: [] }],
+            helpers: [{ name: "coder", modelCode: "helper-model", capability: "C", allowedTools: ["write_file"], allowedCommands: [] }],
             checkpointStrategy: { mode: "ON_VERIFICATION_PASS", commitMessage: "m", pushToRemote: false, allowNoChanges: false },
             completionCriteria: { definitionOfDone: "D", requireVerificationBy: [] },
             budget: { maxTokens: 1000, maxWorkerCalls: 5, maxVerifierRejectionsPerAttempt: 2, maxOrchestratorIterations: 10, maxWorkerIterations: 5, onBudgetExceeded: "FAIL" },

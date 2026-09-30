@@ -142,7 +142,7 @@ class OrchestrationOutcomeServiceTest extends IntegrationTestBase {
         outcomeService.applyResult(attempt.getId(), UUID.randomUUID(), "d2",
                 OrchestrationOutcomeService.OutcomeStatus.FAILED,
                 OrchestrationOutcomeService.RetryDisposition.RETRYABLE,
-                "WORKER_FAILED",
+                "HELPER_FAILED",
                 result(OrchestrationOutcomeService.OutcomeStatus.FAILED,
                         OrchestrationOutcomeService.RetryDisposition.RETRYABLE));
 
@@ -172,13 +172,13 @@ class OrchestrationOutcomeServiceTest extends IntegrationTestBase {
         outcomeService.applyResult(attempt.getId(), UUID.randomUUID(), "d3",
                 OrchestrationOutcomeService.OutcomeStatus.FAILED,
                 OrchestrationOutcomeService.RetryDisposition.RETRYABLE,
-                "WORKER_FAILED", structured);
+                "HELPER_FAILED", structured);
 
         TaskAttempt stored = attemptRepository.findById(attempt.getId()).orElseThrow();
         WorkflowTask storedTask = taskRepository.findById(task.getId()).orElseThrow();
         assertThat(stored.getStatus()).isEqualTo(AttemptStatus.FAILED);
         // the final Agent result retains its original resultId + errorCode
-        assertThat(stored.getErrorCode()).isEqualTo("WORKER_FAILED");
+        assertThat(stored.getErrorCode()).isEqualTo("HELPER_FAILED");
         assertThat(storedTask.getStatus()).isEqualTo(TaskStatus.COMPLETED);
         assertThat(storedTask.getResult()).isEqualTo(TaskResult.FAILURE);
         assertThat(requestRepository.findById(request.getId()).orElseThrow()
@@ -289,7 +289,7 @@ class OrchestrationOutcomeServiceTest extends IntegrationTestBase {
                 UUID.randomUUID(), "d9",
                 OrchestrationOutcomeService.OutcomeStatus.FAILED,
                 OrchestrationOutcomeService.RetryDisposition.RETRYABLE,
-                "WORKER_FAILED", Map.of("summary", "no continuation")))
+                "HELPER_FAILED", Map.of("summary", "no continuation")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("without a continuation");
     }

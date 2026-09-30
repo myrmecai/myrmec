@@ -2,15 +2,16 @@
 // Copyright 2026 The Myrmec Authors
 
 /**
- * AgentWorker: the in-isolate Agent body.
+ * Agent: the in-isolate session body.
  *
- * This is the byte-identical worker the locked SDK design (§9.3) places below
- * both Supervisors — it runs the task and conversation dispatchers and knows
- * nothing about where its output goes. Frames it would put on the wire are
- * handed to {@link AgentWorkerOptions.post}; the Supervisor decides whether
+ * This is the byte-identical session body the locked SDK design (§9.3) places
+ * below both Supervisors — it runs the task and conversation dispatchers and
+ * knows nothing about where its output goes. Frames it would put on the wire
+ * are handed to {@link AgentOptions.post}; the Supervisor decides whether
  * those reach the engine only (headless) or the editor too (interactive). It
  * resolves its own model per task/turn from the engine descriptor — live model
- * adapters cannot cross the thread boundary, so the worker constructs them.
+ * adapters cannot cross the thread boundary, so the worker constructs its
+ * adapters there.
  */
 import { MessageType as UnifiedMessageType } from "../protocol/unifiedFrames.js";
 import { makeEnvelope } from "../protocol/envelope.js";
@@ -30,8 +31,8 @@ import type { WorkerInbound, WorkerOutbound } from "./agentWorkerProtocol.js";
 import { AgentOrchestrationExecutor } from "./AgentOrchestrationExecutor.js";
 import type { ExecutionFrameSender } from "../executor/ExecutionFrameSender.js";
 
-export interface AgentWorkerOptions {
-  /** Emit a frame back to the Supervisor for routing (the worker's only sink). */
+export interface AgentOptions {
+  /** Emit a frame back to the Supervisor for routing (the Agent's only sink). */
   post: (message: WorkerOutbound) => void;
   /** Factory that resolves a ChatModel for each session. */
   chatModelFactory: ChatModelFactory;
@@ -58,7 +59,7 @@ export interface AgentWorkerOptions {
   autoHitlOnDestructive?: boolean;
 }
 
-export class AgentWorker {
+export class Agent {
   private readonly sessions: SessionRegistry;
   private readonly inference: InferenceExecutor;
   private readonly orchestration: AgentOrchestrationExecutor | null;
@@ -70,11 +71,11 @@ export class AgentWorker {
    * InferenceExecutor; undefined = no size cap. */
   private readonly maxImageBytes?: number;
 
-  constructor(options: AgentWorkerOptions) {
+  constructor(options: AgentOptions) {
     this.log = options.logger ?? console;
     this.maxImageBytes = options.maxImageBytes;
 
-    // Unified outbound sender: every execution.* frame the worker produces
+    // Unified outbound sender: every execution.* frame the Agent produces
     // is wrapped in the legacy Envelope shape (type is the unified frame
     // family) and posted back to the Supervisor for routing.
     this.executionSender = this.buildExecutionSender(options.post);
@@ -136,7 +137,7 @@ export class AgentWorker {
   }
 
   /** Build an {@link ExecutionFrameSender} that posts unified frames back
-   * through the worker's outbound sink. */
+   * through the Agent's outbound sink. */
   private buildExecutionSender(
     post: (message: WorkerOutbound) => void,
   ): ExecutionFrameSender {
@@ -190,7 +191,7 @@ export class AgentWorker {
       return;
     }
     if (message.kind !== "envelope") {
-      this.log.warn("AgentWorker: unknown inbound message", message);
+      this.log.warn("Agent: unknown inbound message", message);
       return;
     }
     const { frame } = message;
@@ -242,7 +243,7 @@ export class AgentWorker {
         );
         return;
       default:
-        this.log.warn("AgentWorker: unhandled frame type", frame.type);
+        this.log.warn("Agent: unhandled frame type", frame.type);
     }
   }
 
@@ -370,7 +371,7 @@ export class AgentWorker {
       this.eventReporter?.bindCapturePolicy(open.capture ?? null);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.log.error("AgentWorker: failed to open session:", message);
+      this.log.error("Agent: failed to open session:", message);
     }
   }
 

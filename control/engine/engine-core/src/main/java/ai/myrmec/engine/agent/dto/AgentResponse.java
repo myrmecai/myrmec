@@ -1,57 +1,41 @@
 package ai.myrmec.engine.agent.dto;
 
-import ai.myrmec.engine.agent.AgentHost;
-import lombok.Builder;
-import lombok.Data;
+import ai.myrmec.engine.agent.Agent;
 
 import java.time.Instant;
-import java.util.Map;
 import java.util.UUID;
 
 /**
- * Response DTO for agent data.
+ * Read model for one {@link Agent} — the session-bound execution body an
+ * agent host serves runs with. Surfaces the runtime Agent FSM status
+ * (IDLE/RESERVED/CONNECTING/BOUND/DRAINING/DEAD), the conversation it is
+ * currently serving (if any), and the heartbeat/state clocks operators need
+ * to diagnose stuck or lost Agents (agent-concurrency §9.5).
  */
-@Data
-@Builder
-public class AgentResponse {
-
-    private UUID id;
-    private String name;
-    private String description;
-    private UUID projectId;
-    private String projectName;
-    private Integer maxAgents;
-    private AgentHost.Status status;
-    private ai.myrmec.engine.agent.AgentHostType hostType;
-    private ai.myrmec.engine.agent.ModelAccessMode modelAccessMode;
-    private int activeInstanceCount;
-    private Instant createdAt;
-    private Instant updatedAt;
-
-    /**
-     * Convert entity to response DTO.
-     */
-    public static AgentResponse from(AgentHost agent) {
-        return from(agent, null, 0);
-    }
-
-    /**
-     * Convert entity to response DTO with project name.
-     */
-    public static AgentResponse from(AgentHost agent, String projectName, int activeInstanceCount) {
-        return AgentResponse.builder()
-                .id(agent.getId())
-                .name(agent.getName())
-                .description(agent.getDescription())
-                .projectId(agent.getProjectId())
-                .projectName(projectName)
-                .maxAgents(agent.getMaxAgents())
-                .status(agent.getStatus())
-                .hostType(agent.getHostType())
-                .modelAccessMode(agent.getModelAccessMode())
-                .activeInstanceCount(activeInstanceCount)
-                .createdAt(agent.getCreatedAt())
-                .updatedAt(agent.getUpdatedAt())
-                .build();
+public record AgentResponse(
+        UUID id,
+        UUID agentHostId,
+        UUID conversationId,
+        String hostname,
+        String ipAddress,
+        String runtimeVersion,
+        String status,
+        Instant registeredAt,
+        Instant lastHeartbeatAt,
+        Instant stateChangedAt
+) {
+    public static AgentResponse from(Agent agent) {
+        return new AgentResponse(
+                agent.getId(),
+                agent.getAgentHostId(),
+                agent.getConversationId(),
+                agent.getHostname(),
+                agent.getIpAddress(),
+                agent.getRuntimeVersion(),
+                agent.getStatus() == null ? null : agent.getStatus().name(),
+                agent.getRegisteredAt(),
+                agent.getLastHeartbeatAt(),
+                agent.getStateChangedAt()
+        );
     }
 }

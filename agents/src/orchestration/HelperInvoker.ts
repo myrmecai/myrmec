@@ -2,9 +2,9 @@
 // Copyright 2026 The Myrmec Authors
 
 /**
- * WorkerInvoker (design §8.5): resolves one declared worker's model
+ * HelperInvoker (design §8.5): resolves one declared helper's model
  * through the ChatModelFactory and executes it through the existing
- * TurnExecutor. Rejects undeclared workers, missing models, invalid
+ * TurnExecutor. Rejects undeclared helpers, missing models, invalid
  * purposes, and tools outside policy — before model execution.
  */
 import { randomUUID } from "node:crypto";
@@ -15,20 +15,20 @@ import type { ModelInfoWire } from "../protocol/sessionTypes.js";
 import type { Task, TaskResult } from "../models/index.js";
 import type {
   OrchestrationAssignment,
-  WorkerAuthoring,
-  WorkerCallResult,
+  HelperAuthoring,
+  HelperCallResult,
   OrchestrationErrorCode,
   VerifierResult,
 } from "./types.js";
 import type { BudgetController } from "./BudgetController.js";
-/** The tools a worker invocation gets: the workspace-scoped file/command
+/** The tools a helper invocation gets: the workspace-scoped file/command
  * tools via the injected toolFactory (Feature 4), plus the runner-owned
  * `report_verdict` tool when purpose is VERIFY (Feature 5, design §11). */
-export interface WorkerInvokerOptions {
+export interface HelperInvokerOptions {
   chatModelFactory: ChatModelFactory;
   turnExecutor: TurnExecutor;
-  /** Optional per-worker tool injection (Feature 4 seam). */
-  toolFactory?: (worker: WorkerAuthoring) => Promise<Tool[]>;
+  /** Optional per-helper tool injection (Feature 4 seam). */
+  toolFactory?: (helper: HelperAuthoring) => Promise<Tool[]>;
   /** Feature 5: records an accepted verdict into the ledger and returns
    * its runner-owned identity. Supplied by the runner per invocation;
    * VERIFY without it fails closed as INVALID_VERIFIER_RESULT. */
@@ -37,18 +37,18 @@ export interface WorkerInvokerOptions {
   ) => VerifierResult;
   /** Feature 5: the dispatch's immutable attempt order (§11 rule 4). */
   attemptOrdinal: number;
-  /** Feature 7 (design §13): the shared per-attempt budget — a worker
+  /** Feature 7 (design §13): the shared per-attempt budget — a helper
    * response that crosses the token limit has its tool calls skipped
    * and the invocation is classified as a budget failure. */
   budget?: BudgetController;
 }
 
-/** One worker invocation outcome with runner-owned identity. */
-export interface InvokeWorkerOutcome {
-  workerCall: WorkerCallResult;
-  /** The worker's final answer text, bounded and redacted. */
+/** One helper invocation outcome with runner-owned identity. */
+export interface InvokeHelperOutcome {
+  helperCall: HelperCallResult;
+  /** The helper's final answer text, bounded and redacted. */
   summary: string;
-  /** Authoritative usage of the worker turn (design §13: normalized). */
+  /** Authoritative usage of the helper turn (design §13: normalized). */
   tokenCount: number;
   /** Design §10.1: a successful VERIFY call requires exactly one
    * verifierResult; other purposes prohibit it. */
@@ -62,6 +62,8 @@ interface ReportVerdictInput {
   summary: string;
   issues: string[];
 }
+
+// ── normalizeUsage ───────────────────────────────────────────────────
 
 /** Normalize provider usage per design §13: a valid usage has non-negative
  * integer counts; the total is the explicit one when present, otherwise
@@ -95,24 +97,26 @@ export function normalizeUsage(
   return null;
 }
 
-export class WorkerInvoker {
-  private readonly options: WorkerInvokerOptions;
-  /** Per-run tool factory injected by the runner (Feature 4): builds the
-   * worker's declared tools scoped to the step workspace. */
-  private toolFactory?: WorkerInvokerOptions["toolFactory"];
+// ── HelperInvoker ────────────────────────────────────────────────────
 
-  constructor(options: WorkerInvokerOptions) {
+export class HelperInvoker {
+  private readonly options: HelperInvokerOptions;
+  /** Per-run tool factory injected by the runner (Feature 4): builds the
+   * helper's declared tools scoped to the step workspace. */
+  private toolFactory?: HelperInvokerOptions["toolFactory"];
+
+  constructor(options: HelperInvokerOptions) {
     this.options = options;
   }
 
   /** The runner injects the workspace-scoped tool factory per run. */
-  setToolFactory(toolFactory: WorkerInvokerOptions["toolFactory"]): void {
+  setToolFactory(toolFactory: HelperInvokerOptions["toolFactory"]): void {
     this.toolFactory = toolFactory ?? this.options.toolFactory;
   }
 
   /** The runner injects the ledger-backed verdict recorder per run
    * (Feature 5, design §11 rules 3-4). */
-  setVerdictRecorder(recorder: WorkerInvokerOptions["verdictRecorder"]): void {
+  setVerdictRecorder(recorder: HelperInvokerOptions["verdictRecorder"]): void {
     this.options.verdictRecorder = recorder;
   }
 
@@ -130,43 +134,43 @@ export class WorkerInvoker {
   private cancellation?: { readonly cancelled: boolean };
 
   /**
-   * Invoke one declared worker. Validates the declaration and the model
+   * Invoke one declared helper. Validates the declaration and the model
    * catalog entry before any model execution; expected execution failures
    * are returned, not thrown (design §7.2 boundary rule).
    */
   async invoke(
     assignment: OrchestrationAssignment,
-    workerName: string,
+    helperName: string,
     purpose: "IMPLEMENT" | "VERIFY",
     instruction: string,
     sequence: { startedSequence: number; completedSequence: number },
     workspace: { revisionBefore: number; revisionAfter: number },
-  ): Promise<InvokeWorkerOutcome> {
-    const worker = assignment.step.orchestration.workers.find((w) => w.name === workerName);
-    if (!worker) {
-      return this.failedOutcome(workerName, purpose, sequence, workspace, {
+  ): Promise<InvokeHelperOutcome> {
+    const helper = assignment.step.orchestration.helpers.find((w) => w.name === helperName);
+    if (!helper) {
+      return this.failedOutcome(helperName, purpose, sequence, workspace, {
         code: "ASSIGNMENT_VALIDATION_ERROR",
-        message: `undeclared worker: ${workerName}`,
+        message: `undeclared helper: ${helperName}`,
       });
     }
 
-    // Design §10.1: VERIFY is allowed only for a worker named in
+    // Design §10.1: VERIFY is allowed only for a helper named in
     // requireVerificationBy; IMPLEMENT cannot be used to submit a verdict.
     if (purpose === "VERIFY") {
       const required = assignment.step.orchestration.completionCriteria.requireVerificationBy;
-      if (!required.includes(workerName)) {
-        return this.failedOutcome(workerName, purpose, sequence, workspace, {
+      if (!required.includes(helperName)) {
+        return this.failedOutcome(helperName, purpose, sequence, workspace, {
           code: "ASSIGNMENT_VALIDATION_ERROR",
-          message: `VERIFY is allowed only for required verifiers: ${workerName}`,
+          message: `VERIFY is allowed only for required verifiers: ${helperName}`,
         });
       }
     }
 
-    const model = assignment.models.find((m) => m.code === worker.modelCode);
+    const model = assignment.models.find((m) => m.code === helper.modelCode);
     if (!model) {
-      return this.failedOutcome(workerName, purpose, sequence, workspace, {
+      return this.failedOutcome(helperName, purpose, sequence, workspace, {
         code: "ASSIGNMENT_VALIDATION_ERROR",
-        message: `worker model not in assignment: ${worker.modelCode}`,
+        message: `helper model not in assignment: ${helper.modelCode}`,
       });
     }
 
@@ -179,9 +183,9 @@ export class WorkerInvoker {
       credentialRef: null,
       parameters: model.parameters as Record<string, unknown>,
     };
-    const resolved = await this.options.chatModelFactory.resolve(info, `worker-${randomUUID()}`);
+    const resolved = await this.options.chatModelFactory.resolve(info, `helper-${randomUUID()}`);
 
-    const tools = (await this.toolFactory?.(worker)) ?? [];
+    const tools = (await this.toolFactory?.(helper)) ?? [];
 
     // Feature 5 (design §11 rule 1-2): a VERIFY invocation carries the
     // runner-owned report_verdict tool; exactly one valid call is
@@ -235,7 +239,7 @@ export class WorkerInvoker {
               }
               verdictRecord = this.options.verdictRecorder({
                 callId: randomUUID(),
-                workerName,
+                helperName,
                 verdict: args.verdict,
                 summary: args.summary.slice(0, 4000),
                 issues: args.issues.map((i) => i.slice(0, 2000)).slice(0, 20),
@@ -250,26 +254,26 @@ export class WorkerInvoker {
             },
           }
         : undefined;
-    const workerTools = [...tools, ...(reportVerdictTool ? [reportVerdictTool] : [])];
+    const helperTools = [...tools, ...(reportVerdictTool ? [reportVerdictTool] : [])];
 
     const task: Task = {
-      taskId: `worker-${randomUUID()}`,
+      taskId: `helper-${randomUUID()}`,
       model: model.modelId,
       context: {
         systemPrompt: [
-          `You are the "${worker.name}" worker.`,
-          `Capability: ${worker.capability}`,
+          `You are the "${helper.name}" helper.`,
+          `Capability: ${helper.capability}`,
           `Step goal: ${assignment.step.orchestration.goal}`,
           purpose === "IMPLEMENT"
             ? "Complete the delegated implementation instruction."
             : "Verify and report a structured verdict with report_verdict exactly once.",
         ].join("\n"),
         messages: [{ role: "user", content: instruction }],
-        toolNames: workerTools.map((t) => t.name),
+        toolNames: helperTools.map((t) => t.name),
         metadata: {
           orchestration: {
             stepId: assignment.step.id,
-            workerName: worker.name,
+            helperName: helper.name,
             purpose,
           },
         },
@@ -278,13 +282,13 @@ export class WorkerInvoker {
 
     const result: TaskResult = await this.options.turnExecutor.execute(task, {
       model: resolved,
-      tools: workerTools,
-      // Design §7.2: the worker's explicit iteration limit — never the
+      tools: helperTools,
+      // Design §7.2: the helper's explicit iteration limit — never the
       // executor's default.
       maxIterationsOverride: assignment.step.orchestration.budget.maxWorkerIterations,
-      // §13: the worker turn shares the per-attempt budget.
+      // §13: the helper turn shares the per-attempt budget.
       ...(this.options.budget ? { budget: this.options.budget } : {}),
-      // §13: the dispatch's cancellation propagates into the worker loop.
+      // §13: the dispatch's cancellation propagates into the helper loop.
       ...(this.cancellation ? { cancellation: this.cancellation } : {}),
     });
 
@@ -294,29 +298,29 @@ export class WorkerInvoker {
       // Design §11 rule 2: a verifier must call report_verdict exactly
       // once. Zero calls or an invalid one is INVALID_VERIFIER_RESULT.
       if (purpose === "VERIFY" && !verdictRecord) {
-        return this.failedOutcome(workerName, purpose, sequence, workspace, {
+        return this.failedOutcome(helperName, purpose, sequence, workspace, {
           code: "INVALID_VERIFIER_RESULT",
           message: "the verifier completed without a valid report_verdict call",
           tokenCount: usage?.totalTokens,
         });
       }
       if (purpose === "IMPLEMENT" && verdictRecord) {
-        return this.failedOutcome(workerName, purpose, sequence, workspace, {
+        return this.failedOutcome(helperName, purpose, sequence, workspace, {
           code: "INVALID_VERIFIER_RESULT",
-          message: "an IMPLEMENT worker must not report a verdict",
+          message: "an IMPLEMENT helper must not report a verdict",
           tokenCount: usage?.totalTokens,
         });
       }
       if (usage === null) {
-        return this.failedOutcome(workerName, purpose, sequence, workspace, {
+        return this.failedOutcome(helperName, purpose, sequence, workspace, {
           code: "TOKEN_USAGE_UNAVAILABLE",
-          message: "worker response lacked authoritative token usage",
+          message: "helper response lacked authoritative token usage",
         });
       }
       return {
-        workerCall: {
+        helperCall: {
           callId,
-          workerName,
+          helperName,
           purpose,
           status: "COMPLETED",
           startedSequence: sequence.startedSequence,
@@ -333,9 +337,9 @@ export class WorkerInvoker {
 
     if (result.status === "CANCELLED") {
       return {
-        workerCall: {
+        helperCall: {
           callId,
-          workerName,
+          helperName,
           purpose,
           status: "CANCELLED",
           startedSequence: sequence.startedSequence,
@@ -353,27 +357,27 @@ export class WorkerInvoker {
     // exhaustion (§13 — the in-loop token check).
     const finishReason = result.failure?.finishReason ?? "";
     if (
-      finishReason === "WORKER_BUDGET_EXCEEDED" ||
+      finishReason === "HELPER_BUDGET_EXCEEDED" ||
       finishReason === "TOKEN_BUDGET_EXCEEDED" ||
       finishReason === "REJECTION_BUDGET_EXCEEDED"
     ) {
-      return this.failedOutcome(workerName, purpose, sequence, workspace, {
+      return this.failedOutcome(helperName, purpose, sequence, workspace, {
         code: finishReason,
         message: result.failure?.message ?? "budget exceeded",
         tokenCount: usage?.totalTokens,
       });
     }
     const code: OrchestrationErrorCode =
-      finishReason === "MAX_ITERATIONS" ? "WORKER_ITERATION_LIMIT" : "WORKER_FAILED";
-    return this.failedOutcome(workerName, purpose, sequence, workspace, {
+      finishReason === "MAX_ITERATIONS" ? "HELPER_ITERATION_LIMIT" : "HELPER_FAILED";
+    return this.failedOutcome(helperName, purpose, sequence, workspace, {
       code,
-      message: result.failure?.message ?? "worker failed",
+      message: result.failure?.message ?? "helper failed",
       tokenCount: usage?.totalTokens,
     });
   }
 
   private failedOutcome(
-    workerName: string,
+    helperName: string,
     purpose: "IMPLEMENT" | "VERIFY",
     sequence: { startedSequence: number; completedSequence: number },
     workspace: { revisionBefore: number; revisionAfter: number },
@@ -382,11 +386,11 @@ export class WorkerInvoker {
       message: string;
       tokenCount?: number;
     },
-  ): InvokeWorkerOutcome {
+  ): InvokeHelperOutcome {
     return {
-      workerCall: {
+      helperCall: {
         callId: randomUUID(),
-        workerName,
+        helperName,
         purpose,
         status: "FAILED",
         startedSequence: sequence.startedSequence,

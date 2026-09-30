@@ -50,27 +50,27 @@ class OrchestrationDefinitionValidatorTest extends IntegrationTestBase {
 
     // ── fixtures ─────────────────────────────────────────────
 
-    private Map<String, Object> orchestrationMap(String profileCode, String... workerNames) {
+    private Map<String, Object> orchestrationMap(String profileCode, String... helperNames) {
         Map<String, Object> orch = new LinkedHashMap<>();
         orch.put("agentProfileCode", profileCode);
         orch.put("modelCode", "stub-orchestrator");
         orch.put("goal", "write a module");
-        Map<String, Object> worker = new LinkedHashMap<>();
-        worker.put("name", workerNames.length > 0 ? workerNames[0] : "coder");
-        worker.put("modelCode", "stub-worker");
-        worker.put("capability", "implementation");
-        worker.put("allowedTools", List.of("write_file"));
-        worker.put("allowedCommands", List.of());
+        Map<String, Object> helper = new LinkedHashMap<>();
+        helper.put("name", helperNames.length > 0 ? helperNames[0] : "coder");
+        helper.put("modelCode", "stub-worker");
+        helper.put("capability", "implementation");
+        helper.put("allowedTools", List.of("write_file"));
+        helper.put("allowedCommands", List.of());
         Map<String, Object> verifier = new LinkedHashMap<>();
-        verifier.put("name", workerNames.length > 1 ? workerNames[1] : "verifier");
+        verifier.put("name", helperNames.length > 1 ? helperNames[1] : "verifier");
         verifier.put("modelCode", "stub-worker");
         verifier.put("capability", "verification");
         verifier.put("allowedTools", List.of("read_file"));
         verifier.put("allowedCommands", List.of());
-        orch.put("workers", List.of(worker, verifier));
+        orch.put("helpers", List.of(helper, verifier));
         orch.put("completionCriteria", Map.of(
                 "definitionOfDone", "module compiles",
-                "requireVerificationBy", List.of(workerNames.length > 1 ? workerNames[1] : "verifier")));
+                "requireVerificationBy", List.of(helperNames.length > 1 ? helperNames[1] : "verifier")));
         return orch;
     }
 
@@ -161,15 +161,15 @@ class OrchestrationDefinitionValidatorTest extends IntegrationTestBase {
     }
 
     @Test
-    @DisplayName("duplicate worker names and unknown verifiers are rejected")
-    void workerCatalogChecks() {
+    @DisplayName("duplicate helper names and unknown verifiers are rejected")
+    void helperCatalogChecks() {
         Map<String, Object> orch = orchestrationMap("primary", "coder", "coder");
         List<Map<String, Object>> steps = List.of(orchestratorStep("build", orch));
         BadRequestException ex = catchValidation(steps, "primary");
         assertThat(ex.getDetails().stream()
                 .map(d -> d.getErrorCode() + ":" + d.getField())
-                .anyMatch(s -> s.contains("workers")))
-                .as("duplicate worker name flagged")
+                .anyMatch(s -> s.contains("helpers")))
+                .as("duplicate helper name flagged")
                 .isTrue();
     }
 
@@ -178,9 +178,9 @@ class OrchestrationDefinitionValidatorTest extends IntegrationTestBase {
     void unknownCommandTemplateRejected() {
         Map<String, Object> orch = orchestrationMap("primary");
         @SuppressWarnings("unchecked")
-        Map<String, Object> worker =
-                (Map<String, Object>) ((List<Object>) orch.get("workers")).get(0);
-        worker.put("allowedCommands", List.of("ghost-template"));
+        Map<String, Object> helper =
+                (Map<String, Object>) ((List<Object>) orch.get("helpers")).get(0);
+        helper.put("allowedCommands", List.of("ghost-template"));
         List<Map<String, Object>> steps = List.of(orchestratorStep("build", orch));
         BadRequestException ex = catchValidation(steps, "primary");
         assertThat(ex.getDetails().stream()

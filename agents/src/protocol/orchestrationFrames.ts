@@ -31,7 +31,7 @@ export type DispatchIdentityWire = z.infer<typeof dispatchIdentitySchema>;
 
 const usageSchema = z
   .object({
-    workerCalls: z.number().int().nonnegative(),
+    helperCalls: z.number().int().nonnegative(),
     rejectionCount: z.number().int().nonnegative(),
     totalTokens: z.number().int().nonnegative(),
   })
@@ -61,7 +61,7 @@ export const orchestrationEventPayloadSchema = z
     sequence: z.number().int().nonnegative(),
     occurredAt: z.string().min(1),
     status: z.string().optional(),
-    workerName: z.string().optional(),
+    helperName: z.string().optional(),
     callId: uuid.optional(),
     candidateTreeHash: z.string().optional(),
     durationMs: z.number().int().nonnegative().optional(),
@@ -128,7 +128,7 @@ export const orchestrationResultPayloadSchema = z
     status: z.enum(["COMPLETED", "FAILED", "CANCELLED", "PAUSED"]),
     retryDisposition: z.enum(["NONE", "RETRYABLE", "TERMINAL"]),
     summary: z.string(),
-    workerCalls: z.array(z.record(z.string(), z.unknown())).default([]),
+    helperCalls: z.array(z.record(z.string(), z.unknown())).default([]),
     verifierResults: z.array(z.record(z.string(), z.unknown())).default([]),
     commandExecutions: z.array(z.record(z.string(), z.unknown())).default([]),
     changedFiles: z.array(z.string()).default([]),

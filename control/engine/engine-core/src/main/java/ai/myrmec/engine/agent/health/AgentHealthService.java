@@ -23,9 +23,9 @@ import java.util.UUID;
  * {@link Agent} rows + the live host-instance/sessions allocation
  * state + the queue depth read from {@code task_attempts}.
  *
- * <p>Since the legacy agent wire was deleted (P6-T6), a worker is
+ * <p>Since the legacy agent wire was deleted (P6-T6), an Agent is
  * "online" when its host has a live OPEN instance, "idle" when the
- * worker row is IDLE with no ACTIVE session, and "busy" when it serves
+ * Agent row is IDLE with no ACTIVE session, and "busy" when it serves
  * an ACTIVE/INITIALIZING session. Heartbeat freshness threshold is
  * {@code stale} when the last heartbeat is older than {@code 2 ×}
  * {@code myrmec.agent.heartbeat.interval-seconds} (default 30 →
@@ -67,7 +67,7 @@ public class AgentHealthService {
             if (isOnline) {
                 online++;
             }
-            // A worker is busy when it serves a not-yet-closed session; idle
+            // An Agent is busy when it serves a not-yet-closed session; idle
             // when its row is IDLE and nothing is allocated on it.
             boolean isBusy = isOnline && ai.getId() != null
                     && ai.getAgentHostInstanceId() != null

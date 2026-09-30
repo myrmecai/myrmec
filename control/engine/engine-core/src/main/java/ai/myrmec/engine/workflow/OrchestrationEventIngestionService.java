@@ -44,8 +44,8 @@ public class OrchestrationEventIngestionService {
      * @param dispatchId   the dispatch the event belongs to (attempt UUID)
      * @param sourceEventId the Agent's deterministic event ID — idempotency key
      * @param sequence      dispatch-local strictly-monotonic sequence
-     * @param type         §21 closed-union event type (WORKER_STARTED, …)
-     * @param envelope      the redacted envelope fields (workerName, usage, …)
+     * @param type         §21 closed-union event type (HELPER_STARTED, …)
+     * @param envelope      the redacted envelope fields (helperName, usage, …)
      * @return the outcome of ingestion
      */
     @Transactional

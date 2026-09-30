@@ -62,7 +62,7 @@ public class AgentHost {
     private Map<String, Object> provisions;
 
     /**
-     * Operator hard ceiling on concurrent Agents (workers) this host may run.
+     * Operator hard ceiling on concurrent Agents this host may run.
      */
     @Column(name = "max_agents", nullable = false)
     private Integer maxAgents = 1;

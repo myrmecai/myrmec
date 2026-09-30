@@ -122,9 +122,9 @@ describe("AgentOrchestrationExecutor (engine-mode dispatch)", () => {
           parameters: {},
         },
         {
-          code: "worker-model",
+          code: "helper-model",
           provider: "stub",
-          modelId: "worker-model",
+          modelId: "helper-model",
           description: "Implementation model",
           endpoint: null,
           credentialRef: null,
@@ -158,10 +158,10 @@ describe("AgentOrchestrationExecutor (engine-mode dispatch)", () => {
           goal: "Delegate one unit of work to the coder and summarize.",
           specPath: null,
           sourceSubPath: "app",
-          workers: [
+          helpers: [
             {
               name: "coder",
-              modelCode: "worker-model",
+              modelCode: "helper-model",
               capability: "Writes code",
               allowedTools: ["read_file", "write_file"],
               allowedCommands: [],
@@ -174,7 +174,7 @@ describe("AgentOrchestrationExecutor (engine-mode dispatch)", () => {
             allowNoChanges: true,
           },
           completionCriteria: {
-            definitionOfDone: "One worker invocation completes.",
+            definitionOfDone: "One helper invocation completes.",
             requireVerificationBy: [],
           },
           budget: {

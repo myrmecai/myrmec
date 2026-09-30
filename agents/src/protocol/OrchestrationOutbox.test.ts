@@ -114,15 +114,15 @@ describe("AgentProtocolOrchestrationEventSink (§16.3)", () => {
     const { outbox } = makeOutbox(async () => true);
     const sink = new AgentProtocolOrchestrationEventSink({ outbox });
 
-    const firstId = await sink.emitEvent({ dispatch, type: "WORKER_STARTED" });
-    const secondId = await sink.emitEvent({ dispatch, type: "WORKER_COMPLETED" });
+    const firstId = await sink.emitEvent({ dispatch, type: "HELPER_STARTED" });
+    const secondId = await sink.emitEvent({ dispatch, type: "HELPER_COMPLETED" });
 
     expect(firstId).toBe(uuidV5(ORCHESTRATION_EVENT_NS, `${dispatch.dispatchId}:1`));
     expect(secondId).toBe(uuidV5(ORCHESTRATION_EVENT_NS, `${dispatch.dispatchId}:2`));
 
     // Re-emitting the same slot (a replayed dispatch) returns the same id
     // without double-counting — sequence only advances on new emissions.
-    const replayed = await sink.emitEvent({ dispatch, type: "WORKER_STARTED" });
+    const replayed = await sink.emitEvent({ dispatch, type: "HELPER_STARTED" });
     expect(replayed).not.toBe(firstId); // a NEW emission gets a new slot
   });
 
@@ -159,12 +159,12 @@ describe("AgentProtocolOrchestrationEventSink (§16.3)", () => {
     const sink = new AgentProtocolOrchestrationEventSink({ outbox });
 
     send = async () => false; // the wire drops
-    await sink.emitEvent({ dispatch, type: "WORKER_STARTED" });
+    await sink.emitEvent({ dispatch, type: "HELPER_STARTED" });
     expect(outbox.checkHealthy()).toBe(false);
 
     // The next governed side effect MUST stop — the sink throws.
     await expect(
-      sink.emitEvent({ dispatch, type: "WORKER_COMPLETED" }),
+      sink.emitEvent({ dispatch, type: "HELPER_COMPLETED" }),
     ).rejects.toThrow(OutboxUnhealthyError);
     await expect(
       sink.emitResult({
@@ -213,12 +213,12 @@ describe("AgentProtocolOrchestrationEventSink (§16.3)", () => {
 
     await sink.emitEvent({
       dispatch,
-      type: "WORKER_COMPLETED",
-      workerName: "coder",
+      type: "HELPER_COMPLETED",
+      helperName: "coder",
       status: "COMPLETED",
       callId: "call-1",
       durationMs: 5,
-      usage: { workerCalls: 1, rejectionCount: 0, totalTokens: 42 },
+      usage: { helperCalls: 1, rejectionCount: 0, totalTokens: 42 },
     });
 
     // The budget forces the ladder on the DATA map only: the fixed
@@ -232,7 +232,7 @@ describe("AgentProtocolOrchestrationEventSink (§16.3)", () => {
     const payload = event!.payload as Record<string, unknown>;
     const framing = { ...payload };
     delete framing.status;
-    delete framing.workerName;
+    delete framing.helperName;
     delete framing.callId;
     delete framing.candidateTreeHash;
     delete framing.durationMs;
@@ -261,7 +261,7 @@ describe("AgentProtocolOrchestrationEventSink (§16.3)", () => {
       type: "ORCHESTRATION_FUNCTION_COMPLETED",
       callId: "call-1",
       outcome: "COMPLETED",
-      usage: { workerCalls: 1, rejectionCount: 0, totalTokens: 42 },
+      usage: { helperCalls: 1, rejectionCount: 0, totalTokens: 42 },
       // Sensitive embedding a naive caller might add:
       args: { instruction: "SECRET-INSTRUCTION" },
       result: "SECRET-RESULT",
@@ -289,7 +289,7 @@ describe("AgentProtocolOrchestrationEventSink (§16.3)", () => {
     await sink.emitEvent({
       dispatch,
       type: "SOME_FUTURE_TYPE",
-      workerName: "coder",
+      helperName: "coder",
       args: { secret: "LEAK-ATTEMPT" },
     } as never);
 

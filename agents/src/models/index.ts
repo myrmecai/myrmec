@@ -5,9 +5,10 @@
  * Core type contracts for the Agent SDK.
  *
  * These are the shapes §9.6.6 of dedicated-agents-and-workspaces.md flags as
- * "worth freezing early" — they ripple across protocol, transport, worker,
- * executor, and tools, so they are typed here first rather than inferred ad
- * hoc. Keep them minimal; add fields only when a real consumer needs them.
+ * "worth freezing early" — they ripple across protocol, transport, the
+ * worker (Agent) thread, executor, and tools, so they are typed here first
+ * rather than inferred ad hoc. Keep them minimal; add fields only when a
+ * real consumer needs them.
  */
 
 /** How a Supervisor is acting on the wire. */
@@ -55,12 +56,12 @@ export interface SupervisorContext {
   conversationId?: string; // set while bound to a conversation
 }
 
-/** A resolved workspace the worker runs its tools against. */
+/** A resolved workspace the worker (Agent) runs its tools against. */
 export interface WorkspaceHandle {
   /** Absolute local path the tools are jailed within (REQ-A-050). */
   rootPath: string;
   accessMode: WorkspaceAccessMode;
-  /** True once this worker holds the single-writer lease (server-side case). */
+  /** True once this Agent holds the single-writer lease (server-side case). */
   writeLeaseHeld: boolean;
 }
 
@@ -100,15 +101,15 @@ export interface ApprovalDecision {
   reason?: string;
 }
 
-/** A unit of work assigned to a worker — either a workflow task or a
- * conversation turn. The worker treats both through the same turn loop. */
+/** A unit of work assigned to an Agent — either a workflow task or a
+ * conversation turn. The Agent treats both through the same turn loop. */
 export interface Task {
   taskId: string;
-  /** Provider/model code the worker must call directly (REQ-A-040/041). */
+  /** Provider/model code the Agent must call directly (REQ-A-040/041). */
   model: string;
   /** Engine-assembled context: system prompt, history tail, tools, etc. */
   context: TaskContext;
-  /** When true the worker must make tools deterministic (REQ-A-073). */
+  /** When true the Agent must make tools deterministic (REQ-A-073). */
   replayMode?: boolean;
 }
 
@@ -119,7 +120,7 @@ export interface TaskContext {
   messages: TurnMessage[];
   /** Effective tool names available this turn (profile minus disabled). */
   toolNames: string[];
-  /** Where the worker's tools operate. */
+  /** Where the Agent's tools operate. */
   workspace?: WorkspaceHandle;
   /** Opaque metadata the engine passes through (kb bindings, hitl mode…). */
   metadata?: Record<string, unknown>;

@@ -83,7 +83,7 @@ export interface HostControlClientOptions {
   path?: string;
   /** SDK runtime version reported in `host.open`. */
   runtimeVersion?: string;
-  /** Worker-pool size reported in `host.open` and heartbeat. */
+  /** Worker-thread-pool size reported in `host.open` and heartbeat. */
   poolSize?: number;
   /** Optional capabilities map reported in `host.open`. */
   capabilities?: Record<string, unknown>;
@@ -140,7 +140,7 @@ export interface HostControlClientOptions {
 /**
  * §13 (A2): the retention collaborators the client needs across a
  * control-socket drop. Implemented by the SessionRegistry (plus the
- * execution-cancellation hook the worker/executor layer supplies).
+ * execution-cancellation hook the Agent/executor layer supplies).
  */
 export interface HostRetentionLifecycle extends HostSessionLifecycle {
   /** Mark every session as retained (survive the drop). */
@@ -1707,7 +1707,7 @@ export class HostControlClient {
       channelMode,
     });
     // Consumer hook (§7.1): after the transport-side bookkeeping the
-    // supervisor/worker opens its model + tools for the session.
+    // supervisor/Agent opens its model + tools for the session.
     if (this.sessionOpenObserver) {
       await this.sessionOpenObserver(frame);
     }
@@ -1810,7 +1810,7 @@ export class HostControlClient {
       closedAt: new Date().toISOString(),
       reasonCode: payload.reasonCode ?? "HOST_INITIATED",
     });
-    // Consumer hook (§9): the worker/registry tears the session down
+    // Consumer hook (§9): the Agent/registry tears the session down
     // alongside the transport-side teardown.
     if (this.sessionCloseObserver) {
       await this.sessionCloseObserver(frame);

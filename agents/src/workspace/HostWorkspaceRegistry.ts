@@ -8,7 +8,7 @@
  * lifecycle. One registry keyed by `runId` tracks every live run's
  * workspace: the pinned Agent, the lease deadline, the workspace
  * generation, and the durable external lease manifest written beside the
- * checkout. `AgentWorker` receives a scoped handle and cannot delete the
+ * checkout. `Agent` receives a scoped handle and cannot delete the
  * checkout; only the registry's release path may.
  *
  * Lease states (§16.5): ACQUIRING → ACTIVE → SUSPENDED → ACTIVE, with

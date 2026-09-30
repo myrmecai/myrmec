@@ -31,7 +31,7 @@ import java.util.UUID;
  *
  * <p>This service manages agent <em>hosts</em> (the durable definition a
  * Supervisor process registers against). The ephemeral {@link Agent}
- * worker instances are persisted through {@link AgentRepository} but their
+ * instances are persisted through {@link AgentRepository} but their
  * lifecycle FSM is driven from here.
  */
 @Service
@@ -91,98 +91,98 @@ public class AgentHostService {
         // Generate registration key
         String registrationKey = generateRegistrationKey();
 
-        AgentHost agent = new AgentHost();
-        agent.setName(name);
-        agent.setDescription(description);
-        agent.setProjectId(projectId);
-        agent.setRegistrationKey(registrationKey);
-        agent.setMaxAgents(maxAgents != null ? maxAgents : 1);
-        agent.setStatus(AgentHost.Status.ACTIVE);
-        agent.setModelAccessMode(mode);
-        agent.setHostType(type);
+        AgentHost agentHost = new AgentHost();
+        agentHost.setName(name);
+        agentHost.setDescription(description);
+        agentHost.setProjectId(projectId);
+        agentHost.setRegistrationKey(registrationKey);
+        agentHost.setMaxAgents(maxAgents != null ? maxAgents : 1);
+        agentHost.setStatus(AgentHost.Status.ACTIVE);
+        agentHost.setModelAccessMode(mode);
+        agentHost.setHostType(type);
 
-        agent = agentHostRepository.save(agent);
-        log.info("Created agent: {} ({})", agent.getName(), agent.getId());
+        agentHost = agentHostRepository.save(agentHost);
+        log.info("Created agent: {} ({})", agentHost.getName(), agentHost.getId());
 
-        return new AgentHostCreationResult(agent, registrationKey);
+        return new AgentHostCreationResult(agentHost, registrationKey);
     }
 
     /**
      * Update an existing agent host.
      */
     @Transactional
-    public AgentHost updateAgent(UUID agentId, String name, String description,
+    public AgentHost updateAgent(UUID agentHostId, String name, String description,
                              UUID projectId, Integer maxAgents, AgentHost.Status status,
                              ModelAccessMode modelAccessMode) {
-        AgentHost agent = agentHostRepository.findById(agentId)
-                .orElseThrow(() -> ResourceNotFoundException.agent(agentId));
+        AgentHost agentHost = agentHostRepository.findById(agentHostId)
+                .orElseThrow(() -> ResourceNotFoundException.agent(agentHostId));
 
-        if (name != null && !name.equals(agent.getName())) {
+        if (name != null && !name.equals(agentHost.getName())) {
             if (agentHostRepository.existsByName(name)) {
                 throw new BadRequestException("Agent with name '" + name + "' already exists");
             }
-            agent.setName(name);
+            agentHost.setName(name);
         }
 
         if (description != null) {
-            agent.setDescription(description);
+            agentHost.setDescription(description);
         }
 
         if (projectId != null) {
-            agent.setProjectId(projectId);
+            agentHost.setProjectId(projectId);
         }
 
         if (maxAgents != null) {
-            agent.setMaxAgents(maxAgents);
+            agentHost.setMaxAgents(maxAgents);
         }
 
         if (status != null) {
-            agent.setStatus(status);
+            agentHost.setStatus(status);
         }
 
         // Credential-envelope design §5.2: a mode change is validated against
         // the matrix + mandate (null = no change). The PLATFORM_ADMIN-only
         // guard for this path lives in the admin controller (method-level).
-        if (modelAccessMode != null && modelAccessMode != agent.getModelAccessMode()) {
-            modelAccessModeValidator.validate(agent.getHostType(), modelAccessMode);
-            agent.setModelAccessMode(modelAccessMode);
-            log.info("Model access mode of host {} set to {}", agentId, modelAccessMode);
+        if (modelAccessMode != null && modelAccessMode != agentHost.getModelAccessMode()) {
+            modelAccessModeValidator.validate(agentHost.getHostType(), modelAccessMode);
+            agentHost.setModelAccessMode(modelAccessMode);
+            log.info("Model access mode of host {} set to {}", agentHostId, modelAccessMode);
         }
 
-        agent = agentHostRepository.save(agent);
-        log.info("Updated agent: {} ({})", agent.getName(), agent.getId());
-        return agent;
+        agentHost = agentHostRepository.save(agentHost);
+        log.info("Updated agent: {} ({})", agentHost.getName(), agentHost.getId());
+        return agentHost;
     }
 
     /**
      * Delete an agent host and all its instances.
      */
     @Transactional
-    public void deleteAgent(UUID agentId) {
-        AgentHost agent = agentHostRepository.findById(agentId)
-                .orElseThrow(() -> ResourceNotFoundException.agent(agentId));
+    public void deleteAgent(UUID agentHostId) {
+        AgentHost agentHost = agentHostRepository.findById(agentHostId)
+                .orElseThrow(() -> ResourceNotFoundException.agent(agentHostId));
 
         // Delete all instances first
-        List<Agent> instances = agentInstanceRepository.findByAgentHostId(agentId);
+        List<Agent> instances = agentInstanceRepository.findByAgentHostId(agentHostId);
         agentInstanceRepository.deleteAll(instances);
 
-        agentHostRepository.delete(agent);
-        log.info("Deleted agent: {} ({}) with {} instances", agent.getName(), agentId, instances.size());
+        agentHostRepository.delete(agentHost);
+        log.info("Deleted agent: {} ({}) with {} instances", agentHost.getName(), agentHostId, instances.size());
     }
 
     /**
      * Regenerate registration key for an agent host.
      */
     @Transactional
-    public String regenerateRegistrationKey(UUID agentId) {
-        AgentHost agent = agentHostRepository.findById(agentId)
-                .orElseThrow(() -> ResourceNotFoundException.agent(agentId));
+    public String regenerateRegistrationKey(UUID agentHostId) {
+        AgentHost agentHost = agentHostRepository.findById(agentHostId)
+                .orElseThrow(() -> ResourceNotFoundException.agent(agentHostId));
 
         String newKey = generateRegistrationKey();
-        agent.setRegistrationKey(newKey);
-        agentHostRepository.save(agent);
+        agentHost.setRegistrationKey(newKey);
+        agentHostRepository.save(agentHost);
 
-        log.info("Regenerated registration key for agent: {} ({})", agent.getName(), agentId);
+        log.info("Regenerated registration key for agent: {} ({})", agentHost.getName(), agentHostId);
         return newKey;
     }
 
@@ -190,17 +190,17 @@ public class AgentHostService {
      * Count online instances for an agent host.
      */
     @Transactional(readOnly = true)
-    public int countOnlineInstances(UUID agentId) {
-        return (int) agentInstanceRepository.countOnlineByAgentHostId(agentId);
+    public int countOnlineInstances(UUID agentHostId) {
+        return (int) agentInstanceRepository.countOnlineByAgentHostId(agentHostId);
     }
 
     /**
-     * Count connected (non-{@code DEAD}) instances for a host — workers with a
+     * Count connected (non-{@code DEAD}) instances for a host — Agents with a
      * live control socket, idle or busy. Used by the #88 availability check.
      */
     @Transactional(readOnly = true)
-    public int countConnectedInstances(UUID agentId) {
-        return (int) agentInstanceRepository.countConnectedByAgentHostId(agentId);
+    public int countConnectedInstances(UUID agentHostId) {
+        return (int) agentInstanceRepository.countConnectedByAgentHostId(agentHostId);
     }
 
     private String generateRegistrationKey() {
@@ -325,9 +325,9 @@ public class AgentHostService {
      * Get an agent host by ID.
      */
     @Transactional(readOnly = true)
-    public AgentHost getAgent(UUID agentId) {
-        return agentHostRepository.findById(agentId)
-                .orElseThrow(() -> ResourceNotFoundException.agent(agentId));
+    public AgentHost getAgent(UUID agentHostId) {
+        return agentHostRepository.findById(agentHostId)
+                .orElseThrow(() -> ResourceNotFoundException.agent(agentHostId));
     }
 
     /**
@@ -344,14 +344,14 @@ public class AgentHostService {
      * Create a new agent instance for an agent host.
      */
     @Transactional
-    public Agent createInstance(UUID agentId, String hostname, String ipAddress,
+    public Agent createInstance(UUID agentHostId, String hostname, String ipAddress,
                                          String runtimeVersion, Map<String, Object> metadata) {
         // Verify agent exists
-        AgentHost agent = agentHostRepository.findById(agentId)
-                .orElseThrow(() -> ResourceNotFoundException.agent(agentId));
+        AgentHost agentHost = agentHostRepository.findById(agentHostId)
+                .orElseThrow(() -> ResourceNotFoundException.agent(agentHostId));
 
         Agent instance = new Agent();
-        instance.setAgentHostId(agentId);
+        instance.setAgentHostId(agentHostId);
         instance.setHostname(hostname);
         instance.setIpAddress(ipAddress);
         instance.setRuntimeVersion(runtimeVersion);
@@ -362,7 +362,7 @@ public class AgentHostService {
 
         instance = agentInstanceRepository.save(instance);
         log.info("Agent instance registered: {} for agent {} ({})",
-                instance.getId(), agent.getName(), agentId);
+                instance.getId(), agentHost.getName(), agentHostId);
         return instance;
     }
 
@@ -370,8 +370,8 @@ public class AgentHostService {
      * Get all instances for an agent host.
      */
     @Transactional(readOnly = true)
-    public List<Agent> getInstancesForAgent(UUID agentId) {
-        return agentInstanceRepository.findByAgentHostId(agentId);
+    public List<Agent> getAgentsForAgentHost(UUID agentHostId) {
+        return agentInstanceRepository.findByAgentHostId(agentHostId);
     }
 
     /**
@@ -383,10 +383,10 @@ public class AgentHostService {
     }
 
     /**
-     * Atomically reserve a specific warm worker for a conversation
+     * Atomically reserve a specific warm Agent for a conversation
      * (IDLE → RESERVED), pinning the conversation and profile version at
      * reserve-time (agent-concurrency §9.5). Returns {@code true} if this
-     * caller won the claim; {@code false} if the worker was no longer IDLE
+     * caller won the claim; {@code false} if the Agent was no longer IDLE
      * (lost the race or already bound), in which case the caller should try
      * another candidate.
      */
@@ -409,16 +409,16 @@ public class AgentHostService {
     }
 
     /**
-     * Release a worker back into the warm pool (→ IDLE, binding cleared).
-     * Idempotent: a no-op if the worker is already idle or gone.
+     * Release an Agent back into the warm pool (→ IDLE, binding cleared).
+     * Idempotent: a no-op if the Agent is already idle or gone.
      */
     @Transactional
     public void releaseInstance(UUID instanceId) {
         agentInstanceRepository.findById(instanceId).ifPresent(instance -> {
-            // Don't revive a DEAD worker — it was reaped for a reason
+            // Don't revive a DEAD Agent — it was reaped for a reason
             // (host lost, transport error) and must not re-enter the pool.
             if (instance.getStatus() == Agent.Status.DEAD) {
-                log.debug("Skipping release of DEAD worker {}", instanceId);
+                log.debug("Skipping release of DEAD Agent {}", instanceId);
                 return;
             }
             UUID conversationId = instance.getConversationId();
@@ -433,18 +433,18 @@ public class AgentHostService {
     }
 
     /**
-     * Flip a reserved worker to {@code BOUND} once its conversation socket
+     * Flip a reserved Agent to {@code BOUND} once its conversation socket
      * has attached to the home node (agent-concurrency §9.4/§9.5), and pin
-     * the home node on both the worker and the conversation so the
+     * the home node on both the Agent and the conversation so the
      * cross-node router can address turns + streamed output to this replica.
      *
-     * <p>Defensive: only attaches when the worker is still reserved for the
-     * same conversation it is attaching for. A worker attaching for a
+     * <p>Defensive: only attaches when the Agent is still reserved for the
+     * same conversation it is attaching for. An Agent attaching for a
      * conversation it was never bound to (or after it was already released)
      * is rejected with {@code false}; the caller closes the socket.</p>
      *
-     * @return {@code true} if the worker was flipped to BOUND, {@code false}
-     *         if the worker is gone or no longer bound to that conversation
+     * @return {@code true} if the Agent was flipped to BOUND, {@code false}
+     *         if the Agent is gone or no longer bound to that conversation
      */
     @Transactional
     public boolean attachConversation(UUID instanceId, UUID conversationId, String homeNodeId) {
@@ -461,7 +461,7 @@ public class AgentHostService {
         }
         Agent.Status fromState = instance.getStatus();
 
-        // Idempotent re-attach (agent-concurrency §9.11): the worker is already
+        // Idempotent re-attach (agent-concurrency §9.11): the Agent is already
         // BOUND to this conversation on this same home node. The Agent
         // Supervisor reconnected its conversation socket after a transient drop
         // and re-sent conversation.attach. Treat it as a liveness event — stay
@@ -494,14 +494,14 @@ public class AgentHostService {
 
     /**
      * Consume an {@code agent.bind.ack} from the Agent Host: the host
-     * received the {@code agent.bind} and its worker is now dialing the home
-     * node, so flip the reserved worker to {@code CONNECTING} and restart the
+     * received the {@code agent.bind} and its Agent is now dialing the home
+     * node, so flip the reserved Agent to {@code CONNECTING} and restart the
      * reaper clock (the connect-timeout window runs from here, not from the
-     * original reserve). Only a worker still {@code RESERVED} for the same
-     * conversation transitions; an ack arriving after the worker already
+     * original reserve). Only an Agent still {@code RESERVED} for the same
+     * conversation transitions; an ack arriving after the Agent already
      * attached ({@code BOUND}) or was released is a harmless no-op.
      *
-     * @return {@code true} if the worker advanced to CONNECTING (or was
+     * @return {@code true} if the Agent advanced to CONNECTING (or was
      *         already past it for this conversation); {@code false} if the
      *         ack does not match a live reservation
      */
@@ -515,7 +515,7 @@ public class AgentHostService {
             return false;
         }
         // Atomic compare-and-set: only transition RESERVED → CONNECTING.
-        // If the worker already advanced to BOUND (because attachConversation
+        // If the Agent already advanced to BOUND (because attachConversation
         // won the race and committed first), the update affects zero rows
         // and this late bind.ack is a harmless no-op. This prevents the
         // race where a read-then-write confirmBind overwrites a BOUND status
@@ -536,13 +536,13 @@ public class AgentHostService {
 
     /**
      * Consume an {@code agent.bind.nack} from the Agent Host: the host cannot
-     * serve this binding (worker spawn failed, capacity gone, etc.), so
-     * release the reserved worker straight back to {@code IDLE} for the
-     * dispatcher to re-pick another candidate. Only a worker still bound to
+     * serve this binding (Agent spawn failed, capacity gone, etc.), so
+     * release the reserved Agent straight back to {@code IDLE} for the
+     * dispatcher to re-pick another candidate. Only an Agent still bound to
      * the same conversation in a transient state ({@code RESERVED}/
      * {@code CONNECTING}) is released.
      *
-     * @return {@code true} if the worker was released; {@code false} if the
+     * @return {@code true} if the Agent was released; {@code false} if the
      *         nack does not match a live reservation
      */
     @Transactional

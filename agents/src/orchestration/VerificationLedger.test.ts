@@ -15,7 +15,7 @@ const TREE_B = "b".repeat(40);
 function verdict(over: Partial<Parameters<InMemoryVerificationLedger["record"]>[0]> = {}) {
   return {
     callId: "call-1",
-    workerName: "verifier",
+    helperName: "verifier",
     verdict: "APPROVED" as const,
     summary: "ok",
     issues: [],
@@ -37,13 +37,13 @@ describe("InMemoryVerificationLedger", () => {
     expect(ledger.records()[0].sequence).toBeLessThan(ledger.records()[1].sequence);
   });
 
-  it("satisfies only when every required worker APPROVED the exact tree", () => {
+  it("satisfies only when every required helper APPROVED the exact tree", () => {
     const ledger = new InMemoryVerificationLedger();
-    ledger.record(verdict({ workerName: "verifier-a", verdict: "APPROVED" }));
+    ledger.record(verdict({ helperName: "verifier-a", verdict: "APPROVED" }));
     // verifier-b has not approved.
     expect(ledger.satisfies(["verifier-a", "verifier-b"], TREE_A)).toBe(false);
     ledger.record(
-      verdict({ callId: "c2", workerName: "verifier-b", verdict: "APPROVED" }),
+      verdict({ callId: "c2", helperName: "verifier-b", verdict: "APPROVED" }),
     );
     expect(ledger.satisfies(["verifier-a", "verifier-b"], TREE_A)).toBe(true);
     // A different tree is a different answer (rule 5).

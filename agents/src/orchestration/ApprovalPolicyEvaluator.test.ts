@@ -6,10 +6,10 @@ import {
   ApprovalPolicyEvaluator,
   governedActionDigest,
 } from "./ApprovalPolicyEvaluator.js";
-import type { OrchestrationAssignment, WorkerAuthoring } from "./types.js";
+import type { OrchestrationAssignment, HelperAuthoring } from "./types.js";
 import type { GovernedAction } from "./GovernedAction.js";
 
-const worker = (overrides: Partial<WorkerAuthoring> = {}): WorkerAuthoring => ({
+const helper = (overrides: Partial<HelperAuthoring> = {}): HelperAuthoring => ({
   name: "coder",
   modelCode: "orch-model",
   capability: "implementation",
@@ -20,9 +20,9 @@ const worker = (overrides: Partial<WorkerAuthoring> = {}): WorkerAuthoring => ({
 
 const action = (overrides: Partial<GovernedAction> = {}): GovernedAction => ({
   actionId: "action-1",
-  type: "WORKER_TOOL",
+  type: "HELPER_TOOL",
   riskClass: "DESTRUCTIVE",
-  summary: "worker:coder:IMPLEMENT",
+  summary: "helper:coder:IMPLEMENT",
   digest: "a".repeat(64),
   ...overrides,
 });
@@ -31,7 +31,7 @@ const assignment = (
   overrides: {
     approvalPolicy?: Record<string, "ALLOW" | "DENY" | "REQUIRE_APPROVAL">;
     commandTemplates?: OrchestrationAssignment["policy"]["commandTemplates"];
-    workers?: WorkerAuthoring[];
+    helpers?: HelperAuthoring[];
   } = {},
 ): OrchestrationAssignment =>
   ({
@@ -98,7 +98,7 @@ const assignment = (
         goal: "g",
         specPath: null,
         sourceSubPath: "app",
-        workers: overrides.workers ?? [worker()],
+        helpers: overrides.helpers ?? [helper()],
         checkpointStrategy: {
           mode: "ON_VERIFICATION_PASS",
           commitMessage: "feat: x",
@@ -174,24 +174,24 @@ describe("ApprovalPolicyEvaluator (§17.4)", () => {
     ).toBe("REQUIRE_APPROVAL");
   });
 
-  test("effective worker risk: the highest template override wins", () => {
+  test("effective helper risk: the highest template override wins", () => {
     const evaluator = new ApprovalPolicyEvaluator({ autoHitlOnDestructive: true });
     const a = assignment({
-      workers: [worker({ allowedCommands: ["dangerous"] })],
+      helpers: [helper({ allowedCommands: ["dangerous"] })],
     });
-    expect(evaluator.effectiveWorkerRisk(a, a.step.orchestration.workers[0])).toBe(
+    expect(evaluator.effectiveWorkerRisk(a, a.step.orchestration.helpers[0])).toBe(
       "DESTRUCTIVE",
     );
     // No commands → the five tools are SAFE by default.
-    const b = assignment({ workers: [worker()] });
-    expect(evaluator.effectiveWorkerRisk(b, b.step.orchestration.workers[0])).toBe("SAFE");
+    const b = assignment({ helpers: [helper()] });
+    expect(evaluator.effectiveWorkerRisk(b, b.step.orchestration.helpers[0])).toBe("SAFE");
   });
 
   test("the governed-action digest is deterministic over runner-owned fields", () => {
     const base = action();
     expect(governedActionDigest(base)).toBe(governedActionDigest(base));
     expect(governedActionDigest(base)).not.toBe(
-      governedActionDigest({ ...base, summary: "worker:coder:VERIFY" }),
+      governedActionDigest({ ...base, summary: "helper:coder:VERIFY" }),
     );
     expect(governedActionDigest(base)).toMatch(/^[0-9a-f]{64}$/);
   });

@@ -34,7 +34,7 @@ import java.util.UUID;
  *       fallback), {@code sourceBranch} resolved to an immutable base commit
  *       via {@link OrchestrationSourceResolver}, unique target branch.</li>
  *   <li>Secret IDs replaced with session-scoped credential references.</li>
- *   <li>Every step/worker model resolved.</li>
+ *   <li>Every step/helper model resolved.</li>
  *   <li>Complete assignment — no later registry lookup: full dispatch tuple,
  *       non-secret models, resolved source, the {@code ExecutionPolicy}
  *       block assembled from the pinned Profile version, exactly one
@@ -120,7 +120,7 @@ public class OrchestrationAssignmentAssembler {
             sourceMap.put("targetBranch", source.targetBranch());
             sourceMap.put("credentialRef", source.credentialRef());
 
-            // §16.2 (6): every step/worker model, non-secret, with
+            // §16.2 (6): every step/helper model, non-secret, with
             // session-scoped credential refs (never the key itself).
             List<Map<String, Object>> models = resolveModels(orchestration);
 
@@ -203,17 +203,17 @@ public class OrchestrationAssignmentAssembler {
         }
     }
 
-    /** The step/worker models referenced by the orchestration map. */
+    /** The step/helper models referenced by the orchestration map. */
     private List<Map<String, Object>> resolveModels(Map<String, Object> orchestration) {
         List<Map<String, Object>> models = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         String orchestratorCode = String.valueOf(orchestration.get("modelCode"));
         addModel(models, seen, orchestratorCode);
-        Object workersRaw = orchestration.get("workers");
-        if (workersRaw instanceof List<?> workers) {
-            for (Object w : workers) {
-                if (w instanceof Map<?, ?> worker) {
-                    addModel(models, seen, String.valueOf(worker.get("modelCode")));
+        Object helpersRaw = orchestration.get("helpers");
+        if (helpersRaw instanceof List<?> helpers) {
+            for (Object w : helpers) {
+                if (w instanceof Map<?, ?> helper) {
+                    addModel(models, seen, String.valueOf(helper.get("modelCode")));
                 }
             }
         }
@@ -247,14 +247,14 @@ public class OrchestrationAssignmentAssembler {
             Map<String, Object> orchestration) {
         Map<String, Object> policy = new LinkedHashMap<>();
 
-        // Referenced templates only: the ones this step's workers name.
+        // Referenced templates only: the ones this step's helpers name.
         Map<String, Object> allTemplates = parseJsonMap(version.getCommandTemplates());
         Map<String, Object> referenced = new TreeMap<>();
         Set<String> referencedNames = new HashSet<>();
-        if (orchestration.get("workers") instanceof List<?> workers) {
-            for (Object w : workers) {
-                if (w instanceof Map<?, ?> worker
-                        && worker.get("allowedCommands") instanceof List<?> commands) {
+        if (orchestration.get("helpers") instanceof List<?> helpers) {
+            for (Object w : helpers) {
+                if (w instanceof Map<?, ?> helper
+                        && helper.get("allowedCommands") instanceof List<?> commands) {
                     commands.forEach(c -> referencedNames.add(String.valueOf(c)));
                 }
             }

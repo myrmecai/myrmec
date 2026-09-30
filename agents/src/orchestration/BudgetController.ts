@@ -2,13 +2,13 @@
 // Copyright 2026 The Myrmec Authors
 
 /**
- * BudgetController (design §13, §8.9): tracks worker calls, model usage,
+ * BudgetController (design §13, §8.9): tracks helper calls, model usage,
  * and rejection count for one runner attempt. Both orchestrator and
- * worker `TurnExecutor` calls share the same controller, and it is
+ * helper `TurnExecutor` calls share the same controller, and it is
  * consulted INSIDE the model-tool loop — not only after a complete turn.
  *
- * Counting semantics (§13): `workerCalls` counts each ACCEPTED
- * `invoke_worker` execution — a delegation rejected by the budget is
+ * Counting semantics (§13): `helperCalls` counts each ACCEPTED
+ * `invoke_helper` execution — a delegation rejected by the budget is
  * never an execution. Once any counter exceeds its limit the breach is
  * FLAGGED: the run terminates using the configured budget action, so
  * every later check returns the same breach and the nested model loops
@@ -28,22 +28,22 @@ export type BudgetCheckPoint =
 /** A budget breach with the specific stable error code (§14). */
 export interface BudgetBreach {
   checkpoint: BudgetCheckPoint;
-  errorCode: "WORKER_BUDGET_EXCEEDED" | "TOKEN_BUDGET_EXCEEDED" | "REJECTION_BUDGET_EXCEEDED";
+  errorCode: "HELPER_BUDGET_EXCEEDED" | "TOKEN_BUDGET_EXCEEDED" | "REJECTION_BUDGET_EXCEEDED";
   message: string;
 }
 
 /** Counters restorable by a same-dispatch restart (§13). */
 export interface BudgetCounters {
-  workerCalls: number;
+  helperCalls: number;
   totalTokens: number;
   rejectionCount: number;
 }
 
 export interface BudgetController {
-  /** §13: accept-or-reject one invoke_worker execution — counts ONLY
+  /** §13: accept-or-reject one invoke_helper execution — counts ONLY
    * accepted executions; a rejected delegation does not count. */
   tryReserveWorkerCall(): BudgetBreach | null;
-  /** §13: record every orchestrator/worker model response's tokens. */
+  /** §13: record every orchestrator/helper model response's tokens. */
   recordTokens(tokens: number): void;
   /** §13: record each REJECTED verdict immediately; flags the breach
    * when the rejection budget is exceeded. */
@@ -83,7 +83,7 @@ export class InMemoryBudgetController implements BudgetController {
     this.maxTokens = budget.maxTokens;
     this.maxVerifierRejectionsPerAttempt = budget.maxVerifierRejectionsPerAttempt;
     if (counters) {
-      this.workerCalls = counters.workerCalls;
+      this.workerCalls = counters.helperCalls;
       this.totalTokens = counters.totalTokens;
       this.rejections = counters.rejectionCount;
     }
@@ -105,8 +105,8 @@ export class InMemoryBudgetController implements BudgetController {
     if (this.workerCalls + 1 > this.maxWorkerCalls) {
       const breach: BudgetBreach = {
         checkpoint: "before-worker-call",
-        errorCode: "WORKER_BUDGET_EXCEEDED",
-        message: `worker call limit exceeded: ${this.workerCalls} accepted of ${this.maxWorkerCalls}`,
+        errorCode: "HELPER_BUDGET_EXCEEDED",
+        message: `helper call limit exceeded: ${this.workerCalls} accepted of ${this.maxWorkerCalls}`,
       };
       this.flagBreach(breach);
       return breach;
@@ -165,7 +165,7 @@ export class InMemoryBudgetController implements BudgetController {
 
   counters(): BudgetCounters {
     return {
-      workerCalls: this.workerCalls,
+      helperCalls: this.workerCalls,
       totalTokens: this.totalTokens,
       rejectionCount: this.rejections,
     };

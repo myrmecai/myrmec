@@ -70,17 +70,17 @@ function validWorkflow(): unknown {
           goal: "Do the thing.",
           specPath: null,
           sourceSubPath: "app",
-          workers: [
+          helpers: [
             {
               name: "coder",
-              modelCode: "worker-model",
+              modelCode: "helper-model",
               capability: "Writes code",
               allowedTools: ["read_file", "write_file"],
               allowedCommands: [],
             },
             {
               name: "verifier",
-              modelCode: "worker-model",
+              modelCode: "helper-model",
               capability: "Checks code",
               allowedTools: ["read_file"],
               allowedCommands: ["mvnw"],
@@ -123,10 +123,10 @@ function validModels(): unknown[] {
       parameters: {},
     },
     {
-      code: "worker-model",
+      code: "helper-model",
       provider: "ollama",
-      modelId: "worker:latest",
-      description: "worker",
+      modelId: "helper:latest",
+      description: "helper",
       endpoint: "http://localhost:11434/v1",
       apiKey: "",
       parameters: {},
@@ -197,15 +197,15 @@ describe("workflowDefinitionSchema", () => {
     expect(() => workflowDefinitionSchema.parse(wf)).toThrow();
   });
 
-  it("rejects an unknown worker modelCode reference", () => {
+  it("rejects an unknown helper modelCode reference", () => {
     const wf = mutable(validWorkflow());
-    wf.workflow[0].orchestration.workers[0].modelCode = "missing-model";
+    wf.workflow[0].orchestration.helpers[0].modelCode = "missing-model";
     expect(() => workflowDefinitionSchema.parse(wf)).toThrow();
   });
 
-  it("rejects duplicate worker names within a step", () => {
+  it("rejects duplicate helper names within a step", () => {
     const wf = mutable(validWorkflow());
-    wf.workflow[0].orchestration.workers[1].name = "coder";
+    wf.workflow[0].orchestration.helpers[1].name = "coder";
     expect(() => workflowDefinitionSchema.parse(wf)).toThrow();
   });
 
@@ -216,7 +216,7 @@ describe("workflowDefinitionSchema", () => {
     expect(() => workflowDefinitionSchema.parse(wf)).toThrow();
   });
 
-  it("rejects a verifier name not in the worker catalog", () => {
+  it("rejects a verifier name not in the helper catalog", () => {
     const wf = mutable(validWorkflow());
     wf.workflow[0].orchestration.completionCriteria.requireVerificationBy = ["ghost"];
     expect(() => workflowDefinitionSchema.parse(wf)).toThrow();
@@ -224,8 +224,8 @@ describe("workflowDefinitionSchema", () => {
 
   it("rejects execute_command without allowedCommands", () => {
     const wf = mutable(validWorkflow());
-    wf.workflow[0].orchestration.workers[0].allowedTools.push("execute_command");
-    wf.workflow[0].orchestration.workers[0].allowedCommands = [];
+    wf.workflow[0].orchestration.helpers[0].allowedTools.push("execute_command");
+    wf.workflow[0].orchestration.helpers[0].allowedCommands = [];
     expect(() => workflowDefinitionSchema.parse(wf)).toThrow();
   });
 
@@ -352,7 +352,7 @@ describe("compileStepAssignment", () => {
     expect(assignment.step.id).toBe("step-1");
     expect(assignment.dispatch.stepId).toBe("step-1");
     expect(assignment.models.map((m) => m.code)).toEqual(
-      expect.arrayContaining(["orch-model", "worker-model"]),
+      expect.arrayContaining(["orch-model", "helper-model"]),
     );
     expect(assignment.source.sourceBaseCommit).toBe("a".repeat(40));
     expect(assignment.policy.commandTemplates).toHaveProperty("mvnw");
@@ -543,28 +543,28 @@ describe("orchestrationAssignmentSchema", () => {
     expect(parsed.policy.commandTemplates.mvnw.executable).toBe("./mvnw");
   });
 
-  it("rejects a worker command template not present in policy", () => {
+  it("rejects a helper command template not present in policy", () => {
     const a = validAssignment();
     const mutated = mutable(a);
-    mutated.step.orchestration.workers[1].allowedCommands = ["ghost-template"];
+    mutated.step.orchestration.helpers[1].allowedCommands = ["ghost-template"];
     expect(() => orchestrationAssignmentSchema.parse(mutated)).toThrow();
   });
 
-  it("rejects a worker tool outside the closed tool set", () => {
+  it("rejects a helper tool outside the closed tool set", () => {
     const a = validAssignment();
     const mutated = mutable(a);
-    mutated.step.orchestration.workers[0].allowedTools = ["rm_rf"];
+    mutated.step.orchestration.helpers[0].allowedTools = ["rm_rf"];
     expect(() => orchestrationAssignmentSchema.parse(mutated)).toThrow();
   });
 
-  it("rejects a worker tool not allowed by the policy", () => {
+  it("rejects a helper tool not allowed by the policy", () => {
     const a = validAssignment();
     const mutated = mutable(a);
-    // Narrow the policy allowlist so the worker's execute_command is a
+    // Narrow the policy allowlist so the helper's execute_command is a
     // closed-set tool the policy does not permit.
     mutated.policy.allowedTools = ["read_file", "write_file", "list_directory"];
-    mutated.step.orchestration.workers[0].allowedTools = ["write_file", "execute_command"];
-    mutated.step.orchestration.workers[0].allowedCommands = ["mvnw"];
+    mutated.step.orchestration.helpers[0].allowedTools = ["write_file", "execute_command"];
+    mutated.step.orchestration.helpers[0].allowedCommands = ["mvnw"];
     expect(() => orchestrationAssignmentSchema.parse(mutated)).toThrow();
   });
 

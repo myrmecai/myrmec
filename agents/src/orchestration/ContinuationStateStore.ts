@@ -20,7 +20,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, w
 import path from "node:path";
 import type { BudgetCounters } from "./BudgetController.js";
 import type { VerdictRecord } from "./VerificationLedger.js";
-import type { WorkerCallResult } from "./types.js";
+import type { HelperCallResult } from "./types.js";
 
 /** The persisted continuation manifest (§17.2's continuation.json). */
 export interface ContinuationManifest {
@@ -29,7 +29,7 @@ export interface ContinuationManifest {
   attemptOrdinal: number;
   /** §13: same-dispatch restart restores these counters. */
   budgetCounters: BudgetCounters;
-  /** Completed worker-call identities — replay deduplicates by these. */
+  /** Completed helper-call identities — replay deduplicates by these. */
   completedCallIds: string[];
   /** The candidate-tree state at the safe boundary. */
   candidateTreeHash: string;
@@ -159,7 +159,7 @@ export class LocalContinuationStateStore implements ContinuationStateStore {
 
 /**
  * RecoveryStore (§8.12, plan Feature 7 lightweight subset): persists a
- * continuation record after every completed worker call (safe model
+ * continuation record after every completed helper call (safe model
  * boundary) and hands the manifest to a new attempt. The source-bearing
  * artifact remains optional until Feature 10 — a continuation whose
  * candidate tree matches the reconstructed checkout needs no artifact.
@@ -175,7 +175,7 @@ export class RecoveryStore {
     dispatchId: string;
     attemptOrdinal: number;
     budgetCounters: BudgetCounters;
-    completedCalls: WorkerCallResult[];
+    completedCalls: HelperCallResult[];
     candidateTreeHash: string;
     workspaceRevision: number;
     verifierHistory: VerdictRecord[];

@@ -77,12 +77,12 @@ describe("CaptureFilter (§8.4/§15 rule 12)", () => {
     expect(
       filter.filterEvent("ORCHESTRATION_FUNCTION_STARTED", {
         callId: "c1",
-        functionName: "invoke_worker",
+        functionName: "invoke_helper",
         modelCode: "m",
         purpose: "IMPLEMENT",
         args: { instruction: "SECRET" },
       }),
-    ).toEqual({ callId: "c1", functionName: "invoke_worker", modelCode: "m", purpose: "IMPLEMENT" });
+    ).toEqual({ callId: "c1", functionName: "invoke_helper", modelCode: "m", purpose: "IMPLEMENT" });
     expect(
       filter.filterEvent("ORCHESTRATION_FUNCTION_COMPLETED", {
         callId: "c1",

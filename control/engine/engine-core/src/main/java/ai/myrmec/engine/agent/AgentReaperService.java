@@ -13,33 +13,33 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Slice 4d — warm-worker FSM reaper (agent-concurrency §9.5).
+ * Slice 4d — warm-Agent FSM reaper (agent-concurrency §9.5).
  *
- * <p>A worker can stall in a transient binding state if the Agent Host never
+ * <p>An Agent can stall in a transient binding state if the Agent Host never
  * acks an {@code agent.bind}, never opens its conversation socket, or simply
- * dies mid-binding. Three timers reclaim those workers so the warm pool does
+ * dies mid-binding. Three timers reclaim those Agents so the warm pool does
  * not leak capacity:</p>
  *
  * <ul>
- *   <li><b>RESERVE_TIMEOUT</b> — a worker still {@code RESERVED} past the
+ *   <li><b>RESERVE_TIMEOUT</b> — an Agent still {@code RESERVED} past the
  *       cutoff (the host never acked the bind) is released back to
  *       {@code IDLE} for re-dispatch.</li>
- *   <li><b>CONNECT_TIMEOUT</b> — a worker still {@code CONNECTING} past the
+ *   <li><b>CONNECT_TIMEOUT</b> — an Agent still {@code CONNECTING} past the
  *       cutoff (the host acked but its conversation socket never attached) is
  *       released back to {@code IDLE}.</li>
- *   <li><b>HOST_LOST</b> — any mid-lifecycle worker
+ *   <li><b>HOST_LOST</b> — any mid-lifecycle Agent
  *       ({@code RESERVED}/{@code CONNECTING}/{@code BOUND}/{@code DRAINING})
  *       whose heartbeat has gone stale is flipped to {@code DEAD} (its host
  *       is gone, not merely slow).</li>
  * </ul>
  *
- * <p>HOST_LOST runs first: a worker that is both heartbeat-stale and
+ * <p>HOST_LOST runs first: an Agent that is both heartbeat-stale and
  * reserve-timed-out belongs to a dead host, so {@code DEAD} (not the
  * reclaim-to-pool {@code IDLE}) is the correct terminal state, and once it is
  * {@code DEAD} the transient-timeout queries no longer match it.</p>
  *
  * <p>Disabled in the e2e profile via {@code myrmec.agent.reaper.enabled} so a
- * shared in-memory context does not asynchronously yank workers that a test
+ * shared in-memory context does not asynchronously yank Agents that a test
  * is driving by hand.</p>
  */
 @Service
@@ -88,7 +88,7 @@ public class AgentReaperService {
     }
 
     /**
-     * HOST_LOST — mid-lifecycle workers whose heartbeat went stale belong to
+     * HOST_LOST — mid-lifecycle Agents whose heartbeat went stale belong to
      * a dead host; flip them to {@code DEAD}.
      */
     void reapHostLost(Instant now) {
@@ -97,20 +97,20 @@ public class AgentReaperService {
         if (stale.isEmpty()) {
             return;
         }
-        for (Agent worker : stale) {
+        for (Agent agent : stale) {
             log.warn("HOST_LOST: agent {} ({}) heartbeat stale since {} -> DEAD",
-                    worker.getId(), worker.getStatus(), worker.getLastHeartbeatAt());
-            UUID conversationId = worker.getConversationId();
-            Agent.Status fromState = worker.getStatus();
-            worker.markOffline();
-            conversationEventService.record(conversationId, worker.getId(), worker.getAgentHostId(),
+                    agent.getId(), agent.getStatus(), agent.getLastHeartbeatAt());
+            UUID conversationId = agent.getConversationId();
+            Agent.Status fromState = agent.getStatus();
+            agent.markOffline();
+            conversationEventService.record(conversationId, agent.getId(), agent.getAgentHostId(),
                     fromState, Agent.Status.DEAD, ConversationEventReason.HOST_LOST);
         }
         agentRepository.saveAll(stale);
     }
 
     /**
-     * RESERVE_TIMEOUT / CONNECT_TIMEOUT — workers stuck in a transient
+     * RESERVE_TIMEOUT / CONNECT_TIMEOUT — Agents stuck in a transient
      * binding state past the cutoff are released back into the warm pool.
      */
     void reapTransient(Instant now, Agent.Status status, long timeoutMs, ConversationEventReason reason) {
@@ -119,13 +119,13 @@ public class AgentReaperService {
         if (stuck.isEmpty()) {
             return;
         }
-        for (Agent worker : stuck) {
+        for (Agent agent : stuck) {
             log.warn("{}: agent {} stuck {} since {} -> IDLE",
-                    reason, worker.getId(), status, worker.getStateChangedAt());
-            UUID conversationId = worker.getConversationId();
-            UUID hostId = worker.getAgentHostId();
-            worker.release();
-            conversationEventService.record(conversationId, worker.getId(), hostId,
+                    reason, agent.getId(), status, agent.getStateChangedAt());
+            UUID conversationId = agent.getConversationId();
+            UUID hostId = agent.getAgentHostId();
+            agent.release();
+            conversationEventService.record(conversationId, agent.getId(), hostId,
                     status, Agent.Status.IDLE, reason);
         }
         agentRepository.saveAll(stuck);

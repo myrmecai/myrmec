@@ -9,8 +9,8 @@ import {
   type AgentHost,
   type AgentHostType,
   type AgentHostWithKey,
-  type AgentWorker,
-  type AgentWorkerStatus,
+  type Agent,
+  type AgentStatus,
   type CreateAgentHostRequest,
   type ModelAccessMode,
   type UpdateAgentHostRequest,
@@ -59,7 +59,7 @@ import {
   AlertCircle,
   Server,
 } from 'lucide-react'
-import { WORKER_STATUS_STYLES } from './shared/constants'
+import { AGENT_STATUS_STYLES } from './shared/constants'
 import { dialogService } from '@/services/dialog-service'
 import DataTable2 from '@/components/data-table2/data-table2'
 import { SortedColumnHeader } from '@/components/data-table2/sorted-column-header'
@@ -70,7 +70,7 @@ export function AgentHostsList() {
   const [editAgentHost, setEditAgentHost] = useState<AgentHost | null>(null)
   const [createdAgentHost, setCreatedAgentHost] = useState<AgentHostWithKey | null>(null)
   const [regeneratedKey, setRegeneratedKey] = useState<{ agentHostName: string; key: string } | null>(null)
-  const [workersAgentHost, setWorkersAgentHost] = useState<AgentHost | null>(null)
+  const [agentsAgentHost, setAgentsAgentHost] = useState<AgentHost | null>(null)
 
   const { data: agentHosts, isLoading, error } = useQuery({
     queryKey: ['agent-hosts'],
@@ -187,8 +187,8 @@ export function AgentHostsList() {
             <Button
               variant="ghost"
               size="icon"
-              title="View workers"
-              onClick={() => setWorkersAgentHost(agentHost)}
+              title="View agents"
+              onClick={() => setAgentsAgentHost(agentHost)}
             >
               <Server className="h-4 w-4" />
             </Button>
@@ -263,7 +263,7 @@ export function AgentHostsList() {
         <div>
           <h1 className="text-3xl font-bold">Agent Hosts</h1>
           <p className="text-muted-foreground">
-            Manage deployable AI agent workers
+            Manage deployable AI agents
           </p>
         </div>
 
@@ -318,11 +318,11 @@ export function AgentHostsList() {
         </DialogContent>
       </Dialog>
 
-      {/* Worker Replicas Dialog */}
-      <Dialog open={!!workersAgentHost} onOpenChange={(open) => !open && setWorkersAgentHost(null)}>
+      {/* Agents Dialog */}
+      <Dialog open={!!agentsAgentHost} onOpenChange={(open) => !open && setAgentsAgentHost(null)}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          {workersAgentHost && (
-            <WorkersDialog agentHost={workersAgentHost} />
+          {agentsAgentHost && (
+            <AgentsDialog agentHost={agentsAgentHost} />
           )}
         </DialogContent>
       </Dialog>
@@ -331,7 +331,7 @@ export function AgentHostsList() {
       <Dialog open={!!createdAgentHost} onOpenChange={(open) => !open && setCreatedAgentHost(null)}>
         <DialogContent>
           <RegistrationKeyDisplay
-            agentHostName={createdAgentHost?.agent.name || ''}
+            agentHostName={createdAgentHost?.agentHost.name || ''}
             registrationKey={createdAgentHost?.registrationKey || ''}
             onClose={() => setCreatedAgentHost(null)}
           />
@@ -353,9 +353,9 @@ export function AgentHostsList() {
   )
 }
 
-function WorkerStatusBadge({ status }: { status: AgentWorkerStatus | null }) {
+function AgentStatusBadge({ status }: { status: AgentStatus | null }) {
   if (!status) return <Badge variant="secondary">Unknown</Badge>
-  return <Badge className={WORKER_STATUS_STYLES[status]}>{status}</Badge>
+  return <Badge className={AGENT_STATUS_STYLES[status]}>{status}</Badge>
 }
 
 const HOST_TYPE_BADGE: Record<AgentHostType, { variant: 'secondary' | 'outline' | 'default'; className?: string }> = {
@@ -386,10 +386,10 @@ function formatTimestamp(value: string | null): string {
   return new Date(value).toLocaleString()
 }
 
-function WorkersDialog({ agentHost }: { agentHost: AgentHost }) {
-  const { data: workers, isLoading, error } = useQuery({
-    queryKey: ['agent-workers', agentHost.id],
-    queryFn: () => agentHostsApi.workers(agentHost.id),
+function AgentsDialog({ agentHost }: { agentHost: AgentHost }) {
+  const { data: agents, isLoading, error } = useQuery({
+    queryKey: ['host-agents', agentHost.id],
+    queryFn: () => agentHostsApi.agents(agentHost.id),
     refetchInterval: 5000,
   })
 
@@ -406,9 +406,9 @@ function WorkersDialog({ agentHost }: { agentHost: AgentHost }) {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Workers — {agentHost.name}</DialogTitle>
+        <DialogTitle>Agents — {agentHost.name}</DialogTitle>
         <DialogDescription>
-          Ephemeral worker replicas and their runtime state. Refreshes every 5s.
+          Ephemeral Agents and their runtime state. Refreshes every 5s.
         </DialogDescription>
       </DialogHeader>
 
@@ -434,12 +434,12 @@ function WorkersDialog({ agentHost }: { agentHost: AgentHost }) {
       )}
 
       {isLoading && (
-        <div className="text-muted-foreground py-6">Loading workers…</div>
+        <div className="text-muted-foreground py-6">Loading agents…</div>
       )}
       {error && (
-        <div className="text-destructive py-6">Failed to load workers</div>
+        <div className="text-destructive py-6">Failed to load agents</div>
       )}
-      {workers && (
+      {agents && (
         <Table>
           <TableHeader>
             <TableRow>
@@ -451,11 +451,11 @@ function WorkersDialog({ agentHost }: { agentHost: AgentHost }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {workers.map((w: AgentWorker) => (
+            {agents.map((w: Agent) => (
               <TableRow key={w.id}>
                 <TableCell>
                   <div className="flex items-center gap-1.5">
-                    <WorkerStatusBadge status={w.status} />
+                    <AgentStatusBadge status={w.status} />
                     {staleByInstance.get(w.id) && (
                       <Badge variant="outline" className="border-amber-500 text-amber-600">
                         Stale
@@ -473,10 +473,10 @@ function WorkersDialog({ agentHost }: { agentHost: AgentHost }) {
                 </TableCell>
               </TableRow>
             ))}
-            {workers.length === 0 && (
+            {agents.length === 0 && (
               <TableRow>
                 <TableCell colSpan={5} className="text-center text-muted-foreground">
-                  No worker replicas have registered for this host yet.
+                  No Agents have registered for this host yet.
                 </TableCell>
               </TableRow>
             )}
@@ -548,7 +548,7 @@ function AgentHostForm({ projects, onSubmit, isLoading, error }: AgentHostFormPr
       <DialogHeader>
         <DialogTitle>New Agent Host</DialogTitle>
         <DialogDescription>
-          Create a new agent worker. A registration key will be generated.
+          Create a new agent host. A registration key will be generated.
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-4 py-4">

@@ -23,7 +23,7 @@ export {
   type CredentialScope,
 } from "./schema.js";
 export { OrchestrationRunner, type OrchestrationRunnerOptions, type OrchestrationRunOptions } from "./OrchestrationRunner.js";
-export { WorkerInvoker, normalizeUsage, type WorkerInvokerOptions, type InvokeWorkerOutcome } from "./WorkerInvoker.js";
+export { HelperInvoker, normalizeUsage, type HelperInvokerOptions, type InvokeHelperOutcome } from "./HelperInvoker.js";
 // HITL (§17.4): the governed-action types, the policy evaluator, the
 // resume validator, and the continuation store.
 export type {

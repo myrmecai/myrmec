@@ -62,11 +62,11 @@ describe("orchestrationFrames (§16.3)", () => {
         schemaVersion: "1.0",
         eventId: "66666666-6666-4666-8666-666666666666",
         dispatch,
-        type: "WORKER_STARTED",
+        type: "HELPER_STARTED",
         sequence: 17,
         occurredAt: new Date().toISOString(),
-        workerName: "coder",
-        usage: { workerCalls: 4, rejectionCount: 0, totalTokens: 8200 },
+        helperName: "coder",
+        usage: { helperCalls: 4, rejectionCount: 0, totalTokens: 8200 },
       }).success,
     ).toBe(true);
   });
@@ -80,13 +80,13 @@ describe("orchestrationFrames (§16.3)", () => {
       status: "COMPLETED",
       retryDisposition: "NONE",
       summary: "all steps verified",
-      workerCalls: [],
+      helperCalls: [],
       verifierResults: [],
       commandExecutions: [],
       changedFiles: ["src/module.ts"],
       commits: [],
       cleanWorktree: true,
-      usage: { workerCalls: 3, rejectionCount: 0, totalTokens: 1200 },
+      usage: { helperCalls: 3, rejectionCount: 0, totalTokens: 1200 },
     };
     expect(orchestrationResultPayloadSchema.safeParse(valid).success).toBe(true);
 

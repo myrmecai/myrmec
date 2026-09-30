@@ -18,7 +18,7 @@ function controller(over: { calls?: number; tokens?: number; rejections?: number
 }
 
 describe("InMemoryBudgetController", () => {
-  it("accepts worker calls while under maxWorkerCalls and rejects the one over without counting it", () => {
+  it("accepts helper calls while under maxWorkerCalls and rejects the one over without counting it", () => {
     const c = controller({ calls: 2 });
     expect(c.tryReserveWorkerCall()).toBeNull();
     expect(c.tryReserveWorkerCall()).toBeNull();
@@ -26,8 +26,8 @@ describe("InMemoryBudgetController", () => {
     // accepted execution (§13: the counter counts accepted executions).
     const breach = c.tryReserveWorkerCall();
     expect(breach).not.toBeNull();
-    expect(breach!.errorCode).toBe("WORKER_BUDGET_EXCEEDED");
-    expect(c.counters().workerCalls).toBe(2);
+    expect(breach!.errorCode).toBe("HELPER_BUDGET_EXCEEDED");
+    expect(c.counters().helperCalls).toBe(2);
   });
 
   it("records tokens after each response and breaches before the next model call", () => {
@@ -52,11 +52,11 @@ describe("InMemoryBudgetController", () => {
     expect(c.check("before-tool-execution")).toBe(breach);
   });
 
-  it("a flagged worker-call breach sticks across all later checks", () => {
+  it("a flagged helper-call breach sticks across all later checks", () => {
     const c = controller({ calls: 1 });
     expect(c.tryReserveWorkerCall()).toBeNull();
     const breach = c.tryReserveWorkerCall();
-    expect(breach!.errorCode).toBe("WORKER_BUDGET_EXCEEDED");
+    expect(breach!.errorCode).toBe("HELPER_BUDGET_EXCEEDED");
     expect(c.check("before-model-call")).toBe(breach);
   });
 
@@ -72,22 +72,22 @@ describe("InMemoryBudgetController", () => {
   it("restores counters for a same-dispatch restart so a crash cannot reset a limit", () => {
     const restored = new InMemoryBudgetController(
       { maxWorkerCalls: 2, maxTokens: 100, maxVerifierRejectionsPerAttempt: 1 },
-      { workerCalls: 2, totalTokens: 80, rejectionCount: 1 },
+      { helperCalls: 2, totalTokens: 80, rejectionCount: 1 },
     );
     // The token budget is already exceeded by restored counters.
     restored.recordTokens(30);
     expect(restored.check("before-model-call")!.errorCode).toBe("TOKEN_BUDGET_EXCEEDED");
     // The next delegation breaches without counting.
-    expect(restored.tryReserveWorkerCall()!.errorCode).toBe("WORKER_BUDGET_EXCEEDED");
+    expect(restored.tryReserveWorkerCall()!.errorCode).toBe("HELPER_BUDGET_EXCEEDED");
     expect(restored.recordRejection()!.errorCode).toBe("REJECTION_BUDGET_EXCEEDED");
     expect(restored.counters()).toEqual({
-      workerCalls: 2,
+      helperCalls: 2,
       totalTokens: 110,
       rejectionCount: 2,
     });
     // Sticky from here: every later check reports the first flagged
-    // breach (the worker-call one).
-    expect(restored.check("before-model-call")!.errorCode).toBe("WORKER_BUDGET_EXCEEDED");
+    // breach (the helper-call one).
+    expect(restored.check("before-model-call")!.errorCode).toBe("HELPER_BUDGET_EXCEEDED");
   });
 
   it("exposes the effective limits", () => {

@@ -17,7 +17,7 @@
  *      `host.announce` — capacity now rides host.open + heartbeat),
  *   3. route inbound commands (execution.start/cancel) to the overridable
  *      `on*` hooks the executor slice fills in,
- *   4. route worker-produced frames out through the client's typed senders,
+ *   4. route Agent-produced frames out through the client's typed senders,
  *   5. wire the SessionRegistry seams (sessionLifecycle / retention / PSK)
  *      into the client when a registry is present.
  *
@@ -63,7 +63,8 @@ export interface AgentSupervisorOptions {
   role: SupervisorRole;
   logger?: Logger;
   /**
-   * Worker-pool size reported in `host.open` + heartbeat. The subclass sets
+   * Worker-thread-pool size reported in `host.open` + heartbeat. The
+   * subclass sets
    * it from its spawnWorkers configuration; default 1 (V1 pool = 1).
    */
   poolSize?: number;
@@ -164,7 +165,8 @@ export abstract class AgentSupervisor {
   // ==================== Worker pool ====================
 
   /**
-   * Bring up the Agent worker pool. The base default is a no-op; subclasses
+   * Bring up the Agent worker (thread) pool. The base default is a no-op;
+   * subclasses
    * spawn one (interactive) or N (headless, auto-sized) worker threads. Called
    * once during {@link start} after auth, before the control socket opens.
    */
@@ -218,7 +220,7 @@ export abstract class AgentSupervisor {
     client.onExecutionStart((frame) => this.onExecutionStart(frame));
     client.onExecutionCancel((frame) => this.onExecutionCancel(frame));
     // Mirror session opens/closes to the subclass's forwarding hooks (the
-    // worker's registry opens/closes the model + tools alongside the
+    // Agent's registry opens/closes the model + tools alongside the
     // transport-side bookkeeping).
     client.onSessionOpen(async (frame) => {
       this.onSessionOpen(frame.payload as SessionOpenPayload);
@@ -233,7 +235,8 @@ export abstract class AgentSupervisor {
   }
 
   /**
-   * Start the Supervisor: authenticate, bring up the worker pool, open the
+   * Start the Supervisor: authenticate, bring up the worker (thread) pool,
+   * open the
    * host-control socket (host.open → host.opened → heartbeat) and run until
    * `stop()`. Blocks until the socket is connected — the client owns
    * reconnection from there (the old `onDisconnect` retry loop is the
@@ -245,7 +248,8 @@ export abstract class AgentSupervisor {
 
     this.auth = await this.authenticate();
 
-    // Bring up the worker pool before the socket so a worker is ready to take
+    // Bring up the worker pool before the socket so a worker (one Agent) is
+    // ready to take
     // the first engine-pushed frame (§9.6.1 spawnWorkers seam).
     await this.spawnWorkers();
 
@@ -292,15 +296,15 @@ export abstract class AgentSupervisor {
   /**
    * A `session.open` the client dispatched (after channel bind + opened
    * reply). The base default is a logged no-op; subclasses forward to the
-   * worker registry.
+   * Agent's registry.
    */
   protected onSessionOpen(_payload: SessionOpenPayload): void {
-    this.log.debug("session.open received (no worker wired yet)");
+    this.log.debug("session.open received (no Agent wired yet)");
   }
 
   /** A `session.close` the client dispatched. Base default: no-op. */
   protected onSessionClose(_payload: { sessionId: string }): void {
-    this.log.debug("session.close received (no worker wired yet)");
+    this.log.debug("session.close received (no Agent wired yet)");
   }
 
   // ==================== PSK delivery (§6, credential envelope design) ========
@@ -318,10 +322,11 @@ export abstract class AgentSupervisor {
     registry?.setPsk?.(psk);
   }
 
-  // ==================== Worker forwarding ====================
+  // ==================== Agent forwarding ====================
 
   /**
-   * Forward an inbound frame to the worker pool. The base default logs; the
+   * Forward an inbound frame to the worker (thread) pool. The base default
+   * logs; the
    * concrete Supervisor overrides this to dispatch into its worker host
    * (§9.7). Conversation-socket inbound and reserve-time frames are gone
    * with the legacy wire — everything unified flows here.
@@ -343,7 +348,7 @@ export abstract class AgentSupervisor {
    * execution.start/cancel is the allocator-owned session id (stamped by
    * ExecutionCommandSender from the session row), while the payload's own
    * `sessionId` field carries the CONVERSATION id for conversation turns.
-   * The worker's SessionRegistry, however, keys sessions by the id from
+   * The Agent's SessionRegistry, however, keys sessions by the id from
    * session.open (the session id) — so a forwarded frame must carry the
    * transport-level id or the executor's registry lookup misses and the
    * turn dead-ends (SESSION_NOT_OPEN → a terminal without an accept →
@@ -360,8 +365,8 @@ export abstract class AgentSupervisor {
   }
 
   /**
-   * Route a frame the worker produced onto the unified wire. Under the
-   * unified protocol (P6-T6) every worker frame rides the host control
+   * Route a frame the Agent produced onto the unified wire. Under the
+   * unified protocol (P6-T6) every Agent frame rides the host control
    * socket — the per-conversation socket split is gone with the legacy wire
    * (§9.3 seam 4 collapsed).
    */
@@ -370,8 +375,8 @@ export abstract class AgentSupervisor {
   }
 
   /**
-   * Post a worker-produced frame to the engine. Maps the legacy Envelope
-   * shape (the worker's only sink) onto the client's typed senders. Warns
+   * Post an Agent-produced frame to the engine. Maps the legacy Envelope
+   * shape (the Agent's only sink) onto the client's typed senders. Warns
    * (and drops) when the client is not connected (shutdown race).
    */
   protected async post(frame: Envelope): Promise<void> {
@@ -427,7 +432,7 @@ export abstract class AgentSupervisor {
           payload as unknown as ProtocolErrorPayload,
         );
       default:
-        this.log.warn("Unknown worker frame type — dropped:", frame.type);
+        this.log.warn("Unknown Agent frame type — dropped:", frame.type);
     }
   }
 }

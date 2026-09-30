@@ -3,7 +3,7 @@
 package ai.myrmec.engine.agent;
 
 import ai.myrmec.engine.IntegrationTestBase;
-import ai.myrmec.engine.agent.dto.AgentResponse;
+import ai.myrmec.engine.agent.dto.AgentHostResponse;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.inference.SessionContextAssembler;
@@ -196,11 +196,11 @@ class ModelAccessModeValidationTest extends IntegrationTestBase {
             assertThat(anon.getStatusCode().value()).isIn(401, 403);
 
             // A platform admin can change the mode.
-            ResponseEntity<AgentResponse> adminResp = restTemplate.exchange(
+            ResponseEntity<AgentHostResponse> adminResp = restTemplate.exchange(
                     "/api/v1/admin/agent-hosts/" + host.getId() + "/model-access-mode",
                     HttpMethod.PUT,
                     new HttpEntity<>(Map.of("modelAccessMode", "GATEWAY"), adminHeaders()),
-                    AgentResponse.class);
+                    AgentHostResponse.class);
             assertThat(adminResp.getStatusCode()).isEqualTo(HttpStatus.OK);
             assertThat(adminResp.getBody().getModelAccessMode()).isEqualTo(ModelAccessMode.GATEWAY);
         });

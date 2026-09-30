@@ -58,7 +58,7 @@ class FakeHostControlConnection implements HostControlConnection {
 }
 
 /** A concrete Supervisor that stubs the abstract seams, injects the fake
- * connection, and captures the worker-forwarded + engine-routed frames so
+ * connection, and captures the Agent-forwarded + engine-routed frames so
  * the unified routing surface can be asserted through the FULL composition
  * (supervisor → HostControlClient → fake socket). */
 class TestSupervisor extends AgentSupervisor {
@@ -312,14 +312,14 @@ describe("AgentSupervisor on the unified wire (composition root)", () => {
     await sup.stop();
   });
 
-  it("routes worker execution frames through the client's typed senders", async () => {
+  it("routes Agent execution frames through the client's typed senders", async () => {
     const conn = new FakeHostControlConnection();
     const sup = new TestSupervisor(silentLogger, conn);
     await sup.start();
     await conn.simulateInbound(hostOpenedFrame());
     conn.sent.length = 0;
 
-    // The worker's legacy-shape frames, mapped by the supervisor's post().
+    // The Agent's legacy-shape frames, mapped by the supervisor's post().
     await sup.route(
       makeEnvelope("execution.delta", {
         executionId,
@@ -342,7 +342,7 @@ describe("AgentSupervisor on the unified wire (composition root)", () => {
     await sup.stop();
   });
 
-  it("drops an unknown worker frame type with a warning (legacy wire deleted)", async () => {
+  it("drops an unknown Agent frame type with a warning (legacy wire deleted)", async () => {
     const conn = new FakeHostControlConnection();
     const sup = new TestSupervisor(silentLogger, conn);
     await sup.start();

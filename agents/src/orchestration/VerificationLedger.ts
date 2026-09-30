@@ -3,11 +3,11 @@
 
 /**
  * VerificationLedger (design §8.8, rules §11): stores immutable verdict
- * records and answers whether every required worker has an authoritative
+ * records and answers whether every required helper has an authoritative
  * APPROVED verdict for the exact current candidate tree.
  *
  * The ledger is append-only (rule 7): it never overwrites rejections or
- * older approvals. For one worker+tree the lexicographically highest
+ * older approvals. For one helper+tree the lexicographically highest
  * runner-owned `(attemptOrdinal, sequence)` verdict is authoritative
  * (rule 8), so a verdict from a new attempt supersedes every restored
  * verdict from an older attempt.
@@ -16,7 +16,7 @@ import type { VerifierResult } from "./types.js";
 
 export interface VerdictRecord {
   callId: string;
-  workerName: string;
+  helperName: string;
   verdict: "APPROVED" | "REJECTED";
   summary: string;
   issues: string[];
@@ -30,10 +30,10 @@ export interface VerificationLedger {
   record(input: Omit<VerdictRecord, "sequence">): VerdictRecord;
   records(): readonly VerdictRecord[];
   /**
-   * True when every named worker's authoritative verdict for exactly
+   * True when every named helper's authoritative verdict for exactly
    * `candidateTreeHash` is APPROVED (design §11 rule 11).
    */
-  satisfies(requiredWorkers: string[], candidateTreeHash: string): boolean;
+  satisfies(requiredHelpers: string[], candidateTreeHash: string): boolean;
 }
 
 /** In-memory ledger for one runner attempt (design §8.8). */
@@ -51,9 +51,9 @@ export class InMemoryVerificationLedger implements VerificationLedger {
     return this.store;
   }
 
-  satisfies(requiredWorkers: string[], candidateTreeHash: string): boolean {
-    for (const workerName of requiredWorkers) {
-      const authoritative = this.authoritative(workerName, candidateTreeHash);
+  satisfies(requiredHelpers: string[], candidateTreeHash: string): boolean {
+    for (const helperName of requiredHelpers) {
+      const authoritative = this.authoritative(helperName, candidateTreeHash);
       if (!authoritative || authoritative.verdict !== "APPROVED") {
         return false;
       }
@@ -63,15 +63,15 @@ export class InMemoryVerificationLedger implements VerificationLedger {
 
   /**
    * The lexicographically highest `(attemptOrdinal, sequence)` record for
-   * this worker at exactly this tree (design §11 rule 8).
+   * this helper at exactly this tree (design §11 rule 8).
    */
   private authoritative(
-    workerName: string,
+    helperName: string,
     candidateTreeHash: string,
   ): VerdictRecord | undefined {
     let best: VerdictRecord | undefined;
     for (const r of this.store) {
-      if (r.workerName !== workerName || r.candidateTreeHash !== candidateTreeHash) {
+      if (r.helperName !== helperName || r.candidateTreeHash !== candidateTreeHash) {
         continue;
       }
       if (
@@ -90,7 +90,7 @@ export class InMemoryVerificationLedger implements VerificationLedger {
 export function toVerifierResult(record: VerdictRecord): VerifierResult {
   return {
     callId: record.callId,
-    workerName: record.workerName,
+    helperName: record.helperName,
     verdict: record.verdict,
     summary: record.summary,
     issues: [...record.issues],

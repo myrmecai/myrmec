@@ -2,10 +2,10 @@
 // Copyright 2026 The Myrmec Authors
 
 /**
- * execute_command (design §10.3): the fifth Agent-local worker tool.
+ * execute_command (design §10.3): the fifth Agent-local tool.
  * Accepts structured input `{ templateName, parameters, cwd }`, resolves
  * the pinned command template from the assignment's ExecutionPolicy
- * (intersection: worker.allowedCommands ∩ policy.commandTemplates), and
+ * (intersection: helper.allowedCommands ∩ policy.commandTemplates), and
  * spawns with `shell: false`, a sanitized environment, bounded output,
  * a deadline, and descendant-process-tree kill on timeout.
  *
@@ -36,7 +36,7 @@ export interface CommandToolContext {
   /** The templates the assignment policy carries (already the
    * referenced-subset compiled for this step). */
   commandTemplates: Record<string, CommandTemplateDefinition>;
-  /** The worker's declared command allowlist to intersect with. */
+  /** The helper's declared command allowlist to intersect with. */
   allowedCommands: string[];
   /** Collects CommandExecutionRecord evidence for the run result. */
   recordExecution: (record: CommandExecutionRecord) => void;
@@ -134,7 +134,7 @@ export function executeCommandTool(ctx: CommandToolContext): Tool {
     async invoke(rawArgs) {
       const args = rawArgs as unknown as ExecuteCommandInput;
 
-      // Policy intersection (§10.3): the worker's declared commands AND
+      // Policy intersection (§10.3): the helper's declared commands AND
       // the assignment policy's templates.
       if (
         typeof args.templateName !== "string" ||

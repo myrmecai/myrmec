@@ -317,7 +317,7 @@ class WorkflowDispatchUnifiedProtocolTest extends WorkflowDispatchSupport {
         orch.put("modelCode", TEST_MODEL_CODE);
         orch.put("goal", "write a module");
         orch.put("sourceSubPath", ".");
-        orch.put("workers", List.of());
+        orch.put("helpers", List.of());
         orch.put("checkpointStrategy", Map.of(
                 "mode", "ON_VERIFICATION_PASS", "commitMessage", "checkpoint",
                 "pushToRemote", false, "allowNoChanges", true));

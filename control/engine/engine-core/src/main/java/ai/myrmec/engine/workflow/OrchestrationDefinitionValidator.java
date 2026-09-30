@@ -28,10 +28,10 @@ import java.util.UUID;
  *   <li>Publication supplies an explicit {@code profileBindings} map from
  *       that alias to an existing Agent Profile UUID; the binding is
  *       required and the referenced profile must exist and be ACTIVE.</li>
- *   <li>Worker/model/verifier references inside the orchestration map:
- *       known model codes, no duplicate worker names, verifiers drawn from
- *       the worker catalog, declared dependencies known.</li>
- *   <li>Command-template names referenced by workers must exist in the
+ *   <li>Helper/model/verifier references inside the orchestration map:
+ *       known model codes, no duplicate helper names, verifiers drawn from
+ *       the helper catalog, declared dependencies known.</li>
+ *   <li>Command-template names referenced by helpers must exist in the
  *       bound Profile's PUBLISHED version command templates.</li>
  *   <li>Step-level {@code retryPolicy} sanity: non-negative bounded
  *       integers, initial ≤ max backoff.</li>
@@ -161,24 +161,24 @@ public class OrchestrationDefinitionValidator {
                 }
             }
 
-            // Worker catalog: duplicate names, template references.
-            Set<String> workerNames = new HashSet<>();
-            Object workersRaw = orch.get("workers");
-            if (workersRaw instanceof List<?> workers) {
-                for (int wi = 0; wi < workers.size(); wi++) {
-                    if (!(workers.get(wi) instanceof Map<?, ?> worker)) continue;
-                    String name = String.valueOf(worker.get("name"));
-                    if (!workerNames.add(name)) {
+            // Helper catalog: duplicate names, template references.
+            Set<String> helperNames = new HashSet<>();
+            Object helpersRaw = orch.get("helpers");
+            if (helpersRaw instanceof List<?> helpers) {
+                for (int wi = 0; wi < helpers.size(); wi++) {
+                    if (!(helpers.get(wi) instanceof Map<?, ?> helper)) continue;
+                    String name = String.valueOf(helper.get("name"));
+                    if (!helperNames.add(name)) {
                         failures.add(ValidationDetail.of(
-                                "steps[" + i + "].orchestration.workers[" + wi + "].name",
-                                "INVALID_VALUE", "Duplicate worker name: " + name));
+                                "steps[" + i + "].orchestration.helpers[" + wi + "].name",
+                                "INVALID_VALUE", "Duplicate helper name: " + name));
                     }
-                    Object commands = worker.get("allowedCommands");
+                    Object commands = helper.get("allowedCommands");
                     if (commands instanceof List<?> commandList) {
                         for (Object cmd : commandList) {
                             if (!templateNames.contains(String.valueOf(cmd))) {
                                 failures.add(ValidationDetail.of(
-                                        "steps[" + i + "].orchestration.workers[" + wi + "].allowedCommands",
+                                        "steps[" + i + "].orchestration.helpers[" + wi + "].allowedCommands",
                                         "INVALID_VALUE",
                                         "Command template '" + cmd + "' is not defined by the bound "
                                                 + "profile's published version."));
@@ -188,17 +188,17 @@ public class OrchestrationDefinitionValidator {
                 }
             }
 
-            // Verifiers must be worker names.
+            // Verifiers must be helper names.
             Object criteria = orch.get("completionCriteria");
             if (criteria instanceof Map<?, ?> completion) {
                 Object verifiers = completion.get("requireVerificationBy");
                 if (verifiers instanceof List<?> verifierList) {
                     for (Object verifier : verifierList) {
-                        if (!workerNames.contains(String.valueOf(verifier))) {
+                        if (!helperNames.contains(String.valueOf(verifier))) {
                             failures.add(ValidationDetail.of(
                                     "steps[" + i + "].orchestration.completionCriteria",
                                     "INVALID_VALUE",
-                                    "Verifier not in worker catalog: " + verifier));
+                                    "Verifier not in helper catalog: " + verifier));
                         }
                     }
                 }

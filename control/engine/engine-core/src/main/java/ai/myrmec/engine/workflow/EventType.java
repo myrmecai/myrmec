@@ -58,7 +58,7 @@ public enum EventType {
      * §16.3/§21). Idempotently ingested by
      * {@code OrchestrationEventIngestionService} keyed by the Agent-supplied
      * deterministic eventId, with a dispatch-local strictly-monotonic
-     * sequence. Data: the redacted §21 event envelope (workerName, callId,
+     * sequence. Data: the redacted §21 event envelope (helperName, callId,
      * usage, candidateTreeHash, …).
      */
     ORCHESTRATION;

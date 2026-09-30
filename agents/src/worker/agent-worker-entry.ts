@@ -2,9 +2,9 @@
 // Copyright 2026 The Myrmec Authors
 
 /**
- * Real `worker_thread` entry for an Agent worker.
+ * Real `worker_thread` entry for an Agent.
  *
- * Boots one {@link AgentWorker} bound to `parentPort`: inbound control frames
+ * Boots one {@link Agent} bound to `parentPort`: inbound control frames
  * arrive as messages and are dispatched; the worker's outbound frames are
  * posted back to the Supervisor (§9.7). Config arrives via `workerData` as
  * plain data. The worker resolves its own model per task/turn from the engine
@@ -14,7 +14,7 @@
  * Prod:  node dist/worker/agent-worker-entry.js (as a worker).
  */
 import { parentPort, workerData } from "node:worker_threads";
-import { AgentWorker } from "./agentWorker.js";
+import { Agent } from "./agentWorker.js";
 import { EngineHttpClient } from "../transport/httpClient.js";
 import {
   createChatModelFactory,
@@ -54,7 +54,7 @@ const sessionToolFactory = await createSessionToolFactory({
     : {}),
 });
 
-const worker = new AgentWorker({
+const worker = new Agent({
   post: (message) => port.postMessage(message),
   httpClient,
   agentAccessToken: config.agentAccessToken,

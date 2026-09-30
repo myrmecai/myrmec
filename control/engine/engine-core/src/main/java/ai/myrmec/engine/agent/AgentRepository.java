@@ -30,7 +30,7 @@ public interface AgentRepository extends JpaRepository<Agent, UUID> {
     List<Agent> findByAgentHostIdAndStatus(UUID agentId, Agent.Status status);
 
     /**
-     * Find all workers still linked to a conversation (status IDLE or BOUND).
+     * Find all Agents still linked to a conversation (status IDLE or BOUND).
      * Historically this was a single-row Optional, but crashed reconnects can
      * leave several rows pointing at the same conversation; a single-result
      * query then fails with IncorrectResultSizeDataAccessException and (since
@@ -52,7 +52,7 @@ public interface AgentRepository extends JpaRepository<Agent, UUID> {
     long countOnlineByAgentHostId(@Param("agentHostId") UUID agentHostId);
 
     /**
-     * Count connected (non-{@code DEAD}) instances for a host — i.e. workers
+     * Count connected (non-{@code DEAD}) instances for a host — i.e. Agents
      * whose control socket is live regardless of whether they're currently
      * idle or busy. Drives the #88 conversation agent-availability indicator.
      */
@@ -65,7 +65,7 @@ public interface AgentRepository extends JpaRepository<Agent, UUID> {
     long countByAgentHostId(UUID agentId);
 
     /**
-     * Workers minted for this live instance in the given statuses (§2.7):
+     * Agents minted for this live instance in the given statuses (§2.7):
      * capacity counts IDLE (reusable) + RESERVED/BOUND (serving) + DEAD
      * (not yet released) against the instance's pool.
      */
@@ -73,20 +73,20 @@ public interface AgentRepository extends JpaRepository<Agent, UUID> {
                                                java.util.Collection<Agent.Status> statuses);
 
     /**
-     * Count workers currently holding an active binding to a conversation
+     * Count Agents currently holding an active binding to a conversation
      * (any of {@code statuses}). Used by the #87 backlog drainer to skip a
      * conversation whose turn is already in flight, preventing a double
-     * dispatch when a second worker comes online mid-turn.
+     * dispatch when a second Agent comes online mid-turn.
      */
     long countByConversationIdAndStatusIn(UUID conversationId, java.util.Collection<Agent.Status> statuses);
 
     /**
-     * Atomically claim a warm worker for a conversation: flip exactly the
+     * Atomically claim a warm Agent for a conversation: flip exactly the
      * row identified by {@code id} from {@code IDLE} to {@code RESERVED},
      * pinning the conversation and profile version at reserve-time
      * (agent-concurrency §9.5). The {@code status = IDLE} guard makes this a
      * compare-and-set: concurrent dispatchers racing for the same warm
-     * worker see at most one win (return {@code 1}); the loser gets
+     * Agent see at most one win (return {@code 1}); the loser gets
      * {@code 0} and tries the next candidate. No {@code RETURNING} is used
      * so the query runs identically on H2 and PostgreSQL.
      */
@@ -102,7 +102,7 @@ public interface AgentRepository extends JpaRepository<Agent, UUID> {
                       @Param("now") Instant now);
 
     /**
-     * Find workers stuck in a transient binding state ({@code RESERVED} or
+     * Find Agents stuck in a transient binding state ({@code RESERVED} or
      * {@code CONNECTING}) whose last FSM transition predates {@code cutoff}.
      * The reserve/connect-timeout reapers reclaim these to {@code IDLE}
      * (agent-concurrency §9.5).
@@ -112,7 +112,7 @@ public interface AgentRepository extends JpaRepository<Agent, UUID> {
                                                     @Param("cutoff") Instant cutoff);
 
     /**
-     * Find live-but-unresponsive workers: any worker whose status is in
+     * Find live-but-unresponsive Agents: any Agent whose status is in
      * {@code statuses} (the mid-lifecycle set) yet has not heartbeat since
      * {@code cutoff}. The HOST_LOST reaper flips these to {@code DEAD}
      * (agent-concurrency §9.5).
@@ -122,11 +122,11 @@ public interface AgentRepository extends JpaRepository<Agent, UUID> {
                                     @Param("statuses") List<Agent.Status> statuses);
 
     /**
-     * Find workers homed on a lost replica: any worker whose status is in
+     * Find Agents homed on a lost replica: any Agent whose status is in
      * {@code statuses} ({@code BOUND}/{@code CONNECTING}) and whose
      * {@code home_node_id} is one of the {@code DOWN} nodes. Under the
-     * unified protocol (P6-T6) the legacy re-homing sweep is deleted: a
-     * worker whose home instance closed is superseded by the next
+     * unified protocol (P6-T6) the legacy re-homing sweep is deleted: an
+     * Agent whose home instance closed is superseded by the next
      * dispatch's fresh session offer while its host is still alive
      * (agent-concurrency §9.11).
      */
@@ -135,10 +135,10 @@ public interface AgentRepository extends JpaRepository<Agent, UUID> {
                                               @Param("homeNodeIds") List<String> homeNodeIds);
 
     /**
-     * Atomically transition a worker from {@code RESERVED} to
+     * Atomically transition an Agent from {@code RESERVED} to
      * {@code CONNECTING} (agent-concurrency §9.5). The
      * {@code status = RESERVED} guard makes this a compare-and-set: if the
-     * worker has already advanced to {@code BOUND} (because
+     * Agent has already advanced to {@code BOUND} (because
      * {@code attachConversation} won the race), the update affects zero rows
      * and the caller treats the late bind.ack as a harmless no-op.
      */

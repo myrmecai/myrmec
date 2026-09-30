@@ -7,7 +7,7 @@
  * `Envelope` is a loosely-typed frame shape: payloads are intentionally
  * `unknown` and narrowed by the consuming handler — the envelope layer only
  * guarantees the frame shape, not payload semantics. The `type` is a plain
- * string: under the unified wire the worker's outbound frames carry unified
+ * string: under the unified wire the Agent's outbound frames carry unified
  * frame-family names ("execution.delta", "session.open", …) while the
  * orchestrator's legacy-shape frames (orchestration.event / result /
  * approval_requested, the outbox records) keep their own families.

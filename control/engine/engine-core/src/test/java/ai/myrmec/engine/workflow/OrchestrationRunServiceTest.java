@@ -182,7 +182,7 @@ class OrchestrationRunServiceTest extends IntegrationTestBase {
         assertThat(projectedOrch).doesNotContainKey("agentProfileCode");
         assertThat(projectedOrch).doesNotContainKey("dependsOn");
         assertThat(projectedOrch).containsKeys(
-                "modelCode", "goal", "sourceSubPath", "workers",
+                "modelCode", "goal", "sourceSubPath", "helpers",
                 "checkpointStrategy", "completionCriteria", "budget");
 
         // retryPolicy projected to the three schema fields.
@@ -219,13 +219,13 @@ class OrchestrationRunServiceTest extends IntegrationTestBase {
         orch.put("goal", "write a module");
         orch.put("specPath", null);
         orch.put("sourceSubPath", ".");
-        Map<String, Object> worker = new LinkedHashMap<>();
-        worker.put("name", "coder");
-        worker.put("modelCode", TEST_MODEL_CODE);
-        worker.put("capability", "implementation");
-        worker.put("allowedTools", List.of("write_file"));
-        worker.put("allowedCommands", List.of());
-        orch.put("workers", List.of(worker));
+        Map<String, Object> helper = new LinkedHashMap<>();
+        helper.put("name", "coder");
+        helper.put("modelCode", TEST_MODEL_CODE);
+        helper.put("capability", "implementation");
+        helper.put("allowedTools", List.of("write_file"));
+        helper.put("allowedCommands", List.of());
+        orch.put("helpers", List.of(helper));
         orch.put("checkpointStrategy", Map.of(
                 "mode", "ON_VERIFICATION_PASS", "commitMessage", "checkpoint",
                 "pushToRemote", false, "allowNoChanges", true));

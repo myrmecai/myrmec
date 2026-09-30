@@ -3,14 +3,14 @@
 
 /**
  * OrchestrationRunner (design §8.4): owns one step's model loop,
- * delegation through the single `invoke_worker` tool, iteration limits,
+ * delegation through the single `invoke_helper` tool, iteration limits,
  * and result assembly. Transport-independent: it consumes a validated
  * `OrchestrationAssignment` and returns a structured
  * `OrchestrationRunResult`. Expected execution failures are returned,
  * never thrown (§7.2 boundary rule).
  *
  * This feature (Feature 2) implements the minimal delegation loop:
- * one orchestrator, one worker at a time, no workspace mutation yet
+ * one orchestrator, one helper at a time, no workspace mutation yet
  * (revisions stay at 0 until Feature 4 introduces real tools).
  */
 import { createHash, randomUUID } from "node:crypto";
@@ -22,11 +22,11 @@ import type { Task, TaskResult } from "../models/index.js";
 import type {
   OrchestrationAssignment,
   OrchestrationRunResult,
-  WorkerCallResult,
+  HelperCallResult,
   OrchestrationErrorCode,
 } from "./types.js";
 import { orchestrationAssignmentSchema } from "./schema.js";
-import { normalizeUsage, WorkerInvoker } from "./WorkerInvoker.js";
+import { normalizeUsage, HelperInvoker } from "./HelperInvoker.js";
 import { InMemoryBudgetController, type BudgetBreach, type BudgetController } from "./BudgetController.js";
 import { ORCHESTRATION_SCHEDULING_NS, uuidV5 } from "./constants.js";
 import { governedActionDigest } from "./ApprovalPolicyEvaluator.js";
@@ -42,10 +42,10 @@ import type { WorkspaceInspector } from "../workspace/WorkspaceInspector.js";
 
 export interface OrchestrationRunnerOptions {
   chatModelFactory: ChatModelFactory;
-  workerInvoker: WorkerInvoker;
+  helperInvoker: HelperInvoker;
   turnExecutor: TurnExecutor;
   /** Feature 4: the resolved step workspace. When absent (Feature 2 unit
-   * tests), revisions stay at 0 and workers get no tools. */
+   * tests), revisions stay at 0 and helpers get no tools. */
   workspace?: StepWorkspace;
   /** Feature 4: candidate-tree inspection after mutating calls. */
   workspaceInspector?: WorkspaceInspector;
@@ -81,7 +81,7 @@ export interface OrchestrationRunnerOptions {
     ): import("./ApprovalPolicyEvaluator.js").ApprovalPolicyDecision;
     effectiveWorkerRisk(
       assignment: OrchestrationAssignment,
-      worker: import("./types.js").WorkerAuthoring,
+      helper: import("./types.js").HelperAuthoring,
     ): "SAFE" | "DESTRUCTIVE" | "IRREVERSIBLE";
   };
   /** HITL (§17.4): the durable approval sink. REQUIRED when the
@@ -117,7 +117,7 @@ export interface OrchestrationRunnerOptions {
     ): import("./ApprovalResumeValidator.js").RestoredSuspension | null;
   };
   /** §17.2/§17.5 (retry continuation): publishes the durable continuation
-   * manifest after a WORKER_FAILED (RETRYABLE) safe boundary — completed
+   * manifest after a HELPER_FAILED (RETRYABLE) safe boundary — completed
    * call identities, budget counters, verifier history, candidate tree.
    * The engine stores the returned §7.3 ContinuationRecord on the result;
    * a retry dispatch carries the continuationId and the runner restores
@@ -127,8 +127,8 @@ export interface OrchestrationRunnerOptions {
     publish(input: {
       dispatchId: string;
       attemptOrdinal: number;
-      budgetCounters: { workerCalls: number; totalTokens: number; rejectionCount: number };
-      completedCalls: WorkerCallResult[];
+      budgetCounters: import("./BudgetController.js").BudgetCounters;
+      completedCalls: HelperCallResult[];
       candidateTreeHash: string;
       workspaceRevision: number;
       verifierHistory: VerdictRecord[];
@@ -151,11 +151,11 @@ export interface OrchestrationRunOptions {
   runId: string;
   /** §7.3 (Wave 6, A4): the host-side orchestration function-call ceiling
    * from session.open policy (null = no host limit). Enforced at the
-   * invoke_worker boundary — reaching it pauses the attempt. */
+   * invoke_helper boundary — reaching it pauses the attempt. */
   maxFunctionCalls?: number | null;
   /** §7.3 (§12.2): the dispatch's wall-clock execution timeout in seconds
    * from session.open policy (null/absent = none). The runner arms the
-   * deadline at run start and enforces it at the worker-call boundary —
+   * deadline at run start and enforces it at the helper-call boundary —
    * an elapsed deadline PAUSES the attempt (errorCode EXECUTION_TIMEOUT). */
   executionTimeoutSeconds?: number | null;
   /** §8.7 (A4): live allowance overlay from the engine (tighten-only).
@@ -165,14 +165,14 @@ export interface OrchestrationRunOptions {
 }
 
 /** The orchestrator's single action tool input (design §10.1). */
-interface InvokeWorkerInput {
-  workerName: string;
+interface InvokeHelperInput {
+  helperName: string;
   purpose: "IMPLEMENT" | "VERIFY";
   instruction: string;
 }
 
 /**
- * §17.4: thrown by the HITL gate when a worker invocation requires
+ * §17.4: thrown by the HITL gate when a helper invocation requires
  * approval. The run() body catches it, publishes the suspension, sends
  * the request through the durable sink, and returns PAUSED. Carries the
  * governed action + expiry — never raw tool arguments, source, diffs, or
@@ -201,7 +201,7 @@ class PolicyDeniedSignal extends Error {
 }
 
 /**
- * §8.7 (A4): thrown by the invoke_worker boundary when the tighten-only
+ * §8.7 (A4): thrown by the invoke_helper boundary when the tighten-only
  * allowance ceiling is reached — the attempt PAUSES (§8.7: pause is the
  * terminal answer; no further model calls pass the ceiling).
  */
@@ -213,7 +213,7 @@ class PolicyCeilingSignal extends Error {
 }
 
 /**
- * §7.3 (§12.2): thrown by the invoke_worker boundary when the policy
+ * §7.3 (§12.2): thrown by the invoke_helper boundary when the policy
  * executionTimeoutSeconds deadline has elapsed — the attempt PAUSES with
  * errorCode EXECUTION_TIMEOUT (mirroring PolicyCeilingSignal's shape).
  */
@@ -253,7 +253,7 @@ export class OrchestrationRunner {
 
   /**
    * Execute exactly one validated orchestration step (design §5). The
-   * orchestrator model plans and delegates through `invoke_worker`; the
+   * orchestrator model plans and delegates through `invoke_helper`; the
    * runner owns every identity, sequence, and limit.
    */
   async run(
@@ -268,7 +268,7 @@ export class OrchestrationRunner {
         assignmentInput.dispatch,
         "ASSIGNMENT_VALIDATION_ERROR",
         parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "),
-        { workerCalls: 0, rejectionCount: 0, totalTokens: 0 },
+        { helperCalls: 0, rejectionCount: 0, totalTokens: 0 },
       );
     }
     const assignment = parsed.data as OrchestrationAssignment;
@@ -276,7 +276,7 @@ export class OrchestrationRunner {
     const o = step.orchestration;
     // §7.3 (§12.2): the dispatch's wall-clock deadline — armed from the
     // run options at run start (monotonic epoch-ms) and enforced at the
-    // worker-call boundary. Null = no timeout enforced.
+    // helper-call boundary. Null = no timeout enforced.
     const deadlineAt =
       runOptions.executionTimeoutSeconds != null
         ? Date.now() + runOptions.executionTimeoutSeconds * 1000
@@ -295,7 +295,7 @@ export class OrchestrationRunner {
           dispatch,
           "APPROVAL_POLICY_DENIED",
           "resume decision present but no suspension loader is wired — failing closed",
-          { workerCalls: 0, rejectionCount: 0, totalTokens: 0 },
+          { helperCalls: 0, rejectionCount: 0, totalTokens: 0 },
         );
       }
       const restored = loader.load(assignment.continuation!.continuationId);
@@ -304,7 +304,7 @@ export class OrchestrationRunner {
           dispatch,
           "APPROVAL_POLICY_DENIED",
           "resume decision for an unrestorable suspension — failing closed",
-          { workerCalls: 0, rejectionCount: 0, totalTokens: 0 },
+          { helperCalls: 0, rejectionCount: 0, totalTokens: 0 },
         );
       }
       const validation = validateApprovalResume(decision, restored);
@@ -313,7 +313,7 @@ export class OrchestrationRunner {
           dispatch,
           validation.rejection ?? "APPROVAL_POLICY_DENIED",
           `resume decision rejected: ${validation.reason}`,
-          { workerCalls: 0, rejectionCount: 0, totalTokens: 0 },
+          { helperCalls: 0, rejectionCount: 0, totalTokens: 0 },
         );
       }
       // §17.4: "APPROVED authorizes only the stored pending action."
@@ -349,18 +349,18 @@ export class OrchestrationRunner {
           dispatch,
           "RECOVERY_SNAPSHOT_INVALID",
           `retry continuation ${assignment.continuation.continuationId} could not be restored — failing closed`,
-          { workerCalls: 0, rejectionCount: 0, totalTokens: 0 },
+          { helperCalls: 0, rejectionCount: 0, totalTokens: 0 },
         );
       }
     }
 
     let sequence = 0;
     const nextSequence = () => ++sequence;
-    const workerCalls: WorkerCallResult[] = [];
+    const helperCalls: HelperCallResult[] = [];
 
     const revision = { value: 0 };
     const lastTree = { value: "" };
-    // Baseline the candidate tree before any worker call so revisions
+    // Baseline the candidate tree before any helper call so revisions
     // count only actual changes.
     await this.refreshRevision(revision, lastTree);
 
@@ -372,7 +372,7 @@ export class OrchestrationRunner {
     let rejectionCount = 0;
     const verifierResults: VerdictRecord[] = [];
     // Feature 7 (design §13): the per-attempt budget controller shared by
-    // the orchestrator and every worker TurnExecutor. A new engine
+    // the orchestrator and every helper TurnExecutor. A new engine
     // attempt has a new dispatchId and FRESH counters (§17.2) — the
     // restored manifest contributes completed-call identities, candidate
     // state, and verifier history only, never counters.
@@ -417,13 +417,13 @@ export class OrchestrationRunner {
       }
       return record;
     };
-    this.options.workerInvoker.setVerdictRecorder(recordVerdict);
-    // Feature 7 (§13): the worker turns share the per-attempt budget.
-    this.options.workerInvoker.setBudget(budget);
-    // Feature 7 (§13): the dispatch cancellation propagates into worker
+    this.options.helperInvoker.setVerdictRecorder(recordVerdict);
+    // Feature 7 (§13): the helper turns share the per-attempt budget.
+    this.options.helperInvoker.setBudget(budget);
+    // Feature 7 (§13): the dispatch cancellation propagates into helper
     // turns (the orchestrator turn receives it via TurnRun).
     if (this.options.cancellation) {
-      this.options.workerInvoker.setCancellation(this.options.cancellation);
+      this.options.helperInvoker.setCancellation(this.options.cancellation);
     }
 
     const orchestratorModelDef = assignment.models.find((m) => m.code === o.modelCode);
@@ -432,7 +432,7 @@ export class OrchestrationRunner {
         dispatch,
         "ASSIGNMENT_VALIDATION_ERROR",
         `orchestration model not in assignment: ${o.modelCode}`,
-        resultUsage(0, workerCalls),
+        resultUsage(0, helperCalls),
       );
     }
 
@@ -450,13 +450,13 @@ export class OrchestrationRunner {
       `orchestrator-${randomUUID()}`,
     );
 
-    // Feature 4/5: when a step workspace is provided, workers get their
+    // Feature 4/5: when a step workspace is provided, helpers get their
     // declared tools through the WorkspaceToolFactory scoped to it
     // (design §10.3). Without a workspace (unit tests) the invoker's
-    // toolFactory stays unset and workers have no tools.
+    // toolFactory stays unset and helpers have no tools.
     const commandExecutions: import("./types.js").CommandExecutionRecord[] = [];
     const toolFactory = this.options.workspace
-      ? async (worker: import("./types.js").WorkerAuthoring): Promise<Tool[]> => {
+      ? async (helper: import("./types.js").HelperAuthoring): Promise<Tool[]> => {
           const { WorkspaceToolFactory } = await import("../tools/WorkspaceToolFactory.js");
           const factory = new WorkspaceToolFactory({
             workspace: this.options.workspace!,
@@ -475,80 +475,80 @@ export class OrchestrationRunner {
             recordExecution: (record) => commandExecutions.push(record),
             workerCallId: "",
           });
-          return factory.resolve(worker);
+          return factory.resolve(helper);
         }
       : undefined;
-    this.options.workerInvoker.setToolFactory(toolFactory);
+    this.options.helperInvoker.setToolFactory(toolFactory);
 
     // The single action tool: validated mechanically before invocation.
-    const invokeWorkerTool: Tool = {
-      name: "invoke_worker",
+    const invokeHelperTool: Tool = {
+      name: "invoke_helper",
       description:
-        "Delegate a focused unit of work to a declared orchestration worker. " +
-        "Worker names must come from the worker catalog. " +
+        "Delegate a focused unit of work to a declared orchestration helper. " +
+        "Helper names must come from the helper catalog. " +
         "purpose=IMPLEMENT delegates implementation; purpose=VERIFY delegates verification.",
       parameters: {
         type: "object",
         properties: {
-          workerName: { type: "string" },
+          helperName: { type: "string" },
           purpose: { type: "string", enum: ["IMPLEMENT", "VERIFY"] },
           instruction: { type: "string" },
         },
-        required: ["workerName", "purpose", "instruction"],
+        required: ["helperName", "purpose", "instruction"],
       },
       invoke: async (rawArgs) => {
-        const args = rawArgs as unknown as InvokeWorkerInput;
+        const args = rawArgs as unknown as InvokeHelperInput;
         // Mechanical validation before any model call (design §10.1).
         if (
-          typeof args.workerName !== "string" ||
+          typeof args.helperName !== "string" ||
           (args.purpose !== "IMPLEMENT" && args.purpose !== "VERIFY") ||
           typeof args.instruction !== "string"
         ) {
           return {
             status: "FAILED",
             errorCode: "ASSIGNMENT_VALIDATION_ERROR",
-            summary: "invoke_worker requires workerName, purpose, and instruction.",
+            summary: "invoke_helper requires helperName, purpose, and instruction.",
           };
         }
         if (args.purpose === "VERIFY") {
           // Feature 5 (design §10.1): VERIFY delegates to a required
           // verifier; the verdict is recorded through the runner-owned
-          // report_verdict tool inside the worker turn.
+          // report_verdict tool inside the helper turn.
           const required = o.completionCriteria.requireVerificationBy;
-          if (!required.includes(args.workerName)) {
+          if (!required.includes(args.helperName)) {
             return {
               status: "FAILED",
               errorCode: "ASSIGNMENT_VALIDATION_ERROR",
-              summary: `VERIFY is allowed only for required verifiers: ${args.workerName}`,
+              summary: `VERIFY is allowed only for required verifiers: ${args.helperName}`,
             };
           }
         }
         const startedSequence = nextSequence();
         const revisionBefore = revision.value;
         // §13 cancellation linearization point: once cancelled, no new
-        // worker call starts.
+        // helper call starts.
         if (this.options.cancellation?.cancelled) {
-          return { status: "CANCELLED", summary: "cancelled before worker invocation" };
+          return { status: "CANCELLED", summary: "cancelled before helper invocation" };
         }
-        // §17.4 HITL gate: evaluate the worker invocation BEFORE the
-        // worker starts — and BEFORE the budget reservation, so a
-        // suspended invocation never consumes a worker-call slot (the
+        // §17.4 HITL gate: evaluate the helper invocation BEFORE the
+        // helper starts — and BEFORE the budget reservation, so a
+        // suspended invocation never consumes a helper-call slot (the
         // resumed attempt gets fresh counters per §13). The pending
-        // action is the whole WORKER_TOOL invocation; approval lets the
-        // worker run to completion. The gate throws a typed signal that
+        // action is the whole HELPER_TOOL invocation; approval lets the
+        // helper run to completion. The gate throws a typed signal that
         // the run() body catches to return PAUSED — a tool-result code
         // would let the orchestrator loop keep planning, which §17.4
-        // forbids ("suspend once, before the worker starts").
+        // forbids ("suspend once, before the helper starts").
         if (this.options.approvalEvaluator) {
-          const worker = o.workers.find((w) => w.name === args.workerName);
-          const riskClass = worker
-            ? this.options.approvalEvaluator.effectiveWorkerRisk(assignment, worker)
+          const helper = o.helpers.find((w) => w.name === args.helperName);
+          const riskClass = helper
+            ? this.options.approvalEvaluator.effectiveWorkerRisk(assignment, helper)
             : "SAFE";
           const action: import("./GovernedAction.js").GovernedAction = {
             actionId: `action-${dispatch.dispatchId}-${startedSequence}`,
-            type: "WORKER_TOOL",
+            type: "HELPER_TOOL",
             riskClass,
-            summary: `worker:${args.workerName}:${args.purpose}`,
+            summary: `helper:${args.helperName}:${args.purpose}`,
             digest: "",
           };
           action.digest = governedActionDigest(action);
@@ -574,7 +574,7 @@ export class OrchestrationRunner {
             }
           }
         }
-        // §13: count every accepted invoke_worker execution toward
+        // §13: count every accepted invoke_helper execution toward
         // maxWorkerCalls — a delegation rejected by the budget never
         // becomes an execution. A suspended invocation was never
         // accepted; only post-gate (approved) executions reserve.
@@ -588,7 +588,7 @@ export class OrchestrationRunner {
           };
         }
         // §8.7 (A4): tighten-only live allowance — the runner re-reads the
-        // enforced ceiling at each worker-call boundary and PAUSES the
+        // enforced ceiling at each helper-call boundary and PAUSES the
         // attempt when the accounted usage reached it (pause is the
         // terminal answer until a tighter/looser frame arrives per §8.7;
         // the controller routes the PAUSED result to the engine).
@@ -602,7 +602,7 @@ export class OrchestrationRunner {
         }
         // §7.3 (§12.2): the wall-clock deadline joins the same boundary —
         // a dispatch whose policy executionTimeoutSeconds elapsed pauses
-        // instead of starting another worker call (same PAUSED shape as
+        // instead of starting another helper call (same PAUSED shape as
         // the allowance ceiling above). Comparison is >= so a 0-second
         // deadline deterministically pauses at the first boundary.
         if (deadlineAt !== null && Date.now() >= deadlineAt) {
@@ -610,9 +610,9 @@ export class OrchestrationRunner {
             `execution paused: the policy execution timeout reached (timeout ${runOptions.executionTimeoutSeconds}s)`,
           );
         }
-        const outcome = await this.options.workerInvoker.invoke(
+        const outcome = await this.options.helperInvoker.invoke(
           assignment,
-          args.workerName,
+          args.helperName,
           args.purpose,
           args.instruction,
           { startedSequence, completedSequence: startedSequence },
@@ -622,24 +622,24 @@ export class OrchestrationRunner {
         // After a mutating-capable call, recompute the candidate tree and
         // stamp the post-call revision (design §5 step 7).
         await this.refreshRevision(revision, lastTree);
-        outcome.workerCall.workspaceRevisionBefore = revisionBefore;
-        outcome.workerCall.workspaceRevisionAfter = revision.value;
-        outcome.workerCall.completedSequence = completedSequence;
-        workerCalls.push(outcome.workerCall);
-        // The bounded, redacted InvokeWorkerResult (design §10.1): never
+        outcome.helperCall.workspaceRevisionBefore = revisionBefore;
+        outcome.helperCall.workspaceRevisionAfter = revision.value;
+        outcome.helperCall.completedSequence = completedSequence;
+        helperCalls.push(outcome.helperCall);
+        // The bounded, redacted InvokeHelperResult (design §10.1): never
         // transcripts, prompts, file contents, diffs, or command output.
         const result: Record<string, unknown> = {
-          callId: outcome.workerCall.callId,
-          workerName: outcome.workerCall.workerName,
-          purpose: outcome.workerCall.purpose,
-          status: outcome.workerCall.status,
+          callId: outcome.helperCall.callId,
+          helperName: outcome.helperCall.helperName,
+          purpose: outcome.helperCall.purpose,
+          status: outcome.helperCall.status,
           summary: outcome.summary,
-          workspaceRevisionBefore: outcome.workerCall.workspaceRevisionBefore,
-          workspaceRevisionAfter: outcome.workerCall.workspaceRevisionAfter,
-          tokenCount: outcome.workerCall.tokenCount,
+          workspaceRevisionBefore: outcome.helperCall.workspaceRevisionBefore,
+          workspaceRevisionAfter: outcome.helperCall.workspaceRevisionAfter,
+          tokenCount: outcome.helperCall.tokenCount,
         };
-        if (outcome.workerCall.errorCode) {
-          result.errorCode = outcome.workerCall.errorCode;
+        if (outcome.helperCall.errorCode) {
+          result.errorCode = outcome.helperCall.errorCode;
         }
         // Feature 5 (design §10.1): a successful VERIFY call carries
         // exactly one verifierResult; other purposes prohibit it.
@@ -660,8 +660,8 @@ export class OrchestrationRunner {
           `Step goal: ${o.goal}`,
           `Definition of done: ${o.completionCriteria.definitionOfDone}`,
           "",
-          "Worker catalog (delegate with invoke_worker):",
-          ...o.workers.map(
+          "Helper catalog (delegate with invoke_helper):",
+          ...o.helpers.map(
             (w) =>
               `- ${w.name} (${w.modelCode}): ${w.capability}; tools: ${w.allowedTools.join(", ") || "none"}; commands: ${w.allowedCommands.join(", ") || "none"}` +
               (o.completionCriteria.requireVerificationBy.includes(w.name)
@@ -674,9 +674,9 @@ export class OrchestrationRunner {
               "Every required verifier must approve the CURRENT candidate tree " +
               "before completion. A rejection must be repaired and reverified."
             : "",
-          "Only delegated workers can inspect or change repository files. " +
+          "Only delegated helpers can inspect or change repository files. " +
             "You have no direct repository access. Delegate focused units " +
-            "of work, review worker results, and finish with a summary of " +
+            "of work, review helper results, and finish with a summary of " +
             "the step outcome when the goal is met.",
         ].join("\n"),
         messages: [
@@ -685,7 +685,7 @@ export class OrchestrationRunner {
             content: `Begin the step: ${o.goal}`,
           },
         ],
-        toolNames: [invokeWorkerTool.name],
+        toolNames: [invokeHelperTool.name],
         metadata: { orchestration: { stepId: step.id } },
       },
     };
@@ -693,7 +693,7 @@ export class OrchestrationRunner {
     let result: TaskResult;
     // §7.3 (Wave 6, A4): the session's host-side function-call ceiling
     // caps the orchestrator turn's iterations (the orchestrator's
-    // invoke_worker calls are the §8.7 "orchestration function calls").
+    // invoke_helper calls are the §8.7 "orchestration function calls").
     const hostIterationCap =
       runOptions.maxFunctionCalls != null && runOptions.maxFunctionCalls > 0
         ? Math.min(runOptions.maxFunctionCalls, o.budget.maxOrchestratorIterations)
@@ -701,7 +701,7 @@ export class OrchestrationRunner {
     try {
       result = await this.options.turnExecutor.execute(task, {
         model: orchestratorModel,
-        tools: [invokeWorkerTool],
+        tools: [invokeHelperTool],
         maxIterationsOverride: hostIterationCap,
         // §13: the orchestrator turn shares the per-attempt budget — its
         // responses are recorded and checked inside the model-tool loop.
@@ -711,13 +711,13 @@ export class OrchestrationRunner {
         ...(this.options.cancellation ? { cancellation: this.options.cancellation } : {}),
       });
     } catch (signal) {
-      // §17.4: the HITL gate suspended a worker invocation. Publish the
+      // §17.4: the HITL gate suspended a helper invocation. Publish the
       // continuation + suspension state FIRST, then send the idempotent
       // request through the durable sink, and only then return PAUSED.
       // The sink's absence fails closed (§17.4).
       if (signal instanceof ApprovalRequiredSignal) {
         const usageNow = {
-          workerCalls: budget.counters().workerCalls,
+          helperCalls: budget.counters().helperCalls,
           rejectionCount,
           totalTokens: budget.counters().totalTokens,
         };
@@ -727,7 +727,7 @@ export class OrchestrationRunner {
           signal,
           lastTree.value,
           revision.value,
-          workerCalls,
+          helperCalls,
           verifierResults,
           commandExecutions,
           usageNow,
@@ -741,17 +741,17 @@ export class OrchestrationRunner {
           "APPROVAL_POLICY_DENIED",
           signal.reason,
           {
-            workerCalls: budget.counters().workerCalls,
+            helperCalls: budget.counters().helperCalls,
             rejectionCount,
             totalTokens: budget.counters().totalTokens,
           },
-          workerCalls,
+          helperCalls,
           verifierResults,
           commandExecutions,
         );
       }
       // §8.7 (A4): the tighten-only allowance ceiling was reached at the
-      // worker-call boundary — PAUSE the attempt (§8.7: pause is the
+      // helper-call boundary — PAUSE the attempt (§8.7: pause is the
       // terminal answer until the host resumes with a tighter/none).
       if (signal instanceof PolicyCeilingSignal) {
         return {
@@ -762,14 +762,14 @@ export class OrchestrationRunner {
           status: "PAUSED",
           retryDisposition: "NONE",
           summary: `suspended: ${signal.message}`.slice(0, 4000),
-          workerCalls,
+          helperCalls,
           verifierResults: verifierResults.map(toVerifierResult),
           commandExecutions,
           changedFiles: [],
           commits: [],
           cleanWorktree: false,
           usage: {
-            workerCalls: budget.counters().workerCalls,
+            helperCalls: budget.counters().helperCalls,
             rejectionCount,
             totalTokens: budget.counters().totalTokens,
           },
@@ -786,7 +786,7 @@ export class OrchestrationRunner {
           },
         };
       }
-      // §7.3 (§12.2): the wall-clock deadline elapsed at the worker-call
+      // §7.3 (§12.2): the wall-clock deadline elapsed at the helper-call
       // boundary — PAUSE the attempt with EXECUTION_TIMEOUT (mirrors the
       // PolicyCeilingSignal PAUSED shape; the deadline breach is a policy
       // pause, not a failure, so the engine may resume/re-dispatch).
@@ -799,14 +799,14 @@ export class OrchestrationRunner {
           status: "PAUSED",
           retryDisposition: "NONE",
           summary: `suspended: ${signal.message}`.slice(0, 4000),
-          workerCalls,
+          helperCalls,
           verifierResults: verifierResults.map(toVerifierResult),
           commandExecutions,
           changedFiles: [],
           commits: [],
           cleanWorktree: false,
           usage: {
-            workerCalls: budget.counters().workerCalls,
+            helperCalls: budget.counters().helperCalls,
             rejectionCount,
             totalTokens: budget.counters().totalTokens,
           },
@@ -829,12 +829,12 @@ export class OrchestrationRunner {
     const usage = normalizeUsage(result.usage);
 
     // §13/§21: the result's usage mirrors the BudgetController's
-    // authoritative counters — every orchestrator AND worker model
+    // authoritative counters — every orchestrator AND helper model
     // response counts toward maxTokens, so the evidence matches the
     // enforcement, not just the completed-call subset.
     const budgetCounters = budget.counters();
     const usageOut = {
-      workerCalls: budgetCounters.workerCalls,
+      helperCalls: budgetCounters.helperCalls,
       rejectionCount,
       totalTokens: budgetCounters.totalTokens,
     };
@@ -855,7 +855,7 @@ export class OrchestrationRunner {
           status: "PAUSED",
           retryDisposition: "NONE",
           summary: breach.message.slice(0, 4000),
-          workerCalls,
+          helperCalls,
           verifierResults: verifierResults.map(toVerifierResult),
           commandExecutions,
           changedFiles: [],
@@ -881,7 +881,7 @@ export class OrchestrationRunner {
         breach.errorCode,
         breach.message,
         { ...usageOut, rejectionCount },
-        workerCalls,
+        helperCalls,
         verifierResults,
         commandExecutions,
       );
@@ -895,7 +895,7 @@ export class OrchestrationRunner {
       // error vs budget exhaustion (the in-loop token check).
       const finishReason = result.failure?.finishReason ?? "";
       if (
-        finishReason === "WORKER_BUDGET_EXCEEDED" ||
+        finishReason === "HELPER_BUDGET_EXCEEDED" ||
         finishReason === "TOKEN_BUDGET_EXCEEDED" ||
         finishReason === "REJECTION_BUDGET_EXCEEDED"
       ) {
@@ -913,14 +913,14 @@ export class OrchestrationRunner {
             status: "PAUSED",
             retryDisposition: "NONE",
             summary: `suspended: ${result.failure?.message ?? "policy allowance ceiling reached"}`.slice(0, 4000),
-            workerCalls,
+            helperCalls,
             verifierResults: verifierResults.map(toVerifierResult),
             commandExecutions,
             changedFiles: [],
             commits: [],
             cleanWorktree: false,
             usage: {
-              workerCalls: budget.counters().workerCalls,
+              helperCalls: budget.counters().helperCalls,
               rejectionCount,
               totalTokens: budget.counters().totalTokens,
             },
@@ -949,16 +949,16 @@ export class OrchestrationRunner {
           : "ORCHESTRATOR_FAILED";
       // A missing authoritative usage on a failed turn fails closed.
       if (code === "ORCHESTRATOR_ITERATION_LIMIT" && usage === null) {
-        return this.failure(dispatch, "TOKEN_USAGE_UNAVAILABLE", "orchestration turn lacked authoritative token usage", usageOut, workerCalls, verifierResults);
+        return this.failure(dispatch, "TOKEN_USAGE_UNAVAILABLE", "orchestration turn lacked authoritative token usage", usageOut, helperCalls, verifierResults);
       }
-      // §16.6: when the orchestrator cannot recover from a worker
-      // invocation that failed with WORKER_FAILED, the RUN result
-      // carries the worker's stable code — the §16.6 RETRYABLE
+      // §16.6: when the orchestrator cannot recover from a helper
+      // invocation that failed with HELPER_FAILED, the RUN result
+      // carries the helper's stable code — the §16.6 RETRYABLE
       // classification (engine retries within the step's maxRetries).
-      const lastFailedWorkerCall = [...workerCalls]
+      const lastFailedHelperCall = [...helperCalls]
         .reverse()
-        .find((c) => c.status === "FAILED" && c.errorCode === "WORKER_FAILED");
-      if (lastFailedWorkerCall) {
+        .find((c) => c.status === "FAILED" && c.errorCode === "HELPER_FAILED");
+      if (lastFailedHelperCall) {
         // §17.2/§17.5: publish the durable retry continuation at this
         // safe boundary — completed-call identities, candidate state,
         // verifier history (fresh counters per §13 new-attempt rule).
@@ -972,13 +972,13 @@ export class OrchestrationRunner {
               dispatchId: dispatch.dispatchId,
               attemptOrdinal,
               budgetCounters: budget.counters(),
-              completedCalls: workerCalls,
+              completedCalls: helperCalls,
               candidateTreeHash: lastTree.value,
               workspaceRevision: revision.value,
               verifierHistory: verifierResults,
             })
           : null;
-        const failed = this.failure(dispatch, "WORKER_FAILED", result.failure?.message ?? "worker failed and the orchestrator did not recover", usageOut, workerCalls, verifierResults, commandExecutions);
+        const failed = this.failure(dispatch, "HELPER_FAILED", result.failure?.message ?? "helper failed and the orchestrator did not recover", usageOut, helperCalls, verifierResults, commandExecutions);
         return published
           ? {
               ...failed,
@@ -992,7 +992,7 @@ export class OrchestrationRunner {
             }
           : failed;
       }
-      return this.failure(dispatch, code, result.failure?.message ?? "orchestrator turn failed", usageOut, workerCalls, verifierResults, commandExecutions);
+      return this.failure(dispatch, code, result.failure?.message ?? "orchestrator turn failed", usageOut, helperCalls, verifierResults, commandExecutions);
     }
     if (result.status === "CANCELLED") {
       return {
@@ -1003,7 +1003,7 @@ export class OrchestrationRunner {
         status: "CANCELLED",
         retryDisposition: "NONE",
         summary: "",
-        workerCalls,
+        helperCalls,
         verifierResults: verifierResults.map(toVerifierResult),
         commandExecutions,
         changedFiles: [],
@@ -1016,7 +1016,7 @@ export class OrchestrationRunner {
     }
     if (usage === null) {
       // A completed turn must still report authoritative usage.
-      return this.failure(dispatch, "TOKEN_USAGE_UNAVAILABLE", "orchestration turn lacked authoritative token usage", usageOut, workerCalls);
+      return this.failure(dispatch, "TOKEN_USAGE_UNAVAILABLE", "orchestration turn lacked authoritative token usage", usageOut, helperCalls);
     }
 
     // ── Completion gate (design §10.4) ────────────────────────────
@@ -1032,7 +1032,7 @@ export class OrchestrationRunner {
           ? "no required verifiers"
           : `completion requires APPROVED verdicts from every required verifier for the current tree: ${required.join(", ")}`,
         { ...usageOut, rejectionCount },
-        workerCalls,
+        helperCalls,
         verifierResults,
         commandExecutions,
       );
@@ -1048,7 +1048,7 @@ export class OrchestrationRunner {
         status: "CANCELLED",
         retryDisposition: "NONE",
         summary: "cancelled before checkpoint",
-        workerCalls,
+        helperCalls,
         verifierResults: verifierResults.map(toVerifierResult),
         commandExecutions,
         changedFiles: [],
@@ -1077,7 +1077,7 @@ export class OrchestrationRunner {
           checkpoint.errorCode,
           `checkpoint failed: ${checkpoint.errorCode}`,
           { ...usageOut, rejectionCount },
-          workerCalls,
+          helperCalls,
           verifierResults,
           commandExecutions,
         );
@@ -1100,7 +1100,7 @@ export class OrchestrationRunner {
       status: "COMPLETED",
       retryDisposition: "NONE",
       summary: (result.completion ?? "").slice(0, 4000),
-      workerCalls,
+      helperCalls,
       verifierResults: verifierResults.map(toVerifierResult),
       commandExecutions,
       changedFiles: [],
@@ -1124,10 +1124,10 @@ export class OrchestrationRunner {
     signal: ApprovalRequiredSignal,
     candidateTreeHash: string,
     workspaceRevision: number,
-    workerCalls: WorkerCallResult[],
+    helperCalls: HelperCallResult[],
     verifierRecords: VerdictRecord[],
     commandExecutions: import("./types.js").CommandExecutionRecord[],
-    usage: { workerCalls: number; rejectionCount: number; totalTokens: number },
+    usage: { helperCalls: number; rejectionCount: number; totalTokens: number },
   ): Promise<OrchestrationRunResult> {
     const evaluator = this.options.approvalEvaluator;
     const sink = this.options.approvalSink;
@@ -1139,7 +1139,7 @@ export class OrchestrationRunner {
         "APPROVAL_POLICY_DENIED",
         "approval required but no OrchestrationApprovalSink is wired — failing closed",
         usage,
-        workerCalls,
+        helperCalls,
         verifierRecords,
         commandExecutions,
       );
@@ -1194,7 +1194,7 @@ export class OrchestrationRunner {
       status: "PAUSED",
       retryDisposition: "NONE",
       summary: `suspended for approval: ${signal.action.summary}`,
-      workerCalls,
+      helperCalls,
       verifierResults: verifierRecords.map(toVerifierResult),
       commandExecutions,
       changedFiles: [],
@@ -1253,8 +1253,8 @@ export class OrchestrationRunner {
     dispatch: OrchestrationAssignment["dispatch"],
     errorCode: OrchestrationErrorCode,
     message: string,
-    usage: { workerCalls: number; rejectionCount: number; totalTokens: number },
-    workerCalls: WorkerCallResult[] = [],
+    usage: { helperCalls: number; rejectionCount: number; totalTokens: number },
+    helperCalls: HelperCallResult[] = [],
     verifierRecords: VerdictRecord[] = [],
     commandExecutions: import("./types.js").CommandExecutionRecord[] = [],
   ): OrchestrationRunResult {
@@ -1264,9 +1264,9 @@ export class OrchestrationRunner {
       resultDigest: this.resultDigest(dispatch),
       dispatch,
       status: "FAILED",
-      retryDisposition: errorCode === "WORKER_FAILED" ? "RETRYABLE" : "TERMINAL",
+      retryDisposition: errorCode === "HELPER_FAILED" ? "RETRYABLE" : "TERMINAL",
       summary: message.slice(0, 4000),
-      workerCalls,
+      helperCalls,
       verifierResults: verifierRecords.map(toVerifierResult),
       commandExecutions,
       changedFiles: [],
@@ -1280,10 +1280,10 @@ export class OrchestrationRunner {
 
 function resultUsage(
   totalTokens: number,
-  workerCalls: WorkerCallResult[],
-): { workerCalls: number; rejectionCount: number; totalTokens: number } {
+  helperCalls: HelperCallResult[],
+): { helperCalls: number; rejectionCount: number; totalTokens: number } {
   return {
-    workerCalls: workerCalls.length,
+    helperCalls: helperCalls.length,
     rejectionCount: 0,
     totalTokens,
   };

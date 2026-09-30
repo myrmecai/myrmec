@@ -449,7 +449,7 @@ test.describe('UC-WF-01 — Workflow CRUD', () => {
       '      modelCode: "github-gpt-4o"',
       '      goal: "Build it"',
       '      sourceSubPath: "app"',
-      '      workers:',
+      '      helpers:',
       '        - { name: coder, modelCode: "github-gpt-4o", capability: "Implements", allowedTools: [read_file], allowedCommands: [] }',
       '      checkpointStrategy: { mode: ON_VERIFICATION_PASS, commitMessage: "feat: x", pushToRemote: false, allowNoChanges: false }',
       '      completionCriteria: { definitionOfDone: "done", requireVerificationBy: [coder] }',

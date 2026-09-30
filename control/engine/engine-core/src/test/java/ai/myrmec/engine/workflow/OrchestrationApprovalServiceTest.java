@@ -105,9 +105,9 @@ class OrchestrationApprovalServiceTest extends IntegrationTestBase {
         payload.put("approvalRequestId", UUID.randomUUID().toString());
         payload.put("action", Map.of(
                 "actionId", "action-1",
-                "type", "WORKER_TOOL",
+                "type", "HELPER_TOOL",
                 "riskClass", "DESTRUCTIVE",
-                "summary", "worker:impl:edit",
+                "summary", "helper:impl:edit",
                 "digest", "a".repeat(64)));
         payload.put("stateDigest", "b".repeat(64));
         payload.put("snapshotTreeHash", "c".repeat(40));

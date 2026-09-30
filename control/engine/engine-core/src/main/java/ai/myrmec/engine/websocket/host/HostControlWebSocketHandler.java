@@ -576,7 +576,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    /** §7.4/§19.1: context installed — mint the worker row, flip ACTIVE. */
+    /** §7.4/§19.1: context installed — mint the Agent row, flip ACTIVE. */
     private void handleSessionOpened(WebSocketSession session, HostProtocolEnvelope envelope) {
         UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
         if (instanceId == null) {

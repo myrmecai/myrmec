@@ -2,14 +2,15 @@
 // Copyright 2026 The Myrmec Authors
 
 /**
- * WorkerInvoker contract tests (design §8.5): declaration validation,
+ * HelperInvoker contract tests (design §8.5): declaration validation,
  * model resolution, task assembly, and normalized usage enforcement.
  */
 import { describe, it, expect } from "vitest";
 import { TurnExecutor } from "../executor/TurnExecutor.js";
 import type { ChatModel, ConversationMessage, ModelResponse, ToolSpec } from "../executor/types.js";
-import { WorkerInvoker, normalizeUsage } from "./WorkerInvoker.js";import type { OrchestrationAssignment } from "./types.js";
-// InvokeWorkerOutcome is exercised through invoke()'s return value.
+import { HelperInvoker, normalizeUsage } from "./HelperInvoker.js";
+import type { OrchestrationAssignment } from "./types.js";
+// InvokeHelperOutcome is exercised through invoke()'s return value.
 
 // ── helpers ──────────────────────────────────────────────────────────
 
@@ -30,7 +31,7 @@ function baseAssignment(): OrchestrationAssignment {
       attemptId: "attempt", attemptOrdinal: 1, dispatchId: "attempt",
     },
     models: [
-      { code: "worker-model", provider: "stub", modelId: "worker-model", description: "w", endpoint: null, credentialRef: null, parameters: {} },
+      { code: "helper-model", provider: "stub", modelId: "helper-model", description: "w", endpoint: null, credentialRef: null, parameters: {} },
     ],
     source: {
       repoUrl: "https://example.com/r.git", sourceBranch: "main",
@@ -47,9 +48,9 @@ function baseAssignment(): OrchestrationAssignment {
       agentProfileCode: "p", dependsOn: [],
       retryPolicy: { maxRetries: 0, initialBackoffSeconds: 1, maxBackoffSeconds: 1 },
       orchestration: {
-        modelCode: "worker-model", goal: "G", specPath: null, sourceSubPath: "app",
-        workers: [
-          { name: "coder", modelCode: "worker-model", capability: "C", allowedTools: ["read_file"], allowedCommands: [] },
+        modelCode: "helper-model", goal: "G", specPath: null, sourceSubPath: "app",
+        helpers: [
+          { name: "coder", modelCode: "helper-model", capability: "C", allowedTools: ["read_file"], allowedCommands: [] },
         ],
         checkpointStrategy: { mode: "ON_VERIFICATION_PASS", commitMessage: "m", pushToRemote: false, allowNoChanges: false },
         completionCriteria: { definitionOfDone: "D", requireVerificationBy: [] },
@@ -62,15 +63,15 @@ function baseAssignment(): OrchestrationAssignment {
   };
 }
 
-function invokerWith(model: ChatModel): WorkerInvoker {
-  return new WorkerInvoker({
+function invokerWith(model: ChatModel): HelperInvoker {
+  return new HelperInvoker({
     attemptOrdinal: 1,
     chatModelFactory: { resolve: async () => model },
     turnExecutor: new TurnExecutor({}),
   });
 }
 
-// ── normalizeUsage ────────────────────────────────────────────────────
+// ── normalizeUsage ───────────────────────────────────────────────────
 
 describe("normalizeUsage", () => {
   it("accepts an explicit valid total", () => {
@@ -100,13 +101,13 @@ describe("normalizeUsage", () => {
   });
 });
 
-// ── WorkerInvoker ────────────────────────────────────────────────────
+// ── HelperInvoker ────────────────────────────────────────────────────
 
-describe("WorkerInvoker", () => {
+describe("HelperInvoker", () => {
   const seq = { startedSequence: 1, completedSequence: 1 };
   const rev = { revisionBefore: 0, revisionAfter: 0 };
 
-  it("invokes a declared worker and returns runner-owned identity", async () => {
+  it("invokes a declared helper and returns runner-owned identity", async () => {
     const model = new ScriptedModel([
       { content: "did it", usage: { promptTokens: 5, completionTokens: 3, totalTokens: 8 } },
     ]);
@@ -114,17 +115,17 @@ describe("WorkerInvoker", () => {
     const outcome = await invoker.invoke(
       baseAssignment(), "coder", "IMPLEMENT", "Do work.", seq, rev,
     );
-    expect(outcome.workerCall.status).toBe("COMPLETED");
+    expect(outcome.helperCall.status).toBe("COMPLETED");
     expect(outcome.summary).toBe("did it");
     expect(outcome.tokenCount).toBe(8);
-    expect(outcome.workerCall.callId).toBeTruthy();
-    expect(outcome.workerCall.workerName).toBe("coder");
-    expect(outcome.workerCall.purpose).toBe("IMPLEMENT");
+    expect(outcome.helperCall.callId).toBeTruthy();
+    expect(outcome.helperCall.helperName).toBe("coder");
+    expect(outcome.helperCall.purpose).toBe("IMPLEMENT");
   });
 
-  it("rejects an undeclared worker before any model execution", async () => {
+  it("rejects an undeclared helper before any model execution", async () => {
     let resolveCalls = 0;
-    const invoker = new WorkerInvoker({
+    const invoker = new HelperInvoker({
       attemptOrdinal: 1,
       chatModelFactory: {
         resolve: async () => {
@@ -135,30 +136,30 @@ describe("WorkerInvoker", () => {
       turnExecutor: new TurnExecutor({}),
     });
     const outcome = await invoker.invoke(baseAssignment(), "ghost", "IMPLEMENT", "x", seq, rev);
-    expect(outcome.workerCall.status).toBe("FAILED");
-    expect(outcome.workerCall.errorCode).toBe("ASSIGNMENT_VALIDATION_ERROR");
+    expect(outcome.helperCall.status).toBe("FAILED");
+    expect(outcome.helperCall.errorCode).toBe("ASSIGNMENT_VALIDATION_ERROR");
     expect(resolveCalls).toBe(0);
   });
 
-  it("rejects a worker model code absent from assignment.models", async () => {
+  it("rejects a helper model code absent from assignment.models", async () => {
     const a = baseAssignment();
     a.models = [];
     const invoker = invokerWith(new ScriptedModel([]));
     const outcome = await invoker.invoke(a, "coder", "IMPLEMENT", "x", seq, rev);
-    expect(outcome.workerCall.status).toBe("FAILED");
-    expect(outcome.workerCall.errorCode).toBe("ASSIGNMENT_VALIDATION_ERROR");
+    expect(outcome.helperCall.status).toBe("FAILED");
+    expect(outcome.helperCall.errorCode).toBe("ASSIGNMENT_VALIDATION_ERROR");
   });
 
   it("fails with TOKEN_USAGE_UNAVAILABLE for a response without usage", async () => {
     const model = new ScriptedModel([{ content: "done" }]);
     const invoker = invokerWith(model);
     const outcome = await invoker.invoke(baseAssignment(), "coder", "IMPLEMENT", "x", seq, rev);
-    expect(outcome.workerCall.status).toBe("FAILED");
-    expect(outcome.workerCall.errorCode).toBe("TOKEN_USAGE_UNAVAILABLE");
+    expect(outcome.helperCall.status).toBe("FAILED");
+    expect(outcome.helperCall.errorCode).toBe("TOKEN_USAGE_UNAVAILABLE");
   });
 
-  it("classifies a worker iteration cap as WORKER_ITERATION_LIMIT", async () => {
-    // The worker loops: requests the same (undeclared) tool forever, which
+  it("classifies a helper iteration cap as HELPER_ITERATION_LIMIT", async () => {
+    // The helper loops: requests the same (undeclared) tool forever, which
     // is recorded and fed back — hitting maxWorkerIterations.
     const looping: ModelResponse[] = Array.from({ length: 10 }, (_, i) => ({
       content: "",
@@ -167,19 +168,19 @@ describe("WorkerInvoker", () => {
     }));
     const invoker = invokerWith(new ScriptedModel(looping));
     const outcome = await invoker.invoke(baseAssignment(), "coder", "IMPLEMENT", "x", seq, rev);
-    expect(outcome.workerCall.status).toBe("FAILED");
-    expect(outcome.workerCall.errorCode).toBe("WORKER_ITERATION_LIMIT");
+    expect(outcome.helperCall.status).toBe("FAILED");
+    expect(outcome.helperCall.errorCode).toBe("HELPER_ITERATION_LIMIT");
   });
 
-  it("classifies a worker provider error as WORKER_FAILED", async () => {
+  it("classifies a helper provider error as HELPER_FAILED", async () => {
     class Boom implements ChatModel {
       async invoke(): Promise<ModelResponse> {
-        throw new Error("worker provider down");
+        throw new Error("helper provider down");
       }
     }
     const invoker = invokerWith(new Boom());
     const outcome = await invoker.invoke(baseAssignment(), "coder", "IMPLEMENT", "x", seq, rev);
-    expect(outcome.workerCall.status).toBe("FAILED");
-    expect(outcome.workerCall.errorCode).toBe("WORKER_FAILED");
+    expect(outcome.helperCall.status).toBe("FAILED");
+    expect(outcome.helperCall.errorCode).toBe("HELPER_FAILED");
   });
 });

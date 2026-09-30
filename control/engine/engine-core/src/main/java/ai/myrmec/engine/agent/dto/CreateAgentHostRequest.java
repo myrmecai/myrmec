@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.agent.dto;
 
 import ai.myrmec.engine.agent.AgentHostType;
@@ -11,10 +13,10 @@ import lombok.Data;
 import java.util.UUID;
 
 /**
- * Request DTO for creating an agent.
+ * Request DTO for creating an agent host.
  */
 @Data
-public class CreateAgentRequest {
+public class CreateAgentHostRequest {
 
     @NotBlank(message = "Agent name is required")
     @Size(max = 100, message = "Agent name cannot exceed 100 characters")
@@ -29,7 +31,7 @@ public class CreateAgentRequest {
     private UUID projectId;
 
     /**
-     * Maximum concurrent Agents (workers) this host may run.
+     * Maximum concurrent Agents this host may run.
      */
     @Min(value = 1, message = "Max agents must be at least 1")
     private Integer maxAgents = 1;

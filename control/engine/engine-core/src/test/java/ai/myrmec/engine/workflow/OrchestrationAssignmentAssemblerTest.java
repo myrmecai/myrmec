@@ -88,19 +88,19 @@ class OrchestrationAssignmentAssemblerTest extends IntegrationTestBase {
         orch.put("modelCode", "github-gpt-4o");
         orch.put("goal", "write a module");
         orch.put("sourceSubPath", ".");
-        Map<String, Object> worker = new LinkedHashMap<>();
-        worker.put("name", "coder");
-        worker.put("modelCode", "github-gpt-4o");
-        worker.put("capability", "implementation");
-        worker.put("allowedTools", List.of("write_file"));
-        worker.put("allowedCommands", List.of());
+        Map<String, Object> helper = new LinkedHashMap<>();
+        helper.put("name", "coder");
+        helper.put("modelCode", "github-gpt-4o");
+        helper.put("capability", "implementation");
+        helper.put("allowedTools", List.of("write_file"));
+        helper.put("allowedCommands", List.of());
         Map<String, Object> verifier = new LinkedHashMap<>();
         verifier.put("name", "verifier");
         verifier.put("modelCode", "github-gpt-4o");
         verifier.put("capability", "verification");
         verifier.put("allowedTools", List.of("read_file"));
         verifier.put("allowedCommands", List.of());
-        orch.put("workers", List.of(worker, verifier));
+        orch.put("helpers", List.of(helper, verifier));
         orch.put("checkpointStrategy", Map.of(
                 "mode", "ON_VERIFICATION_PASS", "commitMessage", "checkpoint",
                 "pushToRemote", false, "allowNoChanges", true));

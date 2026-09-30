@@ -7,7 +7,7 @@
  * <p>Implements the {@link ExecutorEvents} seam the {@link TurnExecutor}
  * loop fires (progress / tool start / tool end) and turns each callback into
  * a schema-valid `execution.event` frame on the {@link ExecutionFrameSender}
- * — the sender plumbing already routes it worker → supervisor → engine
+ * — the sender plumbing already routes it worker (Agent) → supervisor → engine
  * (HostControlClient.sendExecutionEvent).</p>
  *
  * <p>§15 rule 12: EVERY data map passes through the session's
@@ -28,7 +28,7 @@ import { CaptureFilter } from "./CaptureFilter.js";
 
 /** Constructor options for {@link ConversationEventReporter}. */
 export interface ConversationEventReporterOptions {
-  /** The unified execution-frame sender (worker's outbound surface). */
+  /** The unified execution-frame sender (Agent's outbound surface). */
   sender: ExecutionFrameSender;
   /** The session's capture filter (built from the registry capture policy). */
   filter: CaptureFilter;

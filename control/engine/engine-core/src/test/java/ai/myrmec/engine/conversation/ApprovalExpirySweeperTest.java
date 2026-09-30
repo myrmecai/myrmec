@@ -196,8 +196,8 @@ class ApprovalExpirySweeperTest extends IntegrationTestBase {
                 "approvalRequestId", UUID.randomUUID().toString(),
                 "stateDigest", "b".repeat(64),
                 "action", java.util.Map.of(
-                        "actionId", "action-1", "type", "WORKER_TOOL",
-                        "riskClass", "DESTRUCTIVE", "summary", "worker:impl:edit",
+                        "actionId", "action-1", "type", "HELPER_TOOL",
+                        "riskClass", "DESTRUCTIVE", "summary", "helper:impl:edit",
                         "digest", "a".repeat(64))));
         var output = new java.util.HashMap<String, Object>();
         output.put("summary", "suspended");

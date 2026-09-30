@@ -143,7 +143,8 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
   // ==================== Worker pool ====================
 
   /**
-   * Bring up the Agent worker pool. V1 headless pool size = 1 (config, not a
+   * Bring up the Agent worker (thread) pool. V1 headless pool size = 1
+   * (config, not a
    * seam — §9.3); auto-sizing to N is a later slice.
    */
   protected override async spawnWorkers(): Promise<void> {
@@ -239,7 +240,7 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
 
   /**
    * A `session.open` the client dispatched after its own transport-side
-   * bookkeeping (channel bind, opened reply). The worker's registry needs it
+   * bookkeeping (channel bind, opened reply). The Agent's registry needs it
    * to establish the model + tools for the session.
    */
   protected override onSessionOpen(payload: SessionOpenPayload): void {

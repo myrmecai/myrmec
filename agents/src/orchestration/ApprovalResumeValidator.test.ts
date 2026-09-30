@@ -50,9 +50,9 @@ function restored(over: Partial<RestoredSuspension["suspension"]> = {}): Restore
       approvalRequestId: "11111111-1111-4111-8111-111111111111",
       pendingAction: {
         actionId: "action-1",
-        type: "WORKER_TOOL",
+        type: "HELPER_TOOL",
         riskClass: "DESTRUCTIVE",
-        summary: "worker:impl:edit",
+        summary: "helper:impl:edit",
         digest: ACTION_DIGEST,
       },
       expiresAt: "2999-01-01T00:00:00Z",
@@ -172,7 +172,7 @@ describe("ApprovalResumeValidator", () => {
         dispatchId: "d1",
         attemptOrdinal: 1,
         budgetCounters: {
-          workerCalls: 0,
+          helperCalls: 0,
           totalTokens: 0,
           rejectionCount: 0,
         },
@@ -198,7 +198,7 @@ describe("ApprovalResumeValidator", () => {
         dispatchId: "22222222-2222-4222-8222-222222222222",
         attemptOrdinal: 1,
         budgetCounters: {
-          workerCalls: 0,
+          helperCalls: 0,
           totalTokens: 0,
           rejectionCount: 0,
         },

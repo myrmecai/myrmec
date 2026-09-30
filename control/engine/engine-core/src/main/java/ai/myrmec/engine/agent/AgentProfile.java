@@ -38,7 +38,7 @@ public class AgentProfile {
     private UUID id;
 
     /**
-     * Unique profile name (e.g., "Python K8s Worker").
+     * Unique profile name (e.g., "Python K8s Agent").
      */
     @Column(name = "name", nullable = false, unique = true, length = 100)
     private String name;

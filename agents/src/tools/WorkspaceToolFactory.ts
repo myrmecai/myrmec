@@ -3,13 +3,13 @@
 
 /**
  * WorkspaceToolFactory (design §10.3): builds the net-new Agent-local
- * file tools for one worker invocation, scoped to the step workspace and
- * filtered to the worker's declared allowedTools. The engine-declared
+ * file tools for one helper invocation, scoped to the step workspace and
+ * filtered to the helper's declared allowedTools. The engine-declared
  * session tool path is never involved.
  */
 import type { Tool } from "../executor/types.js";
 import type {
-  WorkerAuthoring,
+  HelperAuthoring,
   CommandExecutionRecord,
   CommandTemplateDefinition,
 } from "../orchestration/types.js";
@@ -53,10 +53,10 @@ export class WorkspaceToolFactory {
   }
 
   /**
-   * Return only the tools the worker's allowedTools names — nothing else
+   * Return only the tools the helper's allowedTools names — nothing else
    * exists on the model's tool list, so nothing else is callable.
    */
-  resolve(worker: WorkerAuthoring): Tool[] {
+  resolve(helper: HelperAuthoring): Tool[] {
     const available = new Map<string, () => Tool>([
       ["read_file", () => readFileTool(this.ctx)],
       ["list_directory", () => listDirectoryTool(this.ctx)],
@@ -64,16 +64,16 @@ export class WorkspaceToolFactory {
       ["write_file", () => writeFileTool(this.ctx)],
     ]);
     // Feature 5 (design §10.3): execute_command exists only when the
-    // assignment carried command templates and the worker declares
+    // assignment carried command templates and the helper declares
     // allowedCommands — the policy intersection happens inside the tool.
-    if (this.options.commandTemplates && worker.allowedCommands.length > 0) {
+    if (this.options.commandTemplates && helper.allowedCommands.length > 0) {
       available.set(
         "execute_command",
         () =>
           executeCommandTool({
             workspace: this.options.workspace,
             commandTemplates: this.options.commandTemplates!,
-            allowedCommands: worker.allowedCommands,
+            allowedCommands: helper.allowedCommands,
             recordExecution: this.options.recordExecution ?? (() => {}),
             workerCallId: this.options.workerCallId ?? "",
             ...(this.options.cancelled ? { cancelled: this.options.cancelled } : {}),
@@ -81,7 +81,7 @@ export class WorkspaceToolFactory {
       );
     }
     const tools: Tool[] = [];
-    for (const name of worker.allowedTools) {
+    for (const name of helper.allowedTools) {
       const make = available.get(name);
       if (make) tools.push(make());
     }

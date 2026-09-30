@@ -2,17 +2,17 @@
 // Copyright 2026 The Myrmec Authors
 
 import { describe, it, expect, vi } from "vitest";
-import { AgentWorker } from "./agentWorker.js";
+import { Agent } from "./agentWorker.js";
 import type { WorkerInbound, WorkerOutbound } from "./agentWorkerProtocol.js";
 import { MessageType as UnifiedMessageType } from "../protocol/unifiedFrames.js";
 import type { ChatModelFactory, SessionToolFactory } from "../executor/providers.js";
 import type { ChatModel, ModelStreamChunk } from "../executor/types.js";
 
-/** Streaming model that yields fixed chunks for worker-level tests. */
+/** Streaming model that yields fixed chunks for Agent-level tests. */
 class FixedStreamModel implements ChatModel {
   constructor(private readonly chunks: ModelStreamChunk[]) {}
   async invoke(): Promise<{ content: string }> {
-    throw new Error("worker test expects streaming path");
+    throw new Error("Agent test expects streaming path");
   }
   async *stream(): AsyncIterable<ModelStreamChunk> {
     for (const c of this.chunks) yield c;
@@ -83,10 +83,10 @@ function executionStartPayload(stream = true) {
   };
 }
 
-describe("AgentWorker", () => {
+describe("Agent", () => {
   it("routes a unified execution.start (after session.open) and posts execution.delta + execution.complete", async () => {
     const { post, frames, typesSent } = sink();
-    const worker = new AgentWorker({
+    const worker = new Agent({
       post,
       chatModelFactory: streamingChatModelFactory,
       sessionToolFactory: noopSessionToolFactory,
@@ -113,7 +113,7 @@ describe("AgentWorker", () => {
   it("ignores an unhandled frame type without emitting", () => {
     const { post, frames } = sink();
     const warn = vi.fn();
-    const worker = new AgentWorker({
+    const worker = new Agent({
       post,
       chatModelFactory: noopChatModelFactory,
       sessionToolFactory: noopSessionToolFactory,
@@ -129,7 +129,7 @@ describe("AgentWorker", () => {
   it("routes execution.cancel through the unified cancellation path", async () => {
     const { post, frames } = sink();
     const warn = vi.fn();
-    const worker = new AgentWorker({
+    const worker = new Agent({
       post,
       chatModelFactory: noopChatModelFactory,
       sessionToolFactory: noopSessionToolFactory,
@@ -155,7 +155,7 @@ describe("AgentWorker", () => {
   it("ignores a non-envelope inbound message", () => {
     const { post, frames } = sink();
     const warn = vi.fn();
-    const worker = new AgentWorker({
+    const worker = new Agent({
       post,
       chatModelFactory: noopChatModelFactory,
       sessionToolFactory: noopSessionToolFactory,
@@ -171,12 +171,12 @@ describe("AgentWorker", () => {
 
   it("constructs with the built-in resolver when none is injected", () => {
     const { post } = sink();
-    expect(() => new AgentWorker({ post, chatModelFactory: noopChatModelFactory, sessionToolFactory: noopSessionToolFactory })).not.toThrow();
+    expect(() => new Agent({ post, chatModelFactory: noopChatModelFactory, sessionToolFactory: noopSessionToolFactory })).not.toThrow();
   });
 
   it("threads maxImageBytes into the InferenceExecutor", () => {
     const { post } = sink();
-    const worker = new AgentWorker({
+    const worker = new Agent({
       post,
       chatModelFactory: noopChatModelFactory,
       sessionToolFactory: noopSessionToolFactory,
@@ -197,7 +197,7 @@ describe("AgentWorker", () => {
 
   it("applies a tighten-only policy update to the session enforcer without emitting", async () => {
     const { post, frames } = sink();
-    const worker = new AgentWorker({
+    const worker = new Agent({
       post,
       chatModelFactory: resolvingChatModelFactory,
       sessionToolFactory: noopSessionToolFactory,
@@ -223,7 +223,7 @@ describe("AgentWorker", () => {
 
   it("rejects a backward usage roll with protocol.error INVALID_MESSAGE", async () => {
     const { post, frames, typesSent } = sink();
-    const worker = new AgentWorker({
+    const worker = new Agent({
       post,
       chatModelFactory: resolvingChatModelFactory,
       sessionToolFactory: noopSessionToolFactory,
@@ -262,7 +262,7 @@ describe("AgentWorker", () => {
 
   it("rejects a loosening allowance with protocol.error INVALID_MESSAGE", async () => {
     const { post, frames, typesSent } = sink();
-    const worker = new AgentWorker({
+    const worker = new Agent({
       post,
       chatModelFactory: resolvingChatModelFactory,
       sessionToolFactory: noopSessionToolFactory,

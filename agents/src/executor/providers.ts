@@ -19,7 +19,7 @@
  *   stub implementation ({@link StubSessionToolFactory} in `stub.ts`) returns
  *   stub tools with canned results.
  *
- * Both factories are constructed **inside the worker** from serializable config
+ * Both factories are constructed **inside the worker (Agent thread)** from serializable config
  * (they cannot cross the `worker_threads` boundary as instances). The factory
  * functions {@link createChatModelFactory} and {@link createSessionToolFactory}
  * resolve the correct implementation from a {@link ProviderConfig}.
@@ -87,7 +87,7 @@ export interface ProviderConfig {
    * confined to this root. When absent, the session gets no agent-side tools
    * and `realTools` (if any) is used instead.
    *
-   * Tools are built INSIDE the worker because a {@link Tool} carries an
+   * Tools are built INSIDE the worker thread because a {@link Tool} carries an
    * `invoke` function, which cannot cross the `worker_threads` boundary.
    */
   workspaceRoot?: string;
@@ -147,7 +147,7 @@ export class DefaultSessionToolFactory implements SessionToolFactory {
 
 /**
  * Create a {@link ChatModelFactory} from config.
- * Called inside the worker from serializable config.
+ * Called inside the worker (Agent thread) from serializable config.
  *
  * Async because the stub implementation is loaded via dynamic `import()`
  * (not `require()`) to work in ESM mode.
@@ -162,10 +162,10 @@ export async function createChatModelFactory(config: ProviderConfig): Promise<Ch
 
 /**
  * Create a {@link SessionToolFactory} from config.
- * Called inside the worker from serializable config.
+ * Called inside the worker (Agent thread) from serializable config.
  *
  * Real mode prefers workspace-backed file tools when a `workspaceRoot` is
- * supplied: those are built here (inside the worker) because a tool's `invoke`
+ * supplied: those are built here (inside the worker thread) because a tool's `invoke`
  * function cannot cross the `worker_threads` boundary. Without a root, an
  * explicitly supplied `realTools` list is used.
  */

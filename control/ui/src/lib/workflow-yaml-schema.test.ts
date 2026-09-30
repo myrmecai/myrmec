@@ -48,7 +48,7 @@ workflow:
       modelCode: "glm-5.3"
       goal: "Build it"
       sourceSubPath: "app"
-      workers:
+      helpers:
         - { name: coder, modelCode: "glm-5.3", capability: "Implements", allowedTools: [read_file, write_file], allowedCommands: [] }
       checkpointStrategy: { mode: ON_VERIFICATION_PASS, commitMessage: "feat: x", pushToRemote: false, allowNoChanges: false }
       completionCriteria: { definitionOfDone: "done", requireVerificationBy: [coder] }
@@ -148,14 +148,14 @@ describe('validateWorkflowYaml', () => {
   it('rejects mixed ORCHESTRATOR aliases', () => {
     const doubled = ORCHESTRATOR_YAML.replace(
       /$/,
-      '\n  - id: second\n    name: Second\n    taskType: ORCHESTRATOR\n    agentProfileCode: fullstack\n    dependsOn: [backend]\n    retryPolicy: { maxRetries: 0, initialBackoffSeconds: 2, maxBackoffSeconds: 30 }\n    orchestration:\n      modelCode: "glm-5.3"\n      goal: "Second"\n      sourceSubPath: "app"\n      workers:\n        - { name: coder, modelCode: "glm-5.3", capability: "Implements", allowedTools: [read_file], allowedCommands: [] }\n      checkpointStrategy: { mode: ON_VERIFICATION_PASS, commitMessage: "feat: second", pushToRemote: false, allowNoChanges: false }\n      completionCriteria: { definitionOfDone: "done", requireVerificationBy: [coder] }\n      budget: { maxTokens: 1000, maxWorkerCalls: 10, maxVerifierRejectionsPerAttempt: 1, maxOrchestratorIterations: 5, maxWorkerIterations: 5, onBudgetExceeded: FAIL }'
+      '\n  - id: second\n    name: Second\n    taskType: ORCHESTRATOR\n    agentProfileCode: fullstack\n    dependsOn: [backend]\n    retryPolicy: { maxRetries: 0, initialBackoffSeconds: 2, maxBackoffSeconds: 30 }\n    orchestration:\n      modelCode: "glm-5.3"\n      goal: "Second"\n      sourceSubPath: "app"\n      helpers:\n        - { name: coder, modelCode: "glm-5.3", capability: "Implements", allowedTools: [read_file], allowedCommands: [] }\n      checkpointStrategy: { mode: ON_VERIFICATION_PASS, commitMessage: "feat: second", pushToRemote: false, allowNoChanges: false }\n      completionCriteria: { definitionOfDone: "done", requireVerificationBy: [coder] }\n      budget: { maxTokens: 1000, maxWorkerCalls: 10, maxVerifierRejectionsPerAttempt: 1, maxOrchestratorIterations: 5, maxWorkerIterations: 5, onBudgetExceeded: FAIL }'
     )
     const v = validateWorkflowYaml(doubled, CTX)
     expect(v.ok).toBe(false)
     expect(v.issues.some((i) => i.message.includes('agentProfileCode'))).toBe(true)
   })
 
-  it('rejects verifier not in workers', () => {
+  it('rejects verifier not in helpers', () => {
     const v = validateWorkflowYaml(
       ORCHESTRATOR_YAML.replace('requireVerificationBy: [coder]', 'requireVerificationBy: [ghost]'),
       CTX

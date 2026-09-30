@@ -286,10 +286,10 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
         task.setApprovalRequestedAt(Instant.now());
         task.setApprovalPayload(java.util.Map.of(
                 "approvalRequestId", java.util.UUID.randomUUID().toString(),
-                "summary", "worker:coder:IMPLEMENT",
+                "summary", "helper:coder:IMPLEMENT",
                 "action", java.util.Map.of(
-                        "actionId", "action-1", "type", "WORKER_TOOL",
-                        "riskClass", "DESTRUCTIVE", "summary", "worker:coder:IMPLEMENT",
+                        "actionId", "action-1", "type", "HELPER_TOOL",
+                        "riskClass", "DESTRUCTIVE", "summary", "helper:coder:IMPLEMENT",
                         "digest", "a".repeat(64))));
         var savedTask = workflowTaskRepository.save(task);
 

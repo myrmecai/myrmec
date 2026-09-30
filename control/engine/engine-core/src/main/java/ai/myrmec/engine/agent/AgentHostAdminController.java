@@ -3,12 +3,12 @@
 
 package ai.myrmec.engine.agent;
 
+import ai.myrmec.engine.agent.dto.AgentHostResponse;
+import ai.myrmec.engine.agent.dto.AgentHostWithKeyResponse;
 import ai.myrmec.engine.agent.dto.AgentResponse;
-import ai.myrmec.engine.agent.dto.AgentWithKeyResponse;
-import ai.myrmec.engine.agent.dto.AgentWorkerResponse;
-import ai.myrmec.engine.agent.dto.CreateAgentRequest;
+import ai.myrmec.engine.agent.dto.CreateAgentHostRequest;
 import ai.myrmec.engine.agent.dto.SetModelAccessModeRequest;
-import ai.myrmec.engine.agent.dto.UpdateAgentRequest;
+import ai.myrmec.engine.agent.dto.UpdateAgentHostRequest;
 import ai.myrmec.engine._system.exception.ErrorResponse;
 import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.project.ProjectRepository;
@@ -51,18 +51,18 @@ public class AgentHostAdminController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     @GetMapping
-    public ResponseEntity<List<AgentResponse>> listAgents() {
-        List<AgentHost> agents = agentHostService.findAll();
+    public ResponseEntity<List<AgentHostResponse>> listAgentHosts() {
+        List<AgentHost> agentHosts = agentHostService.findAll();
 
         // Fetch project names
         Map<UUID, String> projectNames = projectRepository.findAll().stream()
                 .collect(Collectors.toMap(Project::getId, Project::getName));
 
-        List<AgentResponse> responses = agents.stream()
-                .map(agent -> AgentResponse.from(
-                        agent,
-                        agent.getProjectId() != null ? projectNames.get(agent.getProjectId()) : null,
-                        agentHostService.countOnlineInstances(agent.getId())
+        List<AgentHostResponse> responses = agentHosts.stream()
+                .map(agentHost -> AgentHostResponse.from(
+                        agentHost,
+                        agentHost.getProjectId() != null ? projectNames.get(agentHost.getProjectId()) : null,
+                        agentHostService.countOnlineInstances(agentHost.getId())
                 ))
                 .toList();
 
@@ -76,35 +76,35 @@ public class AgentHostAdminController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     @GetMapping("/{id}")
-    public ResponseEntity<AgentResponse> getAgent(@PathVariable UUID id) {
-        AgentHost agent = agentHostService.getAgent(id);
+    public ResponseEntity<AgentHostResponse> getAgentHost(@PathVariable UUID id) {
+        AgentHost agentHost = agentHostService.getAgent(id);
         String projectName = null;
-        if (agent.getProjectId() != null) {
-            projectName = projectRepository.findById(agent.getProjectId())
+        if (agentHost.getProjectId() != null) {
+            projectName = projectRepository.findById(agentHost.getProjectId())
                     .map(Project::getName)
                     .orElse(null);
         }
-        return ResponseEntity.ok(AgentResponse.from(
-                agent,
+        return ResponseEntity.ok(AgentHostResponse.from(
+                agentHost,
                 projectName,
-                agentHostService.countOnlineInstances(agent.getId())
+                agentHostService.countOnlineInstances(agentHost.getId())
         ));
     }
 
-    @Operation(summary = "List the worker replicas (instances) of an agent host, with their runtime FSM status")
+    @Operation(summary = "List the Agents (warm replicas) of an agent host, with their runtime FSM status")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "List of worker replicas"),
+            @ApiResponse(responseCode = "200", description = "List of Agents"),
             @ApiResponse(responseCode = "404", description = "Agent host not found",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
-    @GetMapping("/{id}/workers")
-    public ResponseEntity<List<AgentWorkerResponse>> listWorkers(@PathVariable UUID id) {
+    @GetMapping("/{id}/agents")
+    public ResponseEntity<List<AgentResponse>> listAgents(@PathVariable UUID id) {
         // Validates the host exists (throws 404 otherwise) before listing.
         agentHostService.getAgent(id);
-        List<AgentWorkerResponse> workers = agentHostService.getInstancesForAgent(id).stream()
-                .map(AgentWorkerResponse::from)
+        List<AgentResponse> agents = agentHostService.getAgentsForAgentHost(id).stream()
+                .map(AgentResponse::from)
                 .toList();
-        return ResponseEntity.ok(workers);
+        return ResponseEntity.ok(agents);
     }
 
     @Operation(summary = "Create a new agent host")
@@ -116,8 +116,8 @@ public class AgentHostAdminController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     @PostMapping
-    public ResponseEntity<AgentWithKeyResponse> createAgent(
-            @Valid @RequestBody CreateAgentRequest request) {
+    public ResponseEntity<AgentHostWithKeyResponse> createAgentHost(
+            @Valid @RequestBody CreateAgentHostRequest request) {
 
         // Credential-envelope design §5.1: the model access mode is a
         // PLATFORM_ADMIN-only setting; the class-level guard also allows
@@ -145,11 +145,11 @@ public class AgentHostAdminController {
                     .orElse(null);
         }
 
-        AgentResponse agentResponse = AgentResponse.from(result.agent(), projectName, 0);
+        AgentHostResponse agentHostResponse = AgentHostResponse.from(result.agent(), projectName, 0);
 
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(AgentWithKeyResponse.builder()
-                        .agent(agentResponse)
+                .body(AgentHostWithKeyResponse.builder()
+                        .agentHost(agentHostResponse)
                         .registrationKey(result.registrationKey())
                         .build());
     }
@@ -163,9 +163,9 @@ public class AgentHostAdminController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     @PutMapping("/{id}")
-    public ResponseEntity<AgentResponse> updateAgent(
+    public ResponseEntity<AgentHostResponse> updateAgentHost(
             @PathVariable UUID id,
-            @Valid @RequestBody UpdateAgentRequest request) {
+            @Valid @RequestBody UpdateAgentHostRequest request) {
 
         // Credential-envelope design §5.1: mode changes are PLATFORM_ADMIN
         // only. EDITORs may edit other fields via this endpoint, but a
@@ -174,7 +174,7 @@ public class AgentHostAdminController {
                 request.getModelAccessMode() == null ? null
                         : requirePlatformAdminForMode(request.getModelAccessMode());
 
-        AgentHost agent = agentHostService.updateAgent(
+        AgentHost agentHost = agentHostService.updateAgent(
                 id,
                 request.getName(),
                 request.getDescription(),
@@ -185,16 +185,16 @@ public class AgentHostAdminController {
         );
 
         String projectName = null;
-        if (agent.getProjectId() != null) {
-            projectName = projectRepository.findById(agent.getProjectId())
+        if (agentHost.getProjectId() != null) {
+            projectName = projectRepository.findById(agentHost.getProjectId())
                     .map(Project::getName)
                     .orElse(null);
         }
 
-        return ResponseEntity.ok(AgentResponse.from(
-                agent,
+        return ResponseEntity.ok(AgentHostResponse.from(
+                agentHost,
                 projectName,
-                agentHostService.countOnlineInstances(agent.getId())
+                agentHostService.countOnlineInstances(agentHost.getId())
         ));
     }
 
@@ -205,7 +205,7 @@ public class AgentHostAdminController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteAgent(@PathVariable UUID id) {
+    public ResponseEntity<Void> deleteAgentHost(@PathVariable UUID id) {
         agentHostService.deleteAgent(id);
         return ResponseEntity.noContent().build();
     }
@@ -239,22 +239,22 @@ public class AgentHostAdminController {
     })
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     @PutMapping("/{id}/model-access-mode")
-    public ResponseEntity<AgentResponse> setModelAccessMode(
+    public ResponseEntity<AgentHostResponse> setModelAccessMode(
             @PathVariable UUID id,
             @Valid @RequestBody SetModelAccessModeRequest request) {
-        AgentHost agent = agentHostService.updateAgent(
+        AgentHost agentHost = agentHostService.updateAgent(
                 id, null, null, null, null, null, request.getModelAccessMode());
 
         String projectName = null;
-        if (agent.getProjectId() != null) {
-            projectName = projectRepository.findById(agent.getProjectId())
+        if (agentHost.getProjectId() != null) {
+            projectName = projectRepository.findById(agentHost.getProjectId())
                     .map(Project::getName)
                     .orElse(null);
         }
-        return ResponseEntity.ok(AgentResponse.from(
-                agent,
+        return ResponseEntity.ok(AgentHostResponse.from(
+                agentHost,
                 projectName,
-                agentHostService.countOnlineInstances(agent.getId())
+                agentHostService.countOnlineInstances(agentHost.getId())
         ));
     }
 

@@ -17,16 +17,16 @@
  *
  * <p>Effective risk derivation (§17.4): the five orchestration tools are
  * SAFE by default; a Profile command template may declare a higher
- * {@code riskClass} override. Evaluation is per worker invocation — the
- * effective risk of one {@code invoke_worker} is the highest risk across
- * the intersection of that worker's declared tools and command templates.
+ * {@code riskClass} override. Evaluation is per helper invocation — the
+ * effective risk of one {@code invoke_helper} is the highest risk across
+ * the intersection of that helper's declared tools and command templates.
  * Runner-owned checkpoint is DESTRUCTIVE (fixed); remote push is
  * IRREVERSIBLE (fixed).</p>
  */
 import { createHash } from "node:crypto";
 import type {
   OrchestrationAssignment,
-  WorkerAuthoring,
+  HelperAuthoring,
 } from "./types.js";
 import type { GovernedAction } from "./GovernedAction.js";
 
@@ -86,7 +86,7 @@ export class ApprovalPolicyEvaluator {
 
     // §17.4 precedence (3): the risk matrix. SAFE executes; the fixed
     // DESTRUCTIVE checkpoint and IRREVERSIBLE push suspend only when the
-    // project HITL setting requires approval; a worker invocation's
+    // project HITL setting requires approval; a helper invocation's
     // effective risk was already folded into the action's riskClass.
     if (action.riskClass === "SAFE") {
       return { outcome: "ALLOW" };
@@ -101,17 +101,17 @@ export class ApprovalPolicyEvaluator {
   }
 
   /**
-   * The effective risk of one worker invocation (§17.4): the highest risk
-   * across the intersection of the worker's declared tools and command
+   * The effective risk of one helper invocation (§17.4): the highest risk
+   * across the intersection of the helper's declared tools and command
    * templates. The five tools are SAFE by default; a command template may
    * override to DESTRUCTIVE/IRREVERSIBLE.
    */
   effectiveWorkerRisk(
     assignment: OrchestrationAssignment,
-    worker: WorkerAuthoring,
+    helper: HelperAuthoring,
   ): "SAFE" | "DESTRUCTIVE" | "IRREVERSIBLE" {
     let risk: "SAFE" | "DESTRUCTIVE" | "IRREVERSIBLE" = "SAFE";
-    for (const command of worker.allowedCommands) {
+    for (const command of helper.allowedCommands) {
       const template = assignment.policy.commandTemplates[command];
       const templateRisk = template?.riskClass ?? "SAFE";
       if (templateRisk === "IRREVERSIBLE") return "IRREVERSIBLE";
@@ -121,7 +121,7 @@ export class ApprovalPolicyEvaluator {
   }
 
   /**
-   * The policy key for an action (§17.4 identifier forms): the worker-
+   * The policy key for an action (§17.4 identifier forms): the helper-
    * invocation action resolves to the HIGHEST-RISK referenced key so a
    * REQUIRE_APPROVAL on any participating template/tool suspends.
    */
@@ -133,18 +133,18 @@ export class ApprovalPolicyEvaluator {
     if (action.type === "CHECKPOINT") return ACTION_KEY("CHECKPOINT");
     if (action.type === "PUSH") return ACTION_KEY("PUSH");
     if (action.type === "CONTINUE_BUDGET") return null;
-    if (action.type !== "WORKER_TOOL") return null;
+    if (action.type !== "HELPER_TOOL") return null;
 
-    // WORKER_TOOL: check every referenced tool and template; the first
+    // HELPER_TOOL: check every referenced tool and template; the first
     // explicit DENY/REQUIRE_APPROVAL entry wins (tightest rule).
-    const workerName = action.summary.match(/^worker:([^:]+)/)?.[1];
-    const worker = assignment.step.orchestration.workers.find(
-      (w) => w.name === workerName,
+    const helperName = action.summary.match(/^helper:([^:]+)/)?.[1];
+    const helper = assignment.step.orchestration.helpers.find(
+      (w) => w.name === helperName,
     );
-    if (!worker) return null;
+    if (!helper) return null;
     const keys = [
-      ...worker.allowedTools.map(TOOL_KEY),
-      ...worker.allowedCommands.map(TEMPLATE_KEY),
+      ...helper.allowedTools.map(TOOL_KEY),
+      ...helper.allowedCommands.map(TEMPLATE_KEY),
     ];
     for (const key of keys) {
       if (policy[key] === "DENY" || policy[key] === "REQUIRE_APPROVAL") {

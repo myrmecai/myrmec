@@ -121,9 +121,9 @@ class SessionAllocatorTest extends IntegrationTestBase {
         allocator.confirmOpened(sessionId, "slot-thread-1");
 
         // §19.1 decision 1: the Agent row is minted at session.opened.
-        var workers = agentRepository.findByAgentHostId(instance.getAgentHostId());
-        assertThat(workers).hasSize(1);
-        Agent minted = workers.get(0);
+        var agents = agentRepository.findByAgentHostId(instance.getAgentHostId());
+        assertThat(agents).hasSize(1);
+        Agent minted = agents.get(0);
         assertThat(minted.getAgentHostInstanceId()).isEqualTo(instance.getId());
         assertThat(minted.getStatus()).isEqualTo(Agent.Status.IDLE);
 
@@ -150,7 +150,7 @@ class SessionAllocatorTest extends IntegrationTestBase {
         Session closed = sessionRepository.findById(sessionId).orElseThrow();
         assertThat(closed.getAllocationState()).isEqualTo(SessionAllocator.ALLOC_STATE_CLOSED);
         assertThat(closed.getClosedAt()).isNotNull();
-        // The worker row is released (IDLE) and reusable — capacity is back.
+        // The Agent row is released (IDLE) and reusable — capacity is back.
         assertThat(allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
                 project.getId(), instance.getAgentHostId())).isPresent();
 
@@ -277,9 +277,9 @@ class SessionAllocatorTest extends IntegrationTestBase {
         allocator.confirmOpened(sessionB, "slot-b");
 
         // Two DISTINCT conversations -> exactly two workers, one per refId.
-        var workers = agentRepository.findByAgentHostId(instance.getAgentHostId());
-        assertThat(workers).hasSize(2);
-        assertThat(workers.stream().map(Agent::getConversationId).toList())
+        var agents = agentRepository.findByAgentHostId(instance.getAgentHostId());
+        assertThat(agents).hasSize(2);
+        assertThat(agents.stream().map(Agent::getConversationId).toList())
                 .containsExactlyInAnyOrder(conversationA, conversationB);
 
         // Close releases A's worker: its conversationId is cleared.

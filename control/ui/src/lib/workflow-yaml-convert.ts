@@ -131,9 +131,9 @@ export function workflowToYaml(input: {
     if (step.taskType !== 'ORCHESTRATOR') continue
     const orch = (step.orchestration ?? {}) as Record<string, unknown>
     if (typeof orch.modelCode === 'string') modelCodes.add(orch.modelCode)
-    const workers = orch.workers
-    if (Array.isArray(workers)) {
-      for (const w of workers) {
+    const helpers = orch.helpers
+    if (Array.isArray(helpers)) {
+      for (const w of helpers) {
         const mc = (w as Record<string, unknown>).modelCode
         if (typeof mc === 'string') modelCodes.add(mc)
       }
