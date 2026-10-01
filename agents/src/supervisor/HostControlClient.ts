@@ -2,10 +2,10 @@
 // Copyright 2026 The Myrmec Authors
 
 /**
- * Unified host-control socket client (§6–§11).
+ * Unified host-control socket client (section 6-section 11).
  *
  * Maintains the single WebSocket to `/api/v1/agent/host/ws`, runs the host
- * lifecycle FSM (CONNECTING → host.open → host.opened → heartbeat), handles
+ * lifecycle FSM (CONNECTING -> host.open -> host.opened -> heartbeat), handles
  * session allocation arms, and forwards execution commands to a registered
  * handler. It is intentionally independent of the legacy `AgentSupervisor`
  * conversation-socket machinery: the unified protocol replaces the bind/attach
@@ -90,9 +90,9 @@ export interface HostControlClientOptions {
   /** Optional capacity map reported in `host.open` and heartbeat. */
   reportedCapacity?: Record<string, unknown>;
   /**
-   * Local-owner model (§3.7/§4.1): the id of the user logged into the
-   * plugin (LOCAL hosts) — stamped onto `host.open` so the engine pins
-   * instance ownership. Absent (headless/MANAGED) → field omitted.
+   * Local-owner model (section 3.7/section 4.1): the id of the user logged into the
+   * plugin (LOCAL hosts) - stamped onto `host.open` so the engine pins
+   * instance ownership. Absent (headless/MANAGED) -> field omitted.
    */
   ownerUserId?: string;
   /** Maximum dedupe cache entries for inbound messageId values. */
@@ -101,44 +101,53 @@ export interface HostControlClientOptions {
   connection?: HostControlConnection;
   /**
    * Invoked once per `host.opened` carrying a PSK (design
-   * 2026-09-16-credential-envelope-delivery.md §6/§10). The client buffers
+   * 2026-09-16-credential-envelope-delivery.md section 6/section 10). The client buffers
    * the bytes in process memory only; the callback hands them to the
    * SessionRegistry (`setPsk`). Never logged, never persisted.
    */
   onPsk?: (psk: Uint8Array) => void;
   /**
-   * §7.5 (A1): session-lifecycle collaborator. When a `session.open` carries
+   * section 7.5 (A1): session-lifecycle collaborator. When a `session.open` carries
    * a `channel` offer the client opens the dedicated channel socket, runs the
    * channel.open/opened handshake, and registers the bound socket here;
    * channel loss is NON-fatal (the session keeps riding the control socket).
    * Inbound execution frames on the channel socket are dispatched through the
-   * same pipeline as control-socket frames. Optional — when omitted the
+   * same pipeline as control-socket frames. Optional - when omitted the
    * client stays control-only (existing behavior unchanged).
    */
   sessionLifecycle?: HostSessionLifecycle;
   /**
-   * §7.5 (A1): channel socket factory override (tests inject a fake).
+   * section 7.5 (A1): channel socket factory override (tests inject a fake).
    * Default dials the real `WebSocketChannelConnection`.
    */
   channelConnectionFactory?: (endpoint: string) => ChannelConnection;
   /**
-   * §13 (A2): session-lifecycle retention collaborators. Implemented by the
+   * section 13 (A2): session-lifecycle retention collaborators. Implemented by the
    * SessionRegistry. When wired, a control-socket drop RETAINS sessions for
    * `retentionWindowMs` and the reconnect path sends `host.resume` +
    * applies `host.reconcile` decisions instead of tearing everything down.
-   * Optional — when omitted the client keeps the pre-A2 behavior.
+   * Optional - when omitted the client keeps the pre-A2 behavior.
    */
   retention?: HostRetentionLifecycle;
   /**
-   * §13 (A2): how long retained state survives a drop, in ms. Must not
+   * section 13 (A2): how long retained state survives a drop, in ms. Must not
    * exceed the engine's `myrmec.host.recovery.retain-seconds` (default
-   * 300s) — the engine expires its side first. Default 300_000.
+   * 300s) - the engine expires its side first. Default 300_000.
    */
   retentionWindowMs?: number;
+  /**
+   * Protocol 12.1/12.3: invoked with `acknowledgedMessageId` for every
+   * inbound `protocol.ack` the engine sends for a host->engine durable
+   * frame. The supervisor composition wires this to the executor's
+   * outbox seam (acknowledgeByMessageId, best-effort no-op on unknown
+   * id). Optional - omitted keeps the previous bookkeeping-only
+   * behavior.
+   */
+  onEngineAck?: (acknowledgedMessageId: string) => void;
 }
 
 /**
- * §13 (A2): the retention collaborators the client needs across a
+ * section 13 (A2): the retention collaborators the client needs across a
  * control-socket drop. Implemented by the SessionRegistry (plus the
  * execution-cancellation hook the Agent/executor layer supplies).
  */
@@ -147,7 +156,7 @@ export interface HostRetentionLifecycle extends HostSessionLifecycle {
   markAllDisconnected(): void;
   /** All retained session ids, insertion order. */
   retainedSessionIds(): string[];
-  /** §13 host.resume summaries for every retained session. */
+  /** section 13 host.resume summaries for every retained session. */
   buildRetainedSummaries(): Array<{
     sessionId: string;
     state: string;
@@ -158,8 +167,8 @@ export interface HostRetentionLifecycle extends HostSessionLifecycle {
   /** Drop a session per a CLOSE/unknown decision (vault included). */
   closeRetained(sessionId: string): void;
   /**
-   * Apply cancellation semantics for one execution (§13: a
-   * CANCEL_EXECUTION decision IS the cancellation command — the in-flight
+   * Apply cancellation semantics for one execution (section 13: a
+   * CANCEL_EXECUTION decision IS the cancellation command - the in-flight
    * turn is aborted and the normal execution.cancelled terminal frame is
    * emitted; no separate execution.cancel frame is sent).
    */
@@ -167,10 +176,10 @@ export interface HostRetentionLifecycle extends HostSessionLifecycle {
 }
 
 /**
- * §7.5 (A1): one bound dedicated-channel client per session. Owns the
- * channel socket + the channel.open → channel.opened handshake, forwards
+ * section 7.5 (A1): one bound dedicated-channel client per session. Owns the
+ * channel socket + the channel.open -> channel.opened handshake, forwards
  * inbound frames through the shared dispatch, and reports death (close /
- * error) so the session falls back to the control socket — never closing
+ * error) so the session falls back to the control socket - never closing
  * the session itself.
  */
 export class SessionChannelClient {
@@ -207,7 +216,7 @@ export class SessionChannelClient {
   }
 
   /**
-   * Run the §7.5 handshake: connect (same HOST_JWT gate as the control
+   * Run the section 7.5 handshake: connect (same HOST_JWT gate as the control
    * socket), send channel.open with the session's durable cursor + the
    * single-use offer token, await channel.opened. Never throws.
    *
@@ -227,7 +236,7 @@ export class SessionChannelClient {
           payload: {
             sessionId: this.sessionId,
             resumeFromSequence,
-            // §15 rule 7: the token rides the payload, not the auth.
+            // section 15 rule 7: the token rides the payload, not the auth.
             token: this.offer.token,
           },
         }),
@@ -243,7 +252,7 @@ export class SessionChannelClient {
     }
   }
 
-  /** Await the channel.opened reply (bounded — the token is short-lived). */
+  /** Await the channel.opened reply (bounded - the token is short-lived). */
   private awaitOpened(timeoutMs = 10_000): Promise<ChannelOpenedPayload | null> {
     return new Promise<ChannelOpenedPayload | null>((resolve) => {
       const timer = setTimeout(() => {
@@ -290,7 +299,7 @@ export class SessionChannelClient {
     }
 
     if (frame.type === UnifiedMessageType.PROTOCOL_ERROR) {
-      // Handshake rejection (expired/misbound token, invalid state) — the
+      // Handshake rejection (expired/misbound token, invalid state) - the
       // bind never happened, so fall back cleanly.
       const payload = frame.payload as { code: string; message: string };
       if (!this.opened) {
@@ -305,7 +314,7 @@ export class SessionChannelClient {
     }
 
     // Any other frame post-bind (execution.*) is the engine's
-    // channel-preferred arm — dispatch through the SAME pipeline the control
+    // channel-preferred arm - dispatch through the SAME pipeline the control
     // socket uses (shared dedupe, acks, handlers).
     await this.callbacks.onFrame(raw);
   }
@@ -323,11 +332,11 @@ export class SessionChannelClient {
   }
 }
 
-/** §7.5 (A1): the session-side collaborators the channel client needs.
+/** section 7.5 (A1): the session-side collaborators the channel client needs.
  * Implemented by the SessionRegistry. */
 export interface HostSessionLifecycle {
-  /** The session's durable-event cursor — feeds channel.open's
-   * resumeFromSequence (§12.3). 0 when unknown. */
+  /** The session's durable-event cursor - feeds channel.open's
+   * resumeFromSequence (section 12.3). 0 when unknown. */
   getHighestContiguousSequence(sessionId: string): number;
   /** Record a durable inbound frame's sequence (registry cursor tracking). */
   observeDurableSequence(sessionId: string, sequence: number): void;
@@ -337,7 +346,7 @@ export interface HostSessionLifecycle {
     socket: unknown,
     opened: ChannelOpenedPayload,
   ): void;
-  /** Mark the channel dead (§7.5: non-fatal — keep the session). */
+  /** Mark the channel dead (section 7.5: non-fatal - keep the session). */
   markChannelDead(sessionId: string): void;
   /** Drop the binding on session close (returns the socket to close). */
   unbindChannel(sessionId: string): { socket: unknown } | null;
@@ -468,8 +477,8 @@ class WebSocketHostControlConnection implements HostControlConnection {
 }
 
 /**
- * §7.5 (A1): raw WebSocket abstraction for the dedicated channel socket.
- * Same shape as {@link HostControlConnection} minus the reconnect machinery —
+ * section 7.5 (A1): raw WebSocket abstraction for the dedicated channel socket.
+ * Same shape as {@link HostControlConnection} minus the reconnect machinery -
  * channel loss is non-fatal and reconnect is A2/Wave 5.
  */
 export interface ChannelConnection {
@@ -481,7 +490,7 @@ export interface ChannelConnection {
   onClose?: (code: number, reason: string) => void | Promise<void>;
 }
 
-/** Production channel socket for one session (§7.5). Same HOST_JWT
+/** Production channel socket for one session (section 7.5). Same HOST_JWT
  * handshake gate as the control socket (`?token=`); the single-use channel
  * token rides the channel.open payload. */
 export class WebSocketChannelConnection implements ChannelConnection {
@@ -586,7 +595,7 @@ const DURABLE_INBOUND_TYPES: ReadonlySet<string> = new Set([
   UnifiedMessageType.SESSION_CLOSED,
 ]);
 
-/** §13 (A2): the host.reconcile payload shape as received from the engine. */
+/** section 13 (A2): the host.reconcile payload shape as received from the engine. */
 type HostReconcileWire = {
   hostInstanceId: string;
   decisions: ReconcileDecision[];
@@ -597,16 +606,16 @@ const CLIENT_HANDLED_TYPES: ReadonlySet<string> = new Set([
   UnifiedMessageType.HOST_OPENED,
   UnifiedMessageType.HOST_HEARTBEAT,
   UnifiedMessageType.PROTOCOL_ERROR,
-  // §12.3: the engine's protocol.ack for host→engine durable frames. The
-  // engine replies on the socket the frame arrived on — with A1 that can be
+  // section 12.3: the engine's protocol.ack for host->engine durable frames. The
+  // engine replies on the socket the frame arrived on - with A1 that can be
   // the dedicated channel. The SDK records the ack's cursor for its own
   // replay bookkeeping later (A2); here it is simply expected noise.
   UnifiedMessageType.PROTOCOL_ACK,
 ]);
 
-/** §7.5 (A1): outbound frame families that PREFER the dedicated channel
+/** section 7.5 (A1): outbound frame families that PREFER the dedicated channel
  * when one is bound for their session. Everything else (session.*, host.*,
- * protocol.ack, execution.accept/reject/start/cancel) is control-only — the
+ * protocol.ack, execution.accept/reject/start/cancel) is control-only - the
  * engine's channel arm refuses it (INVALID_MESSAGE). */
 const CHANNEL_PREFERRED_OUTBOUND_TYPES: ReadonlySet<string> = new Set([
   UnifiedMessageType.EXECUTION_DELTA,
@@ -657,7 +666,7 @@ export class HostControlClient {
   private readonly poolSize: number;
   private readonly capabilities: Record<string, unknown>;
   private readonly reportedCapacity: Record<string, unknown>;
-  /** §3.7: the plugin's logged-in user id stamped onto host.open (LOCAL). */
+  /** section 3.7: the plugin's logged-in user id stamped onto host.open (LOCAL). */
   private readonly ownerUserId: string | undefined;
 
   private connection: HostControlConnection;
@@ -678,29 +687,29 @@ export class HostControlClient {
     | ((frame: UnifiedFrame<"session.close">) => void | Promise<void>)
     | null = null;
   private readonly onPsk: ((psk: Uint8Array) => void) | undefined;
-  /** §7.5 (A1): session collaborators (registry) for channel binding. */
+  /** section 7.5 (A1): session collaborators (registry) for channel binding. */
   private readonly sessionLifecycle: HostSessionLifecycle | null;
-  /** §7.5 (A1): channel socket factory override (tests inject a fake). */
+  /** section 7.5 (A1): channel socket factory override (tests inject a fake). */
   private readonly channelConnectionFactory:
     | ((endpoint: string) => ChannelConnection)
     | undefined;
-  /** §7.5 (A1): one channel client per bound session (open handshake state). */
+  /** section 7.5 (A1): one channel client per bound session (open handshake state). */
   private readonly channels = new Map<string, SessionChannelClient>();
-  /** §13 (A2): retention collaborators (registry + cancel hook). */
+  /** section 13 (A2): retention collaborators (registry + cancel hook). */
   private readonly retention: HostRetentionLifecycle | null;
-  /** §13 (A2): how long retained state survives a drop (ms). */
+  /** section 13 (A2): how long retained state survives a drop (ms). */
   private readonly retentionWindowMs: number;
-  /** §13 (A2): the nonce of the instance the host last served (the resume
-   * identity — a fresh host.open rotates `_currentNonce`, so it is captured
+  /** section 13 (A2): the nonce of the instance the host last served (the resume
+   * identity - a fresh host.open rotates `_currentNonce`, so it is captured
    * on every opened). */
   private previousInstanceNonce: string | null = null;
-  /** §13 (A2): the id of the instance the host last served. */
+  /** section 13 (A2): the id of the instance the host last served. */
   private previousHostInstanceId: string | null = null;
-  /** §13 (A2): pending retention-expiry timer (armed on drop). */
+  /** section 13 (A2): pending retention-expiry timer (armed on drop). */
   private retentionTimer: ReturnType<typeof setTimeout> | null = null;
   /**
-   * §8.4/§12.3: the host-assigned durable sequence for `execution.event`
-   * envelopes — monotonic per sender and session (protocol doc, envelope
+   * section 8.4/section 12.3: the host-assigned durable sequence for `execution.event`
+   * envelopes - monotonic per sender and session (protocol doc, envelope
    * field table: "sequence | ordered session events | Monotonic per sender
    * and session"). The engine requires it on execution.event (rejects the
    * frame with INVALID_MESSAGE otherwise) and echoes it back on the
@@ -708,17 +717,22 @@ export class HostControlClient {
    * are acknowledged with 0; only the event stream carries this cursor.
    */
   private readonly durableEventSequences = new Map<string, number>();
-  /** §13 (A2): guard so one resume runs per reconnection. */
+  /** section 13 (A2): guard so one resume runs per reconnection. */
   private resumePending: Promise<void> | null = null;
-  /** §13 (A2): whether the current connection resumed (vs fresh host.open). */
+  /** section 13 (A2): whether the current connection resumed (vs fresh host.open). */
   private resumedThisConnection = false;
   /**
-   * §12.1/§13 (A2): per-session id of the last terminal/session frame the
-   * host acknowledged (protocol.ack correlation) — the resume report's
+   * section 12.1/section 13 (A2): per-session id of the last terminal/session frame the
+   * host acknowledged (protocol.ack correlation) - the resume report's
    * lastAcknowledgedMessageId; the engine uses it to skip terminal resends
    * the host already holds.
    */
   private readonly lastAcknowledgedMessageIds = new Map<string, string>();
+  /**
+   * Protocol 12.1/12.3: the optional hook fired for every inbound
+   * protocol.ack (the supervisor wires it to the executor's outbox seam).
+   */
+  private readonly onEngineAck: ((acknowledgedMessageId: string) => void) | null;
 
   constructor(options: HostControlClientOptions) {
     this.engineUrl = options.engineUrl.replace(/\/+$/, "");
@@ -736,6 +750,7 @@ export class HostControlClient {
     this.channelConnectionFactory = options.channelConnectionFactory;
     this.retention = options.retention ?? null;
     this.retentionWindowMs = options.retentionWindowMs ?? 300_000;
+    this.onEngineAck = options.onEngineAck ?? null;
     this.connection =
       options.connection ??
       new WebSocketHostControlConnection(this.engineUrl, this.path);
@@ -767,15 +782,15 @@ export class HostControlClient {
     this.executionHandler = handler;
   }
 
-  /** Register a callback for execution.cancel frames (§8.4: engine→host). */
+  /** Register a callback for execution.cancel frames (section 8.4: engine->host). */
   onExecutionCancel(handler: ExecutionCancelHandler): void {
     this.executionCancelHandler = handler;
   }
 
   /**
-   * Observe `session.open` frames (§7.1): fired AFTER the transport-side
+   * Observe `session.open` frames (section 7.1): fired AFTER the transport-side
    * bookkeeping (channel bind, session.opened reply) so the consumer opens
-   * its model/tools for the session. The payload is the raw frame — the
+   * its model/tools for the session. The payload is the raw frame - the
    * consumer narrows it.
    */
   onSessionOpen(
@@ -785,7 +800,7 @@ export class HostControlClient {
   }
 
   /**
-   * Observe `session.close` frames (§9): fired after the channel teardown.
+   * Observe `session.close` frames (section 9): fired after the channel teardown.
    */
   onSessionClose(
     handler: (frame: UnifiedFrame<"session.close">) => void | Promise<void>,
@@ -796,7 +811,7 @@ export class HostControlClient {
   /**
    * Start the control socket: open with retry, then run the FSM until stop().
    *
-   * The reconnect machinery (exponential backoff + the close-code reaction —
+   * The reconnect machinery (exponential backoff + the close-code reaction -
    * refresh on 4001, re-register on 4002, permanent stop on 4003, reconnect
    * otherwise) is INLINED here: the legacy `ReconnectingConnection` was its
    * only consumer and is deleted with the legacy wire.
@@ -850,7 +865,7 @@ export class HostControlClient {
         try {
           await this.tokenProvider.refreshTokens();
         } catch {
-          // Refresh failed — fall back to a full re-register.
+          // Refresh failed - fall back to a full re-register.
           await this.tokenProvider.reRegister();
         }
         return true;
@@ -885,7 +900,7 @@ export class HostControlClient {
   async stop(reason = "Host shutdown"): Promise<void> {
     this.running = false;
     this.stopHeartbeat();
-    // §7.5: every bound channel socket dies with the host teardown.
+    // section 7.5: every bound channel socket dies with the host teardown.
     await this.closeAllChannels(reason);
     this.stopRetentionTimer();
     this.stopReconnecting();
@@ -1004,14 +1019,27 @@ export class HostControlClient {
     });
   }
 
-  /** Send a durable execution.event. */
+  /** Send a durable execution.event.
+   *
+   * section 12.1 (outbox idempotency): when the payload carries a retransmit
+   * `sequenceOverride` the client stamps THAT sequence instead of minting
+   * a fresh one - the engine's slot uniqueness treats a new sequence as a
+   * conflicting duplicate, so a resent record MUST reuse its original
+   * envelope sequence. The conversation path (no override) mints as
+   * before, unchanged.
+   */
   async sendExecutionEvent(payload: ExecutionEventPayload): Promise<void> {
-    // §12.3: stamp the per-session monotonic sequence BEFORE the send — the
+    // section 12.3: stamp the per-session monotonic sequence BEFORE the send - the
     // engine validates the field and tracks it as the session's durable
     // cursor. A session without a cursor starts at 1.
+    const override = (
+      payload as ExecutionEventPayload & { sequenceOverride?: number }
+    ).sequenceOverride;
     const sessionId = this.executionSessions.get(payload.executionId) ?? null;
     let sequence: number | null = null;
-    if (sessionId) {
+    if (override !== undefined && override !== null) {
+      sequence = override;
+    } else if (sessionId) {
       const next = (this.durableEventSequences.get(sessionId) ?? 0) + 1;
       this.durableEventSequences.set(sessionId, next);
       sequence = next;
@@ -1027,11 +1055,20 @@ export class HostControlClient {
     });
   }
 
-  /** Send terminal execution.complete. */
+  /** Send terminal execution.complete.
+   *
+   * section 12.1 (outbox idempotency): a payload carrying `messageIdOverride`
+   * is a retransmitted record - the client reuses THAT wire messageId
+   * instead of minting one, so the engine's terminal dedup recognizes
+   * the resend. The conversation path (no override) mints as before.
+   */
   async sendExecutionComplete(payload: ExecutionCompletePayload): Promise<void> {
+    const override = (
+      payload as ExecutionCompletePayload & { messageIdOverride?: string }
+    ).messageIdOverride;
     await this.sendFrame({
       protocolVersion: SUPPORTED_PROTOCOL_VERSION,
-      messageId: this.nextMessageId(),
+      messageId: override ?? this.nextMessageId(),
       type: UnifiedMessageType.EXECUTION_COMPLETE,
       sentAt: new Date().toISOString(),
       executionId: payload.executionId,
@@ -1039,11 +1076,14 @@ export class HostControlClient {
     });
   }
 
-  /** Send terminal execution.failed. */
+  /** Send terminal execution.failed (same section 12.1 retransmit rule as complete). */
   async sendExecutionFailed(payload: ExecutionFailedPayload): Promise<void> {
+    const override = (
+      payload as ExecutionFailedPayload & { messageIdOverride?: string }
+    ).messageIdOverride;
     await this.sendFrame({
       protocolVersion: SUPPORTED_PROTOCOL_VERSION,
-      messageId: this.nextMessageId(),
+      messageId: override ?? this.nextMessageId(),
       type: UnifiedMessageType.EXECUTION_FAILED,
       sentAt: new Date().toISOString(),
       executionId: payload.executionId,
@@ -1051,11 +1091,14 @@ export class HostControlClient {
     });
   }
 
-  /** Send execution.paused (HITL / checkpoint). */
+  /** Send execution.paused (same section 12.1 retransmit rule as complete). */
   async sendExecutionPaused(payload: ExecutionPausedPayload): Promise<void> {
+    const override = (
+      payload as ExecutionPausedPayload & { messageIdOverride?: string }
+    ).messageIdOverride;
     await this.sendFrame({
       protocolVersion: SUPPORTED_PROTOCOL_VERSION,
-      messageId: this.nextMessageId(),
+      messageId: override ?? this.nextMessageId(),
       type: UnifiedMessageType.EXECUTION_PAUSED,
       sentAt: new Date().toISOString(),
       executionId: payload.executionId,
@@ -1077,7 +1120,7 @@ export class HostControlClient {
     });
   }
 
-  /** Answer a rejected frame with protocol.error (§8.7 etc.). */
+  /** Answer a rejected frame with protocol.error (section 8.7 etc.). */
   async sendProtocolError(payload: ProtocolErrorPayload): Promise<void> {
     await this.sendFrame({
       protocolVersion: SUPPORTED_PROTOCOL_VERSION,
@@ -1101,13 +1144,19 @@ export class HostControlClient {
     });
   }
 
-  /** Send a durable HITL approval request (execution.approval.requested). */
+  /** Send a durable HITL approval request (execution.approval.requested).
+   * Same section 12.1 retransmit rule as the terminal frames. */
   async sendExecutionApprovalRequested(
     payload: ExecutionApprovalRequestedPayload,
   ): Promise<void> {
+    const override = (
+      payload as ExecutionApprovalRequestedPayload & {
+        messageIdOverride?: string;
+      }
+    ).messageIdOverride;
     await this.sendFrame({
       protocolVersion: SUPPORTED_PROTOCOL_VERSION,
-      messageId: this.nextMessageId(),
+      messageId: override ?? this.nextMessageId(),
       type: UnifiedMessageType.EXECUTION_APPROVAL_REQUESTED,
       sentAt: new Date().toISOString(),
       executionId: payload.executionId,
@@ -1136,15 +1185,15 @@ export class HostControlClient {
       sessionId: frame.sessionId ?? null,
       executionId: frame.executionId ?? null,
     };
-    // §7.5 (A1): execution.delta/event/terminal PREFER the bound channel
+    // section 7.5 (A1): execution.delta/event/terminal PREFER the bound channel
     // socket for their session; everything else is control-only. A channel
-    // send failure falls back to the control socket (best-effort) — channel
+    // send failure falls back to the control socket (best-effort) - channel
     // loss must not break an execution.
     const channel = this.channelForOutbound(fullFrame);
     if (channel) {
       try {
         await channel.send(encodeUnifiedFrame(fullFrame));
-        // Terminal frames end the execution — drop its session mapping.
+        // Terminal frames end the execution - drop its session mapping.
         if (
           fullFrame.type === UnifiedMessageType.EXECUTION_COMPLETE ||
           fullFrame.type === UnifiedMessageType.EXECUTION_FAILED ||
@@ -1164,10 +1213,10 @@ export class HostControlClient {
   }
 
   /**
-   * §7.5 (A1): resolve the outbound channel for an execution frame — the
+   * section 7.5 (A1): resolve the outbound channel for an execution frame - the
    * bound, alive channel for the frame's session, else null (control).
    * Resolves the session from the envelope's sessionId, falling back to the
-   * executionId→sessionId map the client fills on execution.start.
+   * executionId->sessionId map the client fills on execution.start.
    */
   private channelForOutbound(frame: ParsedUnifiedFrame): SessionChannelClient | null {
     if (!CHANNEL_PREFERRED_OUTBOUND_TYPES.has(frame.type)) {
@@ -1182,7 +1231,7 @@ export class HostControlClient {
     return channel && channel.isOpen ? channel : null;
   }
 
-  /** Registry of executionId → sessionId, filled from execution.start. */
+  /** Registry of executionId -> sessionId, filled from execution.start. */
   private readonly executionSessions = new Map<string, string>();
 
   // ==================== Internal transport wiring ====================
@@ -1210,7 +1259,7 @@ export class HostControlClient {
       poolSize: this.poolSize,
       capabilities: this.capabilities,
       reportedCapacity: this.reportedCapacity,
-      // §3.7 local-owner model: present only for LOCAL/plugin hosts —
+      // section 3.7 local-owner model: present only for LOCAL/plugin hosts -
       // spreading undefined keeps the field off the MANAGED wire.
       ...(this.ownerUserId !== undefined ? { ownerUserId: this.ownerUserId } : {}),
     };
@@ -1226,19 +1275,19 @@ export class HostControlClient {
   private async onDisconnect(code: number, reason: string): Promise<void> {
     this.log.info(`Host control socket closed: code=${code} reason=${reason}`);
     this.stopHeartbeat();
-    // §13 (A2): capture the resume identity BEFORE it is cleared — a
+    // section 13 (A2): capture the resume identity BEFORE it is cleared - a
     // reconnecting host reports (previousHostInstanceId, instanceNonce).
     this.previousHostInstanceId = this.hostInstanceId;
     this.previousInstanceNonce = this._currentNonce;
     this.hostInstanceId = null;
     this.state = this.running ? "RECOVERING" : "IDLE";
 
-    // §13 (A2): a drop no longer tears the world down. Sessions, execution
+    // section 13 (A2): a drop no longer tears the world down. Sessions, execution
     // states, the durable-event cursors and the PSK vaults are RETAINED for
     // the window pending host.resume/host.reconcile; teardown happens only
     // on a CLOSE decision, a protocol.error reject, or retention expiry.
-    // Bound channel sockets are INDEPENDENT transports — where one is still
-    // alive (and the engine still routes to it) the §7.5 binding stands and
+    // Bound channel sockets are INDEPENDENT transports - where one is still
+    // alive (and the engine still routes to it) the section 7.5 binding stands and
     // is resumed as-is; one that died with the engine flows through the
     // existing onDead path (non-fatal, session rides the control socket).
     if (this.running && this.retention && this.previousHostInstanceId) {
@@ -1258,7 +1307,7 @@ export class HostControlClient {
       // A failing refresh/re-register (e.g. an expired HOST refresh token
       // after sleep, or a stale USER bearer during re-registration) must not
       // kill the loop as an unhandled rejection. Log it and fall through to
-      // the backoff retry — the next connect attempt re-runs the provider and
+      // the backoff retry - the next connect attempt re-runs the provider and
       // a later close code can still route to re-register.
       this.log.warn(
         "Token refresh/re-register failed on disconnect; will retry:",
@@ -1271,12 +1320,12 @@ export class HostControlClient {
     }
   }
 
-  // ==================== §13 retention (A2) ====================
+  // ==================== section 13 retention (A2) ====================
 
   /**
    * Arm the retention-expiry timer: if no successful resume happens within
    * the window the retained state is torn down (the engine expired its side
-   * too — HOST_LOST).
+   * too - HOST_LOST).
    */
   private armRetentionTimer(): void {
     this.stopRetentionTimer();
@@ -1296,7 +1345,7 @@ export class HostControlClient {
   }
 
   /**
-   * §13: the retention window lapsed without a reconnect — clear retained
+   * section 13: the retention window lapsed without a reconnect - clear retained
    * state and tear the sessions down (the engine expired its side too).
    */
   private async expireRetention(): Promise<void> {
@@ -1310,7 +1359,7 @@ export class HostControlClient {
       return;
     }
     this.log.info(
-      `Retention window expired for ${expired.length} session(s) — tearing down (HOST_LOST)`,
+      `Retention window expired for ${expired.length} session(s) - tearing down (HOST_LOST)`,
     );
     for (const sessionId of expired) {
       retention.closeRetained(sessionId);
@@ -1318,9 +1367,9 @@ export class HostControlClient {
   }
 
   /**
-   * §13: after host.opened on a reconnected socket, if retained state exists
+   * section 13: after host.opened on a reconnected socket, if retained state exists
    * report it with host.resume and apply the engine's host.reconcile
-   * decisions. A rejected resume (protocol.error — no matching RECOVERING
+   * decisions. A rejected resume (protocol.error - no matching RECOVERING
    * instance) falls back to the fresh-host path and wipes retained state.
    * Runs once per reconnection; never throws.
    */
@@ -1428,12 +1477,12 @@ export class HostControlClient {
     | null = null;
 
   /**
-   * Apply the engine's authoritative decisions (§13):
+   * Apply the engine's authoritative decisions (section 13):
    *  - KEEP: re-bind the session; the engine replays its durable events onto
    *    the resumed socket where the existing dispatch (dedupe by messageId,
    *    registry cursor) absorbs them; a fresh channel.open re-binds the
    *    dedicated channel with the retained cursor.
-   *  - CANCEL_EXECUTION: the decision IS the cancellation command — the
+   *  - CANCEL_EXECUTION: the decision IS the cancellation command - the
    *    hook aborts the in-flight turn and the normal execution.cancelled
    *    terminal flows out; NO separate execution.cancel frame is sent.
    *  - CLOSE/unknown: drop the session (registry removal, vault clear).
@@ -1454,7 +1503,7 @@ export class HostControlClient {
     if (!retention) {
       return;
     }
-    // The engine re-adopted this instance — the retention window closes.
+    // The engine re-adopted this instance - the retention window closes.
     this.stopRetentionTimer();
     for (const decision of payload.decisions as ReconcileDecision[]) {
       const sessionId = decision.sessionId;
@@ -1470,16 +1519,16 @@ export class HostControlClient {
         const executionId = decision.executionId ?? "";
         this.log.info(
           `Reconcile CANCEL_EXECUTION for session ${sessionId} ` +
-            `(execution ${executionId}) — applying execution.cancel semantics`,
+            `(execution ${executionId}) - applying execution.cancel semantics`,
         );
         retention.cancelExecution(executionId);
         retention.closeRetained(sessionId);
         continue;
       }
-      // CLOSE (and any unknown action — fail closed toward teardown).
+      // CLOSE (and any unknown action - fail closed toward teardown).
       this.log.info(
         `Reconcile ${decision.action} for session ${sessionId} ` +
-          `(reason ${decision.reasonCode ?? "n/a"}) — dropping session`,
+          `(reason ${decision.reasonCode ?? "n/a"}) - dropping session`,
       );
       retention.closeRetained(sessionId);
     }
@@ -1510,7 +1559,7 @@ export class HostControlClient {
     }
 
     if (frame.type === UnifiedMessageType.HOST_RECONCILE) {
-      // §13 (A2): the engine's authoritative answer to host.resume.
+      // section 13 (A2): the engine's authoritative answer to host.resume.
       this.pendingReconcile?.(frame as UnifiedFrame<"host.reconcile">);
       return;
     }
@@ -1526,14 +1575,26 @@ export class HostControlClient {
     }
 
     if (frame.type === UnifiedMessageType.PROTOCOL_ACK) {
-      // §12.3: the engine's ack for a host→engine durable frame (arrives on
-      // the socket the frame was sent on — control or channel). Bookkeeping
-      // of the acked cursor is A2; here it is simply expected noise.
+      // section 12.1/section 12.3: the engine's ack for a host->engine durable frame
+      // (arrives on the socket the frame was sent on - control or
+      // channel). The hook forwards the acknowledged messageId to the
+      // supervisor's outbox seam so terminal/event records clear on the
+      // ENGINE's receipt, not on send success (at-least-once).
+      const ackPayload = frame.payload as ProtocolAckPayload;
+      try {
+        this.onEngineAck?.(ackPayload.acknowledgedMessageId);
+      } catch (err) {
+        // Best-effort seam: an ack must never break the client.
+        this.log.warn(
+          "onEngineAck handler failed:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
       return;
     }
 
     if (DURABLE_INBOUND_TYPES.has(frame.type)) {
-      // §7.5 (A1): feed the registry's durable cursor (monotonic) so a later
+      // section 7.5 (A1): feed the registry's durable cursor (monotonic) so a later
       // channel.open carries the correct resumeFromSequence, then ack.
       if (frame.sessionId && typeof frame.sequence === "number") {
         this.sessionLifecycle?.observeDurableSequence(
@@ -1541,7 +1602,7 @@ export class HostControlClient {
           frame.sequence,
         );
       }
-      // §12.1/§13 (A2): record the per-session last-acknowledged messageId
+      // section 12.1/section 13 (A2): record the per-session last-acknowledged messageId
       // so host.resume can report it (engine terminal-resend dedup).
       if (frame.sessionId) {
         this.lastAcknowledgedMessageIds.set(frame.sessionId, messageId);
@@ -1579,7 +1640,7 @@ export class HostControlClient {
     frame: UnifiedFrame<"host.opened">,
   ): Promise<void> {
     const payload = frame.payload as HostOpenedPayload;
-    // §13 (A2): a reconnection (retained state + a previous instance) runs
+    // section 13 (A2): a reconnection (retained state + a previous instance) runs
     // the resume handshake INSTEAD of treating this as a fresh world. The
     // fresh-host path is the protocol.error fallback.
     const isReconnect = this.previousHostInstanceId !== null && this.retention !== null;
@@ -1593,12 +1654,12 @@ export class HostControlClient {
         `pool=${payload.effectivePoolSize} heartbeat=${payload.heartbeatIntervalSeconds}s`,
     );
     if (isReconnect) {
-      // Retained state exists — report it before new work flows. A rejected
+      // Retained state exists - report it before new work flows. A rejected
       // resume (protocol.error) wipes state; the fresh host.open fallback
       // re-opens the instance and new work proceeds there.
       await this.attemptResume();
     }
-    // PSK receive path (design §6/§10): decode, validate, keep in process
+    // PSK receive path (design section 6/section 10): decode, validate, keep in process
     // memory ONLY, hand to the SessionRegistry via the callback. The value
     // is never logged and never persisted; the frame-logger denylist keeps
     // it out of captured logs on the engine side.
@@ -1606,7 +1667,7 @@ export class HostControlClient {
       const pskBytes = Buffer.from(payload.psk, "base64");
       if (pskBytes.length !== 32) {
         this.log.error(
-          `host.opened carried a malformed PSK (${pskBytes.length} bytes, expected 32) — keyless delivery disabled for this run`,
+          `host.opened carried a malformed PSK (${pskBytes.length} bytes, expected 32) - keyless delivery disabled for this run`,
         );
       } else {
         try {
@@ -1631,16 +1692,16 @@ export class HostControlClient {
       `protocol.error ${payload.code}: ${payload.message} (retryable=${payload.retryable})`,
     );
     if (payload.code === ProtocolErrorCode.UNSUPPORTED_VERSION) {
-      this.log.error("Unsupported protocol version — closing connection");
+      this.log.error("Unsupported protocol version - closing connection");
       this.stopReconnecting();
       await this.connection.disconnect("Unsupported protocol version");
       this.state = "IDLE";
       return;
     }
-    // §13 (A2): the engine rejected host.resume (no matching RECOVERING
-    // instance — expired/unknown/nonce mismatch, SESSION_NOT_FOUND or
+    // section 13 (A2): the engine rejected host.resume (no matching RECOVERING
+    // instance - expired/unknown/nonce mismatch, SESSION_NOT_FOUND or
     // IDENTITY_MISMATCH). Fall back to a fresh host.open: wipe the retained
-    // state (the engine has no instance — it is stale), close the window,
+    // state (the engine has no instance - it is stale), close the window,
     // and let the reconnection machinery re-dial into the fresh path.
     if (
       this.running &&
@@ -1650,7 +1711,7 @@ export class HostControlClient {
         payload.code === ProtocolErrorCode.IDENTITY_MISMATCH)
     ) {
       this.log.warn(
-        `host.resume rejected (${payload.code}) — wiping retained state, falling back to fresh host.open`,
+        `host.resume rejected (${payload.code}) - wiping retained state, falling back to fresh host.open`,
       );
       this.stopRetentionTimer();
       this.resumedThisConnection = false;
@@ -1688,7 +1749,7 @@ export class HostControlClient {
     const sessionId = frame.sessionId ?? payload.sessionId;
     this.log.info(`Session opened by engine: ${sessionId}`);
 
-    // §7.5 (A1): the engine minted a dedicated-channel offer — open the
+    // section 7.5 (A1): the engine minted a dedicated-channel offer - open the
     // channel socket and run the bind handshake BEFORE confirming the open.
     // A failed handshake is non-fatal: the session rides the control socket
     // (the engine accepts execution arms on both sockets).
@@ -1706,20 +1767,20 @@ export class HostControlClient {
       ready: true,
       channelMode,
     });
-    // Consumer hook (§7.1): after the transport-side bookkeeping the
+    // Consumer hook (section 7.1): after the transport-side bookkeeping the
     // supervisor/Agent opens its model + tools for the session.
     if (this.sessionOpenObserver) {
       await this.sessionOpenObserver(frame);
     }
   }
 
-  // ==================== Dedicated session channel (§7.5, A1) ====================
+  // ==================== Dedicated session channel (section 7.5, A1) ====================
 
   /**
    * Open the dedicated channel socket for a session and run the
-   * channel.open → channel.opened handshake (§7.5). Auth is the same
+   * channel.open -> channel.opened handshake (section 7.5). Auth is the same
    * HOST_JWT handshake gate as the control socket; the single-use token
-   * rides the channel.open payload. Never throws — any failure logs a warn
+   * rides the channel.open payload. Never throws - any failure logs a warn
    * and falls back to the control socket.
    *
    * @returns the channel.opened payload on success, null on any failure.
@@ -1751,7 +1812,7 @@ export class HostControlClient {
         onDead: (reason) => {
           this.log.warn(
             `Dedicated channel lost for session ${sessionId} (${reason}): ` +
-              "session unaffected — traffic continues on the control socket",
+              "session unaffected - traffic continues on the control socket",
           );
           lifecycle.markChannelDead(sessionId);
           this.channels.delete(sessionId);
@@ -1773,7 +1834,7 @@ export class HostControlClient {
     return opened;
   }
 
-  /** Close a session's channel socket alongside the control teardown (§7.5). */
+  /** Close a session's channel socket alongside the control teardown (section 7.5). */
   private async closeChannel(sessionId: string, reason: string): Promise<void> {
     const channel = this.channels.get(sessionId);
     this.channels.delete(sessionId);
@@ -1781,7 +1842,7 @@ export class HostControlClient {
       await channel.close(reason);
     }
     this.sessionLifecycle?.unbindChannel(sessionId);
-    // Drop the session's execution mappings — they resolve to a channel
+    // Drop the session's execution mappings - they resolve to a channel
     // that no longer exists.
     for (const [executionId, mapped] of this.executionSessions) {
       if (mapped === sessionId) {
@@ -1803,14 +1864,14 @@ export class HostControlClient {
     const payload = frame.payload as SessionClosedPayload;
     const sessionId = frame.sessionId ?? payload.sessionId;
     this.log.info(`Session close requested: ${sessionId}`);
-    // §7.5: the channel dies with the session.
+    // section 7.5: the channel dies with the session.
     await this.closeChannel(sessionId, "Session closed");
     await this.sendSessionClosed({
       sessionId,
       closedAt: new Date().toISOString(),
       reasonCode: payload.reasonCode ?? "HOST_INITIATED",
     });
-    // Consumer hook (§9): the Agent/registry tears the session down
+    // Consumer hook (section 9): the Agent/registry tears the session down
     // alongside the transport-side teardown.
     if (this.sessionCloseObserver) {
       await this.sessionCloseObserver(frame);
@@ -1823,7 +1884,7 @@ export class HostControlClient {
     const payload = frame.payload as ExecutionEventPayload;
     const executionId = frame.executionId ?? payload.executionId;
     this.log.info(`Execution start: ${executionId}`);
-    // §7.5 (A1): remember the session so channel-preferred sends (which
+    // section 7.5 (A1): remember the session so channel-preferred sends (which
     // carry only executionId) can resolve their channel.
     const startSessionId =
       frame.sessionId ??

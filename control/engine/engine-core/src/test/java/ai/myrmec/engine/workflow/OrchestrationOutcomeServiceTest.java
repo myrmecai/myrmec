@@ -233,7 +233,14 @@ class OrchestrationOutcomeServiceTest extends IntegrationTestBase {
         TaskAttempt attempt = runningAttempt();
         var structured = result(OrchestrationOutcomeService.OutcomeStatus.PAUSED,
                 OrchestrationOutcomeService.RetryDisposition.NONE);
-        structured.put("suspensionExpiresAt", "2099-01-01T00:00:00Z");
+        // The unified paused payload (protocol 8.6) nests the approval
+        // deadline under suspension.expiresAt - the flat
+        // suspensionExpiresAt key never arrives on the wire.
+        structured.put("suspension", Map.of(
+                "approvalRequestId", "apr-1",
+                "pendingAction", Map.of("actionId", "a-1", "type", "DELETE",
+                        "riskClass", "HIGH", "summary", "s", "digest", "d"),
+                "expiresAt", "2099-01-01T00:00:00Z"));
         outcomeService.applyResult(attempt.getId(), UUID.randomUUID(), "d6",
                 OrchestrationOutcomeService.OutcomeStatus.PAUSED,
                 OrchestrationOutcomeService.RetryDisposition.NONE,
@@ -244,9 +251,25 @@ class OrchestrationOutcomeServiceTest extends IntegrationTestBase {
         assertThat(stored.getStatus()).isEqualTo(AttemptStatus.PAUSED);
         assertThat(storedTask.getStatus()).isEqualTo(TaskStatus.PAUSED);
         assertThat(storedTask.getPauseState()).isEqualTo("ORCH_REVIEW");
-        assertThat(storedTask.getApprovalExpiresAt()).isNotNull();
+        assertThat(storedTask.getApprovalExpiresAt())
+                .isEqualTo(Instant.parse("2099-01-01T00:00:00Z"));
         assertThat(requestRepository.findById(request.getId()).orElseThrow()
                 .getStatus()).isEqualTo(RequestStatus.PAUSED);
+    }
+
+    @Test
+    @DisplayName("PAUSED without a suspension record leaves the approval deadline unset")
+    void pausedWithoutSuspensionLeavesNoDeadline() {
+        TaskAttempt attempt = runningAttempt();
+        outcomeService.applyResult(attempt.getId(), UUID.randomUUID(), "d10",
+                OrchestrationOutcomeService.OutcomeStatus.PAUSED,
+                OrchestrationOutcomeService.RetryDisposition.NONE,
+                null, result(OrchestrationOutcomeService.OutcomeStatus.PAUSED,
+                        OrchestrationOutcomeService.RetryDisposition.NONE));
+
+        WorkflowTask storedTask = taskRepository.findById(task.getId()).orElseThrow();
+        assertThat(storedTask.getStatus()).isEqualTo(TaskStatus.PAUSED);
+        assertThat(storedTask.getApprovalExpiresAt()).isNull();
     }
 
     // ── Duplicate / conflicting results ───────────────────────

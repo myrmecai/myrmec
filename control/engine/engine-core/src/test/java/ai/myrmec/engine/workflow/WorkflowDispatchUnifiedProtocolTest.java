@@ -6,6 +6,7 @@ import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionAllocator;
+import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.user.User;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -251,6 +252,50 @@ class WorkflowDispatchUnifiedProtocolTest extends WorkflowDispatchSupport {
                 project.getId(), host.host().getId()))
                 .as("the released slot accepts a new reservation")
                 .isPresent();
+    }
+
+    @Test
+    @DisplayName("execution.accept with a dispatchId flips the OrchestrationDispatch row to ACCEPTED (design section 12 touchpoint 1)")
+    void dispatchRowFlipsToAcceptedOnExecutionAccept() throws Exception {
+        SocketHost host = openHost("unified-flip-host", profile, project, 4);
+        Workflow wf = orchestratorWorkflow("unified-flip");
+        WorkflowRequest request = runningRequest(wf, "unified-flip");
+        runService.pinRun(request.getId(), wf.getId(), project.getId(), profile.getId());
+        WorkflowTask task = pendingTask(request, "build");
+
+        dispatcher.dispatchPendingTasks();
+
+        // The dispatch row is durable and PENDING before any accept arrives.
+        UUID sessionId = offeredSessionId(host);
+        TaskAttempt attempt = attemptRepository
+                .findFirstByTaskIdOrderByAttemptNumberDesc(task.getId()).orElseThrow();
+        OrchestrationDispatch dispatch = dispatchRepository.findById(attempt.getId()).orElseThrow();
+        assertThat(dispatch.getDeliveryState()).isEqualTo("PENDING");
+
+        completeHandshake(host);
+        JsonNode start = awaitFrame(host.outbound(), "execution.start");
+        UUID executionId = UUID.fromString(start.path("executionId").asText());
+
+        // The host's execution.accept echoes the orchestration identity
+        // (protocol 8.2 ORCHESTRATION variant).
+        sendHost(host, """
+                { "protocolVersion": 1, "messageId": "m-acc-dispatch", "type": "execution.accept",
+                  "sentAt": "%s", "hostInstanceId": "%s", "sessionId": "%s", "executionId": "%s",
+                  "payload": { "executionId": "%s", "startedAt": "%s", "resolvedModelId": null,
+                  "dispatchId": "%s", "assignmentDigest": "%s" } }
+                """.formatted(Instant.now(), host.instanceId(), sessionId, executionId,
+                executionId, Instant.now(), attempt.getId(), dispatch.getAssignmentDigest()));
+
+        OrchestrationDispatch flipped = dispatchRepository.findById(attempt.getId())
+                .orElseThrow();
+        assertThat(flipped.getDeliveryState())
+                .as("the accept ends the relay retransmit")
+                .isEqualTo("ACCEPTED");
+        assertThat(flipped.getAcceptedAt()).isNotNull();
+        assertThat(flipped.isAccepted()).isTrue();
+        // The execution itself is admitted (STARTING -> RUNNING).
+        assertThat(sessionExecutionRepository.findById(executionId).orElseThrow().getState())
+                .isEqualTo(SessionExecution.State.RUNNING);
     }
 
     // ── fixtures ───────────────────────────────────────────────

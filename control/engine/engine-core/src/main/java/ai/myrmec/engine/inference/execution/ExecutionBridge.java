@@ -278,7 +278,9 @@ public class ExecutionBridge {
     }
 
     /**
-     * Orchestration event: bridge execution.event → orchestration.event ingestion.
+     * Orchestration event: bridge execution.event to orchestration ingestion
+     * (the unified wire carries orchestration progress as execution.event;
+     * D3/D8).
      */
     public void onOrchestrationEvent(UUID dispatchId, ExecutionEventPayload payload, long sequence) {
         if (payload == null || payload.eventId() == null) {

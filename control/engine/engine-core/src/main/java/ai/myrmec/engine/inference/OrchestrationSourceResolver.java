@@ -78,16 +78,25 @@ public class OrchestrationSourceResolver {
                             + " (neither artifacts repo nor project workspace).");
         }
 
-        // V1: the source base commit pins the branch head at dispatch time.
-        // The engine scenario adapter exercises the real fetch-verify
-        // (LocalGitSourceResolver semantics); this resolver persists the
-        // identity contract so a later branch movement cannot change an
-        // assignment.
-        String sourceBaseCommit = resolveBaseCommit(repoUrl, sourceBranch, credentialSecretId);
-
-        // The request's execution branch is the unique target branch.
+        // Unified session execution (design D10 part 2): a predecessor's
+        // pushed output wins. The run's target branch head is the pinned
+        // base commit when the ref exists; the first task of a run (no
+        // target ref yet) falls back to the source-branch head pin. The
+        // ls-remote pinning is reused as-is against either ref, and V1
+        // serializes dependent tasks so head-pinning is deterministic.
         String targetBranch = request.getBranch() != null
                 ? request.getBranch() : "myrmec/" + request.getId();
+
+        String sourceBaseCommit;
+        try {
+            sourceBaseCommit = resolveBaseCommit(repoUrl, "refs/heads/" + targetBranch,
+                    credentialSecretId);
+        } catch (Exception targetRefMissing) {
+            log.debug("No target ref refs/heads/{} at {} ({}); pinning the source branch head",
+                    targetBranch, repoUrl, targetRefMissing.getMessage());
+            sourceBaseCommit = resolveBaseCommit(repoUrl, "refs/heads/" + sourceBranch,
+                    credentialSecretId);
+        }
 
         String credentialRef = credentialSecretId == null
                 ? null : "workspace:" + credentialSecretId;
@@ -96,26 +105,28 @@ public class OrchestrationSourceResolver {
     }
 
     /**
-     * Resolve the immutable base commit for the source branch. V1: the
-     * branch-head identity pin — the adapter's fetch-verify path proves
-     * obtainability before dispatch; failure surfaces as terminal
-     * SOURCE_BASE_UNAVAILABLE at the outcome layer.
+     * Resolve the immutable base commit for any ref path. The resolver first
+     * probes the run's target branch (a predecessor's pushed output, design
+     * D10 part 2) and falls back to the source-branch head when the target
+     * ref does not exist yet (first task of a run). The generic form makes
+     * the {@code refPath} argument explicit: a full ref path such as
+     * {@code refs/heads/<branch>}.
      *
-     * <p>Feature 10 (§16.2 step 4): a REAL {@code git ls-remote} resolves
-     * the branch head to the immutable full SHA — the agent fetches that
+     * <p>Feature 10 (16.2 step 4): a REAL {@code git ls-remote} resolves
+     * the ref head to the immutable full SHA - the agent fetches that
      * exact object and never re-resolves the branch. V1 credential
      * handling: a credentialSecretId names a vault secret used via the
      * {@code Credential} helper env (never on the command line); the
      * deterministic local fixtures run unauthenticated.</p>
      */
-    private String resolveBaseCommit(String repoUrl, String sourceBranch, String credentialSecretId) {
+    private String resolveBaseCommit(String repoUrl, String refPath, String credentialSecretId) {
         try {
             List<String> command = new java.util.ArrayList<>();
             command.add("git");
             command.add("ls-remote");
-            // Only the exact branch — never wildcard resolution.
+            // Only the exact ref - never wildcard resolution.
             command.add(repoUrl);
-            command.add("refs/heads/" + sourceBranch);
+            command.add(refPath);
 
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.environment().put("GIT_TERMINAL_PROMPT", "0");
@@ -126,7 +137,7 @@ public class OrchestrationSourceResolver {
             // V1: no credential injection on the command line. A null
             // credentialSecretId (local fixtures) needs none; a secret id
             // resolves through the engine's credential policy in a later
-            // slice — never embedded here.
+            // slice - never embedded here.
             pb.redirectErrorStream(false);
 
             Process process = pb.start();
@@ -142,7 +153,7 @@ public class OrchestrationSourceResolver {
             // Output: "<40-hex-sha>\trefs/heads/<branch>"
             for (String line : stdout.split("\n")) {
                 String trimmed = line.trim();
-                if (trimmed.endsWith("\trefs/heads/" + sourceBranch)) {
+                if (trimmed.endsWith("\t" + refPath)) {
                     String sha = trimmed.substring(0, trimmed.indexOf('\t')).trim();
                     if (sha.matches("[0-9a-f]{40}")) {
                         return sha;
@@ -150,9 +161,9 @@ public class OrchestrationSourceResolver {
                 }
             }
             throw new IllegalStateException(
-                    "branch refs/heads/" + sourceBranch + " not found at " + repoUrl);
+                    "ref " + refPath + " not found at " + repoUrl);
         } catch (Exception e) {
-            // §14: the object is unobtainable — terminal, never a fallback.
+            // 14: the object is unobtainable - terminal, never a fallback.
             throw new IllegalStateException("SOURCE_BASE_UNAVAILABLE: "
                     + e.getMessage());
         }

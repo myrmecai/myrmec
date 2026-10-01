@@ -13,16 +13,17 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Idempotent ingestion of Agent {@code orchestration.event} frames (design
- * §16.3/§21). Validates the correlation tuple against engine rows, inserts
+ * Idempotent ingestion of unified {@code execution.event} frames carrying
+ * orchestration progress (design 16.3/21, D3/D8). Validates the
+ * correlation tuple against engine rows, inserts
  * one {@code EventType.ORCHESTRATION} row per deterministic Agent eventId
  * (unique {@code source_event_id}; replay is a no-op), rejects conflicting
  * duplicate payloads, and preserves dispatch-local ordering through the
  * unique {@code (attempt_id, sequence_number)} index. Events are exposed
  * through the existing SSE stream.
  *
- * <p>§8.7 (A4): {@code ORCHESTRATION_FUNCTION_COMPLETED} envelopes carry the
- * authoritative per-function usage — the accounted orchestration function-call
+ * <p>8.7 (A4): {@code ORCHESTRATION_FUNCTION_COMPLETED} events carry the
+ * authoritative per-function usage - the accounted orchestration function-call
  * count and cumulative tokens advance here, so ingestion notifies
  * {@link SessionPolicyService} (the tighten-only policy-update producer,
  * throttled to one frame per accounting batch internally).</p>
@@ -98,11 +99,14 @@ public class OrchestrationEventIngestionService {
     }
 
     /**
-     * §8.7 (A4): an orchestration function's completion advances the
-     * durably accounted usage — notify the policy producer. The producer
-     * throttles internally (one frame per accounting batch); failures here
-     * must never break event ingestion.
+     * 8.7 (A4): an orchestration function's completion advances the
+     * durably accounted usage - notify the policy producer. The usage rides
+     * the protocol 8.4 nested map ({@code data.usage.helperCalls /
+     * totalTokens}) - never flat envelope keys. The producer throttles
+     * internally (one frame per accounting batch); failures here must
+     * never break event ingestion.
      */
+    @SuppressWarnings("unchecked")
     private void notifyPolicyProducer(UUID dispatchId, Map<String, Object> envelope) {
         try {
             var execution = sessionExecutionRepository.findByDispatchId(dispatchId).orElse(null);
@@ -110,8 +114,15 @@ public class OrchestrationEventIngestionService {
                 log.debug("No execution row bound to dispatch {} yet — policy update skipped", dispatchId);
                 return;
             }
-            long functionCalls = longOf(envelope == null ? null : envelope.get("functionCalls"));
-            long totalTokens = longOf(envelope == null ? null : envelope.get("totalTokens"));
+            // Protocol 8.4: usage is a NESTED map on the event data -
+            // { helperCalls, rejectionCount, totalTokens }. helperCalls
+            // maps to the policy producer's function-call count.
+            Map<String, Object> usage = envelope != null
+                    && envelope.get("usage") instanceof Map<?, ?> nested
+                    ? (Map<String, Object>) nested
+                    : Map.of();
+            long functionCalls = longOf(usage.get("helperCalls"));
+            long totalTokens = longOf(usage.get("totalTokens"));
             if (functionCalls > 0 || totalTokens > 0) {
                 sessionPolicyService.onUsageRecorded(execution.getId(), functionCalls, totalTokens);
             }

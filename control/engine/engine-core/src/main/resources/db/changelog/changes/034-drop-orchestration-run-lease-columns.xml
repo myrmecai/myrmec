@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Drop the orchestration_runs lease lifecycle columns (unified session
+        execution, design 2026-10-01-unified-session-execution.md D9).
+
+        Workspaces are task-scoped under the unified protocol: each
+        orchestration attempt acquires its own checkout keyed by dispatchId
+        and releases it before its terminal frame; the host releases the
+        checkout on session close (protocol 9). Nothing lease-shaped
+        outlives a session, so the engine-side run-lease machinery
+        (WorkspaceReleaseOrchestrator, WorkspaceReleaseReconciliationSweeper,
+        OrchestrationLeaseRenewalService) and the lease_state/lease_deadline
+        columns it drove are deleted together. The orchestration_runs row
+        itself STAYS - it is the run identity and model-fact pin.
+
+        No engine production code reads either column after the deletion
+        (verified by grep before this changeset was written).
+    -->
+
+    <changeSet id="034-orchestration-runs-lease-state-drop" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="orchestration_runs"/>
+                <columnExists tableName="orchestration_runs" columnName="lease_state"/>
+            </and>
+        </preConditions>
+        <dropColumn tableName="orchestration_runs" columnName="lease_state"/>
+    </changeSet>
+
+    <changeSet id="034-orchestration-runs-lease-deadline-drop" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="orchestration_runs"/>
+                <columnExists tableName="orchestration_runs" columnName="lease_deadline"/>
+            </and>
+        </preConditions>
+        <dropColumn tableName="orchestration_runs" columnName="lease_deadline"/>
+    </changeSet>
+</databaseChangeLog>

@@ -3,14 +3,23 @@
 
 /**
  * The OrchestrationRunner's event/result/approval sink routed through the
- * durable outbox (design §16.3, Feature 10). Every governed side effect's
- * evidence first lands durably in the outbox, THEN goes to the wire; when
- * the outbox or socket is unhealthy the sink stops accepting new records
- * and the runner must stop before the next governed side effect.
+ * durable outbox (unified session execution design, SDK touchpoint 6).
+ * Every governed side effect's evidence first lands durably in the outbox,
+ * THEN goes to the wire; when the outbox or socket is unhealthy the sink
+ * stops accepting new records and the runner must stop before the next
+ * governed side effect.
  *
  * Event IDs and per-envelope sequences are deterministic and
- * dispatch-local (§16.3): `eventId = uuidV5(EVENT_NS, "<dispatchId>:<sequence>")`
- * — DispatchIdentity carries no sequence of its own.
+ * dispatch-local: `eventId = uuidV5(EVENT_NS, "<dispatchId>:<sequence>")`
+ * - DispatchIdentity carries no sequence of its own.
+ *
+ * The WIRE event vocabulary is the protocol 8.4 union only
+ * (ORCHESTRATION_FUNCTION_STARTED/COMPLETED, VERIFICATION_RECORDED,
+ * CHECKPOINT_CREATED, PROGRESS) with the 8.4 required-metadata keys;
+ * the sink maps the SDK's host-side "Helper" observations onto them
+ * (started: callId, functionName, modelCode?, purpose; completed:
+ * callId, outcome, usage {helperCalls, rejectionCount, totalTokens},
+ * workspaceRevision?).
  */
 import type { OrchestrationOutbox } from "./OrchestrationOutbox.js";
 import { ORCHESTRATION_EVENT_NS, uuidV5 } from "../orchestration/constants.js";
@@ -22,10 +31,10 @@ import type { Logger } from "../models/index.js";
 export interface AgentProtocolOrchestrationEventSinkOptions {
   outbox: OrchestrationOutbox;
   /**
-   * §8.4/§15 rule 12: the session's capture policy the dispatch rides.
-   * Absent/null ⇒ METADATA (fail closed) — the orchestration progress
-   * stream is metadata by construction, and an unknown policy must not
-   * widen what the sink emits. maxBytes truncation applies regardless.
+   * The session's capture policy the dispatch rides. Absent/null means
+   * METADATA (fail closed) - the orchestration progress stream is
+   * metadata by construction, and an unknown policy must not widen what
+   * the sink emits. maxBytes truncation applies regardless.
    */
   capturePolicy?: CapturePolicy | null;
   logger?: Logger;
@@ -36,13 +45,15 @@ export interface OrchestrationProgressEvent {
   type: string;
   occurredAt?: string;
   status?: string;
-  /** The helper whose invocation produced this event, if any. */
+  /** The helper whose invocation produced this event, if any (SDK
+   * concept name; the wire key is `functionName`). */
   helperName?: string;
   callId?: string;
   candidateTreeHash?: string;
   durationMs?: number;
   usage?: { helperCalls: number; rejectionCount: number; totalTokens: number };
-  /** ┬º8.4 metadata columns (ORCHESTRATION_FUNCTION_* / VERIFICATION / CHECKPOINT / PROGRESS). */
+  /** Protocol 8.4 metadata columns (ORCHESTRATION_FUNCTION_* /
+   * VERIFICATION / CHECKPOINT / PROGRESS). */
   outcome?: string;
   functionName?: string;
   modelCode?: string;
@@ -61,6 +72,8 @@ export interface TerminalResult {
   resultId: string;
   resultDigest: string;
   payload: Record<string, unknown>;
+  /** The terminal frame subtype (execution.complete/failed/paused). */
+  terminalType: "complete" | "failed" | "paused";
 }
 
 export interface ApprovalProposal {
@@ -70,13 +83,13 @@ export interface ApprovalProposal {
 }
 
 /**
- * The sink. Not a constructor per dispatch — a supervisor holds one sink
+ * The sink. Not a constructor per dispatch - a supervisor holds one sink
  * per outbox and passes the dispatch identity per record.
  */
 export class AgentProtocolOrchestrationEventSink {
   private readonly sequences = new Map<string, number>();
   private readonly emitted = new Set<string>();
-  /** §15 rule 12: the session's capture filter (null policy ⇒ METADATA). */
+  /** The session's capture filter (null policy means METADATA). */
   private captureFilter: CaptureFilter;
 
   constructor(private readonly options: AgentProtocolOrchestrationEventSinkOptions) {
@@ -84,12 +97,11 @@ export class AgentProtocolOrchestrationEventSink {
   }
 
   /**
-   * §7.3/§15 rule 12: bind the executing dispatch's session capture policy
-   * before the run's side effects begin (a dispatch admitted from a session
-   * with a capture block filters its progress stream with it). Called by
-   * the executor at dispatch start; one sink serves the serialized
-   * execution chain (§17.6: one dispatch at a time), so the binding is
-   * unambiguous.
+   * Bind the executing dispatch's session capture policy before the run's
+   * side effects begin (a dispatch admitted from a session with a capture
+   * block filters its progress stream with it). Called by the executor at
+   * dispatch start; one sink serves the serialized execution chain (one
+   * dispatch at a time), so the binding is unambiguous.
    */
   bindCapturePolicy(capture: CapturePolicy | null): void {
     this.captureFilter = new CaptureFilter(capture ?? null, this.options.logger);
@@ -104,11 +116,11 @@ export class AgentProtocolOrchestrationEventSink {
    * Emit one progress event: assigns the next strictly-monotonic
    * dispatch-local sequence, derives the deterministic eventId, persists
    * the record durably, then sends. Throws OutboxUnhealthyError when the
-   * outbox is down — the runner stops before the next side effect.
+   * outbox is down - the runner stops before the next side effect.
    *
-   * §8.4/§15 rule 12: the built payload passes the session's CaptureFilter
-   * (event type → allowlist; conservative fallback for the orchestration
-   * progress types) and the maxBytes budget before it is enqueued.
+   * The built payload passes the session's CaptureFilter (event type to
+   * allowlist; conservative fallback for the orchestration progress
+   * types) and the maxBytes budget before it is enqueued.
    */
   async emitEvent(event: OrchestrationProgressEvent): Promise<string> {
     this.assertHealthy();
@@ -116,12 +128,12 @@ export class AgentProtocolOrchestrationEventSink {
     const sequence = this.nextSequence(dispatchId);
     const eventId = this.eventIdFor(dispatchId, sequence);
 
-    // Idempotent re-emission of the same slot returns the same id —
+    // Idempotent re-emission of the same slot returns the same id -
     // a replayed dispatch never double-counts.
     if (this.emitted.has(eventId)) return eventId;
     this.emitted.add(eventId);
 
-    // §15 rule 12: filter + truncate BEFORE the durable record exists —
+    // The filter + truncate BEFORE the durable record exists -
     // sensitive content must not land in the outbox either.
     const filter = this.captureFilter;
     const raw: Record<string, unknown> = {
@@ -133,7 +145,7 @@ export class AgentProtocolOrchestrationEventSink {
         : {}),
       ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
       ...(event.usage !== undefined ? { usage: event.usage } : {}),
-      // ┬º8.4 metadata columns (the sensitive ladder strips anything else).
+      // Protocol 8.4 metadata columns (the sensitive ladder strips anything else).
       ...(event.outcome !== undefined ? { outcome: event.outcome } : {}),
       ...(event.functionName !== undefined ? { functionName: event.functionName } : {}),
       ...(event.modelCode !== undefined ? { modelCode: event.modelCode } : {}),
@@ -155,7 +167,7 @@ export class AgentProtocolOrchestrationEventSink {
         ? filter.filterEvent(event.type, raw)
         : raw;
     // Budget the WHOLE payload: the envelope's fixed keys (schemaVersion,
-    // eventId, dispatch, type, sequence, occurredAt) are unavoidable overhead —
+    // eventId, dispatch, type, sequence, occurredAt) are unavoidable overhead -
     // only the remainder of maxBytes is available to the data map.
     const fixedPayload = {
       schemaVersion: "1.0",
@@ -192,8 +204,10 @@ export class AgentProtocolOrchestrationEventSink {
   }
 
   /**
-   * Emit the ONE logical terminal result. Keyed by resultId — duplicate
+   * Emit the ONE logical terminal result. Keyed by resultId - duplicate
    * delivery is allowed and the engine dedups; enqueue is idempotent.
+   * The record's terminalType selects the unified frame
+   * (execution.complete / failed / paused).
    */
   async emitResult(result: TerminalResult): Promise<void> {
     this.assertHealthy();
@@ -202,6 +216,7 @@ export class AgentProtocolOrchestrationEventSink {
     await this.options.outbox.enqueue({
       id: result.resultId,
       kind: "result",
+      terminalType: result.terminalType,
       payload: {
         schemaVersion: "1.0",
         ...result.payload,
@@ -213,7 +228,7 @@ export class AgentProtocolOrchestrationEventSink {
     await this.options.outbox.drain();
   }
 
-  /** Emit one durable HITL proposal (approval_requested). */
+  /** Emit one durable HITL proposal (execution.approval.requested). */
   async emitApprovalRequest(proposal: ApprovalProposal): Promise<void> {
     this.assertHealthy();
     const key = `approval:${proposal.approvalRequestId}`;
@@ -232,7 +247,7 @@ export class AgentProtocolOrchestrationEventSink {
     await this.options.outbox.drain();
   }
 
-  /** The drain entry point after a reconnect (§16.3 retransmission). */
+  /** The drain entry point after a reconnect (retransmission). */
   async retransmitUnacknowledged(): Promise<number> {
     return this.options.outbox.drain();
   }
@@ -252,10 +267,10 @@ export class AgentProtocolOrchestrationEventSink {
   }
 }
 
-/** The stop-before-side-effect signal (§16.3). */
+/** The stop-before-side-effect signal (section 16.3). */
 export class OutboxUnhealthyError extends Error {
   constructor(reason: string) {
-    super(`orchestration outbox unhealthy — stopping before the next side effect: ${reason}`);
+    super(`orchestration outbox unhealthy - stopping before the next side effect: ${reason}`);
     this.name = "OutboxUnhealthyError";
   }
 }

@@ -4,12 +4,12 @@
 /**
  * AgentWorkerHost: the parent-side handle to one Agent worker.
  *
- * Per §9.7 the Supervisor owns the engine socket and the worker is pure
+ * Per section 9.7 the Supervisor owns the engine socket and the worker is pure
  * compute, so this host is the bridge between them: it forwards inbound
  * control frames **into** the worker and routes the worker's outbound frames
  * **out** through {@link AgentWorkerHostOptions.onFrame} (the Supervisor wires
  * that to the engine socket for headless; to the editor + engine for
- * interactive — seam 4). It also observes worker `error`/`exit` so a crash is
+ * interactive - seam 4). It also observes worker `error`/`exit` so a crash is
  * contained (REQ-A-085) and the Supervisor can decide on restart.
  *
  * The host depends only on a minimal {@link WorkerLike} surface so it is
@@ -40,6 +40,12 @@ export interface AgentWorkerHostOptions {
   worker: WorkerLike;
   /** Route a frame the worker emitted (the Supervisor's seam-4 sink). */
   onFrame: (frame: Envelope) => Promise<void> | void;
+  /**
+   * The engine's protocol.ack for a host->engine durable frame, forwarded
+   * from the worker (protocol 12.1/12.3) so the supervisor's outbox seam
+   * can acknowledge the matching record by messageId. Optional.
+   */
+  onEngineAck?: (acknowledgedMessageId: string) => void;
   /** Observe worker exit; restart policy belongs to the Supervisor. */
   onExit?: (code: number) => void;
   logger?: Logger;
@@ -59,6 +65,10 @@ export class AgentWorkerHost {
         void Promise.resolve(options.onFrame(message.frame)).catch((err) =>
           this.log.error("Failed to route worker frame", err),
         );
+        return;
+      }
+      if (message?.kind === "ack") {
+        options.onEngineAck?.(message.acknowledgedMessageId);
         return;
       }
       this.log.warn("AgentWorkerHost: unknown worker message", value);
@@ -82,13 +92,23 @@ export class AgentWorkerHost {
   }
 
   /**
-   * Hand the run PSK (design 2026-09-16 §6/§10) to the worker. The bytes
+   * Hand the run PSK (design 2026-09-16 section 6/section 10) to the worker. The bytes
    * cross as a plain array (structured clone); the worker reconstructs the
    * Uint8Array and stores it in process memory only. MUST be called after
    * spawn and BEFORE any session.open carrying credential envelopes.
    */
   setPsk(psk: Uint8Array): void {
     const message: WorkerInbound = { kind: "psk", psk: Array.from(psk) };
+    this.worker.postMessage(message);
+  }
+
+  /**
+   * Forward the engine's protocol.ack INTO the worker (protocol
+   * 12.1/12.3): the executor's outbox acknowledges the record whose
+   * outbound frame carried the messageId.
+   */
+  dispatchEngineAck(acknowledgedMessageId: string): void {
+    const message: WorkerInbound = { kind: "ack", acknowledgedMessageId };
     this.worker.postMessage(message);
   }
 
@@ -102,6 +122,7 @@ export interface SpawnAgentWorkerHostOptions {
   onFrame: (frame: Envelope) => Promise<void> | void;
   config?: AgentWorkerConfig;
   onExit?: (code: number) => void;
+  onEngineAck?: (acknowledgedMessageId: string) => void;
   logger?: Logger;
 }
 
@@ -121,6 +142,7 @@ export function spawnAgentWorkerHost(
     worker,
     onFrame: options.onFrame,
     ...(options.onExit ? { onExit: options.onExit } : {}),
+    ...(options.onEngineAck ? { onEngineAck: options.onEngineAck } : {}),
     ...(options.logger ? { logger: options.logger } : {}),
   });
 }

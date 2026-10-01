@@ -20,7 +20,7 @@ import java.util.UUID;
  * §16.3/§16.7). The transaction that creates the task attempt inserts this
  * row with the canonical assignment bytes, their SHA-256 digest, and a
  * {@code PENDING} delivery state — committed BEFORE any WebSocket send. The
- * relay retransmits these exact bytes until {@code inference.accept} flips
+ * relay retransmits these exact bytes until {@code execution.accept} flips
  * the row to {@code ACCEPTED} under a lock.
  *
  * <p>{@code dispatchId} equals the task attempt UUID in V1 (§16.2), making

@@ -10,7 +10,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -117,18 +116,5 @@ public class OrchestrationRunService {
 
     private static String nullSafe(String value) {
         return value == null ? "" : value;
-    }
-
-    /** Record the Host-supplied workspace identity on the run (§17.1). */
-    @Transactional
-    public void recordWorkspaceIdentity(UUID runId, String workspaceId, int generation,
-                                        String leaseState, Instant leaseDeadline) {
-        OrchestrationRun run = runRepository.findById(runId)
-                .orElseThrow(() -> new IllegalArgumentException("Unknown run: " + runId));
-        run.setWorkspaceId(workspaceId);
-        run.setWorkspaceGeneration(generation);
-        run.setLeaseState(leaseState);
-        run.setLeaseDeadline(leaseDeadline);
-        runRepository.save(run);
     }
 }

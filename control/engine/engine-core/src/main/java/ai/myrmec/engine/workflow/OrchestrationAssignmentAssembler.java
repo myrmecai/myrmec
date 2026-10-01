@@ -44,7 +44,7 @@ import java.util.UUID;
  * <p>The serialized JSON must pass the TypeScript
  * {@code orchestrationAssignmentSchema}; the canonical digest is SHA-256
  * over the serialized bytes (for the durable dispatch row and
- * {@code inference.accept} correlation).</p>
+ * {@code execution.accept} correlation).</p>
  */
 @Service
 @RequiredArgsConstructor

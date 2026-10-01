@@ -2,12 +2,12 @@
 // Copyright 2026 The Myrmec Authors
 
 /**
- * GitWorkspaceManager (design §8.6): clones a repository, checks out the
+ * GitWorkspaceManager (design section 8.6): clones a repository, checks out the
  * exact assigned `sourceBaseCommit` object (never resolving the branch
  * again), creates the target branch, and returns a checkout-root handle.
  * All Git invocations use `execFile` with argument arrays and
  * `shell: false`. Credentials, when present, are passed only through a
- * per-invocation `-c credential.helper` process pipe — never persisted
+ * per-invocation `-c credential.helper` process pipe - never persisted
  * in remotes, config, logs, or command lines.
  */
 import { execFile } from "node:child_process";
@@ -27,7 +27,7 @@ import type { ResolvedSource } from "../orchestration/types.js";
 const exec = promisify(execFile);
 
 /** Errors surfaced by the workspace layer. `SOURCE_BASE_UNAVAILABLE` is
- * terminal and distinct from generic `WORKSPACE_ERROR` (design §14). */
+ * terminal and distinct from generic `WORKSPACE_ERROR` (design section 14). */
 export class WorkspaceError extends Error {
   constructor(
     readonly code: "SOURCE_BASE_UNAVAILABLE" | "WORKSPACE_ERROR",
@@ -73,18 +73,21 @@ export class GitWorkspaceManager implements WorkspaceManager {
   /**
    * Acquire a checkout. The default layout is Feature-4's
    * `<root>/ws-<uuid>/1/checkout` (unique per run, no run identity in the
-   * path). Feature 10 (§17.1) managed runs pass a `runLayout` — the run-
-   * keyed path `<root>/runs/<runId>/<generation>/checkout` — so the
-   * lease manifest, restart reconciliation, and cleanup all address the
-   * checkout through its durable run identity.
+   * path). A task-scoped dispatch (unified session execution design,
+   * section 9) passes `taskLayout` - the dispatch-keyed path
+   * `<root>/tasks/<dispatchId>/checkout` - so the checkout is acquired
+   * at dispatch and released before its terminal/pause frame, with no
+   * workspace state crossing sessions. The run-keyed `runs/<runId>/<gen>`
+   * layout is deleted with the run-lease machinery.
    */
-  async acquire(source: ResolvedSource, signal?: AbortSignal, runLayout?: {
-    runId: string;
-    generation: number;
-  }): Promise<CheckoutHandle> {
+  async acquire(
+    source: ResolvedSource,
+    signal?: AbortSignal,
+    taskLayout?: { dispatchId: string },
+  ): Promise<CheckoutHandle> {
     const workspaceId = `ws-${randomUUID()}`;
-    const baseDir = runLayout
-      ? path.join(this.workspaceRoot, "runs", runLayout.runId, String(runLayout.generation))
+    const baseDir = taskLayout
+      ? path.join(this.workspaceRoot, "tasks", taskLayout.dispatchId)
       : path.join(this.workspaceRoot, workspaceId, "1");
     let checkoutPath: string;
     try {
@@ -95,7 +98,7 @@ export class GitWorkspaceManager implements WorkspaceManager {
       throw new WorkspaceError("WORKSPACE_ERROR", `workspace create failed: ${String(err)}`);
     }
 
-    // Credentials: per-invocation credential helper via stdin — the token
+    // Credentials: per-invocation credential helper via stdin - the token
     // never appears in a command line, remote URL, or on-disk config.
     const credArgs = source.accessToken
       ? [
@@ -116,7 +119,7 @@ export class GitWorkspaceManager implements WorkspaceManager {
       ], { signal });
 
       // Fetch the exact assigned object. A missing/unreachable object is
-      // terminal SOURCE_BASE_UNAVAILABLE (design §14): the workflow cannot
+      // terminal SOURCE_BASE_UNAVAILABLE (design section 14): the workflow cannot
       // safely reconstruct against its recorded source.
       try {
         await git(checkoutPath, [
@@ -159,7 +162,7 @@ export class GitWorkspaceManager implements WorkspaceManager {
 }
 
 /**
- * Derive the step workspace and enforce path confinement (design §8.6):
+ * Derive the step workspace and enforce path confinement (design section 8.6):
  * the working path is `<checkout>/<sourceSubPath>` and every tool path is
  * resolved against it with traversal/absolute/symlink rejection.
  */
@@ -182,7 +185,7 @@ export class GitWorkspaceScope implements WorkspaceScope {
 
 /**
  * Canonicalize a tool-supplied path against a permitted root (design
- * §10.3/§20.3): resolve relative to the root, reject absolute and `..`
+ * section 10.3/section 20.3): resolve relative to the root, reject absolute and `..`
  * traversal, then verify the FINAL canonical target (after symlinks) is
  * inside the root. Windows case-insensitive roots are compared via
  * case-normalized prefixes.
@@ -213,7 +216,7 @@ export function confinePath(root: string, userPath: string): string {
 
   // Symlink escape: the canonical target (realpath) must stay inside the
   // canonical root. Paths that do not exist yet compare their nearest
-  // EXISTING ancestor — the tool root may legitimately not exist before
+  // EXISTING ancestor - the tool root may legitimately not exist before
   // the first write creates it.
   const nearestExisting = (p: string): string => {
     let probe = p;

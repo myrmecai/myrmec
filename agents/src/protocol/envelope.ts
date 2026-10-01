@@ -5,12 +5,12 @@
  * The wire envelope. Every frame on the control socket is
  * `{ type, timestamp, payload }` (matches the Python `WebSocketMessage`).
  * `Envelope` is a loosely-typed frame shape: payloads are intentionally
- * `unknown` and narrowed by the consuming handler — the envelope layer only
+ * `unknown` and narrowed by the consuming handler - the envelope layer only
  * guarantees the frame shape, not payload semantics. The `type` is a plain
- * string: under the unified wire the Agent's outbound frames carry unified
- * frame-family names ("execution.delta", "session.open", …) while the
- * orchestrator's legacy-shape frames (orchestration.event / result /
- * approval_requested, the outbox records) keep their own families.
+ * string: under the unified wire every outbound Agent frame carries a
+ * unified frame-family name ("execution.delta", "execution.event", ...) -
+ * the orchestrator's legacy-shape families (orchestration.event/result)
+ * are deleted with the legacy wire.
  */
 
 import { z } from "zod";
@@ -33,7 +33,7 @@ export interface Envelope<T extends string = string, P = unknown> {
 }
 
 /**
- * Build an outbound envelope. Mirrors `WebSocketMessage.create` — stamps a
+ * Build an outbound envelope. Mirrors `WebSocketMessage.create` - stamps a
  * fresh UTC ISO timestamp.
  */
 export function makeEnvelope<T extends string, P>(

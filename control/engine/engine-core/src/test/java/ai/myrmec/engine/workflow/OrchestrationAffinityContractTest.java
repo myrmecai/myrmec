@@ -263,8 +263,8 @@ class OrchestrationAffinityContractTest extends WorkflowDispatchSupport {
         taskRepository.save(afterExpiry);
         dispatcher.dispatchPendingTasks();
 
-        run = runRepository.findById(request.getId()).orElseThrow();
-        assertThat(run.getLeaseState()).isEqualTo("LOST");
+        // (The run row is kept for identity/model facts; the lease lifecycle
+        // is deleted with D9 - the request tuple is the terminal truth.)
         assertThat(requestRepository.findById(request.getId()).orElseThrow().getStatus())
                 .isEqualTo(RequestStatus.FAILED);
         WorkflowTask failed = taskRepository.findById(retried.getId()).orElseThrow();

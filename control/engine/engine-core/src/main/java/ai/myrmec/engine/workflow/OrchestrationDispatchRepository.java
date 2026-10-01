@@ -26,7 +26,7 @@ public interface OrchestrationDispatchRepository extends JpaRepository<Orchestra
 
     /**
      * §16.3/§16.4 (6): unaccepted dispatch rows — the relay retransmits
-     * the exact stored bytes until {@code inference.accept} flips them.
+     * the exact stored bytes until {@code execution.accept} flips them.
      */
     List<OrchestrationDispatch> findByDeliveryState(String deliveryState);
 }

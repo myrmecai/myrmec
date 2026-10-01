@@ -27,5 +27,11 @@ public record ExecutionPausedPayload(
     public record ConversationContinuation(
             String approvalRequestId, String pendingActionId, String pendingActionDigest) {}
 
-    public record Usage(String modelId, Long inputTokens, Long outputTokens) {}
+    /** Protocol 8.6: orchestration usage is function-call/token totals; a
+     * conversation pause carries model/token accounting instead. Both
+     * shapes bind this one record; the absent variant's fields stay null
+     * (the socket's ObjectMapper fails on unknown keys, so the sender
+     * must emit only the keys its variant carries). */
+    public record Usage(String modelId, Long inputTokens, Long outputTokens,
+                        Long orchestrationFunctionCalls, Long totalTokens) {}
 }

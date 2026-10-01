@@ -2,10 +2,10 @@
 // Copyright 2026 The Myrmec Authors
 
 /**
- * Workspace contracts (design §7.1): acquisition and step scoping are
+ * Workspace contracts (design section 7.1): acquisition and step scoping are
  * separate operations. A checkout cannot be mistaken for a step-scoped
  * tool root. `GitWorkspaceManager` fetches and checks out the exact
- * assigned `sourceBaseCommit` — never resolving the branch again.
+ * assigned `sourceBaseCommit` - never resolving the branch again.
  */
 import type { ResolvedSource } from "../orchestration/types.js";
 
@@ -28,15 +28,16 @@ export interface StepWorkspace {
 
 export interface WorkspaceManager {
   /**
-   * Acquire a checkout for the resolved source. Feature 10 (§17.1) may
-   * pass a run-keyed layout so managed runs live at
-   * `<root>/runs/<runId>/<generation>/checkout`; without it the manager
-   * picks its own unique layout.
+   * Acquire a checkout for the resolved source. An orchestration dispatch
+   * (unified session execution design, section 9) passes the task-scoped
+   * layout so the checkout lives at `<root>/tasks/<dispatchId>/checkout`
+   * - acquired at dispatch, released before the terminal/pause frame;
+   * without it the manager picks its own unique layout.
    */
   acquire(
     source: ResolvedSource,
     signal?: AbortSignal,
-    runLayout?: { runId: string; generation: number },
+    taskLayout?: { dispatchId: string },
   ): Promise<CheckoutHandle>;
   release(checkout: CheckoutHandle): Promise<void>;
 }

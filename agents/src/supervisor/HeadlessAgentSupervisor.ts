@@ -6,7 +6,7 @@
  *
  * Implements seam 1 (authenticate) via the Engine HOST registration endpoint
  * and the token lifecycle (refresh / re-register) the unified client's
- * reconnect machinery calls into (REQ-A-001/002). Per §9.7 it owns the
+ * reconnect machinery calls into (REQ-A-001/002). Per section 9.7 it owns the
  * host-control socket (via the base's `HostControlClient`) and delegates
  * execution to an Agent worker thread: inbound unified frames are forwarded
  * into the worker, and the frames the worker emits are routed onto the
@@ -41,7 +41,7 @@ export interface HeadlessAgentSupervisorOptions {
   metadata?: Record<string, unknown>;
   logger?: Logger;
   /**
-   * Host capabilities (tools + runtime catalog) reported in `host.open` —
+   * Host capabilities (tools + runtime catalog) reported in `host.open` -
    * the supply side of reserve-time matching (replaces legacy provisions).
    */
   capabilities?: Record<string, unknown>;
@@ -124,7 +124,7 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
     if (!this.refreshToken) {
       throw new Error("No refresh token available");
     }
-    this.log.debug("Refreshing tokens…");
+    this.log.debug("Refreshing tokens...");
     const res = await this.http.refresh(this.refreshToken);
     this.accessToken = res.accessToken;
     this.refreshToken = res.refreshToken;
@@ -145,9 +145,15 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
   /**
    * Bring up the Agent worker (thread) pool. V1 headless pool size = 1
    * (config, not a
-   * seam — §9.3); auto-sizing to N is a later slice.
+   * seam - section 9.3); auto-sizing to N is a later slice.
    */
   protected override async spawnWorkers(): Promise<void> {
+    // Protocol 12.1/12.3: forward every engine protocol.ack across the
+    // worker boundary - the executor's outbox acknowledges the record
+    // whose outbound frame carried the messageId (at-least-once).
+    this.engineAckSink = (acknowledgedMessageId) => {
+      this.host?.dispatchEngineAck(acknowledgedMessageId);
+    };
     this.host = spawnAgentWorkerHost({
       onFrame: (frame) => this.routeWorkerFrame(frame),
       config: {
@@ -160,8 +166,8 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
         ...(process.env.MYRMEC_LLM_EXECUTION ? { chatModelMode: process.env.MYRMEC_LLM_EXECUTION as "stub" | "real" } : {}),
         ...(process.env.MYRMEC_TOOL_EXECUTION ? { sessionToolMode: process.env.MYRMEC_TOOL_EXECUTION as "stub" | "real" } : {}),
         ...(process.env.MYRMEC_STUB_MODULE ? { stubModulePath: process.env.MYRMEC_STUB_MODULE } : {}),
-        // Feature 10 (§17.1/§16.3): orchestration workspace + outbox
-        // roots. Defaults per design §17.1: /tmp/myrmec on POSIX,
+        // Feature 10 (section 17.1/section 16.3): orchestration workspace + outbox
+        // roots. Defaults per design section 17.1: /tmp/myrmec on POSIX,
         // %TEMP%\myrmec on Windows.
         workspaceRoot:
           process.env.MYRMEC_WORKSPACE_ROOT ??
@@ -171,7 +177,7 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
         outboxRoot:
           process.env.MYRMEC_OUTBOX_ROOT ??
           `${process.env.MYRMEC_WORKSPACE_ROOT ?? (process.platform === "win32" ? `${process.env.TEMP ?? "C:\\Windows\\Temp"}\\myrmec` : "/tmp/myrmec")}/outbox`,
-        // HITL (§17.4): the orchestration project's autoHitlOnDestructive
+        // HITL (section 17.4): the orchestration project's autoHitlOnDestructive
         // matrix input. E2E sets MYRMEC_AUTO_HITL=true|false; the
         // conservative default (suspend on destructive) applies otherwise.
         ...(process.env.MYRMEC_AUTO_HITL
@@ -189,12 +195,12 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
     this.host = null;
   }
 
-  // ==================== Inbound → worker forwarding ====================
+  // ==================== Inbound -> worker forwarding ====================
 
   // Seam 4 (headless) = engine only: every unified command frame is forwarded
-  // to the worker (as a legacy-shaped Envelope — the worker's dispatch speaks
+  // to the worker (as a legacy-shaped Envelope - the worker's dispatch speaks
   // that shape), and the worker's output frames are routed onto the unified
-  // wire via the `onFrame` → routeWorkerFrame sink wired in spawnWorkers.
+  // wire via the `onFrame` -> routeWorkerFrame sink wired in spawnWorkers.
 
   protected override async onExecutionStart(
     frame: Parameters<
@@ -202,10 +208,10 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
     >[0],
   ): Promise<void> {
     // The engine pushes BOTH payload shapes on execution.start:
-    //  - conversation: ExecutionStartPayload → forward as "execution.start"
+    //  - conversation: ExecutionStartPayload -> forward as "execution.start"
     //    (the worker dispatches it to the inference executor).
     //  - orchestration: OrchestrationExecutionStartPayload (dispatchId +
-    //    assignmentDigest) → the worker's orchestration executor resolves
+    //    assignmentDigest) -> the worker's orchestration executor resolves
     //    the assignment from the session opened for the dispatch.
     const payload = frame.payload as
       | ExecutionStartPayload
@@ -249,7 +255,7 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
     );
   }
 
-  /** A `session.close` the client dispatched — forward to the worker. */
+  /** A `session.close` the client dispatched - forward to the worker. */
   protected override onSessionClose(payload: { sessionId: string }): void {
     this.forwardToWorkerEnvelope(
       makeEnvelope("session.close", payload as Record<string, unknown>),
@@ -269,7 +275,7 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
   }
 
   protected async resolveWorkspace(_task: Task): Promise<WorkspaceHandle> {
-    // Seam 3 (clone task.context.workspace → temp dir) — implemented by the
+    // Seam 3 (clone task.context.workspace -> temp dir) - implemented by the
     // workspace/executor slice.
     throw new Error("resolveWorkspace not implemented yet (executor slice)");
   }

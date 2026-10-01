@@ -5,18 +5,18 @@
  * The message contract between a Supervisor (parent thread) and an Agent
  * worker (`worker_thread`).
  *
- * Locked shape (§9.7): the Supervisor owns the engine socket; the worker is
- * pure compute. So this channel is the worker's *only* link to the outside —
+ * Locked shape (section 9.7): the Supervisor owns the engine socket; the worker is
+ * pure compute. So this channel is the worker's *only* link to the outside -
  * inbound control frames come **in**, and the frames the worker would put on
  * the wire go **out** for the Supervisor to route (engine for headless; editor
- * + engine for interactive — seam 4). Everything here must be
+ * + engine for interactive - seam 4). Everything here must be
  * structured-cloneable: only plain data crosses a `worker_threads` boundary,
  * never class instances, closures, or sockets.
  */
 import type { Envelope, RawEnvelope } from "../protocol/envelope.js";
 
 /**
- * Parent → worker. Carries a decoded control frame for the worker to dispatch
+ * Parent -> worker. Carries a decoded control frame for the worker to dispatch
  * to its task / conversation handlers.
  */
 export interface WorkerEnvelopeMessage {
@@ -25,10 +25,10 @@ export interface WorkerEnvelopeMessage {
 }
 
 /**
- * Parent → worker. Delivers the run PSK (design
- * 2026-09-16-credential-envelope-delivery.md §6/§10) decoded from
+ * Parent -> worker. Delivers the run PSK (design
+ * 2026-09-16-credential-envelope-delivery.md section 6/section 10) decoded from
  * `host.opened` on the parent's control socket. The worker stores it in
- * process memory only (the SessionRegistry vault) — it is never logged and
+ * process memory only (the SessionRegistry vault) - it is never logged and
  * never persisted. Bytes travel as a plain array because structured clone
  * cannot cross the boundary with a typed-buffer view guarantee; the worker
  * reconstructs the Uint8Array.
@@ -38,19 +38,41 @@ export interface WorkerPskMessage {
   psk: number[];
 }
 
-export type WorkerInbound = WorkerEnvelopeMessage | WorkerPskMessage;
+/**
+ * Parent -> worker. The engine's protocol.ack for a host->engine durable
+ * frame (protocol 12.1/12.3), decoded on the parent's socket and handed
+ * across the boundary so the worker's outbox can acknowledge the record
+ * whose outbound frame carried `acknowledgedMessageId`.
+ */
+export interface WorkerEngineAckMessage {
+  kind: "ack";
+  acknowledgedMessageId: string;
+}
+
+export type WorkerInbound = WorkerEnvelopeMessage | WorkerPskMessage | WorkerEngineAckMessage;
 
 /**
- * Worker → parent. A frame the worker produced (a `message.delta`,
- * `task.complete`, `approval.request`, …) for the Supervisor to route onto the
- * engine socket and, in interactive mode, the editor.
+ * Worker -> parent. A frame the worker produced (an `execution.delta`,
+ * `execution.complete`, `approval.request`, ...) for the Supervisor to route onto
+ * the engine socket and, in interactive mode, the editor.
  */
 export interface WorkerFrameMessage {
   kind: "frame";
   frame: Envelope;
 }
 
-export type WorkerOutbound = WorkerFrameMessage;
+/**
+ * Worker -> parent. The engine's `protocol.ack` for a host->engine durable
+ * frame, forwarded across the worker boundary so the executor's outbox
+ * can acknowledge the matching record by messageId (protocol 12.1/12.3:
+ * terminal/event records stay unacknowledged until this arrives).
+ */
+export interface WorkerAckMessage {
+  kind: "ack";
+  acknowledgedMessageId: string;
+}
+
+export type WorkerOutbound = WorkerFrameMessage | WorkerAckMessage;
 
 /** Plain config handed to a worker at spawn (must be structured-cloneable). */
 export interface AgentWorkerConfig {
@@ -72,12 +94,12 @@ export interface AgentWorkerConfig {
   /** Path to a handler module (only used when mode='stub'). The worker
    * dynamically imports this file to load test-specific LLM/tool handlers. */
   stubModulePath?: string;
-  /** Feature 10 (§17.1): workspace root for orchestration runs. Runs live
+  /** Feature 10 (section 17.1): workspace root for orchestration runs. Runs live
    * at <root>/runs/<runId>/<generation>/checkout. */
   workspaceRoot?: string;
-  /** Feature 10 (§16.3): durable outbox root (agent-local). */
+  /** Feature 10 (section 16.3): durable outbox root (agent-local). */
   outboxRoot?: string;
-  /** HITL (§17.4): the orchestration project's autoHitlOnDestructive
+  /** HITL (section 17.4): the orchestration project's autoHitlOnDestructive
    * matrix input (from MYRMEC_AUTO_HITL; conservative default true). */
   autoHitlOnDestructive?: boolean;
 }

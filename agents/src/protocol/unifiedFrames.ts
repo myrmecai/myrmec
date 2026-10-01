@@ -639,11 +639,17 @@ export const executionPausedPayloadSchema = z.object({
       pendingActionDigest: z.string().nullish(),
     })
     .nullish(),
+  // Protocol 8.6: an orchestration pause carries the function-call/token
+  // totals; a conversation pause carries model/token accounting. One
+  // permissive block accepts either variant (the emitter sends only the
+  // keys its session kind carries).
   usage: z
     .object({
       modelId: z.string().nullish(),
       inputTokens: z.number().int().nullish(),
       outputTokens: z.number().int().nullish(),
+      orchestrationFunctionCalls: z.number().int().nullish(),
+      totalTokens: z.number().int().nullish(),
     })
     .nullish(),
 });

@@ -60,6 +60,7 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -108,6 +109,8 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     private final ai.myrmec.engine.workflow.TaskDispatchContinuation taskDispatchContinuation;
     private final EncryptionService encryptionService;
     private final HostResumeReconcileService resumeReconcileService;
+    private final ai.myrmec.engine.workflow.OrchestrationDispatchRepository dispatchRepository;
+    private final org.springframework.transaction.support.TransactionTemplate transactionTemplate;
 
     @Value("${myrmec.host.heartbeat-interval-seconds:15}")
     private int heartbeatIntervalSeconds;
@@ -151,7 +154,9 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                                        @org.springframework.context.annotation.Lazy
                                        ai.myrmec.engine.workflow.TaskDispatchContinuation taskDispatchContinuation,
                                        EncryptionService encryptionService,
-                                       HostResumeReconcileService resumeReconcileService) {
+                                       HostResumeReconcileService resumeReconcileService,
+                                       ai.myrmec.engine.workflow.OrchestrationDispatchRepository dispatchRepository,
+                                       org.springframework.transaction.PlatformTransactionManager transactionManager) {
         this.objectMapper = objectMapper;
         this.agentHostRepository = agentHostRepository;
         this.instanceRepository = instanceRepository;
@@ -177,6 +182,8 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         this.taskDispatchContinuation = taskDispatchContinuation;
         this.encryptionService = encryptionService;
         this.resumeReconcileService = resumeReconcileService;
+        this.dispatchRepository = dispatchRepository;
+        this.transactionTemplate = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
     }
 
     /** Exposed for handler tests to assert registration. */
@@ -798,10 +805,40 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             if (!ok) {
                 sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
                         "execution.accept for a non-STARTING execution", false, "EXECUTION", null);
+            } else if (accept.dispatchId() != null) {
+                // Unified session execution touchpoint 1 (design 12): the
+                // orchestration dispatch row stops retransmitting the moment
+                // the host durably admits the execution - the flip is
+                // best-effort and must never fail the accept itself.
+                flipDispatchAccepted(accept.dispatchId());
             }
         } catch (Exception e) {
             sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
                     "execution.accept payload invalid: " + e.getMessage(), false, "EXECUTION", null);
+        }
+    }
+
+    /**
+     * Unified session execution (design 12 touchpoint 1): an
+     * {@code execution.accept} echoing a non-null {@code dispatchId}
+     * (protocol 8.2 ORCHESTRATION variant) flips the
+     * {@code OrchestrationDispatch} row {@code PENDING/SENT -> ACCEPTED},
+     * ending the relay's retransmit. Best-effort under its own transaction
+     * (a {@code TransactionTemplate} call - direct invocation would bypass
+     * the proxy): a dispatch-row failure is logged, never propagated - the
+     * accept has already durably succeeded.
+     */
+    private void flipDispatchAccepted(UUID dispatchId) {
+        try {
+            transactionTemplate.executeWithoutResult(tx ->
+                    dispatchRepository.findWithLockByDispatchId(dispatchId)
+                            .ifPresent(d -> {
+                                d.setDeliveryState("ACCEPTED");
+                                d.setAcceptedAt(Instant.now());
+                                dispatchRepository.save(d);
+                            }));
+        } catch (Exception e) {
+            log.warn("Dispatch accept flip failed for dispatchId {}: {}", dispatchId, e.getMessage());
         }
     }
 

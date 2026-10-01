@@ -105,9 +105,6 @@ class ExecutionBridgeTest extends IntegrationTestBase {
     @Autowired
     private ai.myrmec.engine.workflow.OrchestrationDispatchRepository orchestrationDispatchRepository;
 
-    @Autowired
-    private ai.myrmec.engine.workflow.WorkspaceReleaseOrchestrator workspaceReleaseOrchestrator;
-
     // =================================================================
     // Conversation bridges
     // =================================================================
@@ -189,7 +186,7 @@ class ExecutionBridgeTest extends IntegrationTestBase {
         ExecutionPausedPayload payload = new ExecutionPausedPayload(
                 UUID.randomUUID(), Instant.now(), "APPROVAL_REQUIRED",
                 null, null, continuation,
-                new ExecutionPausedPayload.Usage("m1", 1L, 2L));
+                new ExecutionPausedPayload.Usage("m1", 1L, 2L, null, null));
 
         executionBridge.onConversationPaused(conversation.getId(), host.getId(), payload);
 
@@ -433,11 +430,17 @@ class ExecutionBridgeTest extends IntegrationTestBase {
         UUID executionId = UUID.randomUUID();
         // H2 truncates timestamptz to micros — truncate to millis so the
         // persisted value round-trips exactly (Plan 2's known pattern).
+        // The unified paused payload (protocol 8.6) nests expiry under
+        // suspension.expiresAt - the flat suspensionExpiresAt key never
+        // arrives on the wire.
         Instant expiresAt = Instant.now().plusSeconds(600).truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("executionId", executionId.toString());
-        payload.put("suspensionExpiresAt", expiresAt.toString());
-        payload.put("suspension", Map.of("expiresAt", expiresAt.toString()));
+        payload.put("suspension", Map.of(
+                "approvalRequestId", "apr-1",
+                "pendingAction", Map.of("actionId", "a-1", "type", "DELETE",
+                        "riskClass", "HIGH", "summary", "s", "digest", "d"),
+                "expiresAt", expiresAt.toString()));
 
         executionBridge.onOrchestrationOutcome(
                 f.attempt.getId(), executionId, SessionExecution.State.PAUSED, payload);

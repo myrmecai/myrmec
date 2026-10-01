@@ -44,8 +44,6 @@ public class OrchestrationOutcomeService {
     private final TaskAttemptRepository attemptRepository;
     private final WorkflowTaskRepository taskRepository;
     private final WorkflowRequestRepository requestRepository;
-    /** Feature 10 (§16.5): the release-frame owner for terminal states. */
-    private final WorkspaceReleaseOrchestrator releaseOrchestrator;
     /** Feature 10: the §16.6 progression — completed tasks unblock
      * dependants and complete the request; terminal failure fails it. */
     private final WorkflowProgressionService progressionService;
@@ -54,12 +52,10 @@ public class OrchestrationOutcomeService {
             TaskAttemptRepository attemptRepository,
             WorkflowTaskRepository taskRepository,
             WorkflowRequestRepository requestRepository,
-            WorkspaceReleaseOrchestrator releaseOrchestrator,
             WorkflowProgressionService progressionService) {
         this.attemptRepository = attemptRepository;
         this.taskRepository = taskRepository;
         this.requestRepository = requestRepository;
-        this.releaseOrchestrator = releaseOrchestrator;
         this.progressionService = progressionService;
     }
 
@@ -149,44 +145,16 @@ public class OrchestrationOutcomeService {
             progressionService.onTaskFailed(task);
         }
 
-        boolean releaseSent = sendReleaseIfNeeded(attempt, task, request, status);
-
         attemptRepository.save(attempt);
         taskRepository.save(task);
         requestRepository.save(request);
-        log.info("Applied orchestration outcome {} (dispatch {}, task {}, request {}) — "
-                + "workspaceRelease={}",
-                status, dispatchId, task.getId(), request.getId(), releaseSent);
+        // Unified session execution (D9/D4/D5): the run-lease machinery is
+        // deleted - after the terminal frame the engine closes the session
+        // and the host releases the task-scoped checkout on session close
+        // (protocol 9). No release frame exists to send.
+        log.info("Applied orchestration outcome {} (dispatch {}, task {}, request {})",
+                status, dispatchId, task.getId(), request.getId());
         return AppliedOutcome.applied(status);
-    }
-
-    /**
-     * §16.5: after a terminal request state the engine sends
-     * {@code orchestration.release} with a deterministic releaseId to the
-     * coordinator; the Supervisor's acknowledgement (idempotent) flips the
-     * run's lease state. PAUSED retains the lease — no release. COMPLETED
-     * of a multi-step run releases only when progression completes the
-     * REQUEST (the orchestrator runs there); a single-step COMPLETED has
-     * no remaining task, so the outcome path releases it here.
-     */
-    private boolean sendReleaseIfNeeded(TaskAttempt attempt, WorkflowTask task,
-                                        WorkflowRequest request, OutcomeStatus status) {
-        if (status == OutcomeStatus.PAUSED) {
-            return false; // retain checkout and continuation (§16.6)
-        }
-        boolean requestTerminal = status == OutcomeStatus.FAILED
-                || status == OutcomeStatus.CANCELLED;
-        if (!requestTerminal) {
-            return false; // completion release runs in the progression path
-        }
-        try {
-            return releaseOrchestrator.release(request.getId());
-        } catch (Exception e) {
-            // Release is best-effort at this seam: the expiry sweep and
-            // idempotent acknowledgement reconcile the lease later.
-            log.warn("Release send for run {} failed: {}", request.getId(), e.getMessage());
-        }
-        return false;
     }
 
     private void applyCompleted(TaskAttempt attempt, WorkflowTask task,
@@ -271,10 +239,14 @@ public class OrchestrationOutcomeService {
         task.setStatus(TaskStatus.PAUSED);
         task.setPauseState("ORCH_REVIEW");
         task.setPausedAt(Instant.now());
-        // The §7.3 SuspensionRecord drives the approval deadline.
-        Object expiresAt = structuredResult.get("suspensionExpiresAt");
-        if (expiresAt != null) {
-            task.setApprovalExpiresAt(Instant.parse(expiresAt.toString()));
+        // The unified protocol 8.6 suspension record drives the approval
+        // deadline: the paused payload nests expiry under
+        // suspension.expiresAt - a flat key never arrives on the wire.
+        // Null-safe: a paused result without a suspension record leaves
+        // the approval deadline unset.
+        if (structuredResult.get("suspension") instanceof Map<?, ?> suspension
+                && suspension.get("expiresAt") != null) {
+            task.setApprovalExpiresAt(Instant.parse(suspension.get("expiresAt").toString()));
         }
         request.setStatus(RequestStatus.PAUSED);
     }

@@ -24,11 +24,15 @@ import java.util.UUID;
  * to {@code agent_profile_versions} plus its content digest) resolved at
  * request creation: later Profile publishes never affect an in-flight run
  * (§16.1). Also owns coordinator affinity (§16.4), the opaque Host workspace
- * identity (§17.1 — never a Host-local path), durable availability
- * throttling, and the pinned opaque recovery identity (§17.2).</p>
+ * identity (17.1, never a Host-local path), and durable availability
+ * throttling.</p>
  *
- * <p>The engine never stores source bytes, diffs, prompts, command output,
- * Host-local paths, or encrypted recovery archives on this row.</p>
+ * <p>Unified session execution (design D9/D4): the run-lease lifecycle
+ * ({@code lease_state}/{@code lease_deadline}) is deleted - workspaces are
+ * task-scoped and released with their session, so nothing lease-shaped
+ * outlives a session. The engine never stores source bytes, diffs, prompts,
+ * command output, Host-local paths, or encrypted recovery archives on this
+ * row.</p>
  */
 @Entity
 @Table(name = "orchestration_runs")
@@ -76,13 +80,6 @@ public class OrchestrationRun {
 
     @Column(name = "workspace_generation")
     private Integer workspaceGeneration;
-
-    /** Lease state: ACQUIRING/ACTIVE/SUSPENDED/RELEASING/RELEASED/LOST (§16.5). */
-    @Column(name = "lease_state", length = 20)
-    private String leaseState;
-
-    @Column(name = "lease_deadline")
-    private Instant leaseDeadline;
 
     // ── affinity recovery (§16.4) ─────────────────────────────────
 

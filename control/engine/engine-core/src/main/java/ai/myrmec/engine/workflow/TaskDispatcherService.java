@@ -526,12 +526,6 @@ public class TaskDispatcherService {
      * result (the Agent is gone; no runner result will arrive).
      */
     private void applyWorkspaceLost(WorkflowTask task, UUID requestId, UUID coordinatorId) {
-        OrchestrationRun run = orchestrationRunRepository.findById(requestId)
-                .orElse(null);
-        if (run != null && !"LOST".equals(run.getLeaseState())) {
-            run.setLeaseState("LOST");
-            orchestrationRunRepository.save(run);
-        }
         task.setStatus(TaskStatus.COMPLETED);
         task.setResult(TaskResult.FAILURE);
         // The engine tuple convention (§16.6, matching the HITL rejection):

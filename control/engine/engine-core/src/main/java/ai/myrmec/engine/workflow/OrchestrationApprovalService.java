@@ -21,8 +21,8 @@ import java.util.UUID;
  * <p>Rejection and expiry are ENGINE-owned terminal transitions: the
  * original PAUSED attempt keeps its signed output immutable, the task
  * becomes {@code COMPLETED/FAILURE} with the decision's error code, no
- * continuation attempt is created, the request is marked FAILED, and the
- * workspace is released. {@code WorkflowTaskPauseService.stop} is
+ * continuation attempt is created, and the request is marked FAILED.
+ * {@code WorkflowTaskPauseService.stop} is
  * deliberately NOT used — it marks a task FAILED where the orchestration
  * tuple requires COMPLETED/FAILURE.</p>
  *
@@ -45,7 +45,6 @@ public class OrchestrationApprovalService {
     private final WorkflowTaskRepository taskRepository;
     private final WorkflowRequestRepository requestRepository;
     private final TaskAttemptRepository attemptRepository;
-    private final WorkspaceReleaseOrchestrator releaseOrchestrator;
 
     /** The decision outcome for one ORCH_REVIEW task. */
     public enum DecisionOutcome { APPROVED, REJECTED, EXPIRED }
@@ -192,14 +191,6 @@ public class OrchestrationApprovalService {
             request.setCompletedAt(Instant.now());
         }
         requestRepository.save(request);
-
-        // §16.5: release the run's workspace after the terminal state.
-        try {
-            releaseOrchestrator.releaseIfOrchestrated(request);
-        } catch (Exception e) {
-            log.warn("Post-rejection release for run {} failed: {}",
-                    request.getId(), e.getMessage());
-        }
 
         log.info("Orchestration approval {} for task {} (run {}) — terminal tuple applied",
                 errorCode, task.getId(), request.getId());
