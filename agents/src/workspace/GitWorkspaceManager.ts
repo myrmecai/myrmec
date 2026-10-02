@@ -109,14 +109,24 @@ export class GitWorkspaceManager implements WorkspaceManager {
 
     try {
       // Clone without checking out (branch resolution is not trusted).
+      // core.autocrlf=false is set BOTH inline and IN THE REPO: the inline
+      // -c covers only the clone invocation; the working-tree
+      // materialization (checkout --detach / checkout -B below) reads the
+      // repo-local config. With autocrlf inherited from the user's global
+      // config on Windows, D10's commit chaining (step 2 re-clones step
+      // 1's pushed files) would rewrite \n as \r\n on checkout and the
+      // committed bytes would no longer match the observed artifacts.
       await git(checkoutPath, [
         ...credArgs,
+        "-c",
+        "core.autocrlf=false",
         "clone",
         "--no-checkout",
         "--filter=blob:none",
         source.repoUrl,
         ".",
       ], { signal });
+      await git(checkoutPath, ["config", "core.autocrlf", "false"], { signal });
 
       // Fetch the exact assigned object. A missing/unreachable object is
       // terminal SOURCE_BASE_UNAVAILABLE (design section 14): the workflow cannot

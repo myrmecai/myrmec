@@ -1216,18 +1216,27 @@ export class OrchestrationRunner {
   }
 
   /**
-   * The real worktree cleanliness (§13/§18): via the inspector when a
-   * workspace is configured; true when no workspace exists (unit runs).
+   * The real worktree cleanliness (design section 13/section 18): via the
+   * inspector when a workspace is configured; true when no workspace exists
+   * (unit runs). A step whose working path (sourceSubPath) does not exist
+   * yet is CLEAN - nothing was ever mutated in it (user ruling
+   * 2026-10-02: an absent subpath is fine; cancel is abandonment and the
+   * checkout is released regardless).
    */
   private async worktreeClean(): Promise<boolean> {
     if (!this.options.workspaceInspector || !this.options.workspace) {
       return true;
     }
+    const { workingPath } = this.options.workspace;
     try {
+      const { existsSync } = await import("node:fs");
+      if (!existsSync(workingPath)) {
+        return true; // the step scope was never created - nothing to mutate
+      }
       const candidate = await this.options.workspaceInspector.inspect(this.options.workspace);
       return candidate.clean;
     } catch {
-      // An un-inspectable workspace reports not-clean — never a false
+      // An un-inspectable workspace reports not-clean - never a false
       // "clean" claim for evidence.
       return false;
     }

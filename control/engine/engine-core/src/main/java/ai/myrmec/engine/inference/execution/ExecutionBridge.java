@@ -338,6 +338,11 @@ public class ExecutionBridge {
             disposition = retryable
                     ? OrchestrationOutcomeService.RetryDisposition.RETRYABLE
                     : OrchestrationOutcomeService.RetryDisposition.TERMINAL;
+            // The stored attempt/task output keeps a TOP-LEVEL errorCode
+            // (the 16.6 engine-tuple convention the observation surfaces
+            // read); the unified 8.5 failure frame nests it under
+            // error.code.
+            payload.put("errorCode", errorCode);
             if (retryable && retryAfterSeconds != null) {
                 payload.put("retryAfterSeconds", retryAfterSeconds);
             }
@@ -474,11 +479,17 @@ public class ExecutionBridge {
         Map<String, Object> boundedPayload = new LinkedHashMap<>();
         boundedPayload.put("approvalRequestId", payload.approvalRequestId());
         if (payload.action() != null) {
-            boundedPayload.put("actionId", payload.action().actionId());
-            boundedPayload.put("actionType", payload.action().type());
-            boundedPayload.put("riskClass", payload.action().riskClass());
-            boundedPayload.put("summary", payload.action().summary());
-            boundedPayload.put("digest", payload.action().digest());
+            // Protocol 8.7 action block, nested: the decide path
+            // (OrchestrationApprovalService.actionDigestOf) and the My Work
+            // queue read payload.action.digest - the flat key form is a
+            // legacy shape no consumer reads.
+            Map<String, Object> action = new LinkedHashMap<>();
+            action.put("actionId", payload.action().actionId());
+            action.put("type", payload.action().type());
+            action.put("riskClass", payload.action().riskClass());
+            action.put("summary", payload.action().summary());
+            action.put("digest", payload.action().digest());
+            boundedPayload.put("action", action);
         }
         boundedPayload.put("snapshotTreeHash", payload.snapshotTreeHash());
         boundedPayload.put("stateDigest", payload.stateDigest());

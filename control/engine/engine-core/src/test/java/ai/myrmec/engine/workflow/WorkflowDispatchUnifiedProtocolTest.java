@@ -152,9 +152,13 @@ class WorkflowDispatchUnifiedProtocolTest extends WorkflowDispatchSupport {
         assertThat(stored.getAgentInstance()).isNotNull();
         assertThat(attemptRepository.findById(attempt.getId()).orElseThrow().getAgentInstance())
                 .isNotNull();
+        // Design D11 (pause-time pinning): a first dispatch selects a host
+        // but records NO coordinator pin - the pin lands at PAUSE, where
+        // the SAME_HOST continuation manifest exists. A fresh run dispatches
+        // freely to any live host.
         assertThat(runRepository.findById(request.getId()).orElseThrow().getCoordinatorHostId())
-                .as("the §16.4 coordinator binding is the selected host")
-                .isEqualTo(host.host().getId());
+                .as("the first dispatch does not pin a coordinator (D11)")
+                .isNull();
 
         // ---- The discriminator: NO legacy delivery happened ----
         // (P6-T6: the legacy wire is deleted from the engine; the unified

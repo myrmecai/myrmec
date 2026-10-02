@@ -13,12 +13,13 @@
  */
 import { hostname } from "node:os";
 
-/** Result of a successful registration. */
+/** Result of a successful host registration. */
 export interface RegisterResponse {
   accessToken: string;
   refreshToken: string;
-  /** Engine-assigned instance/agent id (UUID string). */
-  instanceId: string;
+  /** Engine-assigned durable agent-host id (UUID string; the unified
+   * protocol 4.1 HostRegisterResponse.hostId). */
+  hostId: string;
 }
 
 /** Result of a successful token refresh. */
@@ -105,34 +106,39 @@ export class EngineHttpClient {
     this.metadata = options.metadata;
   }
 
-  /** Register this host with the Engine; returns the first token pair. */
+  /** Register this host with the Engine; returns the first token pair.
+   *
+   * Unified protocol 4.1: the managed-host registration endpoint mints
+   * HOST_JWT credentials (principal AGENT_HOST, subject = the durable
+   * agent_hosts row). The registration key travels in the request body
+   * per HostRegisterRequest - the legacy X-Registration-Key header path
+   * (the AGENT-principal endpoint) is not the host contract. */
   async register(): Promise<RegisterResponse> {
     const body: Record<string, unknown> = {
+      registrationKey: this.registrationKey,
       hostname: hostname(),
-      sdkVersion: this.sdkVersion,
+      runtimeVersion: this.sdkVersion,
     };
     if (this.metadata) {
       body.metadata = this.metadata;
     }
 
-    const data = await this.post(
-      "/api/v1/agent/auth/register",
-      { "X-Registration-Key": this.registrationKey },
-      body,
-    );
+    const data = await this.post("/api/v1/agent/auth/host/register", {}, body);
     return {
       accessToken: data.accessToken as string,
       refreshToken: data.refreshToken as string,
-      instanceId: data.instanceId as string,
+      hostId: data.hostId as string,
     };
   }
 
-  /** Exchange a refresh token for a fresh token pair. */
+  /** Exchange a host refresh token for a fresh (rotated) pair.
+   * Unified protocol 4.1: /api/v1/agent/auth/host/refresh rotates the
+   * refresh token on use. */
   async refresh(refreshToken: string): Promise<RefreshResponse> {
     const data = await this.post(
-      "/api/v1/agent/auth/refresh",
-      { Authorization: `Bearer ${refreshToken}` },
-      undefined,
+      "/api/v1/agent/auth/host/refresh",
+      {},
+      { refreshToken },
     );
     return {
       accessToken: data.accessToken as string,

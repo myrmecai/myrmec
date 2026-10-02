@@ -7,6 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import ai.myrmec.engine.websocket.host.HostConnectionManager;
+
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -20,6 +22,13 @@ import java.util.UUID;
  * <p>Preference order: a host scoped to {@code projectId} first, then a
  * system-wide (unscoped) host. Hosts with no live OPEN instance are
  * excluded — capacity is real, not registered.</p>
+ *
+ * <p>Liveness is TWO-SIDED: the instance row must be OPEN and its control
+ * socket must still be registered and open in the {@link
+ * HostConnectionManager}. A host process killed abruptly can leave the
+ * instance row OPEN (the engine learns of the drop only when it writes to
+ * the half-open socket) - offering to such a host silently strands the
+ * session until its offer lease lapses while genuinely live hosts starve.</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -28,6 +37,7 @@ public class HostSelectionService {
 
     private final AgentHostRepository agentHostRepository;
     private final AgentHostInstanceRepository instanceRepository;
+    private final HostConnectionManager connectionManager;
 
     /**
      * Return all active hosts able to serve {@code projectId} in
@@ -68,8 +78,14 @@ public class HostSelectionService {
     }
 
     private boolean hasLiveInstance(AgentHost host) {
-        return !instanceRepository
+        return instanceRepository
                 .findByAgentHostIdAndStatus(host.getId(), AgentHostInstance.Status.OPEN)
-                .isEmpty();
+                .stream()
+                // The socket must still be registered and open: an OPEN row
+                // whose process died abruptly keeps its row status until the
+                // engine touches the half-open socket.
+                .anyMatch(instance -> connectionManager.getSession(instance.getId())
+                        .map(s -> s.isOpen())
+                        .orElse(false));
     }
 }

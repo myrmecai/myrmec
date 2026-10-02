@@ -657,7 +657,11 @@ export type ExecutionPausedPayload = z.infer<typeof executionPausedPayloadSchema
 
 export const executionCancelPayloadSchema = z.object({
   executionId: uuid,
-  dispatchId: uuid,
+  // Protocol 8.8: dispatchId identifies an ORCHESTRATION execution's
+  // dispatch; a conversation turn's cancel carries none. Nullable so a
+  // null-dispatchId frame never fails schema validation (a dropped cancel
+  // frame leaves the runner to budget-terminate instead of unwinding).
+  dispatchId: uuid.nullish(),
   reasonCode: z.string(),
   requestedAt: isoString,
   gracePeriodSeconds: z.number().int(),

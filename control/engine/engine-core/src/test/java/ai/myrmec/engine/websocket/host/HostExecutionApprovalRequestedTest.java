@@ -216,7 +216,13 @@ class HostExecutionApprovalRequestedTest extends IntegrationTestBase {
         assertThat(refreshed.getRequiresApproval()).isTrue();
         assertThat(refreshed.getApprovalStatus()).isEqualTo("PENDING");
         assertThat(refreshed.getApprovalPayload()).containsEntry("approvalRequestId", "approval-orch-1");
-        assertThat(refreshed.getApprovalPayload()).containsEntry("actionId", "a-1");
+        // Protocol 8.7 shape: the action block persists NESTED (the decide
+        // path reads payload.action.digest; the flat keys are legacy).
+        Object actionBlock = refreshed.getApprovalPayload().get("action");
+        assertThat(actionBlock).isInstanceOf(java.util.Map.class);
+        java.util.Map<?, ?> persistedAction = (java.util.Map<?, ?>) actionBlock;
+        assertThat(persistedAction.get("actionId")).isEqualTo("a-1");
+        assertThat(persistedAction.get("digest")).isEqualTo("d-1");
         assertThat(refreshed.getApprovalExpiresAt()).isEqualTo(expiresAt);
 
         JsonNode ack = lastReply(setup.session());

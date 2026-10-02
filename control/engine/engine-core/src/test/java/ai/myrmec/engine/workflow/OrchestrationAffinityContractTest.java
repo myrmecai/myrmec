@@ -91,45 +91,50 @@ class OrchestrationAffinityContractTest extends WorkflowDispatchSupport {
     // ── (a) two-host affinity: §16.4's own scenario ─────────────
 
     @Test
-    @DisplayName("two eligible hosts: every orchestration dispatch of a run binds to the first-selected coordinator host")
+    @DisplayName("two eligible hosts: every dispatch of a PAUSED run binds to the pause-time coordinator host")
     void twoHostAffinityPinsFirstCoordinatorHost() throws Exception {
         Workflow wf = workflowWithOrchestratorStep("aff-two");
         SocketHost hostA = openHost("aff-host-a", profile, project, 4);
         SocketHost hostB = openHost("aff-host-b", profile, project, 4);
 
-        // First dispatch of a multi-step request pins hostA or hostB; whichever
-        // it is, the SECOND task of the same request must bind to the same host
-        // even though the other is equally eligible.
+        // Pause-time pinning (design D11): the pin exists only after a run
+        // PAUSES on a host (the SAME_HOST continuation manifest). The first
+        // dispatch therefore selects FREELY; the pin is seeded here the way
+        // OrchestrationOutcomeService.applyPaused records it.
         WorkflowRequest request = runningRequest(wf, "aff-two");
         pinRun(request);
-        WorkflowTask first = pendingTask(request, "build");
+        WorkflowTask firstTask = pendingTask(request, "build");
 
         dispatcher.dispatchPendingTasks();
 
+        // No pin yet: the first dispatch selected a host but did not pin.
         OrchestrationRun run = runRepository.findById(request.getId()).orElseThrow();
-        UUID coordinatorHost = run.getCoordinatorHostId();
-        assertThat(coordinatorHost).as("the first dispatch pins a coordinator host").isNotNull();
-        assertThat(coordinatorHost).isIn(hostA.host().getId(), hostB.host().getId());
+        assertThat(run.getCoordinatorHostId()).as("first dispatch does not pin (D11)").isNull();
+        Session firstSession = sessionRepository.findByRefId(request.getId()).stream()
+                .filter(s -> SessionAllocator.ALLOC_STATE_OFFERED.equals(s.getAllocationState()))
+                .findFirst().orElseThrow();
+        SocketHost firstHost = firstSession.getHostInstanceId()
+                .equals(hostA.instanceId()) ? hostA : hostB;
+        completeHandshake(firstHost);
 
-        // Complete the handshake so the run's first session is ACTIVE and the
-        // second task can be offered on the same host.
-        SocketHost pinned = coordinatorHost.equals(hostA.host().getId()) ? hostA : hostB;
-        SocketHost other = pinned == hostA ? hostB : hostA;
-        completeHandshake(pinned);
-        assertThat(attemptRepository.findByTaskIdOrderByAttemptNumberAsc(first.getId()).get(0)
-                .getAgentInstance()).isNotNull();
+        // The run pauses on the first host - the pause-time pin lands.
+        affinity.recordCoordinator(request.getId(), null, firstHost.host().getId());
+        UUID coordinatorHost = runRepository.findById(request.getId())
+                .orElseThrow().getCoordinatorHostId();
+        assertThat(coordinatorHost).isEqualTo(firstHost.host().getId());
 
         WorkflowTask second = pendingTask(request, "verify");
         dispatcher.dispatchPendingTasks();
 
         // The second task was offered to the PINNED host, never the other one.
+        SocketHost other = firstHost == hostA ? hostB : hostA;
         assertThat(framesOf(other).stream().map(f -> f.path("type").asText()).toList())
                 .as("the equally-eligible host receives no offer for this run")
                 .doesNotContain("session.offer");
         Session secondSession = sessionRepository.findByRefId(request.getId()).stream()
                 .filter(s -> SessionAllocator.ALLOC_STATE_OFFERED.equals(s.getAllocationState()))
                 .findFirst().orElseThrow();
-        assertThat(secondSession.getHostInstanceId()).isEqualTo(pinned.instanceId());
+        assertThat(secondSession.getHostInstanceId()).isEqualTo(firstHost.instanceId());
         assertThat(runRepository.findById(request.getId()).orElseThrow().getCoordinatorHostId())
                 .isEqualTo(coordinatorHost);
         assertThat(attemptRepository.findByTaskId(second.getId())).isNotEmpty();
@@ -153,8 +158,10 @@ class OrchestrationAffinityContractTest extends WorkflowDispatchSupport {
         pinRun(request);
         WorkflowTask task = pendingTask(request, "build");
 
-        // First pass selects + pins the coordinator host.
-        dispatcher.dispatchPendingTasks();
+        // Pause-time pinning (D11): seed the pin as a paused run would
+        // (applyPaused records the coordinator when the SAME_HOST
+        // continuation manifest exists).
+        affinity.recordCoordinator(request.getId(), null, hostA.host().getId());
         OrchestrationRun run = runRepository.findById(request.getId()).orElseThrow();
         assertThat(run.getCoordinatorHostId()).isEqualTo(hostA.host().getId());
         int attemptsBefore = attemptRepository.findByTaskId(task.getId()).size();
@@ -236,8 +243,9 @@ class OrchestrationAffinityContractTest extends WorkflowDispatchSupport {
         pinRun(request);
         WorkflowTask task = pendingTask(request, "build");
 
-        // Pin the coordinator host, then take its live instance down.
-        dispatcher.dispatchPendingTasks();
+        // Pause-time pinning (D11): seed the pin as a paused run would,
+        // then take the pinned host's live instance down.
+        affinity.recordCoordinator(request.getId(), null, hostA.host().getId());
         OrchestrationRun run = runRepository.findById(request.getId()).orElseThrow();
         assertThat(run.getCoordinatorHostId()).isEqualTo(hostA.host().getId());
         closeLiveInstances(hostA.host().getId());

@@ -960,11 +960,24 @@ export class OrchestrationExecutor {
         durationMs: null,
       },
     };
-    // The continuation block rides the payload map as an error-sibling
-    // top-level field; the engine reads the raw map (applyResult).
-    const payload = retryable && effective.continuation
-      ? { ...base, continuation: effective.continuation }
-      : { ...base };
+    // The redacted result body rides a result.structured block (the 8.5
+    // success shape's evidence block; protocol 16 additive-field rule):
+    // the engine's FAILED arm unwraps it the same way as COMPLETE so the
+    // attempt/task rows keep the full audit evidence (helperCalls,
+    // verifierResults, changedFiles, usage) for EVERY terminal, not only
+    // success. The continuation block rides the payload map as an
+    // error-sibling top-level field; the engine reads the raw map.
+    const payload = {
+      ...base,
+      result: {
+        content: effective.summary,
+        structured: effective as unknown as Record<string, unknown>,
+        artifacts: null,
+      },
+      ...(retryable && effective.continuation
+        ? { continuation: effective.continuation }
+        : {}),
+    };
     await this.options.sender.sendExecutionFailed(
       payload as ExecutionFailedPayload,
     );

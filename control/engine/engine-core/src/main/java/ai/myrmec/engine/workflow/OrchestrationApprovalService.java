@@ -204,12 +204,38 @@ public class OrchestrationApprovalService {
      * The §7.3 suspension record from the stored PAUSED structured
      * result (mirrored to task output by the outcome path) — never
      * prose; carries the continuation identity for the resume.
+     *
+     * <p>Unified protocol 8.6 shape: the paused frame splits the resume
+     * identity across two blocks - {@code continuation} (continuationId,
+     * snapshot refs, workspace revision, state digest) and {@code
+     * suspension} (approvalRequestId, pendingAction, expiresAt). The
+     * legacy 16.3 result carried continuationId inside suspension; the
+     * resume path accepts BOTH shapes: the stored suspension block when
+     * it carries its own continuationId (legacy), else the merged
+     * continuation + suspension view (unified) so the decide flow reads
+     * one record either way.</p>
      */
     @SuppressWarnings("unchecked")
     private Map<String, Object> suspensionOf(WorkflowTask task) {
         Map<String, Object> output = task.getOutput();
-        if (output != null && output.get("suspension") instanceof Map<?, ?> suspension) {
-            return (Map<String, Object>) suspension;
+        if (output == null) {
+            throw new IllegalStateException(
+                    "Task " + task.getId() + " PAUSED result carries no suspension record");
+        }
+        if (output.get("suspension") instanceof Map<?, ?> suspension) {
+            Map<String, Object> record = (Map<String, Object>) suspension;
+            if (record.get("continuationId") != null) {
+                return record; // legacy 16.3 shape: self-contained suspension
+            }
+            // Unified 8.6 shape: merge the continuation block's resume
+            // identity into the suspension view the decide path reads.
+            Map<String, Object> merged = new java.util.LinkedHashMap<>(record);
+            if (output.get("continuation") instanceof Map<?, ?> continuation) {
+                merged.putAll((Map<String, Object>) continuation);
+            }
+            if (merged.get("continuationId") != null) {
+                return merged;
+            }
         }
         throw new IllegalStateException(
                 "Task " + task.getId() + " PAUSED result carries no suspension record");

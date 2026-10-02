@@ -93,15 +93,18 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
     return this.register();
   }
 
-  /** Register (or re-register) and capture the new token pair + host id. */
+  /** Register (or re-register) and capture the new token pair + host id.
+   * Unified protocol 4.1/19.1: registration resolves the DURABLE host row
+   * (hostId) - no instance row, no Agent row. The live host instance is
+   * created later by host.open; the serving Agent row is minted at
+   * session.opened. */
   private async register(): Promise<AuthContext> {
     this.log.info("Registering with Engine:", this.engineUrl);
     const res = await this.http.register();
     this.accessToken = res.accessToken;
     this.refreshToken = res.refreshToken;
-    this.ctx.hostId = res.instanceId;
-    this.ctx.agentId = res.instanceId;
-    this.log.info("Registered as instance:", res.instanceId);
+    this.ctx.hostId = res.hostId;
+    this.log.info("Registered as agent host:", res.hostId);
 
     this.auth = {
       agentAccessToken: res.accessToken,

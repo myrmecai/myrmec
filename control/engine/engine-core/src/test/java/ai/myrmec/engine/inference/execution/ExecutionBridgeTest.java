@@ -473,9 +473,14 @@ class ExecutionBridgeTest extends IntegrationTestBase {
         assertThat(refreshed.getRequiresApproval()).isTrue();
         assertThat(refreshed.getApprovalStatus()).isEqualTo("PENDING");
         assertThat(refreshed.getApprovalPayload()).containsEntry("approvalRequestId", "approval-req-2");
-        assertThat(refreshed.getApprovalPayload()).containsEntry("actionId", "action-1");
-        assertThat(refreshed.getApprovalPayload()).containsEntry("riskClass", "HIGH");
-        assertThat(refreshed.getApprovalPayload()).containsEntry("digest", "action-digest");
+        // Protocol 8.7 shape: the action block persists NESTED (the decide
+        // path reads payload.action.digest; the flat keys are legacy).
+        Object actionBlock = refreshed.getApprovalPayload().get("action");
+        assertThat(actionBlock).isInstanceOf(java.util.Map.class);
+        java.util.Map<?, ?> persistedAction = (java.util.Map<?, ?>) actionBlock;
+        assertThat(persistedAction.get("actionId")).isEqualTo("action-1");
+        assertThat(persistedAction.get("riskClass")).isEqualTo("HIGH");
+        assertThat(persistedAction.get("digest")).isEqualTo("action-digest");
         assertThat(refreshed.getApprovalExpiresAt()).isEqualTo(expiresAt);
     }
 

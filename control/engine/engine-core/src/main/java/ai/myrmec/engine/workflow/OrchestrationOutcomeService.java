@@ -47,16 +47,30 @@ public class OrchestrationOutcomeService {
     /** Feature 10: the §16.6 progression — completed tasks unblock
      * dependants and complete the request; terminal failure fails it. */
     private final WorkflowProgressionService progressionService;
+    /** Pause-time coordinator pinning (design D11): resolves the paused
+     * attempt's serving host from its execution session. */
+    private final ai.myrmec.engine.inference.execution.SessionExecutionRepository sessionExecutionRepository;
+    private final ai.myrmec.engine.inference.SessionRepository sessionRepository;
+    private final ai.myrmec.engine.agent.AgentHostInstanceRepository agentHostInstanceRepository;
+    private final OrchestrationAffinityResolver affinityResolver;
 
     public OrchestrationOutcomeService(
             TaskAttemptRepository attemptRepository,
             WorkflowTaskRepository taskRepository,
             WorkflowRequestRepository requestRepository,
-            WorkflowProgressionService progressionService) {
+            WorkflowProgressionService progressionService,
+            ai.myrmec.engine.inference.execution.SessionExecutionRepository sessionExecutionRepository,
+            ai.myrmec.engine.inference.SessionRepository sessionRepository,
+            ai.myrmec.engine.agent.AgentHostInstanceRepository agentHostInstanceRepository,
+            OrchestrationAffinityResolver affinityResolver) {
         this.attemptRepository = attemptRepository;
         this.taskRepository = taskRepository;
         this.requestRepository = requestRepository;
         this.progressionService = progressionService;
+        this.sessionExecutionRepository = sessionExecutionRepository;
+        this.sessionRepository = sessionRepository;
+        this.agentHostInstanceRepository = agentHostInstanceRepository;
+        this.affinityResolver = affinityResolver;
     }
 
     /** The §7.3 status union mirrored from the runner result. */
@@ -239,6 +253,14 @@ public class OrchestrationOutcomeService {
         task.setStatus(TaskStatus.PAUSED);
         task.setPauseState("ORCH_REVIEW");
         task.setPausedAt(Instant.now());
+        // Task-scoped workspaces (design D11): the ONLY host-local state a
+        // paused run holds is the SAME_HOST continuation manifest on the
+        // host that paused. The coordinator pin is therefore recorded AT
+        // PAUSE (here), not at first dispatch - a run with no paused
+        // continuation has nothing host-local to preserve and dispatches
+        // freely to any live host. The pause-time pin resolves the serving
+        // host from the attempt's execution session.
+        pinCoordinatorOnPause(request.getId(), attempt);
         // The unified protocol 8.6 suspension record drives the approval
         // deadline: the paused payload nests expiry under
         // suspension.expiresAt - a flat key never arrives on the wire.
@@ -253,6 +275,40 @@ public class OrchestrationOutcomeService {
 
     private boolean hasContinuation(Map<String, Object> structuredResult) {
         return structuredResult != null && structuredResult.get("continuation") != null;
+    }
+
+    /**
+     * Design D11 (pause-time pinning): a PAUSED run's only host-local state
+     * is the SAME_HOST continuation manifest on the host that paused - so
+     * the coordinator pin is recorded HERE (at pause), never at first
+     * dispatch. The serving host is resolved through the attempt's
+     * execution -> session -> host instance -> agent host chain; a
+     * resolution failure logs and leaves the run unpinned (the resume
+     * dispatch then selects freely - fail-open, the decision enrichment
+     * carries the continuation identity either way).
+     */
+    private void pinCoordinatorOnPause(UUID requestId, TaskAttempt attempt) {
+        try {
+            UUID servingHostId = sessionExecutionRepository
+                    .findByDispatchId(attempt.getId())
+                    .map(exec -> sessionRepository.findById(exec.getSessionId())
+                            .map(ai.myrmec.engine.inference.Session::getHostInstanceId)
+                            .orElse(null))
+                    .flatMap(instanceId -> instanceId == null
+                            ? java.util.Optional.<UUID>empty()
+                            : agentHostInstanceRepository.findById(instanceId)
+                                    .map(ai.myrmec.engine.agent.AgentHostInstance::getAgentHostId))
+                    .orElse(null);
+            if (servingHostId != null) {
+                affinityResolver.recordCoordinator(requestId, null, servingHostId);
+            } else {
+                log.warn("Run {} pause-time coordinator pin skipped - serving host unresolvable",
+                        requestId);
+            }
+        } catch (Exception e) {
+            log.warn("Run {} pause-time coordinator pin failed: {}",
+                    requestId, e.getMessage());
+        }
     }
 
     private int countRetryableAttempts(UUID taskId) {

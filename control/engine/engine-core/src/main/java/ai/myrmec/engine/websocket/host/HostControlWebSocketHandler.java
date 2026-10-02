@@ -1223,13 +1223,64 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             log.debug("No dispatchId on orchestration execution {} — skipping outcome bridge", execution.getId());
             return;
         }
+        // Protocol 8.5: the unified complete frame carries the orchestration
+        // result NESTED in result.structured; failed carries the error block
+        // plus the redacted result body in the same result.structured block
+        // (16's additive-field rule - evidence parity for every terminal);
+        // failed additionally carries the retry continuation. The outcome
+        // service consumes the result body itself (the legacy
+        // orchestration.result was flat), so the bridge unwraps
+        // result.structured on COMPLETE and FAILED before applying.
+        Map<String, Object> structuredResult = payloadMap;
+        if ((terminalState == SessionExecution.State.COMPLETED
+                || terminalState == SessionExecution.State.FAILED)
+                && payloadNode != null && payloadNode.path("result").path("structured").isObject()) {
+            structuredResult = objectMapper.convertValue(
+                    payloadNode.path("result").path("structured"),
+                    java.util.LinkedHashMap.class);
+            // The frame-level usage block (8.5) stays authoritative for the
+            // attempt's usage columns; the result body already carries its own.
+            if (!structuredResult.containsKey("usage") && payloadNode.path("usage").isObject()) {
+                structuredResult.put("usage", objectMapper.convertValue(
+                        payloadNode.path("usage"), java.util.LinkedHashMap.class));
+            }
+            // 16.6 engine-tuple convention: the stored output keeps a
+            // top-level errorCode derived from the failure frame's error
+            // block (the observation surfaces read it flat).
+            if (terminalState == SessionExecution.State.FAILED
+                    && payloadNode.path("error").path("code").isTextual()) {
+                structuredResult.put("errorCode",
+                        payloadNode.path("error").path("code").asText());
+            }
+            // FAILED disposition: the bridge's onOrchestrationOutcome reads
+            // retryable/retryAfterSeconds from an error block - fold the
+            // frame's error block into the unwrapped body so BOTH contracts
+            // (evidence storage + retry classification) hold.
+            if (terminalState == SessionExecution.State.FAILED
+                    && payloadNode.path("error").isObject()) {
+                structuredResult.put("error", objectMapper.convertValue(
+                        payloadNode.path("error"), java.util.LinkedHashMap.class));
+            }
+        }
         switch (terminalState) {
             case COMPLETED, FAILED, CANCELLED ->
-                    executionBridge.onOrchestrationOutcome(dispatchId, execution.getId(), terminalState, payloadMap);
+                    executionBridge.onOrchestrationOutcome(dispatchId, execution.getId(), terminalState, structuredResult);
             case PAUSED -> {
                 ExecutionPausedPayload paused = objectMapper.convertValue(payloadNode, ExecutionPausedPayload.class);
                 executionBridge.onOrchestrationApprovalRequested(dispatchId, mapApprovalRequested(paused));
-                executionBridge.onOrchestrationOutcome(dispatchId, execution.getId(), terminalState, payloadMap);
+                // 8.6 paused frame: the stored task/attempt output keeps the
+                // RESULT-BODY usage shape (helperCalls/rejectionCount/
+                // totalTokens) so COMPLETE and PAUSED persist uniformly -
+                // the frame's orchestrationFunctionCalls maps onto it.
+                Map<String, Object> pausedResult = new java.util.LinkedHashMap<>(payloadMap);
+                Map<String, Object> bodyUsage = new java.util.LinkedHashMap<>();
+                bodyUsage.put("helperCalls", paused.usage() == null || paused.usage().orchestrationFunctionCalls() == null
+                        ? 0L : paused.usage().orchestrationFunctionCalls());
+                bodyUsage.put("rejectionCount", 0L);
+                bodyUsage.put("totalTokens", paused.usage() == null || paused.usage().totalTokens() == null
+                        ? 0L : paused.usage().totalTokens());
+                pausedResult.put("usage", bodyUsage);
+                executionBridge.onOrchestrationOutcome(dispatchId, execution.getId(), terminalState, pausedResult);
             }
         }
     }

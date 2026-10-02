@@ -33,6 +33,9 @@ class HostSelectionServiceTest extends IntegrationTestBase {
     @Autowired
     HostSelectionService selector;
 
+    @Autowired
+    ai.myrmec.engine.websocket.host.HostConnectionManager connectionManager;
+
     @Test
     void selectsProjectScopedHostOverUnscopedWhenBothLive() {
         AgentProfile profile = data.agentProfile().named("selector-profile").create();
@@ -97,7 +100,16 @@ class HostSelectionServiceTest extends IntegrationTestBase {
     }
 
     private void openInstance(AgentHost host) {
-        instanceRepository.saveAndFlush(AgentHostInstance.open(
+        AgentHostInstance instance = instanceRepository.saveAndFlush(AgentHostInstance.open(
                 host, null, "dev-laptop", 1, Map.of("cpuCount", 2), "engine-node-1"));
+        // Two-sided liveness: the selection also requires the instance's
+        // control socket to be registered and open. Register an open mock
+        // socket so the fixture's "live" hosts are live on both sides.
+        org.springframework.web.socket.WebSocketSession socket =
+                org.mockito.Mockito.mock(org.springframework.web.socket.WebSocketSession.class);
+        org.mockito.Mockito.when(socket.isOpen()).thenReturn(true);
+        org.mockito.Mockito.when(socket.getId())
+                .thenReturn("test-socket-" + instance.getId());
+        connectionManager.register(instance.getId(), socket);
     }
 }

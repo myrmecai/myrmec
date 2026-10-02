@@ -331,7 +331,22 @@ export class Agent {
       // The orchestration start variant. Route by the session's
       // installed execution mode (the dispatch source of truth).
       const orchestrationStart = payload as unknown as OrchestrationExecutionStartPayload;
-      const session = this.sessions.get(orchestrationStart.sessionId);
+      let session = this.sessions.get(orchestrationStart.sessionId);
+      if (!session) {
+        // session.open() is async (it resolves the LLM model) and may
+        // still be in flight when execution.start arrives - the same
+        // race the InferenceExecutor path handles. Bounded retry before
+        // failing closed (a terminal without an accept would hit the
+        // engine's INVALID_STATE - the execution row is still STARTING).
+        this.log.debug(
+          `orchestration session ${orchestrationStart.sessionId} not ready yet - waiting for session.open() to complete...`,
+        );
+        for (let i = 0; i < 20; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          session = this.sessions.get(orchestrationStart.sessionId);
+          if (session) break;
+        }
+      }
       if (!session) {
         // Fail closed: no session means the start cannot be admitted -
         // the protocol error path reports it without an accept.

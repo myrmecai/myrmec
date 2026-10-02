@@ -11,6 +11,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 import java.util.*;
@@ -59,6 +61,7 @@ public class TaskDispatcherService {
     private final AgentHostInstanceRepository hostInstanceRepository;
     private final SessionAllocator sessionAllocator;
     private final HostControlWebSocketHandler hostControlWebSocketHandler;
+    private final ai.myrmec.engine.websocket.host.HostConnectionManager hostConnectionManager;
     private final PendingTaskDispatches pendingTaskDispatches;
     private final TaskAttemptService taskAttemptService;
     private final TaskAttemptRepository attemptRepository;
@@ -200,11 +203,14 @@ public class TaskDispatcherService {
             return; // throttled/unavailable, or no capacity anywhere
         }
         AgentHost host = pick.host();
-        // §16.4: record the pin with the attempt-creating transaction so a
-        // concurrent pass under the run lock sees the same coordinator.
-        if (pick.coordinatorPin() != null) {
-            affinityResolver.recordCoordinator(requestId, null, host.getId());
-        }
+        // Design D11 (pause-time pinning): the coordinator pin is NOT
+        // recorded at dispatch - a run with no paused continuation has no
+        // host-local state to preserve, and a first-dispatch pin strands
+        // the run when the picked host dies before the handshake. The pin
+        // is recorded by OrchestrationOutcomeService.applyPaused, where
+        // the SAME_HOST continuation manifest actually exists. The
+        // in-flight handshake below still serializes same-run dispatches
+        // within one host (16.4's effective-coordinator rule).
 
         UUID sessionId = sessionAllocator.offer(
                 SESSION_KIND_TASK, requestId, SERVICE_TYPE_WORKFLOW, projectId, host.getId())
@@ -228,26 +234,44 @@ public class TaskDispatcherService {
             return;
         }
 
-        boolean offered = hostControlWebSocketHandler.sendSessionOffer(
-                sessionId, SESSION_KIND_TASK, requestId);
-        if (!offered) {
-            // The host socket vanished between selection and send: give the
-            // slot back and let the next pass re-select.
-            log.info("Session.offer undeliverable for task {} (host socket gone) — releasing slot",
-                    task.getId());
-            taskAttemptService.markAbandoned(attempt.getId(), "Host socket gone before session.offer");
-            sessionAllocator.close(sessionId, "OFFER_UNDELIVERABLE");
-            return;
-        }
-
+        // Protocol 7.1: the pending reservation is committed BEFORE the
+        // offer frame goes on the wire. This method runs inside the dispatch
+        // transaction (the attempt + dispatch rows and the coordinator pin
+        // must all be durable together), and sending inside it lets the
+        // host's session.accept race the commit - the accept handler on
+        // another thread would find no session row and answer INVALID_STATE.
+        // The send is therefore deferred to afterCommit; the socket-gone
+        // fallback (release the slot, abandon the attempt) runs there too.
+        UUID offerSessionId = sessionId;
+        UUID offerRequestId = requestId;
+        UUID offerTaskId = task.getId();
+        UUID offerAttemptId = attempt.getId();
+        TransactionSynchronizationManager.registerSynchronization(
+                new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        boolean delivered = hostControlWebSocketHandler.sendSessionOffer(
+                                offerSessionId, SESSION_KIND_TASK, offerRequestId);
+                        if (!delivered) {
+                            log.info("Session.offer undeliverable for task {} (host socket gone) "
+                                            + "- releasing slot", offerTaskId);
+                            taskAttemptService.markAbandoned(offerAttemptId,
+                                    "Host socket gone before session.offer");
+                            sessionAllocator.close(offerSessionId, "OFFER_UNDELIVERABLE");
+                            return;
+                        }
+                        log.info("Offered session {} for task {} (attempt {}, orchestration {})",
+                                offerSessionId, offerTaskId, offerAttemptId, orchestrator);
+                    }
+                });
         pendingTaskDispatches.stage(sessionId, context);
         markRunning(task, host);
-        log.info("Offered session {} to host {} for task {} (attempt {}, orchestration {})",
-                sessionId, host.getId(), task.getId(), attempt.getId(), orchestrator);
     }
 
-    /** A selected host plus the coordinator pin to record (null when unpinned). */
-    private record HostPick(AgentHost host, UUID coordinatorPin) {}
+    /** The selected host. Coordinator pinning is pause-time only (design
+     * D11) - the pick carries no pin; applyPaused records it when the
+     * SAME_HOST continuation manifest exists. */
+    private record HostPick(AgentHost host) {}
 
     /**
      * §16.4 for an orchestration task: a pinned coordinator's host is the only
@@ -267,7 +291,7 @@ public class TaskDispatcherService {
         if (pinnedHostId.isPresent()) {
             AgentHost host = agentHostRepository.findById(pinnedHostId.get()).orElse(null);
             if (host != null && hasCapacity(host.getId())) {
-                return new HostPick(host, null); // already pinned
+                return new HostPick(host); // already pinned (paused continuation)
             }
             handlePinnedCoordinatorUnavailable(task, requestId, coordinator.orElse(null));
             return null;
@@ -285,7 +309,7 @@ public class TaskDispatcherService {
         Optional<AgentHost> inFlight = inFlightOrchestrationHost(requestId, candidates);
         if (inFlight.isPresent()) {
             if (hasCapacity(inFlight.get().getId())) {
-                return new HostPick(inFlight.get(), null);
+                return new HostPick(inFlight.get());
             }
             handlePinnedCoordinatorUnavailable(task, requestId, coordinator.orElse(null));
             return null;
@@ -293,7 +317,7 @@ public class TaskDispatcherService {
 
         for (AgentHost candidate : candidates) {
             if (hasCapacity(candidate.getId())) {
-                return new HostPick(candidate, candidate.getId());
+                return new HostPick(candidate);
             }
         }
         log.debug("No host with free capacity for orchestration task {}", task.getId());
@@ -305,17 +329,30 @@ public class TaskDispatcherService {
                                         List<AgentHost> candidates) {
         for (AgentHost candidate : candidates) {
             if (hasCapacity(candidate.getId())) {
-                return new HostPick(candidate, null);
+                return new HostPick(candidate);
             }
         }
         log.debug("No host with free capacity for task {}", task.getId());
         return null;
     }
 
-    /** §7.1: a host can take a new session when a live instance has a free slot. */
+    /** Section 7.1: a host can take a new session when a live instance has a free slot.
+     * Liveness is two-sided (see HostSelectionService): the instance row must
+     * be OPEN and its control socket registered + open - an abruptly killed
+     * host keeps its row OPEN on a half-open socket, and a coordinator pin to
+     * such a host would strand the run (the offer write "succeeds" into the
+     * void, the task goes RUNNING, and no scheduler pass ever re-dispatches).
+     * A pinned-but-socketless coordinator therefore reads as unavailable and
+     * takes the section 16.4 bounded-backoff path instead. */
     private boolean hasCapacity(UUID hostId) {
         for (AgentHostInstance instance : hostInstanceRepository
                 .findByAgentHostIdAndStatus(hostId, AgentHostInstance.Status.OPEN)) {
+            boolean socketLive = hostConnectionManager.getSession(instance.getId())
+                    .map(s -> s.isOpen())
+                    .orElse(false);
+            if (!socketLive) {
+                continue;
+            }
             long consuming = sessionAllocator.countConsuming(instance.getId());
             if (consuming < instance.getPoolSize()) {
                 return true;
