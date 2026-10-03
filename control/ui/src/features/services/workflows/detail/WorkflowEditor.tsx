@@ -41,7 +41,8 @@ const statusColors: Record<string, string> = {
 /**
  * The workflow detail page: header lifecycle (name, badges, Save /
  * Publish / Archive / Run) + the YAML authoring surface. Step authoring
- * is YAML-only (spec 2026-09-08-workflow-yaml-authoring-design); the
+ * is YAML-only (the 2026-09-08 workflow-yaml-authoring spec, deleted in
+ * the 2026-10-03 docs cleanup; this surface is its implementation); the
  * canvas lives inside the YAML editor's read-only Preview tab.
  */
 export function WorkflowEditor({ workflowId }: { workflowId: string }) {

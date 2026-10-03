@@ -8,9 +8,11 @@
         http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
 
     <!--
-        Conversation close / archive lifecycle audit trail (design
-        2026-09-21-conversation-close-archive-lifecycle.md section 3). The
-        conversations table gains two parallel audit trails, both NULL-able:
+        Conversation close / archive lifecycle audit trail (recorded in
+        myrmec-ee decisions.md 2026-09-21, UC-014; original design:
+        2026-09-21-conversation-close-archive-lifecycle.md, deleted in the
+        2026-10-03 docs cleanup). The conversations table gains two
+        parallel audit trails, both NULL-able:
 
           - close trail:    closed_at / close_reason / closed_by
             (close_reason USER_ENDED for an explicit close, ARCHIVED for

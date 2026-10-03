@@ -4,8 +4,9 @@ import { z } from 'zod'
 import YAML from 'yaml'
 
 /**
- * The UI YAML authoring variant (design §6 superset, spec
- * docs/superpowers/specs/2026-09-08-workflow-yaml-authoring-design.md).
+ * The UI YAML authoring variant (design §6 superset of the
+ * orchestrator-workers codegen design; the 2026-09-08 authoring spec
+ * was deleted in the 2026-10-03 docs cleanup).
  * INFERENCE steps carry the engine's inference fields; ORCHESTRATOR steps
  * keep the §6 orchestration shape verbatim. The engine's bare-`maxRetries`
  * compatibility stays engine-only: ORCHESTRATOR steps use `retryPolicy`.

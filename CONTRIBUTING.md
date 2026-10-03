@@ -13,8 +13,7 @@ myrmec/
 │   │   └── engine-spi/    # pluggable provider interfaces (Community defaults + Enterprise overrides)
 │   └── ui/       # Control Plane UI — Vite + TypeScript
 ├── agents/       # @myrmec/agent SDK — TypeScript / Node.js, built on LangChain.js
-├── docker-compose.yml
-└── docs/
+└── docker-compose.yml
 ```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the system shape and core concepts.

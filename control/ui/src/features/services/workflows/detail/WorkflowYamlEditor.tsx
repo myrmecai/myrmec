@@ -25,8 +25,9 @@ import {
 } from '@/lib/workflow-yaml-convert'
 
 /**
- * The YAML authoring surface (spec
- * 2026-09-08-workflow-yaml-authoring-design §5): Monaco is the single
+ * The YAML authoring surface (the 2026-09-08 workflow-yaml-authoring
+ * spec's section 5 behavior, implemented here; the spec doc was deleted
+ * in the 2026-10-03 docs cleanup): Monaco is the single
  * editing surface; the canvas is a read-only Preview; the issues panel
  * renders live tier-1 validation. Save compiles to the engine step
  * JSON and POSTs bindings when ORCHESTRATOR steps exist; Publish keeps

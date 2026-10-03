@@ -18,7 +18,9 @@ import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
 
 /**
  * The workflow YAML editing surface is a JSON Schema driven Monaco YAML
- * editor (spec 2026-09-08-workflow-yaml-authoring-design): the schema is
+ * editor (the 2026-09-08 workflow-yaml-authoring spec's behavior,
+ * implemented here; the spec doc was deleted in the 2026-10-03 docs
+ * cleanup): the schema is
  * derived from the canonical Zod UI schema (workflow-yaml-schema.ts) via
  * zod-to-json-schema, then bound to the same monaco instance the
  * @monaco-editor/react wrapper loads through `loader`.

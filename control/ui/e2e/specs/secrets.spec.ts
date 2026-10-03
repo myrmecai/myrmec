@@ -13,7 +13,9 @@ import { confirmDialog } from '../helpers/confirm-dialog'
  * 5. Delete a secret that is not in use.
  * 6. Delete a secret that IS in use (referenced by a Connection Config) → expect RESOURCE_IN_USE.
  *
- * Defects discovered by this spec are tracked in E2E-DEFECTS.md.
+ * Defects discovered by this spec are tracked per the e2e defect
+ * workflow (myrmec-ee docs/testing/01-test-strategy.md; the fixed-defect
+ * ledger `e2e-defects.md` was deleted in the 2026-10-03 docs cleanup).
  */
 
 const SECRET_TYPES = [
