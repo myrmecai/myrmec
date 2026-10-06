@@ -86,7 +86,7 @@ class ExecutionPolicyUpdateTest extends IntegrationTestBase {
                 { "protocolVersion": 1, "messageId": "m-open", "type": "host.open",
                   "sentAt": "%s", "payload": { "instanceNonce": "%s", "hostname": "laptop",
                   "runtimeVersion": "1.8.0", "supportedProtocolVersions": [1], "poolSize": 4,
-                  "capabilities": {}, "reportedCapacity": {} } }
+                  "capabilities": { "sessionInteraction": { "version": 1, "temporaryHold": true } }, "reportedCapacity": {} } }
                 """.formatted(Instant.now(), UUID.randomUUID());
         ((WebSocketHandler) handler).handleMessage(session, new TextMessage(open));
 

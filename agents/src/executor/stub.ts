@@ -22,6 +22,7 @@
 import type {
   ChatModel,
   ConversationMessage,
+  ModelCallOptions,
   ModelResponse,
   ModelStreamChunk,
   ModelToolCall,
@@ -129,6 +130,7 @@ class StubChatModel implements ChatModel {
   async invoke(
     messages: ConversationMessage[],
     tools: ToolSpec[],
+    _options?: ModelCallOptions,
   ): Promise<ModelResponse> {
     this.iteration++;
     const ctx: LlmStubContext = {
@@ -154,6 +156,7 @@ class StubChatModel implements ChatModel {
   async *stream(
     messages: ConversationMessage[],
     tools: ToolSpec[],
+    _options?: ModelCallOptions,
   ): AsyncIterable<ModelStreamChunk> {
     this.iteration++;
     const ctx: LlmStubContext = {

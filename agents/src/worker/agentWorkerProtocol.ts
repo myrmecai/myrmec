@@ -49,7 +49,87 @@ export interface WorkerEngineAckMessage {
   acknowledgedMessageId: string;
 }
 
-export type WorkerInbound = WorkerEnvelopeMessage | WorkerPskMessage | WorkerEngineAckMessage;
+/**
+ * Parent -> worker (protocol §22.8 D7): the supervisor's connection-state
+ * notification for one session. Carries the dedicated-channel/session
+ * reachability seam across the thread boundary:
+ *  - `ready: true`  — the required channel is bound AND reconciliation
+ *    permits work (session admission gate open).
+ *  - `ready: false` — pause admission for the session (control-socket loss
+ *    with a live channel; reconciliation may later re-permit).
+ *  - `fatal: true`  — the session must stop (bound channel died). Idempotent:
+ *    repeated notifications for a stopping/stopped session are no-ops.
+ */
+export interface WorkerConnectionStateMessage {
+  kind: "connection-state";
+  sessionId: string;
+  /** Required channel bound AND reconciliation permits work. */
+  ready: boolean;
+  /** Fatal loss (channel died / session must stop). Idempotent. */
+  fatal: boolean;
+}
+
+/**
+ * §7.5/§22.8 (D7 cutover, Task 11): the supervisor's dedicated channel
+ * handshake completed for a session — the worker's SessionRegistry
+ * records the binding (liveness bookkeeping; the socket itself stays
+ * supervisor-side). Fire-and-forget: an unknown session is a no-op.
+ */
+export interface WorkerChannelOpenedMessage {
+  kind: "channel-opened";
+  sessionId: string;
+  /** The channel.opened payload (cursor + limits) as structured-cloneable. */
+  opened: { highestContiguousSequence: number };
+}
+
+/**
+ * §22.8 (D7): the session's BOUND channel died — the registry clears its
+ * binding mark (the fatal session teardown itself rides the existing
+ * connection-state seam, which the supervisor emits alongside this).
+ */
+export interface WorkerChannelDeadMessage {
+  kind: "channel-dead";
+  sessionId: string;
+}
+
+/** Session close: the registry drops its channel binding (socket stays
+ * supervisor-side; the client closes the transport). */
+export interface WorkerChannelUnbindMessage {
+  kind: "channel-unbind";
+  sessionId: string;
+}
+
+/**
+ * §13 (A2, Task 11): a CANCEL_EXECUTION resume decision's cancellation —
+ * the worker's executor takes the existing execution.cancel path for the
+ * named execution (the §13 decision IS the cancellation command).
+ */
+export interface WorkerCancelExecutionMessage {
+  kind: "cancel-execution";
+  /** The execution to cancel (the executor keys on executionId). */
+  executionId: string;
+}
+
+/**
+ * §13 (A2, Task 11): a CLOSE resume decision (or retention expiry) —
+ * the worker runs the existing fatal session teardown for the session
+ * (idempotent registry-side).
+ */
+export interface WorkerCloseRetainedMessage {
+  kind: "close-retained";
+  sessionId: string;
+}
+
+export type WorkerInbound =
+  | WorkerEnvelopeMessage
+  | WorkerPskMessage
+  | WorkerEngineAckMessage
+  | WorkerConnectionStateMessage
+  | WorkerChannelOpenedMessage
+  | WorkerChannelDeadMessage
+  | WorkerChannelUnbindMessage
+  | WorkerCancelExecutionMessage
+  | WorkerCloseRetainedMessage;
 
 /**
  * Worker -> parent. A frame the worker produced (an `execution.delta`,

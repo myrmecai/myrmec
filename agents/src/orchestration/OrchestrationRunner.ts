@@ -19,6 +19,8 @@ import type { Tool } from "../executor/types.js";
 import type { ChatModelFactory } from "../executor/providers.js";
 import type { ModelInfoWire } from "../protocol/sessionTypes.js";
 import type { Task, TaskResult } from "../models/index.js";
+import { HoldAbortedError } from "../interaction/ExecutionControlCoordinator.js";
+import { AttemptModelScheduler } from "../interaction/AttemptModelScheduler.js";
 import type {
   OrchestrationAssignment,
   OrchestrationRunResult,
@@ -145,7 +147,23 @@ export interface OrchestrationRunnerOptions {
   retryContinuationLoader?: {
     load(continuationId: string): import("./ContinuationStateStore.js").ContinuationManifest | null;
   };
+  /** Task 5 (§14.2): the serialized hold gate — a per-attempt
+   * constructor dependency (the executor composes the coordinator
+   * once per orchestration dispatch). The runner gates the HELPER
+   * admission (BEFORE_HELPER_CALL leaf: released before the helper
+   * child runs so a parked parent never blocks HELD) and the final Git
+   * checkpoint (BEFORE_GIT_EFFECT); the model/tool boundaries inside
+   * every turn are gated through the TurnRun's control/modelScheduler.
+   * Absent: the legacy ungated loop (all existing behavior unchanged). */
+  toolGate?: RunnerControl;
 }
+
+/** The hold-gate surface the runner gates on (Task 5: design 14.2/22.5).
+ * The full ExecutionControl is required because the orchestrator turn's
+ * TurnRun.control expects the complete control seam; the type import
+ * keeps the runner transport-independent. Satisfied by the
+ * ExecutionControlCoordinator. */
+export type RunnerControl = import("../interaction/ExecutionControlCoordinator.js").ExecutionControl;
 
 export interface OrchestrationRunOptions {
   runId: string;
@@ -162,6 +180,19 @@ export interface OrchestrationRunOptions {
    * Mutated by policy updates via {@link OrchestrationRunHandle}; the
    * controller reads through this seam each boundary. */
   allowanceSource?: { maxTokens: number | null };
+  /** §13/§22.5: the SHARED per-attempt budget controller (Task 5 fix:
+   * one instance per attempt composed by the executor and reused by the
+   * helpers AND the executor's own accounting). When present the runner
+   * uses it INSTEAD of constructing its own; absent, the legacy
+   * construction at run start is unchanged. Restore-with-counters stays
+   * the executor's duty (it seeds the controller before injecting). */
+  budget?: BudgetController;
+  /** 14.5 (Task 7): the executor-composed attempt scheduler - REUSED
+   * when present so the orchestrator loop, the helper turns, and the
+   * interactive loop serialize through the SAME one permit (no second
+   * allocation). Absent: the runner constructs its own from toolGate
+   * (Task 5 behavior unchanged). */
+  modelScheduler?: AttemptModelScheduler;
 }
 
 /** The orchestrator's single action tool input (design §10.1). */
@@ -372,11 +403,16 @@ export class OrchestrationRunner {
     let rejectionCount = 0;
     const verifierResults: VerdictRecord[] = [];
     // Feature 7 (design §13): the per-attempt budget controller shared by
-    // the orchestrator and every helper TurnExecutor. A new engine
-    // attempt has a new dispatchId and FRESH counters (§17.2) — the
-    // restored manifest contributes completed-call identities, candidate
-    // state, and verifier history only, never counters.
-    const budget: BudgetController = new InMemoryBudgetController(o.budget);
+    // the orchestrator and every helper TurnExecutor. §13/§22.5 fix: the
+    // runner reuses the EXECUTOR-INJECTED controller when the run options
+    // carry one (one instance per attempt, shared with the executor's own
+    // accounting); absent, the legacy fresh construction is unchanged. A
+    // new engine attempt has a new dispatchId and FRESH counters (§17.2) —
+    // the restored manifest contributes completed-call identities,
+    // candidate state, and verifier history only, never counters (the
+    // executor seeds the injected controller before injection).
+    const budget: BudgetController =
+      runOptions.budget ?? new InMemoryBudgetController(o.budget);
     // §17.5: the restored completed-call identities are available for
     // replay dedup at the §17.5 seam (same-dispatch restart); a NEW
     // engine attempt carries fresh callIds by design (§13), so no
@@ -610,6 +646,49 @@ export class OrchestrationRunner {
             `execution paused: the policy execution timeout reached (timeout ${runOptions.executionTimeoutSeconds}s)`,
           );
         }
+        // Task 5 (§14.2/22.5): the helper admission is a LEAF at
+        // BEFORE_HELPER_CALL. The lease is RELEASED BEFORE the child
+        // turn runs — a parked parent waiting for its child's release
+        // is NOT an active leaf (22.5: nested helper calls use the
+        // same gate without blocking a parent while holding a global
+        // lock; HELD requires the MODEL/TOOL/git leaves drained). The
+        // child's own leaves gate themselves through the TurnRun: the
+        // invoker carries the SAME control + the attempt scheduler
+        // (injected below via setControl), so the child's model/tool
+        // boundaries park and drain on the identical hold gate.
+        const gate = this.options.toolGate;
+        if (gate) {
+          try {
+            const helperLease = await gate.enterOperation("BEFORE_HELPER_CALL");
+            helperLease.release(); // admission only - never across the child
+          } catch (abort) {
+            // §14.3/§22.5: gate aborts (stop/deadline/cancel) are
+            // TERMINATION control flow - the turn unwinds to CANCELLED.
+            if (abort instanceof HoldAbortedError) {
+              return {
+                schemaVersion: "1.0",
+                resultId: this.resultId(dispatch),
+                resultDigest: this.resultDigest(dispatch),
+                dispatch,
+                status: "CANCELLED",
+                retryDisposition: "NONE",
+                summary: `cancelled at the hold gate: ${abort instanceof Error ? abort.message : String(abort)}`,
+                helperCalls,
+                verifierResults: verifierResults.map(toVerifierResult),
+                commandExecutions,
+                changedFiles: [],
+                commits: [],
+                cleanWorktree: await this.worktreeClean(),
+                usage: {
+                  helperCalls: budget.counters().helperCalls,
+                  rejectionCount,
+                  totalTokens: budget.counters().totalTokens,
+                },
+              };
+            }
+            throw abort;
+          }
+        }
         const outcome = await this.options.helperInvoker.invoke(
           assignment,
           args.helperName,
@@ -698,6 +777,29 @@ export class OrchestrationRunner {
       runOptions.maxFunctionCalls != null && runOptions.maxFunctionCalls > 0
         ? Math.min(runOptions.maxFunctionCalls, o.budget.maxOrchestratorIterations)
         : o.budget.maxOrchestratorIterations;
+    // Task 5 fix (§22.5 same-gate rule): ONE scheduler per run, hoisted
+    // out of the TurnRun spread. The same instance is handed to helper
+    // turns through the invoker's setControl seam, so the orchestrator
+    // and its helpers serialize through the SAME one permit (a helper
+    // child's model call can never join the permit concurrently with its
+    // parent's loop) and the gate's leaf accounting sees one attempt.
+    // Task 7 (14.5): when the run options carry the EXECUTOR-COMPOSED
+    // scheduler it is REUSED (the interaction loop shares the same
+    // permit - no second allocation); absent, the legacy fresh
+    // construction is unchanged.
+    const attemptModelScheduler =
+      runOptions.modelScheduler ??
+      (this.options.toolGate
+        ? new AttemptModelScheduler({ control: this.options.toolGate })
+        : null);
+    if (this.options.toolGate && attemptModelScheduler) {
+      // §22.5: helper child turns gate through the SAME control + the
+      // SAME per-attempt scheduler as the orchestrator turn.
+      this.options.helperInvoker.setControl(
+        this.options.toolGate,
+        attemptModelScheduler,
+      );
+    }
     try {
       result = await this.options.turnExecutor.execute(task, {
         model: orchestratorModel,
@@ -706,6 +808,24 @@ export class OrchestrationRunner {
         // §13: the orchestrator turn shares the per-attempt budget — its
         // responses are recorded and checked inside the model-tool loop.
         budget,
+        // Task 5 (§14.2/22.5): the model/tool boundaries of the turn gate
+        // through the same hold gate: the model invocation serializes
+        // through the attempt-level scheduler (one permit, interaction
+        // priority, gate recheck after acquisition — 14.5) and the tool
+        // execution parks at BEFORE_TOOL_EXECUTION via TurnRun.control —
+        // EXCEPT the delegation tool itself (§22.5 carve-out): its body
+        // spans the helper child turn whose own boundaries gate through
+        // the same control/scheduler, and its admission is already gated
+        // at the runner's BEFORE_HELPER_CALL boundary, so the parent must
+        // not hold a tool leaf across the child (else HELD is unreachable
+        // while a helper runs).
+        ...(this.options.toolGate && attemptModelScheduler
+          ? {
+              control: this.options.toolGate,
+              modelScheduler: attemptModelScheduler,
+              ungatedToolNames: [invokeHelperTool.name],
+            }
+          : {}),
         // §13: the dispatch's cooperative cancellation propagates into
         // the orchestrator turn loop.
         ...(this.options.cancellation ? { cancellation: this.options.cancellation } : {}),
@@ -1063,33 +1183,62 @@ export class OrchestrationRunner {
     // unchanged tree was accepted by allowNoChanges. The runner — never
     // a model — invokes the checkpoint service after the criteria pass.
     const commits: import("./types.js").CheckpointCommit[] = [];
-    let cleanWorktree = true;
-    if (this.options.checkpointService && this.options.allowCheckpoint !== false) {
-      const checkpoint = await this.options.checkpointService.create(
-        lastTree.value,
-        this.options.expectedHead ?? "",
-      );
-      if (checkpoint.status === "COMMITTED") {
-        commits.push(checkpoint.commit);
-      } else if (checkpoint.status === "FAILED") {
-        return this.failure(
+    const cleanWorktreeRef = { clean: true };
+    const checkpointSvc = this.options.checkpointService;
+    if (checkpointSvc && this.options.allowCheckpoint !== false) {
+      // Task 5 (§22.5): the final Git checkpoint is the last LEAF
+      // (BEFORE_GIT_EFFECT) — it must not RUN while HELD; it parks at
+      // the gate and runs after CONTINUE. A gate abort (stop/deadline/
+      // cancel) unwinds to CANCELLED via the checkpoint lease release.
+      // Task 5 fix (review finding 4): the lease is held ACROSS the
+      // create and released only in the finally — releasing it before
+      // `create` let a HOLD landing mid-create publish HELD while the
+      // git effect was still in flight (22.5: the git effect must be
+      // DRAINED before HELD; the held lease IS the drain evidence).
+      const runCheckpointPhase = (): Promise<OrchestrationRunResult | null> =>
+        this.checkpointPhase(
+          checkpointSvc,
           dispatch,
-          checkpoint.errorCode,
-          `checkpoint failed: ${checkpoint.errorCode}`,
-          { ...usageOut, rejectionCount },
+          lastTree.value,
+          commits,
+          cleanWorktreeRef,
+          usageOut,
           helperCalls,
           verifierResults,
           commandExecutions,
         );
-      }
-      // NO_CHANGES: the unchanged tree was accepted (allowNoChanges)
-      // — zero commits, and the §18 evidence is the ledger's APPROVED
-      // records bound to the unchanged tree hash.
-      // After a commit (or accepted no-op) the step scope must be clean.
-      if (this.options.workspaceInspector && this.options.workspace) {
-        const post = await this.options.workspaceInspector.inspect(this.options.workspace);
-        cleanWorktree = post.clean;
-      }
+      const phaseFailure = this.options.toolGate
+        ? await (async () => {
+            let checkpointLease;
+            try {
+              checkpointLease =
+                await this.options.toolGate!.enterOperation("BEFORE_GIT_EFFECT");
+            } catch (abort) {
+              // §22.5/§14.3: a gate abort at the checkpoint ADMISSION
+              // (stop/deadline/cancel while the gate is closed) is
+              // TERMINATION control flow — map it to the CANCELLED
+              // result exactly like the helper-admission boundary, not
+              // an escaped execution.failed.
+              if (abort instanceof HoldAbortedError) {
+                return this.cancelledCheckpointResult(
+                  dispatch,
+                  helperCalls,
+                  verifierResults,
+                  commandExecutions,
+                  usageOut,
+                  rejectionCount,
+                );
+              }
+              throw abort;
+            }
+            try {
+              return await runCheckpointPhase();
+            } finally {
+              checkpointLease.release();
+            }
+          })()
+        : await runCheckpointPhase();
+      if (phaseFailure) return phaseFailure;
     }
 
     return {
@@ -1105,12 +1254,95 @@ export class OrchestrationRunner {
       commandExecutions,
       changedFiles: [],
       commits,
-      cleanWorktree,
+      cleanWorktree: cleanWorktreeRef.clean,
+      usage: { ...usageOut, rejectionCount },
+    };
+  }
+
+  /**
+   * §22.5/§14.3 (Task 5): the CANCELLED result a checkpoint-admission
+   * gate abort maps to — the same evidence shape as the §13
+   * cancellation path (worktree state reported as-is; the executor
+   * routes it to the existing cancelled terminal).
+   */
+  private async cancelledCheckpointResult(
+    dispatch: OrchestrationAssignment["dispatch"],
+    helperCalls: HelperCallResult[],
+    verifierResults: VerdictRecord[],
+    commandExecutions: import("./types.js").CommandExecutionRecord[],
+    usageOut: { helperCalls: number; rejectionCount: number; totalTokens: number },
+    rejectionCount: number,
+  ): Promise<OrchestrationRunResult> {
+    return {
+      schemaVersion: "1.0",
+      resultId: this.resultId(dispatch),
+      resultDigest: this.resultDigest(dispatch),
+      dispatch,
+      status: "CANCELLED",
+      retryDisposition: "NONE",
+      summary: "cancelled at the checkpoint hold gate",
+      helperCalls,
+      verifierResults: verifierResults.map(toVerifierResult),
+      commandExecutions,
+      changedFiles: [],
+      commits: [],
+      cleanWorktree: await this.worktreeClean(),
       usage: { ...usageOut, rejectionCount },
     };
   }
 
   // ── result identity (§7.3: deterministic per dispatch+digest) ──────
+
+  /**
+   * The checkpoint phase body shared by the gated and ungated paths
+   * (review finding 4): create() runs under the caller-held
+   * BEFORE_GIT_EFFECT lease (the gated path parks + holds through the
+   * whole phase), COMMITTED appends the commit, FAILED returns the typed
+   * failure, NO_CHANGES contributes zero commits, and the post-branch
+   * inspector re-checks worktree cleanliness into the ref.
+   */
+  private async checkpointPhase(
+    checkpointSvc: NonNullable<OrchestrationRunnerOptions["checkpointService"]>,
+    dispatch: OrchestrationAssignment["dispatch"],
+    lastTreeHash: string,
+    commits: import("./types.js").CheckpointCommit[],
+    cleanWorktreeRef: { clean: boolean },
+    usageOut: { helperCalls: number; rejectionCount: number; totalTokens: number },
+    helperCalls: HelperCallResult[],
+    verifierResults: VerdictRecord[],
+    commandExecutions: import("./types.js").CommandExecutionRecord[],
+  ): Promise<OrchestrationRunResult | null> {
+    const checkpoint = await checkpointSvc.create(
+      lastTreeHash,
+      this.options.expectedHead ?? "",
+    );
+    if (checkpoint.status === "COMMITTED") {
+      commits.push(checkpoint.commit);
+    } else if (checkpoint.status === "FAILED") {
+      return this.failure(
+        dispatch,
+        checkpoint.errorCode,
+        `checkpoint failed: ${checkpoint.errorCode}`,
+        {
+          helperCalls: usageOut.helperCalls,
+          rejectionCount: usageOut.rejectionCount,
+          totalTokens: usageOut.totalTokens,
+        },
+        helperCalls,
+        verifierResults,
+        commandExecutions,
+      );
+    }
+    // NO_CHANGES: the unchanged tree was accepted (allowNoChanges) —
+    // zero commits, and the §18 evidence is the ledger's APPROVED
+    // records bound to the unchanged tree hash. After the commit (or
+    // accepted no-op) the step scope must be clean.
+    if (this.options.workspaceInspector && this.options.workspace) {
+      const post = await this.options.workspaceInspector.inspect(this.options.workspace);
+      cleanWorktreeRef.clean = post.clean;
+    }
+    return null;
+  }
 
   /**
    * §17.4 HITL suspension: publish the continuation + suspension state,

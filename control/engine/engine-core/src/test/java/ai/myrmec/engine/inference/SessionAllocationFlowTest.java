@@ -8,9 +8,11 @@ import ai.myrmec.engine.agent.AgentHostCreationResult;
 import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentProfile;
+import ai.myrmec.engine.project.Project;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.websocket.host.HostControlHandshakeInterceptor;
 import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
+import ai.myrmec.engine.workflow.TaskDispatcherService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -45,6 +47,7 @@ class SessionAllocationFlowTest extends IntegrationTestBase {
     @Autowired SessionRepository sessionRepository;
     @Autowired AgentHostInstanceRepository instances;
     @Autowired TestDataBuilder data;
+    @Autowired ai.myrmec.engine.inference.SessionContextAssembler sessionContextAssembler;
     private final ObjectMapper mapper =
             new ObjectMapper().registerModule(new JavaTimeModule());
 
@@ -68,7 +71,7 @@ class SessionAllocationFlowTest extends IntegrationTestBase {
                 { "protocolVersion": 1, "messageId": "m-open", "type": "host.open",
                   "sentAt": "%s", "payload": { "instanceNonce": "%s", "hostname": "laptop",
                   "runtimeVersion": "1.8.0", "supportedProtocolVersions": [1], "poolSize": 4,
-                  "capabilities": {}, "reportedCapacity": {} } }
+                  "capabilities": { "sessionInteraction": { "version": 1, "temporaryHold": true } }, "reportedCapacity": {} } }
                 """.formatted(Instant.now(), UUID.randomUUID());
         ((WebSocketHandler) handler).handleMessage(session, new TextMessage(open));
         return new Host(host, profile, session);
@@ -201,5 +204,75 @@ class SessionAllocationFlowTest extends IntegrationTestBase {
         JsonNode error = lastReply(hostSetup.session());
         assertThat(error.path("type").asText()).isEqualTo("protocol.error");
         assertThat(error.path("payload").path("code").asText()).isEqualTo("INVALID_STATE");
+    }
+
+    // ------------------------------------------------------------------
+    // §22.3/D7 offer shape: WORKFLOW session.open ALWAYS carries the
+    // dedicated-channel offer; conversation keeps exactly today's gate.
+    // ------------------------------------------------------------------
+
+    @Test
+    void workflowSessionOpenAlwaysCarriesTheChannelOffer() throws Exception {
+        Host hostSetup = openedHost();
+        UUID instanceId = (UUID) hostSetup.session().getAttributes()
+                .get(HostControlWebSocketHandler.ATTR_HOST_INSTANCE_ID);
+        var project = data.project().named("f-proj4").create();
+
+        // §22.3/D7: the offer no longer consults the channel feature flag for
+        // orchestration — only the endpoint + serving instance must resolve.
+        // (The e2e profile leaves myrmec.channel.* at its defaults.)
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                sessionContextAssembler, "channelEndpoint", "engine-e2e.internal:9090");
+        try {
+            UUID sessionId = allocator.offer(TaskDispatcherService.SESSION_KIND_TASK,
+                    UUID.randomUUID(), TaskDispatcherService.SERVICE_TYPE_WORKFLOW,
+                    project.getId(), hostSetup.host().getId()).orElseThrow();
+            allocator.accept(sessionId);
+
+            handler.sendSessionOpen(sessionId, hostSetup.profile().getId());
+            JsonNode open = replies(hostSetup.session()).stream()
+                    .filter(n -> "session.open".equals(n.path("type").asText()))
+                    .findFirst().orElseThrow();
+            assertThat(open.path("payload").path("channel").isObject())
+                    .as("WORKFLOW session.open carries the dedicated offer (§22.3)")
+                    .isTrue();
+            assertThat(open.path("payload").path("channel").path("endpoint").asText())
+                    .isEqualTo("wss://engine-e2e.internal:9090/api/v1/agent/host/ws/channel");
+            assertThat(open.path("payload").path("channel").path("token").asText())
+                    .isNotBlank();
+        } finally {
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    sessionContextAssembler, "channelEndpoint", "");
+        }
+    }
+
+    @Test
+    void conversationSessionOpenKeepsTheFeatureGate() throws Exception {
+        Host hostSetup = openedHost();
+        UUID instanceId = (UUID) hostSetup.session().getAttributes()
+                .get(HostControlWebSocketHandler.ATTR_HOST_INSTANCE_ID);
+        var project = data.project().named("f-proj5").create();
+
+        UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
+                project.getId(), hostSetup.host().getId()).orElseThrow();
+        allocator.accept(sessionId);
+
+        handler.sendSessionOpen(sessionId, hostSetup.profile().getId());
+        JsonNode open = replies(hostSetup.session()).stream()
+                .filter(n -> "session.open".equals(n.path("type").asText()))
+                .findFirst().orElseThrow();
+        // Conversation behavior UNCHANGED: with the feature disabled (the
+        // e2e default) the channel block is absent even with an endpoint set.
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                sessionContextAssembler, "channelEndpoint", "engine-e2e.internal:9090");
+        try {
+            assertThat(open.path("payload").path("channel").isMissingNode()
+                    || open.path("payload").path("channel").isNull())
+                    .as("conversation session.open keeps today's channel gate")
+                    .isTrue();
+        } finally {
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    sessionContextAssembler, "channelEndpoint", "");
+        }
     }
 }

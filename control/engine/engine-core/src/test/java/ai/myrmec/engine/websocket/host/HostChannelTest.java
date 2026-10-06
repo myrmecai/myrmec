@@ -81,7 +81,7 @@ class HostChannelTest extends IntegrationTestBase {
                 { "protocolVersion": 1, "messageId": "m-open", "type": "host.open",
                   "sentAt": "%s", "payload": { "instanceNonce": "%s", "hostname": "laptop",
                   "runtimeVersion": "1.8.0", "supportedProtocolVersions": [1], "poolSize": 4,
-                  "capabilities": {}, "reportedCapacity": {} } }
+                  "capabilities": { "sessionInteraction": { "version": 1, "temporaryHold": true } }, "reportedCapacity": {} } }
                 """.formatted(Instant.now(), UUID.randomUUID());
         handler.handleMessage(session, new TextMessage(open));
 
@@ -113,6 +113,96 @@ class HostChannelTest extends IntegrationTestBase {
         attrs.put(HostControlHandshakeInterceptor.ATTR_HOST_ID, hostId);
         lenient().when(socket.getAttributes()).thenReturn(attrs);
         return socket;
+    }
+
+    /**
+     * D7 (§22.3/D7): an orchestration WORKFLOW session's engine→host frames
+     * ride the dedicated channel. With a channel bound, {@code session.close}
+     * lands on the channel socket and NEVER on the control socket.
+     */
+    @Test
+    void workflowSessionFrameRidesTheBoundChannelOnly() throws Exception {
+        ControlSocket host = openedHost();
+        var project = data.project().named("ch-proj-frag").create();
+        var profile = data.agentProfile().named("ch-prof-frame").create();
+
+        enableChannelFeature(() -> {
+            UUID sessionId = allocator.offer("ORCHESTRATION_TASK", UUID.randomUUID(), "WORKFLOW",
+                    project.getId(), agentIdOf(host.instanceId())).orElseThrow();
+            acceptAndOpen(host, sessionId);
+
+            // session.open (engine→host) — with no bound channel this ride the
+            // control socket and carries the DEDICATED offer (§22.3: workflow
+            // session.open ALWAYS carries one; the channel feature gate no
+            // longer suppresses it for orchestration).
+            handler.sendSessionOpen(sessionId, profile.getId());
+            JsonNode open = replies(host.session()).stream()
+                    .filter(n -> "session.open".equals(n.path("type").asText()))
+                    .findFirst().orElseThrow();
+            JsonNode channel = open.path("payload").path("channel");
+            assertThat(channel.isObject())
+                    .as("WORKFLOW session.open ALWAYS carries a dedicated offer")
+                    .isTrue();
+            String token = channel.path("token").asText();
+
+            // The host binds the offered channel.
+            WebSocketSession socket = channelSocket(host.hostId());
+            channelHandler.handleMessage(socket,
+                    new TextMessage(channelOpenFrame(sessionId, token, 0L)));
+            assertThat(lastReply(socket).path("type").asText()).isEqualTo("channel.opened");
+
+            // engine→host session frames now ride the dedicated channel only.
+            handler.sendSessionClose(sessionId, "EXECUTION_TERMINAL");
+
+            var typesOnChannel = replies(socket).stream()
+                    .map(n -> n.path("type").asText()).toList();
+            assertThat(typesOnChannel).contains("session.close");
+
+            // The Host Channel is not a fallback (§22.3/D7): the frame never
+            // lands on the control socket while a channel is bound.
+            var typesOnControl = replies(host.session()).stream()
+                    .map(n -> n.path("type").asText()).toList();
+            assertThat(typesOnControl).doesNotContain("session.close");
+        });
+    }
+
+    /** §22.3/D7: conversation session.open/close frames behave like today (control-socket delivery without a bound channel). */
+    @Test
+    void conversationSessionFrameDeliversOnTheControlSocketWithoutAChannel() throws Exception {
+        ControlSocket host = openedHost();
+        var project = data.project().named("ch-proj-frh").create();
+        var profile = data.agentProfile().named("ch-prof-frh").create();
+        UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
+                project.getId(), agentIdOf(host.instanceId())).orElseThrow();
+        acceptAndOpen(host, sessionId);
+
+        handler.sendSessionOpen(sessionId, profile.getId());
+        handler.sendSessionClose(sessionId, "EXECUTION_TERMINAL");
+
+        var typesOnControl = replies(host.session()).stream()
+                .map(n -> n.path("type").asText()).toList();
+        assertThat(typesOnControl).contains("session.open", "session.close");
+    }
+
+    /** A throwing-Runnable so the channel tests can keep their checked-exception style. */
+    @FunctionalInterface
+    private interface TestBody {
+        void run() throws Exception;
+    }
+
+    /** Enable the channel feature around a body (feature toggles for conversation). */
+    private void enableChannelFeature(TestBody body) {
+        ReflectionTestUtils.setField(sessionContextAssembler, "channelEnabled", true);
+        ReflectionTestUtils.setField(sessionContextAssembler, "channelEndpoint",
+                "engine-1.internal:9090");
+        try {
+            body.run();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            ReflectionTestUtils.setField(sessionContextAssembler, "channelEnabled", false);
+            ReflectionTestUtils.setField(sessionContextAssembler, "channelEndpoint", "");
+        }
     }
 
     private String channelOpenFrame(UUID sessionId, String token, long resumeFrom) {
@@ -160,7 +250,7 @@ class HostChannelTest extends IntegrationTestBase {
             JsonNode channel = open.path("payload").path("channel");
             assertThat(channel.isObject()).isTrue();
             assertThat(channel.path("endpoint").asText())
-                    .isEqualTo("wss://engine-1.internal:9090/ws/host/channel");
+                    .isEqualTo("wss://engine-1.internal:9090/api/v1/agent/host/ws/channel");
             assertThat(channel.path("token").asText()).isNotBlank();
         } finally {
             ReflectionTestUtils.setField(sessionContextAssembler, "channelEnabled", false);
@@ -358,7 +448,7 @@ class HostChannelTest extends IntegrationTestBase {
     }
 
     @Test
-    void channelCloseDropsBindingButSessionStaysActive() throws Exception {
+    void boundChannelCloseIsFatalAndClosesTheSessionViaTheExistingClosePath() throws Exception {
         ControlSocket host = openedHost();
         var project = data.project().named("ch-proj7").create();
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
@@ -371,18 +461,51 @@ class HostChannelTest extends IntegrationTestBase {
                 new TextMessage(channelOpenFrame(sessionId, token, 0L)));
         assertThat(channelRegistry.getChannel(sessionId)).isPresent();
 
-        // The channel socket dies.
+        // The channel socket dies (D7 §22.8: Agent Channel loss is fatal).
         channelHandler.afterConnectionClosed(socket, CloseStatus.GOING_AWAY);
 
-        // Binding gone; the session is untouched (still ACTIVE).
+        // Binding gone; the session row closed via the EXISTING close path
+        // (SessionAllocator.close) with a fatal reason stamped on the row.
         assertThat(channelRegistry.getChannel(sessionId)).isEmpty();
         Session row = sessionRepository.findById(sessionId).orElseThrow();
         assertThat(row.getAllocationState())
-                .isEqualTo(ai.myrmec.engine.inference.SessionAllocator.ALLOC_STATE_ACTIVE);
-        // The control socket still serves the session — engine→host works.
-        handler.sendSessionClose(sessionId, "CONVERSATION_ARCHIVED");
-        var controlSends = replies(host.session()).stream()
-                .filter(n -> "session.close".equals(n.path("type").asText())).toList();
-        assertThat(controlSends).hasSize(1);
+                .isEqualTo(ai.myrmec.engine.inference.SessionAllocator.ALLOC_STATE_CLOSED);
+        assertThat(row.getClosedAt()).isNotNull();
+        assertThat(row.getCloseReason())
+                .as("the closest existing fatal reason (no new vocabulary)")
+                .isEqualTo(ai.myrmec.engine.websocket.host.payload.SessionCloseReason.HOST_LOST);
+
+        // Capacity exactly once: the released slot accepts a new reservation.
+        assertThat(allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
+                project.getId(), agentIdOf(host.instanceId()))).isPresent();
+    }
+
+    @Test
+    void workflowChannelCloseIsFatalTheSameWayAndReleasesTheSlot() throws Exception {
+        ControlSocket host = openedHost();
+        var project = data.project().named("ch-proj8").create();
+        UUID sessionId = allocator.offer("ORCHESTRATION_TASK", UUID.randomUUID(), "WORKFLOW",
+                project.getId(), agentIdOf(host.instanceId())).orElseThrow();
+        acceptAndOpen(host, sessionId);
+
+        String token = channelTokenService.mint(sessionId, host.instanceId());
+        WebSocketSession socket = channelSocket(host.hostId());
+        channelHandler.handleMessage(socket,
+                new TextMessage(channelOpenFrame(sessionId, token, 0L)));
+        assertThat(channelRegistry.getChannel(sessionId)).isPresent();
+
+        // The channel socket dies — the decision is channel-level, NOT
+        // orchestration-only: conversation sessions die the same way.
+        channelHandler.afterConnectionClosed(socket, CloseStatus.GOING_AWAY);
+
+        Session row = sessionRepository.findById(sessionId).orElseThrow();
+        assertThat(row.getAllocationState())
+                .isEqualTo(ai.myrmec.engine.inference.SessionAllocator.ALLOC_STATE_CLOSED);
+        assertThat(row.getCloseReason())
+                .isEqualTo(ai.myrmec.engine.websocket.host.payload.SessionCloseReason.HOST_LOST);
+
+        // A one-shot WORKFLOW session: the slot returns for the next task.
+        assertThat(allocator.offer("ORCHESTRATION_TASK", UUID.randomUUID(), "WORKFLOW",
+                project.getId(), agentIdOf(host.instanceId()))).isPresent();
     }
 }

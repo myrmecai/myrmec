@@ -21,6 +21,10 @@ import type {
   VerifierResult,
 } from "./types.js";
 import type { BudgetController } from "./BudgetController.js";
+import type { AttemptModelScheduler } from "../interaction/AttemptModelScheduler.js";
+/** The full ExecutionControl seam (the coordinator's interface); the type
+ * import keeps the invoker transport-independent. */
+type ControlSeam = import("../interaction/ExecutionControlCoordinator.js").ExecutionControl;
 /** The tools a helper invocation gets: the workspace-scoped file/command
  * tools via the injected toolFactory (Feature 4), plus the runner-owned
  * `report_verdict` tool when purpose is VERIFY (Feature 5, design §11). */
@@ -132,6 +136,19 @@ export class HelperInvoker {
 
   /** The dispatch's cooperative cancellation signal (§13). */
   private cancellation?: { readonly cancelled: boolean };
+
+  /** Task 5 fix (§22.5 same-gate rule): the runner injects the SAME hold
+   * gate + per-attempt model scheduler it runs the orchestrator turn
+   * with, so helper child turns' model/tool boundaries gate through the
+   * identical gate (their model calls serialize on the same one permit). */
+  setControl(control: ControlSeam, modelScheduler: AttemptModelScheduler): void {
+    this.control = control;
+    this.modelScheduler = modelScheduler;
+  }
+
+  /** The gate + scheduler injected by the runner (§22.5). */
+  private control?: ControlSeam;
+  private modelScheduler?: AttemptModelScheduler;
 
   /**
    * Invoke one declared helper. Validates the declaration and the model
@@ -290,6 +307,16 @@ export class HelperInvoker {
       ...(this.options.budget ? { budget: this.options.budget } : {}),
       // §13: the dispatch's cancellation propagates into the helper loop.
       ...(this.cancellation ? { cancellation: this.cancellation } : {}),
+      // Task 5 fix (§22.5 same-gate rule): the CHILD's own model calls
+      // and tool executions gate through the SAME hold gate + per-attempt
+      // scheduler the runner handed in (setControl) — a HELD gate parks
+      // the child's model invoke at BEFORE_MODEL_CALL and its tools at
+      // BEFORE_TOOL_EXECUTION, so §22.5's "nested helper calls use the
+      // same gate" is real (the parent's admission leaf is released
+      // before the child runs; the child's own leaves gate here).
+      ...(this.control && this.modelScheduler
+        ? { control: this.control, modelScheduler: this.modelScheduler }
+        : {}),
     });
 
     const callId = randomUUID();

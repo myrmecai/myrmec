@@ -27,13 +27,35 @@ public class HostConnectionManager {
 
     private final Map<UUID, WebSocketSession> sessions = new ConcurrentHashMap<>();
     private final Map<String, UUID> sessionToInstance = new ConcurrentHashMap<>();
+    /**
+     * section 22.2: the capabilities each live instance advertised at
+     * host.open — in-memory only (a reconnect re-advertises). Consulted by
+     * the fail-closed host selection gate; a RECOVERING instance keeps its
+     * entry so host.resume re-adoption restores it.
+     */
+    private final Map<UUID, Map<String, Object>> advertisedCapabilities =
+            new ConcurrentHashMap<>();
 
     public void register(UUID hostInstanceId, WebSocketSession session) {
+        register(hostInstanceId, session, null);
+    }
+
+    /**
+     * Register a live socket with the capabilities the host advertised at
+     * host.open (section 22.2). {@code capabilities} may be null on paths
+     * that precede capability validation (resume re-adoption keeps the prior
+     * entry).
+     */
+    public void register(UUID hostInstanceId, WebSocketSession session,
+                         Map<String, Object> capabilities) {
         WebSocketSession existing = sessions.put(hostInstanceId, session);
         if (existing != null && existing.isOpen()) {
             log.warn("Duplicate host-instance connection {}; closing older socket", hostInstanceId);
             close(existing, CloseCode.DUPLICATE_CONNECTION);
             sessionToInstance.remove(existing.getId());
+        }
+        if (capabilities != null) {
+            advertisedCapabilities.put(hostInstanceId, Map.copyOf(capabilities));
         }
         sessionToInstance.put(session.getId(), hostInstanceId);
     }
@@ -47,6 +69,14 @@ public class HostConnectionManager {
 
     public Optional<WebSocketSession> getSession(UUID hostInstanceId) {
         return Optional.ofNullable(sessions.get(hostInstanceId));
+    }
+
+    /**
+     * section 22.2: the capabilities advertised by this instance's current
+     * connection (empty when unknown/dropped — callers fail closed).
+     */
+    public Map<String, Object> getAdvertisedCapabilities(UUID hostInstanceId) {
+        return advertisedCapabilities.getOrDefault(hostInstanceId, Map.of());
     }
 
     public int size() {

@@ -16,6 +16,7 @@ import type {
   ChannelOpenedPayload,
   SessionPolicy,
   CapturePolicy,
+  ReportedInteractionState,
 } from "../protocol/unifiedFrames.js";
 import type { ModelInfoWire } from "../protocol/sessionTypes.js";
 import type { ChatModel, SessionTool } from "../executor/types.js";
@@ -30,13 +31,14 @@ import {
 
 /** §7.5 (A1): the bound dedicated-channel transport for one session. The
  * client owns the socket + handshake; the registry only records the state so
- * close() can tear the socket down alongside the session. */
+ * close() can tear the socket down alongside the session. A LOST channel is
+ * fatal for the session (§22.8 D7) — the registry entry dies with it. */
 export interface SessionChannelState {
   sessionId: string;
   /** The opened channel socket abstraction (never null while alive). */
   socket: unknown;
-  /** False once the channel was lost (close/error) — non-fatal; the session
-   * keeps riding the control socket. */
+  /** False once the channel was lost (close/error) — fatal for the session
+   * (§22.8 D7); the session entry is torn down through close(). */
   alive: boolean;
   /** The engine-reported cursor at bind time (§12.3 replay resume point). */
   highestContiguousSequence: number;
@@ -76,7 +78,8 @@ export interface Session {
   /**
    * §7.5 (A1): the bound dedicated channel for this session, set after the
    * channel handshake completes. Null when the session rides the control
-   * socket only (channel offer absent, or channel lost — non-fatal).
+   * socket only (channel offer absent). A BOUND channel's loss is fatal for
+   * the session (§22.8 D7) — the entry is torn down.
    */
   channel?: SessionChannelState | null;
   /**
@@ -102,6 +105,44 @@ export interface Session {
    * the V1 default (no sensitive payloads on the event stream).
    */
   capture?: CapturePolicy | null;
+  /**
+   * §22.8 (D7): the session's admission gate, driven by the supervisor's
+   * `connection-state` notifications. True by default (the session was
+   * admitted); a `ready: false` notification clears it (pause admission)
+   * and `ready: true` restores it. Fatality tears the whole entry down.
+   */
+  ready?: boolean;
+  /**
+   * §22.8 (Task 10): the session's LIVE interaction runtime evidence — the
+   * coordinator crosswalk the (worker-side) executor binds at dispatch
+   * composition and unbinds at teardown. Kept on the SESSION record (not a
+   * map on the executor keyed by dispatchId) so a session-keyed resume
+   * report and the §14.4 KEEP rearm resolve through ONE lookup. Stored as
+   * the minimal snapshot surface (the coordinator object + the executing
+   * dispatch id) — never serialized, never crossing the thread boundary.
+   */
+  interactionCoordinator?: InteractionCoordinatorRef | null;
+}
+
+/** §22.8 (Task 10): the bound live interaction runtime's crosswalk record. */
+export interface InteractionCoordinatorRef {
+  /** The dispatchId the runtime was composed for. */
+  dispatchId: string;
+  /** The executionId the runtime was composed for. */
+  executionId: string;
+  /** The coordinator — the §22.4 state owner the KEEP arms through
+   * setConnectionReady(true). */
+  coordinator: {
+    setConnectionReady(ready: boolean): void;
+    snapshot(): Readonly<{
+      effectiveState: "RUNNING" | "HOLD_REQUESTED" | "HELD";
+      acceptedControlRevision: number;
+      stateSequence: number;
+      idleResumeAt: string | null;
+      pendingInteractionId: string | null;
+      pendingControlRequestIds: ReadonlyArray<string>;
+    }>;
+  };
 }
 
 /** §13 (A2): one host.resume retained-session summary built from registry state. */
@@ -115,6 +156,16 @@ export interface RetainedSessionSummary {
    * may KEEP only when this is true).
    */
   capacityHeld: boolean;
+  /**
+   * §22.8 (Task 10): the session's LIVE interaction-runtime overlay evidence
+   * (executionId, acceptedControlRevision, stateSequence, effectiveState,
+   * idleResumeAt, pendingInteractionId, pendingControlRequestIds) — the
+   * coordinator snapshot of the runtime bound to this session. Undefined /
+   * absent when no live runtime is bound (a session without an orchestration
+   * dispatch, or an already-torn-down runtime): the resume report then
+   * carries no interactionState block at all.
+   */
+  interactionState?: ReportedInteractionState;
 }
 
 /** Constructor options for {@link SessionRegistry}. */
@@ -221,6 +272,9 @@ export class SessionRegistry {
         assignmentDigest: payload.assignmentDigest ?? null,
         channel: null,
         highestContiguousSequence: 0,
+        // §22.8 (D7): a session is admitted when it opens; the supervisor's
+        // connection-state notifications drive the gate from here.
+        ready: true,
         ...(credentialVault ? { credentialVault } : {}),
         // §7.3 (Wave 6, A4): the session's enforced policy + capture limits.
         policy: payload.policy ?? null,
@@ -372,9 +426,9 @@ export class SessionRegistry {
   }
 
   /**
-   * Mark the channel dead for a session (§7.5: channel loss is NON-fatal —
-   * the session stays open on the control socket). No-op if the session is
-   * gone or already dead.
+   * Mark the channel dead for a session (§7.5/§22.8 D7: fatal — the entry
+   * itself is torn down by the caller, this only clears the binding mark).
+   * No-op if the session is gone or already dead.
    */
   markChannelDead(sessionId: string): void {
     const session = this.sessions.get(sessionId);
@@ -415,6 +469,37 @@ export class SessionRegistry {
     return channel;
   }
 
+  // ==================== §22.8 (D7) connection-state gate ====================
+
+  /**
+   * Apply a supervisor connection-state notification to the session
+   * (§22.8 D7). `fatal: true` tears the session down through the EXISTING
+   * `close()` path (model dispose, vault clear, entry dropped) — idempotent
+   * (an unknown/already-gone session is a no-op). `ready: false/true`
+   * toggle the admission gate on the live entry. Unknown sessions ignore
+   * non-fatal notifications (they hold no state to flip).
+   */
+  applyConnectionState(sessionId: string, ready: boolean, fatal: boolean): void {
+    if (fatal) {
+      this.close(sessionId);
+      return;
+    }
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return;
+    }
+    session.ready = ready;
+    this.logger.debug(
+      `Session ${sessionId} admission gate: ${ready ? "READY" : "PAUSED"} (§22.8 D7)`,
+    );
+  }
+
+  /** The session's record (undefined when unknown) — observability seam for
+   * tests/consumers; the admission gate rides `Session.ready`. */
+  stateOf(sessionId: string): Session | undefined {
+    return this.sessions.get(sessionId);
+  }
+
   // ==================== §13 retention (A2) ====================
 
   /**
@@ -448,11 +533,67 @@ export class SessionRegistry {
 
   /** Build the §13 host.resume summaries for every retained session. */
   buildRetainedSummaries(): RetainedSessionSummary[] {
-    return this.retainedSessionIds().map((sessionId) => ({
-      sessionId,
-      state: "ACTIVE",
-      capacityHeld: true,
-    }));
+    return this.retainedSessionIds().map((sessionId) => {
+      const session = this.sessions.get(sessionId);
+      const coordinator = session?.interactionCoordinator;
+      const summary: RetainedSessionSummary = {
+        sessionId,
+        state: "ACTIVE",
+        capacityHeld: true,
+      };
+      if (coordinator) {
+        // §22.8 (Task 10): the §22.2 live runtime's coordinator snapshot
+        // rides as the optional interactionState block — reported ONLY while
+        // a live runtime is bound (a session whose dispatch already tore
+        // its runtime down reports no block at all).
+        const snap = coordinator.coordinator.snapshot();
+        summary.interactionState = {
+          executionId: coordinator.executionId,
+          acceptedControlRevision: snap.acceptedControlRevision,
+          stateSequence: snap.stateSequence,
+          effectiveState: snap.effectiveState,
+          idleResumeAt: snap.idleResumeAt ?? undefined,
+          pendingInteractionId: snap.pendingInteractionId ?? undefined,
+          pendingControlRequestIds: [...snap.pendingControlRequestIds],
+        };
+      }
+      return summary;
+    });
+  }
+
+  /**
+   * §22.8 (Task 10): bind the session's LIVE interaction runtime (the
+   * executor calls this at dispatch composition; the worker-side bridge
+   * guarantees the same-process executor). The binding is what makes the
+   * session's resume report carry the interactionState block and what the
+   * KEEP arm reaches through. Unknown sessions are a no-op (the executor
+   * binds only for admitted sessions — a missing entry cannot happen on
+   * the live path).
+   */
+  bindInteractionCoordinator(
+    sessionId: string,
+    ref: InteractionCoordinatorRef,
+  ): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return;
+    }
+    session.interactionCoordinator = ref;
+  }
+
+  /** §22.8 (Task 10): drop the session's runtime binding (teardown). */
+  unbindInteractionCoordinator(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.interactionCoordinator = null;
+    }
+  }
+
+  /** §22.8 (Task 10): the bound runtime (undefined = none). Tests/consumers. */
+  interactionCoordinatorOf(
+    sessionId: string,
+  ): InteractionCoordinatorRef | undefined {
+    return this.sessions.get(sessionId)?.interactionCoordinator ?? undefined;
   }
 
   /**

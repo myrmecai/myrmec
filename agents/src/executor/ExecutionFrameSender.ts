@@ -19,6 +19,11 @@ import type {
   ExecutionPausedPayload,
   ExecutionApprovalRequestedPayload,
   ExecutionRejectPayload,
+  ExecutionControlStatePayload,
+  ExecutionInteractionDeltaPayload,
+  ExecutionInteractionCompletePayload,
+  ExecutionInteractionFailedPayload,
+  ExecutionControlRequestPayload,
   ProtocolErrorPayload,
 } from "../protocol/unifiedFrames.js";
 
@@ -34,7 +39,25 @@ export interface ExecutionFrameSender {
   sendExecutionCancel(payload: ExecutionCancelPayload): Promise<void>;
   sendExecutionApprovalRequested(
     payload: ExecutionApprovalRequestedPayload,
+  ): Promise<void>;  /** §22.4 (Task 7): publish the coordinator's control state (durable). */
+  sendExecutionControlState(
+    payload: ExecutionControlStatePayload,
   ): Promise<void>;
-  /** §8.7 (A4): answer a rejected execution.policy.update. */
+  /** §22.6 (Task 7): one best-effort streamed answer fragment. */
+  sendExecutionInteractionDelta(
+    payload: ExecutionInteractionDeltaPayload,
+  ): Promise<void>;
+  /** §22.6 (Task 7): the durable complete interaction outcome. */
+  sendExecutionInteractionComplete(
+    payload: ExecutionInteractionCompletePayload,
+  ): Promise<void>;
+  /** §22.6 (Task 7): the durable failed interaction outcome. */
+  sendExecutionInteractionFailed(
+    payload: ExecutionInteractionFailedPayload,
+  ): Promise<void>;
+  /** §22.7 (Task 7): one durable control proposal. */
+  sendExecutionControlRequest(
+    payload: ExecutionControlRequestPayload,
+  ): Promise<void>;  /** §8.7 (A4): answer a rejected execution.policy.update. */
   sendProtocolError(payload: ProtocolErrorPayload): Promise<void>;
 }

@@ -72,6 +72,16 @@ public class SessionContextAssembler {
     private boolean channelEnabled;
     @Value("${myrmec.channel.endpoint:}")
     private String channelEndpoint;
+    /**
+     * Task 11 (§22.3/D7): the channel offer's URL scheme. The production
+     * default is {@code wss} (TLS everywhere); {@code ws} is the explicit
+     * opt-in for plain-HTTP local/e2e boots where a real dedicated Agent
+     * Channel must still bind (the interaction frames are dedicated-
+     * channel-ONLY — without a bound channel the §22 commands can never
+     * reach the host). Any other value fails closed to {@code wss}.
+     */
+    @Value("${myrmec.channel.scheme:wss}")
+    private String channelScheme;
 
     /**
      * §7.3 (Wave 6, A4): the host-enforced iteration ceiling shipped on
@@ -96,6 +106,63 @@ public class SessionContextAssembler {
     private String captureLevel;
     @Value("${myrmec.session.capture.max-bytes:262144}")
     private int captureMaxBytes;
+
+    /**
+     * section 22.2: the effective interaction policy for orchestration
+     * (WORKFLOW) sessions. Task 1 ships the InteractionProperties defaults —
+     * the project-policy configuration source is wired in Task 2 with the
+     * persistence; until then every orchestration session receives exactly
+     * the section 22.2 default policy (validation lives in
+     * InteractionProperties; the block is REQUIRED on the wire for WORKFLOW).
+     */
+    SessionOpenPayload.InteractionPolicy interactionPolicy(String kind) {
+        if (!"WORKFLOW".equals(kind)) {
+            // section 22.2: conversation sessions do not receive the block.
+            return null;
+        }
+        var defaults = ai.myrmec.engine.inference.execution.interaction.InteractionProperties.defaults();
+        return new SessionOpenPayload.InteractionPolicy(
+                defaults.version(),
+                defaults.enabled(),
+                defaults.idleResumeAfterSeconds(),
+                defaults.responseTimeoutSeconds(),
+                defaults.maxInputBytes(),
+                defaults.maxOutputBytes(),
+                defaults.maxModelIterations(),
+                defaults.maxHistoryBytes(),
+                defaults.transcriptRetentionDays(),
+                SessionOpenPayload.InteractionPolicy.ContentMode
+                        .valueOf(defaults.contentMode().name()));
+    }
+
+    /**
+     * §3.1 (plan 2026-10-03-session-interaction): the EFFECTIVE interaction
+     * policy for an orchestration session as the durable
+     * {@link ai.myrmec.engine.inference.execution.interaction.InteractionProperties.Policy}
+     * — the shape the execution-creation path persists onto the execution
+     * row's {@code interaction_policy} snapshot column. Null for
+     * conversation sessions. Missing policy for WORKFLOW fails closed at
+     * the caller (session orchestration REQUIRES the block, §22.2).
+     */
+    public ai.myrmec.engine.inference.execution.interaction.InteractionProperties.Policy
+            effectiveInteractionPolicy(String kind) {
+        SessionOpenPayload.InteractionPolicy wire = interactionPolicy(kind);
+        if (wire == null) {
+            return null;
+        }
+        return new ai.myrmec.engine.inference.execution.interaction.InteractionProperties.Policy(
+                wire.version(),
+                wire.enabled(),
+                wire.idleResumeAfterSeconds(),
+                wire.responseTimeoutSeconds(),
+                wire.maxInputBytes(),
+                wire.maxOutputBytes(),
+                wire.maxModelIterations(),
+                wire.maxHistoryBytes(),
+                wire.transcriptRetentionDays(),
+                ai.myrmec.engine.inference.execution.interaction.InteractionProperties.ContentMode
+                        .valueOf(wire.contentMode().name()));
+    }
 
     /**
      * Assemble the session.open payload and persist the session row.
@@ -150,7 +217,8 @@ public class SessionContextAssembler {
                 requireDispatchableThenSeal(session, ctx),
                 channelOffer(session),
                 sessionPolicy(policyExecutionTimeoutSeconds, null),
-                capturePolicy());
+                capturePolicy(),
+                interactionPolicy(kind));
     }
 
     /**
@@ -204,7 +272,8 @@ public class SessionContextAssembler {
                 requireDispatchableThenSeal(session, ctx),
                 channelOffer(session),
                 sessionPolicy(stepTimeoutSeconds, stepMaxIterations),
-                capturePolicy());
+                capturePolicy(),
+                interactionPolicy(kind));
     }
 
     /**
@@ -238,13 +307,17 @@ public class SessionContextAssembler {
     }
 
     /**
-     * §7.5 dedicated-transport offer: minted when the channel feature is on
-     * and the session has a serving host instance. The token is bound to
-     * (sessionId, instanceId), single-use, short-lived, and cannot allocate
-     * work (§15 rule 7) — transport binding only.
+     * §22.3/D7 dedicated-transport offer. WORKFLOW (orchestration) sessions
+     * ALWAYS carry the offer — the {@code myrmec.channel.enabled} feature
+     * gate no longer suppresses it (orchestration sessions are dedicated-
+     * channel-only); the configured endpoint + a serving host instance are
+     * still required (an offer with no dialable endpoint would strand the
+     * session). Conversation sessions keep exactly today's behavior: offer
+     * gated by the feature flag + endpoint + instance.
      */
     private SessionOpenPayload.ChannelOffer channelOffer(Session session) {
-        if (!channelEnabled) {
+        boolean orchestration = "WORKFLOW".equals(session.getServiceType());
+        if (!orchestration && !channelEnabled) {
             return null;
         }
         if (session.getHostInstanceId() == null || channelEndpoint == null
@@ -254,9 +327,15 @@ public class SessionContextAssembler {
             return null;
         }
         String token = channelTokenService.mint(session.getId(), session.getHostInstanceId());
-        String endpoint = "wss://" + channelEndpoint + "/ws/host/channel";
-        log.debug("Channel offer minted for session {} (instance {})",
-                session.getId(), session.getHostInstanceId());
+        String scheme = "ws".equalsIgnoreCase(channelScheme) ? "ws" : "wss";
+        // WebSocketConfig registers the channel handler at
+        // /api/v1/agent/host/ws/channel (the same HOST_JWT handshake
+        // interceptor as the control socket); the offer must point at the
+        // REAL route or the dial lands on the security chain (403).
+        String endpoint = scheme + "://" + channelEndpoint + "/api/v1/agent/host/ws/channel";
+        log.debug("Channel offer minted for session {} (instance {}{})",
+                session.getId(), session.getHostInstanceId(),
+                orchestration ? ", orchestration: always-on" : "");
         return new SessionOpenPayload.ChannelOffer(endpoint, token);
     }
 

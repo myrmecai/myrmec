@@ -42,6 +42,9 @@ public class DirectRpcNodeTransport implements NodeTransport {
 
     private volatile BiConsumer<UUID, String> fanoutHandler = (id, frame) -> { };
 
+    private volatile java.util.function.BiConsumer<StreamRelayRequest, String>
+            executionFanoutHandler = (request, frame) -> { };
+
     public DirectRpcNodeTransport(
             EngineNodeRepository nodeRepository,
             NodeRegistryService nodeRegistry,
@@ -93,6 +96,47 @@ public class DirectRpcNodeTransport implements NodeTransport {
      */
     public void handleStreamRelay(UUID conversationId, String frameJson) {
         fanoutHandler.accept(conversationId, frameJson);
+    }
+
+    // ── Execution-stream fan-out (Task 9, §3.5/§4) ──────────────────
+
+    @Override
+    public void setExecutionFanoutHandler(
+            java.util.function.BiConsumer<StreamRelayRequest, String> handler) {
+        this.executionFanoutHandler = handler == null
+                ? (request, frame) -> { } : handler;
+    }
+
+    @Override
+    public void publishExecutionEvent(UUID executionId, String envelopeJson) {
+        if (!relayEnabled || relaySecret.isBlank()) {
+            return; // single-instance: nothing to do
+        }
+        List<EngineNode> peers = nodeRepository.findByStatus(EngineNode.Status.UP);
+        for (EngineNode peer : peers) {
+            if (peer.getNodeId().equals(nodeRegistry.getSelfNodeId())) {
+                continue; // local delivery already happened
+            }
+            try {
+                // NULL conversationId = the execution arm (Task 9).
+                postToPeer(peer.getAddress(),
+                        "/api/v1/internal/stream-relay",
+                        new StreamRelayRequest(null, envelopeJson));
+            } catch (Exception e) {
+                // Fan-out is best-effort; the durable-cursor catch-up repairs.
+                log.debug("Execution stream relay to peer {} for execution {} failed: {}",
+                        peer.getNodeId(), executionId, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Handle an INBOUND execution stream relay from a peer. Called by
+     * {@link StreamRelayController} when the relay request carries a null
+     * conversationId (the execution arm).
+     */
+    public void handleExecutionStreamRelay(StreamRelayRequest request) {
+        executionFanoutHandler.accept(request, request.frameJson());
     }
 
     // ── Shared HTTP plumbing ───────────────────────────────────────

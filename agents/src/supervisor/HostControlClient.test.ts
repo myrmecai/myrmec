@@ -128,7 +128,7 @@ class FakeSessionLifecycle implements HostSessionLifecycle {
     return this.channels.get(sessionId)?.highestContiguousSequence ?? this.cursor;
   }
 
-  observeDurableSequence(sessionId: string, sequence: number): void {
+  observeDurableSequence(_sessionId: string, sequence: number): void {
     this.cursor = Math.max(this.cursor, sequence);
   }
 
@@ -164,6 +164,8 @@ interface TestSubject {
   tokens: HostTokenProvider;
   lifecycle: FakeSessionLifecycle;
   channelConns: FakeChannelConnection[];
+  /** D7 (§22.8): connection-state notifications the client emitted. */
+  notifications: Array<{ sessionId: string; ready: boolean; fatal: boolean }>;
 }
 
 function makeSubject(options: {
@@ -176,6 +178,11 @@ function makeSubject(options: {
   const tokens = makeTokenProvider();
   const lifecycle = new FakeSessionLifecycle();
   const channelConns: FakeChannelConnection[] = [];
+  const notifications: Array<{
+    sessionId: string;
+    ready: boolean;
+    fatal: boolean;
+  }> = [];
   const client = new HostControlClient({
     engineUrl: "http://engine.local",
     tokenProvider: tokens,
@@ -192,8 +199,11 @@ function makeSubject(options: {
       channelConns.push(c);
       return c;
     },
+    onConnectionState: (notification) => {
+      notifications.push({ ...notification });
+    },
   });
-  return { client, conn, tokens, lifecycle, channelConns };
+  return { client, conn, tokens, lifecycle, channelConns, notifications };
 }
 
 /** session.open payload builder with an optional channel offer. */
@@ -258,6 +268,10 @@ function hostOpenedFrame(intervalSeconds: number): Record<string, unknown> {
         eventBackpressureTimeoutSeconds: 30,
       },
       serverNodeId: "node-a",
+      // §22.2: the engine echoes the accepted negotiated capabilities.
+      acceptedCapabilities: {
+        sessionInteraction: { version: 1, temporaryHold: true },
+      },
     },
   };
 }
@@ -641,11 +655,391 @@ describe("HostControlClient sender API", () => {
 });
 
 // ============================================================
+// §22.3/22.4/22.6/22.7 session-interaction outbound senders
+// ============================================================
+
+const dispatchId = "55555555-5555-4555-8555-555555555555";
+const interactionId = "66666666-6666-4666-8666-666666666666";
+const controlRequestId = "77777777-7777-4777-8777-777777777777";
+const completedAt = new Date().toISOString();
+
+describe("HostControlClient §22 session-interaction senders", () => {
+  /** §22.3: the family is dedicated-ONLY - a bound channel (plus the
+   * execution.start session mapping) is the precondition for ANY wire
+   * delivery. Returns the opened subject + channel with wire buffers reset. */
+  async function interactionWireSubject(): Promise<
+    TestSubject & { channel: FakeChannelConnection }
+  > {
+    const subject = makeSubject();
+    const channel = await openBoundChannel(subject);
+    await subject.conn.simulateInbound({
+      protocolVersion: SUPPORTED_PROTOCOL_VERSION,
+      messageId: "m-start-i",
+      type: MessageType.EXECUTION_START,
+      sentAt: new Date().toISOString(),
+      sessionId,
+      executionId,
+      payload: { executionId, sessionId, sequenceNo: 1, deadline: new Date().toISOString() },
+    });
+    channel.sent.length = 0;
+    subject.conn.sent.length = 0;
+    return { ...subject, channel };
+  }
+
+  /** §22.6 complete-outcome payload builder (durable: carries the record's
+   * messageId override the outbox bridge stamps). */
+  function completePayload(messageIdOverride?: string) {
+    return {
+      executionId,
+      dispatchId,
+      interactionId,
+      ordinal: 1,
+      answer: { text: "done" },
+      usage: null,
+      usageStatus: "UNKNOWN" as const,
+      controlRequestIds: [] as string[],
+      completedAt,
+      ...(messageIdOverride !== undefined ? { messageIdOverride } : {}),
+    };
+  }
+
+  it("sends the §22.6/§22.4 five over the dedicated channel with the protocol wire types", async () => {
+    const { client, channel, conn } = await interactionWireSubject();
+
+    await client.sendExecutionInteractionDelta({
+      executionId,
+      dispatchId,
+      interactionId,
+      index: 0,
+      text: "Verification is",
+    });
+    await client.sendExecutionInteractionComplete(completePayload());
+    await client.sendExecutionInteractionFailed({
+      executionId,
+      dispatchId,
+      interactionId,
+      ordinal: 1,
+      error: {
+        errorCode: "MODEL_ERROR",
+        message: "model exhausted",
+        retryable: false,
+      },
+      usage: null,
+      usageStatus: "UNKNOWN",
+      controlRequestIds: [],
+      completedAt,
+    });
+    await client.sendExecutionControlRequest({
+      executionId,
+      dispatchId,
+      interactionId,
+      controlRequestId,
+      action: "CANCEL",
+      explanation: "User asked to stop this attempt.",
+    });
+    await client.sendExecutionControlState({
+      executionId,
+      dispatchId,
+      controlRevision: 1,
+      stateSequence: 2,
+      status: "HELD",
+      effectiveState: "HELD",
+      reasonCode: "USER_REQUESTED",
+      changedAt: completedAt,
+      idleResumeAt: null,
+      safePoint: "BEFORE_MODEL_CALL",
+    });
+
+    const types = channel.sent.map((raw) => JSON.parse(raw).type);
+    expect(types).toEqual([
+      MessageType.EXECUTION_INTERACTION_DELTA,
+      MessageType.EXECUTION_INTERACTION_COMPLETE,
+      MessageType.EXECUTION_INTERACTION_FAILED,
+      MessageType.EXECUTION_CONTROL_REQUEST,
+      MessageType.EXECUTION_CONTROL_STATE,
+    ]);
+    // Identity rides the envelope (§22.3: executionId matches the payload)
+    // and the control socket saw NOTHING (dedicated-only family).
+    const first = JSON.parse(channel.sent[0]);
+    expect(first.executionId).toBe(executionId);
+    expect(conn.sent).toHaveLength(0);
+  });
+
+  it("reuses messageIdOverride for the durable four (§12.1 retransmit stability) and mints a fresh id per delta (ephemeral)", async () => {
+    const { client, channel } = await interactionWireSubject();
+
+    await client.sendExecutionInteractionComplete(completePayload("interaction-1-complete"));
+    await client.sendExecutionInteractionComplete(completePayload("interaction-1-complete"));
+    const completeIds = channel.sent
+      .map((raw) => JSON.parse(raw))
+      .filter((f) => f.type === MessageType.EXECUTION_INTERACTION_COMPLETE)
+      .map((f) => f.messageId as string);
+    expect(completeIds[0]).toBe("interaction-1-complete");
+    expect(completeIds[1]).toBe("interaction-1-complete");
+
+    // The delta is EPHEMERAL: no override - every fragment mints its own id.
+    await client.sendExecutionInteractionDelta({
+      executionId,
+      dispatchId,
+      interactionId,
+      index: 0,
+      text: "frag",
+    });
+    await client.sendExecutionInteractionDelta({
+      executionId,
+      dispatchId,
+      interactionId,
+      index: 1,
+      text: "frag2",
+    });
+    const deltaIds = channel.sent
+      .map((raw) => JSON.parse(raw))
+      .filter((f) => f.type === MessageType.EXECUTION_INTERACTION_DELTA)
+      .map((f) => f.messageId as string);
+    expect(deltaIds[0]).not.toBe(deltaIds[1]);
+  });
+
+  it("stamps correlationIdOverride as the envelope correlation on control.state (§22.4 command correlation)", async () => {
+    const { client, channel } = await interactionWireSubject();
+
+    await client.sendExecutionControlState({
+      executionId,
+      dispatchId,
+      controlRevision: 1,
+      stateSequence: 2,
+      status: "HELD",
+      effectiveState: "HELD",
+      reasonCode: "USER_REQUESTED",
+      changedAt: completedAt,
+      // 22.4: the originating CONTROL command's messageId (outbox record)
+      // stamped as the envelope correlation by the sender bridge. The
+      // override hint rides the payload (the client consumes it and never
+      // forwards it as payload data to assert against).
+      ...({ correlationIdOverride: "m-cmd-1" } as unknown as Record<string, never>),
+    });
+    const state = JSON.parse(channel.sent[0]);
+    expect(state.correlationId).toBe("m-cmd-1");
+
+    // Timer-driven states carry NO correlation (absent -> null envelope).
+    await client.sendExecutionControlState({
+      executionId,
+      dispatchId,
+      controlRevision: 1,
+      stateSequence: 3,
+      status: "HELD",
+      effectiveState: "HELD",
+      reasonCode: "INTERACTION_SETTLED",
+      changedAt: completedAt,
+    });
+    const timerState = JSON.parse(channel.sent[1]);
+    expect(timerState.correlationId).toBeNull();
+  });
+
+  it("routes the family through the bound channel and NEVER the control socket (dedicated-only)", async () => {
+    const subject = makeSubject();
+    const { client, conn } = subject;
+    const channel = await openBoundChannel(subject);
+    // Map the execution to the session (the routing key).
+    await conn.simulateInbound({
+      protocolVersion: SUPPORTED_PROTOCOL_VERSION,
+      messageId: "m-start-i",
+      type: MessageType.EXECUTION_START,
+      sentAt: new Date().toISOString(),
+      sessionId,
+      executionId,
+      payload: { executionId, sessionId, sequenceNo: 1, deadline: new Date().toISOString() },
+    });
+    channel.sent.length = 0;
+    conn.sent.length = 0;
+
+    await client.sendExecutionInteractionDelta({
+      executionId,
+      dispatchId,
+      interactionId,
+      index: 0,
+      text: "via-channel",
+    });
+    await client.sendExecutionInteractionComplete({
+      executionId,
+      dispatchId,
+      interactionId,
+      ordinal: 1,
+      answer: { text: "done" },
+      usage: null,
+      usageStatus: "UNKNOWN",
+      controlRequestIds: [],
+      completedAt,
+    });
+    await client.sendExecutionControlRequest({
+      executionId,
+      dispatchId,
+      interactionId,
+      controlRequestId,
+      action: "HOLD",
+      explanation: "propose hold",
+    });
+    await client.sendExecutionControlState({
+      executionId,
+      dispatchId,
+      controlRevision: 1,
+      stateSequence: 4,
+      status: "HOLD_REQUESTED",
+      effectiveState: "HOLD_REQUESTED",
+      reasonCode: "USER_REQUESTED",
+      changedAt: completedAt,
+    });
+
+    const channelTypes = channel.sent.map((raw) => JSON.parse(raw).type);
+    expect(channelTypes).toEqual([
+      MessageType.EXECUTION_INTERACTION_DELTA,
+      MessageType.EXECUTION_INTERACTION_COMPLETE,
+      MessageType.EXECUTION_CONTROL_REQUEST,
+      MessageType.EXECUTION_CONTROL_STATE,
+    ]);
+    // NOTHING rode the control socket.
+    expect(conn.sent).toHaveLength(0);
+  });
+
+  it("unbound session: interaction-family frames are DROPPED - no control fallback", async () => {
+    const subject = makeSubject();
+    const { client, conn } = subject;
+    await client.start();
+    await conn.simulateInbound(hostOpenedFrame(60));
+    conn.sent.length = 0;
+
+    await client.sendExecutionInteractionComplete({
+      executionId,
+      dispatchId,
+      interactionId,
+      ordinal: 1,
+      answer: { text: "done" },
+      usage: null,
+      usageStatus: "UNKNOWN",
+      controlRequestIds: [],
+      completedAt,
+    });
+    await client.sendExecutionInteractionDelta({
+      executionId,
+      dispatchId,
+      interactionId,
+      index: 0,
+      text: "frag",
+    });
+    await client.sendExecutionControlState({
+      executionId,
+      dispatchId,
+      controlRevision: 0,
+      stateSequence: 1,
+      status: "RUNNING",
+      effectiveState: "RUNNING",
+      reasonCode: "STARTED",
+      changedAt: completedAt,
+    });
+
+    expect(conn.sent).toHaveLength(0);
+  });
+
+  it("fatally lost session: interaction-family frames are DROPPED - no control fallback (§22.8)", async () => {
+    const subject = makeSubject();
+    const { client, conn } = subject;
+    const channel = await openBoundChannel(subject);
+    await conn.simulateInbound({
+      protocolVersion: SUPPORTED_PROTOCOL_VERSION,
+      messageId: "m-start-fl",
+      type: MessageType.EXECUTION_START,
+      sentAt: new Date().toISOString(),
+      sessionId,
+      executionId,
+      payload: { executionId, sessionId, sequenceNo: 1, deadline: new Date().toISOString() },
+    });
+
+    await channel.simulateClose(1006, "abnormal");
+    await vi.advanceTimersByTimeAsync(0);
+    conn.sent.length = 0;
+
+    await client.sendExecutionInteractionComplete({
+      executionId,
+      dispatchId,
+      interactionId,
+      ordinal: 1,
+      answer: { text: "after-loss" },
+      usage: null,
+      usageStatus: "UNKNOWN",
+      controlRequestIds: [],
+      completedAt,
+    });
+    expect(conn.sent).toHaveLength(0);
+  });
+
+  it("delta is fire-and-forget: a failing channel send does NOT throw (best-effort)", async () => {
+    const subject = makeSubject();
+    const { client, conn } = subject;
+    const channel = await openBoundChannel(subject);
+    await conn.simulateInbound({
+      protocolVersion: SUPPORTED_PROTOCOL_VERSION,
+      messageId: "m-start-ff",
+      type: MessageType.EXECUTION_START,
+      sentAt: new Date().toISOString(),
+      sessionId,
+      executionId,
+      payload: { executionId, sessionId, sequenceNo: 1, deadline: new Date().toISOString() },
+    });
+    // Kill the channel socket so channelForOutbound returns null... no -
+    // kill AFTER bind: simulate a send failure by closing the fake channel
+    // while the client still holds it as open is not possible; instead drop
+    // executionSessions mapping? Simplest true-negative: force the channel
+    // closed at the transport level (channel.isOpen false -> routing drops).
+    channel.connected = false;
+    conn.sent.length = 0;
+
+    // Must not throw despite no live channel.
+    await expect(
+      client.sendExecutionInteractionDelta({
+        executionId,
+        dispatchId,
+        interactionId,
+        index: 0,
+        text: "frag",
+      }),
+    ).resolves.toBeUndefined();
+    expect(conn.sent).toHaveLength(0);
+  });
+});
+
+// ============================================================
 // §7.5 (A1) dedicated session channel
 // ============================================================
 
 const channelEndpoint =
   "wss://engine.example/api/v1/agent/host/ws/channel";
+
+/** Open a bound channel for the session (start, host.opened, session.open
+ * with a channel offer, channel.opened reply). Shared by the dual-socket
+ * dispatch and the §22.8 D7 fatal-loss describes. */
+async function openBoundChannel(subject: {
+  client: HostControlClient;
+  conn: FakeHostControlConnection;
+  channelConns: FakeChannelConnection[];
+}): Promise<FakeChannelConnection> {
+  const { client, conn, channelConns } = subject;
+  await client.start();
+  await conn.simulateInbound(hostOpenedFrame(60));
+  const openPromise = simulateSessionOpen(conn, sessionOpenPayload({
+    channel: { endpoint: channelEndpoint, token: "tok" },
+  }));
+  await vi.advanceTimersByTimeAsync(1);
+  const channel = channelConns[0];
+  await channel.simulateInbound({
+    protocolVersion: SUPPORTED_PROTOCOL_VERSION,
+    messageId: "m-chn-opened",
+    type: MessageType.CHANNEL_OPENED,
+    sentAt: new Date().toISOString(),
+    sessionId,
+    payload: { sessionId, highestContiguousSequence: 0 },
+  });
+  await openPromise;
+  return channel;
+}
 
 describe("HostControlClient §7.5 channel handshake", () => {
   it("opens the channel socket and awaits channel.opened on a channel-bearing session.open", async () => {
@@ -795,31 +1189,6 @@ describe("HostControlClient §7.5 channel handshake", () => {
 });
 
 describe("HostControlClient §7.5 dual-socket dispatch", () => {
-  async function openBoundChannel(subject: {
-    client: HostControlClient;
-    conn: FakeHostControlConnection;
-    channelConns: FakeChannelConnection[];
-  }): Promise<FakeChannelConnection> {
-    const { client, conn, channelConns } = subject;
-    await client.start();
-    await conn.simulateInbound(hostOpenedFrame(60));
-    const openPromise = simulateSessionOpen(conn, sessionOpenPayload({
-      channel: { endpoint: channelEndpoint, token: "tok" },
-    }));
-    await vi.advanceTimersByTimeAsync(1);
-    const channel = channelConns[0];
-    await channel.simulateInbound({
-      protocolVersion: SUPPORTED_PROTOCOL_VERSION,
-      messageId: "m-chn-opened",
-      type: MessageType.CHANNEL_OPENED,
-      sentAt: new Date().toISOString(),
-      sessionId,
-      payload: { sessionId, highestContiguousSequence: 0 },
-    });
-    await openPromise;
-    return channel;
-  }
-
   it("dispatches inbound execution.delta on the channel like a control-socket frame", async () => {
     const subject = makeSubject();
     const channel = await openBoundChannel(subject);
@@ -912,9 +1281,9 @@ describe("HostControlClient §7.5 dual-socket dispatch", () => {
     expect(conn.sent).toHaveLength(0);
   });
 
-  it("keeps session alive and control frames flowing after channel loss (non-fatal)", async () => {
+  it("stops the session on channel loss — fatal, no session.closed race from the client (§22.8 D7)", async () => {
     const subject = makeSubject();
-    const { client, conn, lifecycle } = subject;
+    const { client, conn, lifecycle, notifications } = subject;
     const channel = await openBoundChannel(subject);
     await conn.simulateInbound({
       protocolVersion: SUPPORTED_PROTOCOL_VERSION,
@@ -926,41 +1295,33 @@ describe("HostControlClient §7.5 dual-socket dispatch", () => {
       payload: { executionId, sessionId, sequenceNo: 1, deadline: new Date().toISOString() },
     });
 
-    // The channel dies mid-session.
+    // The channel dies mid-session: fatal for the session now.
     await channel.simulateClose(1006, "abnormal");
     await vi.advanceTimersByTimeAsync(0);
 
-    // The session is NOT closed: no session.closed emitted by the client,
-    // the control socket is still connected, and the registry marks dead.
-    expect(conn.connected).toBe(true);
+    // The client emitted the fatal connection-state and dropped the binding.
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toEqual({ sessionId, ready: false, fatal: true });
     expect(lifecycle.channels.get(sessionId)?.alive).toBe(false);
+
+    // The client itself sends NO session.closed on the fatal path — close
+    // authority stays with the engine (the notification is the seam).
     const closes = conn.sent
       .map((raw) => JSON.parse(raw))
       .filter((f) => f.type === MessageType.SESSION_CLOSED);
     expect(closes).toHaveLength(0);
 
-    // Outbound execution frames FALL BACK to the control socket.
+    // Outbound execution frames are DROPPED — never re-routed onto the
+    // control socket for the dead session (§22.8 D7).
     await client.sendExecutionDelta({
       executionId,
       index: 0,
       content: "after-loss",
       contentType: "TEXT",
     });
-    const types = conn.sent.map((raw) => JSON.parse(raw).type);
-    expect(types).toContain(MessageType.EXECUTION_DELTA);
-
-    // The session.close arm still works (the session lifecycle is intact).
-    await conn.simulateInbound({
-      protocolVersion: SUPPORTED_PROTOCOL_VERSION,
-      messageId: "m-close",
-      type: MessageType.SESSION_CLOSE,
-      sentAt: new Date().toISOString(),
-      sessionId,
-      payload: { sessionId, reasonCode: "CONVERSATION_ARCHIVED", gracePeriodSeconds: 30 },
-    });
-    const closed = parseFirstByType(conn.sent, MessageType.SESSION_CLOSED);
-    expect(closed).toBeDefined();
-    expect(closed.payload.reasonCode).toBe("CONVERSATION_ARCHIVED");
+    expect(
+      conn.sent.map((raw) => JSON.parse(raw).type),
+    ).not.toContain(MessageType.EXECUTION_DELTA);
   });
 
   it("closes the channel socket on session.close", async () => {
@@ -992,3 +1353,164 @@ describe("HostControlClient §7.5 dual-socket dispatch", () => {
     expect(channel.connected).toBe(false);
   });
 });
+
+describe("HostControlClient §22.8 D7 fatal channel loss", () => {
+  it("emits a fatal connection-state for the session when a BOUND channel socket closes", async () => {
+    const subject = makeSubject();
+    const { conn, notifications } = subject;
+    const channel = await openBoundChannel(subject);
+
+    await channel.simulateClose(1006, "abnormal");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toEqual({
+      sessionId,
+      ready: false,
+      fatal: true,
+    });
+    // No session.closed went out from the client itself — engine-initiated
+    // close authority is unchanged; fatality is the notification surface.
+    expect(
+      conn.sent.map((raw) => JSON.parse(raw).type),
+    ).not.toContain(MessageType.SESSION_CLOSED);
+  });
+
+  it("does NOT re-route session frames to the control socket after channel loss (no fallback)", async () => {
+    const subject = makeSubject();
+    const { client, conn } = subject;
+    const channel = await openBoundChannel(subject);
+    await conn.simulateInbound({
+      protocolVersion: SUPPORTED_PROTOCOL_VERSION,
+      messageId: "m-start",
+      type: MessageType.EXECUTION_START,
+      sentAt: new Date().toISOString(),
+      sessionId,
+      executionId,
+      payload: { executionId, sessionId, sequenceNo: 1, deadline: new Date().toISOString() },
+    });
+
+    await channel.simulateClose(1006, "abnormal");
+    await vi.advanceTimersByTimeAsync(0);
+    conn.sent.length = 0;
+
+    // Channel-preferred send after the channel died: the session is dead,
+    // so the frame must be DROPPED — never re-routed onto the control socket.
+    const sendPromise = client.sendExecutionDelta({
+      executionId,
+      index: 0,
+      content: "after-loss",
+      contentType: "TEXT",
+    });
+    await sendPromise;
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(conn.sent).toHaveLength(0);
+  });
+
+  it("emits ready=false (non-fatal) when the host control socket drops with a live bound channel", async () => {
+    const subject = makeSubject();
+    const { conn, notifications } = subject;
+    await openBoundChannel(subject);
+    notifications.length = 0;
+
+    await conn.simulateClose(1006, "abnormal");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toEqual({
+      sessionId,
+      ready: false,
+      fatal: false,
+    });
+  });
+
+  it("emits ready=true on control-socket reopen when the channel is still bound", async () => {
+    const subject = makeSubject();
+    const { conn, notifications } = subject;
+    await openBoundChannel(subject);
+
+    // Drop the control socket (ready=false seam)…
+    await conn.simulateClose(1006, "abnormal");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0].ready).toBe(false);
+
+    // …reconnect with a fresh host.open and let host.opened land. The bound
+    // channel is untouched — the client must flip back to ready=true.
+    // (Unique messageId: the client's dedupe LRU would swallow a repeated
+    // host.opened otherwise.)
+    const chanConn = subject.channelConns[0];
+    await vi.advanceTimersByTimeAsync(2000);
+    await conn.simulateInbound({
+      ...hostOpenedFrame(60),
+      messageId: "m-opened-reconnected",
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(chanConn.isOpen).toBe(true);
+    expect(notifications).toHaveLength(2);
+    expect(notifications[1]).toEqual({
+      sessionId,
+      ready: true,
+      fatal: false,
+    });
+  });
+
+  it("does NOT re-emit a duplicate fatal (second close event is a no-op)", async () => {
+    const subject = makeSubject();
+    const { notifications } = subject;
+    const channel = await openBoundChannel(subject);
+
+    await channel.simulateClose(1006, "abnormal");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(notifications).toHaveLength(1);
+
+    // A second close event for the same session cannot double-emit.
+    await channel.simulateClose(1000, "again");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(notifications).toHaveLength(1);
+  });
+
+  it("emits NO fatal for a channel close of a session with no bound channel", async () => {
+    const subject = makeSubject();
+    const { notifications } = subject;
+    await clientWithNoBoundChannelCloses(subject);
+
+    // A pre-bind channel socket closing must produce no notification: the
+    // session never rode it (nothing to kill).
+    expect(notifications).toHaveLength(0);
+  });
+});
+
+/** Drive a pre-bind channel failure: session.open with a channel offer whose
+ * socket closes (error path) BEFORE channel.opened arrives. */
+async function clientWithNoBoundChannelCloses(
+  subject: TestSubject,
+): Promise<void> {
+  const { client, conn, channelConns } = subject;
+  await client.start();
+  await conn.simulateInbound(hostOpenedFrame(60));
+  const openPromise = simulateSessionOpen(
+    conn,
+    sessionOpenPayload({
+      channel: { endpoint: channelEndpoint, token: "tok" },
+    }),
+  );
+  await vi.advanceTimersByTimeAsync(1);
+  expect(channelConns).toHaveLength(1);
+  // The socket dies before the handshake completed — no bind happened.
+  await channelConns[0].simulateInbound({
+    protocolVersion: SUPPORTED_PROTOCOL_VERSION,
+    messageId: "m-err",
+    type: MessageType.PROTOCOL_ERROR,
+    sentAt: new Date().toISOString(),
+    payload: {
+      code: "INVALID_STATE",
+      message: "channel.open rejected: invalid or misbound token",
+      retryable: false,
+      scope: "CONNECTION",
+    },
+  });
+  await openPromise;
+}

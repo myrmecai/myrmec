@@ -114,10 +114,12 @@ export class InferenceExecutor {
   private readonly log: Logger;
 
   /** In-flight executions keyed by `executionId`, each with its abort controller
-   * so an `execution.cancel` can stop the matching turn. */
+   * so an `execution.cancel` can stop the matching turn. The owning sessionId
+   * rides along so §22.8 (D7) fatal session loss can cancel every turn of a
+   * session. */
   private readonly inFlight = new Map<
     string,
-    { controller: AbortController; partialContent: string }
+    { controller: AbortController; partialContent: string; sessionId?: string }
   >();
 
   constructor(options: InferenceExecutorOptions) {
@@ -161,6 +163,20 @@ export class InferenceExecutor {
     return this.inFlight.size;
   }
 
+  /**
+   * §22.8 (D7): the executionIds currently in flight for a session (the
+   * in-flight map carries the owning sessionId). Empty when none.
+   */
+  inFlightExecutionIdsFor(sessionId: string): string[] {
+    const out: string[] = [];
+    for (const [executionId, state] of this.inFlight) {
+      if (state.sessionId === sessionId) {
+        out.push(executionId);
+      }
+    }
+    return out;
+  }
+
   /** True while at least one inference turn is executing. */
   get isBusy(): boolean {
     return this.inFlight.size > 0;
@@ -199,9 +215,10 @@ export class InferenceExecutor {
       return;
     }
 
-    // Register the in-flight turn for cancellation.
+    // Register the in-flight turn for cancellation (the owning sessionId
+    // rides along for §22.8 D7 fatal session loss).
     const controller = new AbortController();
-    const state = { controller, partialContent: "" };
+    const state = { controller, partialContent: "", sessionId };
     this.inFlight.set(executionId, state);
     // §8.7 (A4): register the execution's enforcement state (the session's
     // enforcer is shared; the executionId alias lets policy updates find it).
@@ -553,7 +570,12 @@ export class InferenceExecutor {
             cancellation,
           );
         } else {
-          response = await model.invoke(messages, toolSpecs);
+          // Task 7: thread the executor's AbortController signal as the
+          // THIRD model-call argument (cancellation flows to the model
+          // adapter when the provider supports aborting).
+          response = await model.invoke(messages, toolSpecs, {
+            signal: state.controller.signal,
+          });
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -724,11 +746,16 @@ export class InferenceExecutor {
     let toolCalls: ModelToolCall[] | undefined;
 
     if (!model.stream) {
-      // Adapter doesn't support streaming — fall back to invoke.
-      const response = await model.invoke(messages, toolSpecs);
+      // Adapter doesn't support streaming — fall back to invoke (the
+      // THIRD argument carries the cancellation signal, Task 7).
+      const response = await model.invoke(messages, toolSpecs, {
+        signal: state.controller.signal,
+      });
       return response;
     }
-    for await (const chunk of model.stream(messages, toolSpecs) as AsyncIterable<ModelStreamChunk>) {
+    for await (const chunk of model.stream(messages, toolSpecs, {
+      signal: state.controller.signal,
+    }) as AsyncIterable<ModelStreamChunk>) {
       if (cancellation.cancelled) {
         break;
       }

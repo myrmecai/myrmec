@@ -110,6 +110,8 @@ class HostSelectionServiceTest extends IntegrationTestBase {
         org.mockito.Mockito.when(socket.isOpen()).thenReturn(true);
         org.mockito.Mockito.when(socket.getId())
                 .thenReturn("test-socket-" + instance.getId());
-        connectionManager.register(instance.getId(), socket);
+        connectionManager.register(instance.getId(), socket, Map.of(
+                "sessionInteraction",
+                new ai.myrmec.engine.websocket.host.payload.SessionInteractionCapability(1, true)));
     }
 }

@@ -13,6 +13,10 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import org.springframework.web.socket.TextMessage;
+import org.springframework.web.socket.WebSocketSession;
+
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.UUID;
@@ -69,7 +73,8 @@ public class AgentRelayController {
                     request.targetInstanceId());
             return ResponseEntity.status(403).build();
         }
-        boolean delivered = deliver(request.targetInstanceId(), request.frame());
+        boolean delivered = deliver(request.targetInstanceId(), request.frame(),
+                request.dedicatedSessionId());
         if (!delivered) {
             log.info("Relayed frame for instance {} had no local socket (instance "
                     + "may live elsewhere or be gone)", request.targetInstanceId());
@@ -87,8 +92,31 @@ public class AgentRelayController {
      * NOT parse: a control-socket delivery is always correct for lifecycle
      * frames, and execution frames tolerate the control socket too (§7.5
      * explicitly makes the channel a transport preference, not a requirement).
+     *
+     * <p><b>§22.3/D7 dedicated form:</b> when the peer posts a
+     * {@code dedicatedSessionId} the ONLY local target is that session's bound
+     * channel socket — a control-socket write would violate the fatal-loss
+     * architecture. No binding (or a socket mismatch) is a false return.</p>
      */
-    private boolean deliver(UUID targetInstanceId, String frame) {
+    private boolean deliver(UUID targetInstanceId, String frame, UUID dedicatedSessionId) {
+        if (dedicatedSessionId != null) {
+            WebSocketSession channel = channelRegistry.getChannel(dedicatedSessionId)
+                    .orElse(null);
+            if (channel == null) {
+                log.info("Dedicated relayed frame for session {} has no local "
+                        + "channel binding (§22.3/D7) — no control fallback",
+                        dedicatedSessionId);
+                return false;
+            }
+            try {
+                channel.sendMessage(new TextMessage(frame));
+                return true;
+            } catch (IOException e) {
+                log.warn("Failed relaying frame to dedicated channel of session {}: {}",
+                        dedicatedSessionId, e.getMessage());
+                return false;
+            }
+        }
         return connectionManager.sendRawMessage(targetInstanceId, frame);
     }
 

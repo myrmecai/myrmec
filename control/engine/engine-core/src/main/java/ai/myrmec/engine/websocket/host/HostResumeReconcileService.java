@@ -10,6 +10,9 @@ import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.inference.execution.DurableEventReplayService;
 import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
+import ai.myrmec.engine.inference.execution.interaction.ExecutionInteraction;
+import ai.myrmec.engine.inference.execution.interaction.ExecutionInteractionRepository;
+import ai.myrmec.engine.inference.execution.interaction.InteractionStatus;
 import ai.myrmec.engine.node.NodeRegistryService;
 import ai.myrmec.engine.websocket.host.payload.HostResumePayload;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -69,6 +72,8 @@ public class HostResumeReconcileService {
     private final NodeRegistryService nodeRegistryService;
     private final DurableEventReplayService eventReplayService;
     private final ai.myrmec.engine.node.HostFrameRelayService frameRelayService;
+    private final ai.myrmec.engine.inference.execution.interaction
+            .ExecutionInteractionRepository interactionRepository;
     private final ObjectMapper objectMapper;
 
     /** §13 match outcome — why a resume cannot re-adopt. */
@@ -165,10 +170,43 @@ public class HostResumeReconcileService {
             if ("WORKFLOW".equals(session.getServiceType())) {
                 UUID inFlight = inFlightOrchestrationExecution(session.getId());
                 if (inFlight != null) {
+                    // §22.8 (Task 10): a host reporting live retained
+                    // INTERACTION STATE for the in-flight execution held
+                    // its in-process coordinator across the Host Channel
+                    // outage (the intact Agent Channel case) — KEEP with
+                    // the overlay evidence reconciled into the observed
+                    // columns (highest stateSequence wins; engine terminal
+                    // decisions always win). No interactionState report =
+                    // the §13 default: the engine cannot know what the
+                    // host finished while disconnected → CANCEL_EXECUTION.
+                    var overlay = retained.interactionState();
+                    if (overlay != null && inFlight.equals(overlay.executionId())) {
+                        applyInteractionEvidence(inFlight, overlay);
+                        long cursor = session.getHighestContiguousSequence();
+                        decisions.add(HostResumePayload.ReconcilePayload.Decision.keep(
+                                session.getId(), cursor));
+                        kept.add(session.getId());
+                        long hostCursor = retained.lastSentSequence() != null
+                                ? retained.lastSentSequence() : cursor;
+                        eventReplayService.replay(session.getId(), hostCursor);
+                        resendUnacknowledgedTerminals(session, retained);
+                        log.info("Reconcile KEEP for in-flight execution {} of session {} "
+                                + "(§22.8 retained interaction state: {}@r{})",
+                                inFlight, session.getId(), overlay.effectiveState(),
+                                overlay.acceptedControlRevision());
+                        continue;
+                    }
                     executionRepository.findById(inFlight).ifPresent(e -> {
                         e.setState(SessionExecution.State.CANCELLING);
                         executionRepository.save(e);
                     });
+                    // §22.6 (Task 10): the §13 restart-cancel settles a
+                    // pending interaction with the uncertain-restart
+                    // vocabulary — the host reported no retained overlay,
+                    // so its in-flight chat is HOST_STATE_LOST (never a
+                    // silent timeout). The pointer clears here; the
+                    // terminal invalidation later settles any stragglers.
+                    settleRestartLostInteraction(inFlight, retained);
                     decisions.add(HostResumePayload.ReconcilePayload.Decision.cancelExecution(
                             retained.sessionId(), inFlight));
                     continue;
@@ -215,6 +253,41 @@ public class HostResumeReconcileService {
         return decisions;
     }
 
+    /**
+     * §22.6 (Task 10): the restart-cancel settles the reported execution's
+     * pending interaction with HOST_STATE_LOST — the uncertain-restart
+     * vocabulary. The host reported NO retained overlay, so its in-flight
+     * chat cannot settle on the worker; the engine closes it here (the
+     * Task 8 freeze contract: the pointer clears with the settlement).
+     */
+    private void settleRestartLostInteraction(
+            UUID executionId, HostResumePayload.RetainedSession retained) {
+        SessionExecution locked = executionRepository
+                .findWithLockById(executionId).orElse(null);
+        if (locked == null || locked.getPendingInteractionId() == null) {
+            return;
+        }
+        ExecutionInteraction interaction = interactionRepository
+                .findById(locked.getPendingInteractionId()).orElse(null);
+        if (interaction != null
+                && (interaction.getStatus() == InteractionStatus.ACCEPTED
+                    || interaction.getStatus() == InteractionStatus.RUNNING)) {
+            interaction.setStatus(InteractionStatus.FAILED);
+            interaction.setError(java.util.Map.of(
+                    "errorCode", "HOST_STATE_LOST",
+                    "message", "the host lost its retained state (§22.6 uncertain "
+                            + "restart); the interaction cannot settle",
+                    "retryable", false));
+            interaction.setCompletedAt(Instant.now());
+            if (!"KNOWN".equals(interaction.getUsageStatus())) {
+                interaction.setUsageStatus("UNKNOWN");
+            }
+            interactionRepository.save(interaction);
+        }
+        locked.setPendingInteractionId(null);
+        executionRepository.save(locked);
+    }
+
     /** The one non-terminal orchestration execution on the session, if any. */
     private UUID inFlightOrchestrationExecution(UUID sessionId) {
         return executionRepository.findBySessionId(sessionId).stream()
@@ -224,6 +297,56 @@ public class HostResumeReconcileService {
                 .map(SessionExecution::getId)
                 .findFirst()
                 .orElse(null);
+    }
+
+    /**
+     * §22.8 (Task 10): reconcile the host's retained in-process overlay
+     * EVIDENCE into the observed-state columns. Evidence, never authority:
+     * a STALE report (stateSequence lower than the recorded observation)
+     * is a logged no-op; a terminal row is never touched; the engine's
+     * terminal decisions always win. Row-locked (the same lock order as
+     * every control-path writer).
+     */
+    private void applyInteractionEvidence(
+            UUID executionId,
+            HostResumePayload.RetainedSession.ReportedInteractionState overlay) {
+        SessionExecution locked = executionRepository
+                .findWithLockById(executionId).orElse(null);
+        if (locked == null) {
+            return;
+        }
+        // §22.8: terminal rows never restore — the evidence dies with the
+        // engine's terminal decision.
+        if (locked.getTerminalMessageId() != null
+                || switch (locked.getState()) {
+                    case COMPLETED, FAILED, PAUSED, CANCELLED, REJECTED -> true;
+                    default -> false;
+                }) {
+            log.info("Reconcile interactionState evidence for terminal execution {} "
+                    + "ignored (§22.8: engine terminal decisions win)", executionId);
+            return;
+        }
+        // Highest stateSequence wins (§22.4): a stale report never
+        // regresses the observed state.
+        long reported = overlay.stateSequence() == null ? 0L : overlay.stateSequence();
+        long recorded = locked.getControlStateSequence() == null
+                ? 0L : locked.getControlStateSequence();
+        if (reported <= recorded) {
+            log.debug("Reconcile interactionState evidence for execution {} stale "
+                    + "(reported seq {}, recorded {}) — ignored", executionId, reported,
+                    recorded);
+            return;
+        }
+        locked.setAcceptedControlRevision(overlay.acceptedControlRevision());
+        locked.setControlStateSequence(reported);
+        if (overlay.effectiveState() != null) {
+            locked.setHoldState(overlay.effectiveState());
+        }
+        locked.setHoldChangedAt(Instant.now());
+        locked.setIdleResumeAt(overlay.idleResumeAt() == null
+                ? null : Instant.parse(overlay.idleResumeAt()));
+        locked.setPendingInteractionId(overlay.pendingInteractionId());
+        executionRepository.save(locked);
     }
 
     /** Terminal-close a reconciled-away session (slot returns; §9 semantics). */

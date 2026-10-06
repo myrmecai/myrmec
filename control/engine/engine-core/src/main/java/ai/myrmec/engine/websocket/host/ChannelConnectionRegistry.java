@@ -32,8 +32,10 @@ public class ChannelConnectionRegistry {
     }
 
     /** Unregister only if this socket is the one currently bound. */
-    public void unregister(UUID sessionId, WebSocketSession channelSocket) {
-        channels.remove(sessionId, channelSocket);
+    /** @return true when THIS socket was the live binding (removed); false when the
+     *          session had been re-bound to a newer socket (stale close). */
+    public boolean unregister(UUID sessionId, WebSocketSession channelSocket) {
+        return channels.remove(sessionId, channelSocket);
     }
 
     /** The dedicated channel socket for a session, when bound and open. */

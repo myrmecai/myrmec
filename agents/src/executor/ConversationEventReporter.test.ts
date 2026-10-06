@@ -34,6 +34,11 @@ function makeEventCapture(): {
     sendExecutionCancelled: async () => {},
     sendExecutionCancel: async () => {},
     sendExecutionApprovalRequested: async () => {},
+    sendExecutionControlState: async () => {},
+    sendExecutionInteractionDelta: async () => {},
+    sendExecutionInteractionComplete: async () => {},
+    sendExecutionInteractionFailed: async () => {},
+    sendExecutionControlRequest: async () => {},
     sendProtocolError: async () => {},
   } satisfies ExecutionFrameSender;
   return { sender, events };

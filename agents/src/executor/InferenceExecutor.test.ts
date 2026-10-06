@@ -107,6 +107,16 @@ function makeSenderCapture(): {
     sendExecutionCancel: (p) => push("execution.cancel", p as Record<string, unknown>),
     sendExecutionApprovalRequested: (p) =>
       push("execution.approval.requested", p as Record<string, unknown>),
+    sendExecutionControlState: (p) =>
+      push("execution.control.state", p as Record<string, unknown>),
+    sendExecutionInteractionDelta: (p) =>
+      push("execution.interaction.delta", p as Record<string, unknown>),
+    sendExecutionInteractionComplete: (p) =>
+      push("execution.interaction.complete", p as Record<string, unknown>),
+    sendExecutionInteractionFailed: (p) =>
+      push("execution.interaction.failed", p as Record<string, unknown>),
+    sendExecutionControlRequest: (p) =>
+      push("execution.control.request", p as Record<string, unknown>),
   };
   return { sender, sent };
 }

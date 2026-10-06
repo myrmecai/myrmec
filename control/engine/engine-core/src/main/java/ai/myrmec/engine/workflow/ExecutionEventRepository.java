@@ -91,4 +91,34 @@ public interface ExecutionEventRepository extends JpaRepository<ExecutionEvent, 
      * Count events for an attempt.
      */
     long countByAttemptId(UUID attemptId);
+
+    /**
+     * §3.5 (plan 2026-10-03-session-interaction): the public durable
+     * stream-cursor lookup — brokers replay from their last delivered
+     * sequence; the (execution_id, stream_sequence) pair is unique.
+     */
+    java.util.Optional<ExecutionEvent> findByExecutionIdAndStreamSequence(
+            UUID executionId, Long streamSequence);
+
+    /**
+     * §3.5: durable events for ONE orchestration execution in cursor order
+     * (the §5 GET /events replay page input).
+     */
+    List<ExecutionEvent> findByExecutionIdOrderByStreamSequenceAsc(UUID executionId);
+
+    /**
+     * §3.5: cursor-ordered replay window after {@code afterSequence} —
+     * ordered ascending; the caller applies the limit (bounded max 500 in
+     * the endpoint contract, §4).
+     */
+    List<ExecutionEvent> findByExecutionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
+            UUID executionId, Long afterSequence);
+
+    /**
+     * Task 9 (§4): the retention watermark — the LOWEST stream_sequence
+     * row still retained for the execution. A replay cursor below THIS
+     * value is below retention (the §4 execution.replay.gap condition).
+     */
+    java.util.Optional<ExecutionEvent> findFirstByExecutionIdOrderByStreamSequenceAsc(
+            UUID executionId);
 }

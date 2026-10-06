@@ -24,6 +24,7 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import type {
   ChatModel,
   ConversationMessage,
+  ModelCallOptions,
   ModelResponse,
   ModelStreamChunk,
   ModelToolCall,
@@ -47,11 +48,19 @@ export class LangChainChatModel implements ChatModel {
   async invoke(
     messages: ConversationMessage[],
     tools: ToolSpec[],
+    options?: ModelCallOptions,
   ): Promise<ModelResponse> {
     const lcMessages = messages.map(toLangChainMessage);
     const runnable = this.bind(tools);
 
-    const reply = await runnable.invoke(lcMessages);
+    // RunnableConfig carries the abort signal when present (provider
+    // support is adapter-dependent - LangChain forwards it per model;
+    // an unsupported abort leaves the signal unobserved by the provider
+    // and the CALLER's deadline fencing owns the outcome).
+    const reply = await runnable.invoke(
+      lcMessages,
+      options?.signal ? { signal: options.signal } : undefined,
+    );
 
     return {
       content: extractText(reply.content),
@@ -63,11 +72,15 @@ export class LangChainChatModel implements ChatModel {
   async *stream(
     messages: ConversationMessage[],
     tools: ToolSpec[],
+    options?: ModelCallOptions,
   ): AsyncIterable<ModelStreamChunk> {
     const lcMessages = messages.map(toLangChainMessage);
     const runnable = this.bind(tools);
 
-    const stream = await runnable.stream(lcMessages);
+    const stream = await runnable.stream(
+      lcMessages,
+      options?.signal ? { signal: options.signal } : undefined,
+    );
     for await (const chunk of stream) {
       const content = extractText(chunk.content);
       const usage = extractUsage(chunk.usage_metadata);

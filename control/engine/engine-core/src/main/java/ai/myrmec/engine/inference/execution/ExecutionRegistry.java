@@ -5,7 +5,10 @@ package ai.myrmec.engine.inference.execution;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionAllocator;
 import ai.myrmec.engine.inference.SessionRepository;
+import ai.myrmec.engine.inference.execution.interaction.InteractionPolicySnapshotService;
+import ai.myrmec.engine.inference.execution.interaction.InteractionProperties;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,6 +24,10 @@ import java.util.UUID;
  * messageId for §12.1 dedup. One in-flight execution per conversation
  * session (§11.3.4); exactly one execution per orchestration session
  * (§11.3.5) — both enforced under the session-row lock.
+ *
+ * <p>§3.1 (plan 2026-10-03-session-interaction): orchestration (WORKFLOW)
+ * executions receive their effective immutable interaction policy snapshot
+ * at creation — fail-closed (§22.2): a missing policy refuses the start.</p>
  */
 @Service
 @Slf4j
@@ -33,11 +40,19 @@ public class ExecutionRegistry {
 
     private final SessionExecutionRepository executionRepository;
     private final SessionRepository sessionRepository;
+    /** @Lazy: assembler → registry wiring is intentionally one-directional at runtime. */
+    private final ai.myrmec.engine.inference.SessionContextAssembler sessionContextAssembler;
+    /** §22.8 (Task 10): the terminal invalidation (pending commands/proposals/interactions). */
+    private final ai.myrmec.engine.inference.execution.interaction.TerminalInvalidationService terminalInvalidation;
 
     public ExecutionRegistry(SessionExecutionRepository executionRepository,
-                             SessionRepository sessionRepository) {
+                             SessionRepository sessionRepository,
+                             @Lazy ai.myrmec.engine.inference.SessionContextAssembler sessionContextAssembler,
+                             ai.myrmec.engine.inference.execution.interaction.TerminalInvalidationService terminalInvalidation) {
         this.executionRepository = executionRepository;
         this.sessionRepository = sessionRepository;
+        this.sessionContextAssembler = sessionContextAssembler;
+        this.terminalInvalidation = terminalInvalidation;
     }
 
     /**
@@ -101,6 +116,20 @@ public class ExecutionRegistry {
             log.warn("execution.start refused — orchestration session {} already has an execution",
                     sessionId);
             return Optional.empty();
+        }
+        // §3.1/§22.2: persist the effective orchestration policy snapshot at
+        // execution creation — fail-closed (a missing WORKFLOW policy
+        // refuses the start instead of silently degrading to no policy).
+        if (!conversation) {
+            InteractionProperties.Policy policy =
+                    sessionContextAssembler.effectiveInteractionPolicy(session.getServiceType());
+            if (policy == null) {
+                log.warn("execution.start refused — orchestration session {} has no interaction "
+                        + "policy (§22.2 requires the block on WORKFLOW session.open)", sessionId);
+                return Optional.empty();
+            }
+            execution.setInteractionPolicy(
+                    InteractionPolicySnapshotService.policyMap(policy));
         }
         return Optional.of(executionRepository.saveAndFlush(execution));
     }
@@ -179,6 +208,15 @@ public class ExecutionRegistry {
         execution.setTerminalPayload(terminalPayload);
         execution.setTerminalAt(Instant.now());
         executionRepository.save(execution);
+        // §22.8/§3.4 (Task 10): the FIRST terminal linearization invalidates
+        // the pending interaction-family artifacts under the SAME row lock —
+        // pending dispatch commands EXPIRE (never deliver a command to a
+        // dead execution), CONFIRMATION_REQUIRED proposals settle EXPIRED,
+        // and the pending interaction settles at its ORIGINAL response
+        // deadline per the Task 8 sweeper contract (retained outcome-only
+        // replay; a late outcome persists transcript only). Idempotent: the
+        // terminalMessageId guard above means this runs exactly once.
+        terminalInvalidation.invalidatePending(executionId, Instant.now());
         return true;
     }
 

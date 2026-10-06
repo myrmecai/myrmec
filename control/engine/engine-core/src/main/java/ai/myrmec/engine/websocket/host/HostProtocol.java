@@ -63,6 +63,21 @@ public final class HostProtocol {
     public static final String EXECUTION_CANCELLED = "execution.cancelled";
     public static final String EXECUTION_POLICY_UPDATE = "execution.policy.update";
     public static final String EXECUTION_APPROVAL_REQUESTED = "execution.approval.requested";
+
+    // ---- Session interaction + temporary hold (§22 catalogue, §22.3) ----
+    // All eight ride the session's dedicated Agent Channel; identity rules and
+    // durability semantics are §22.3. Validated payloads are the typed records
+    // in websocket.host.payload.
+    public static final String EXECUTION_CONTROL = "execution.control";
+    public static final String EXECUTION_CONTROL_STATE = "execution.control.state";
+    public static final String EXECUTION_INTERACTION = "execution.interaction";
+    public static final String EXECUTION_INTERACTION_DELTA = "execution.interaction.delta";
+    public static final String EXECUTION_INTERACTION_COMPLETE = "execution.interaction.complete";
+    public static final String EXECUTION_INTERACTION_FAILED = "execution.interaction.failed";
+    public static final String EXECUTION_CONTROL_REQUEST = "execution.control.request";
+    public static final String EXECUTION_CONTROL_REQUEST_RESOLVED =
+            "execution.control.request.resolved";
+
     public static final String EVENT_BACKPRESSURE_TIMEOUT = "EVENT_BACKPRESSURE_TIMEOUT";
     public static final String SESSION_NOT_FOUND = "SESSION_NOT_FOUND";
     public static final String EXECUTION_NOT_FOUND = "EXECUTION_NOT_FOUND";

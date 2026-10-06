@@ -60,6 +60,8 @@ class HostRecoveryTest extends IntegrationTestBase {
     @Autowired SessionExecutionRepository executionRepository;
     @Autowired SessionAllocator allocator;
     @Autowired HostResumeReconcileService reconcileService;
+    @Autowired ai.myrmec.engine.inference.execution.interaction
+            .ExecutionInteractionRepository interactionRepository;
     @Autowired DurableEventReplayService eventReplayService;
     @Autowired org.springframework.context.ApplicationContext applicationContext;
     @jakarta.persistence.PersistenceContext jakarta.persistence.EntityManager entityManager;
@@ -85,7 +87,7 @@ class HostRecoveryTest extends IntegrationTestBase {
                 { "protocolVersion": 1, "messageId": "m-open", "type": "host.open",
                   "sentAt": "%s", "payload": { "instanceNonce": "%s", "hostname": "laptop",
                   "runtimeVersion": "1.8.0", "supportedProtocolVersions": [1], "poolSize": 2,
-                  "capabilities": {}, "reportedCapacity": {} } }
+                  "capabilities": { "sessionInteraction": { "version": 1, "temporaryHold": true } }, "reportedCapacity": {} } }
                 """.formatted(Instant.now(), nonce);
         ((WebSocketHandler) handler).handleMessage(session, new TextMessage(open));
 
@@ -318,7 +320,7 @@ class HostRecoveryTest extends IntegrationTestBase {
                 { "protocolVersion": 1, "messageId": "m-open-2", "type": "host.open",
                   "sentAt": "%s", "payload": { "instanceNonce": "%s", "hostname": "laptop",
                   "runtimeVersion": "1.8.0", "supportedProtocolVersions": [1], "poolSize": 2,
-                  "capabilities": {}, "reportedCapacity": {} } }
+                  "capabilities": { "sessionInteraction": { "version": 1, "temporaryHold": true } }, "reportedCapacity": {} } }
                 """.formatted(Instant.now(), nonce2);
         ((WebSocketHandler) handler).handleMessage(reconnected, new TextMessage(open));
 
@@ -398,5 +400,299 @@ class HostRecoveryTest extends IntegrationTestBase {
         assertThat(executionRepository.findById(decisions.get(1).executionId())
                 .orElseThrow().getState())
                 .isEqualTo(SessionExecution.State.CANCELLING);
+    }
+
+    // ------------------------------------------------------------------
+    // (D7/§22.8) a channel-fatality victim does NOT get KEEP on reconcile
+    // ------------------------------------------------------------------
+
+    /**
+     * Section 22.8: Agent Channel loss is fatal — the session was already
+     * closed by the channel-close path when the socket died, so a later
+     * host.resume reconcile for it answers the engine's existing CLOSED
+     * decision (CLOSE/SESSION_NOT_FOUND), never KEEP. The close path and the
+     * reconcile decision reuse the EXISTING machinery; no new decision
+     * vocabulary.
+     */
+    @Test
+    void channelFatalityVictimDoesNotGetKeepOnReconcile() throws Exception {
+        Setup setup = openedHost("recovery-d7");
+        var project = data.project().named("recovery-d7").create();
+        Session conversation = parkedSession(project.getId(), setup.instanceId(),
+                SessionAllocator.ALLOC_STATE_ACTIVE, "CONVERSATION", 0L);
+
+        // Bind a dedicated channel socket the way the §7.5 handshake does:
+        // the registry holds the socket AND the handler stamps the bound
+        // session id in the socket attributes (what a real channel.open does).
+        WebSocketSession channelSocket = mock(WebSocketSession.class);
+        lenient().when(channelSocket.getId()).thenReturn("rec-chan-d7-" + UUID.randomUUID());
+        lenient().when(channelSocket.isOpen()).thenReturn(true);
+        Map<String, Object> chanAttrs = new HashMap<>();
+        chanAttrs.put(HostChannelWebSocketHandler.ATTR_BOUND_SESSION_ID, conversation.getId());
+        lenient().when(channelSocket.getAttributes()).thenReturn(chanAttrs);
+        applicationContext.getBean(ChannelConnectionRegistry.class)
+                .register(conversation.getId(), channelSocket);
+
+        // The dedicated channel dies — the FATAL close path runs (D7).
+        applicationContext.getBean(HostChannelWebSocketHandler.class)
+                .afterConnectionClosed(channelSocket, CloseStatus.GOING_AWAY);
+        entityManager.clear();
+        assertThat(sessionRepository.findById(conversation.getId()).orElseThrow()
+                .getAllocationState())
+                .as("the fatal channel close already ran")
+                .isEqualTo(SessionAllocator.ALLOC_STATE_CLOSED);
+
+        // The host later reconnects and reports the session as retained.
+        handler.afterConnectionClosed(setup.session(), CloseStatus.GOING_AWAY);
+        WebSocketSession reconnected = mock(WebSocketSession.class);
+        lenient().when(reconnected.getId()).thenReturn("rec-sock-d7-" + UUID.randomUUID());
+        lenient().when(reconnected.isOpen()).thenReturn(true);
+        Map<String, Object> attrs = new HashMap<>();
+        attrs.put(HostControlHandshakeInterceptor.ATTR_HOST_ID, setup.host().getId());
+        lenient().when(reconnected.getAttributes()).thenReturn(attrs);
+
+        resume(reconnected, setup.instanceId(), setup.nonce(), List.of(
+                new HostResumePayload.RetainedSession(conversation.getId(),
+                        "ACTIVE", true, null, 0L, null)));
+
+        List<JsonNode> replies = allReplies(reconnected);
+        JsonNode reconcile = replies.stream()
+                .filter(r -> "host.reconcile".equals(r.path("type").asText()))
+                .findFirst().orElseThrow();
+        JsonNode decision = reconcile.path("payload").path("decisions").get(0);
+        assertThat(decision.path("action").asText())
+                .as("a channel-fatality victim is never KEEPed (§22.8)")
+                .isEqualTo("CLOSE");
+        assertThat(decision.path("reasonCode").asText())
+                .isEqualTo(HostProtocol.SESSION_NOT_FOUND);
+    }
+
+    // ------------------------------------------------------------------
+    // §22.8 (Task 10): the retained in-process interaction overlay on
+    // resume/reconcile — KEEP only for live retained state; evidence
+    // never overrides terminal decisions.
+    // ------------------------------------------------------------------
+
+    @Test
+    void resumeWithInteractionStateKeepsInFlightExecutionAndProjectsEvidence() throws Exception {
+        Setup setup = openedHost("recovery-overlay");
+        var project = data.project().named("recovery-overlay").create();
+        Session workflow = parkedSession(project.getId(), setup.instanceId(),
+                SessionAllocator.ALLOC_STATE_ACTIVE, "WORKFLOW", 0L);
+        SessionExecution inFlight = execution(workflow,
+                SessionExecution.State.RUNNING, null);
+        inFlight.setDispatchId(UUID.randomUUID());
+        inFlight.setControlRevision(1L);
+        inFlight.setAcceptedControlRevision(0L);
+        inFlight.setControlStateSequence(0L);
+        inFlight.setHoldState("RUNNING");
+        executionRepository.saveAndFlush(inFlight);
+
+        handler.afterConnectionClosed(setup.session(), CloseStatus.GOING_AWAY);
+        WebSocketSession reconnected = mock(WebSocketSession.class);
+        lenient().when(reconnected.getId()).thenReturn("rec-sock-t10a-" + UUID.randomUUID());
+        lenient().when(reconnected.isOpen()).thenReturn(true);
+        Map<String, Object> attrs = new HashMap<>();
+        attrs.put(HostControlHandshakeInterceptor.ATTR_HOST_ID, setup.host().getId());
+        lenient().when(reconnected.getAttributes()).thenReturn(attrs);
+
+        // §22.8: the host retained the live coordinator (an intact Agent
+        // Channel during the Host Channel outage) and reports the overlay.
+        var overlay = new HostResumePayload.RetainedSession.ReportedInteractionState(
+                inFlight.getId(), 3L, 12L, "HELD",
+                Instant.now().plusSeconds(300).truncatedTo(java.time.temporal.ChronoUnit.MILLIS).toString(),
+                null, List.of());
+        resume(reconnected, setup.instanceId(), setup.nonce(), List.of(
+                new HostResumePayload.RetainedSession(workflow.getId(),
+                        "ACTIVE", true, inFlight.getId(), 0L, null, overlay)));
+
+        // KEEP (not CANCEL_EXECUTION): the live retained state wins.
+        List<JsonNode> replies = allReplies(reconnected);
+        JsonNode reconcile = replies.stream()
+                .filter(r -> "host.reconcile".equals(r.path("type").asText()))
+                .findFirst().orElseThrow();
+        JsonNode decision = reconcile.path("payload").path("decisions").get(0);
+        assertThat(decision.path("action").asText()).isEqualTo("KEEP");
+        // The evidence projected into the observed columns.
+        SessionExecution after = executionRepository.findById(inFlight.getId()).orElseThrow();
+        assertThat(after.getState()).isEqualTo(SessionExecution.State.RUNNING);
+        assertThat(after.getAcceptedControlRevision()).isEqualTo(3L);
+        assertThat(after.getControlStateSequence()).isEqualTo(12L);
+        assertThat(after.getHoldState()).isEqualTo("HELD");
+        assertThat(after.getIdleResumeAt()).isNotNull();
+    }
+
+    @Test
+    void resumeWithoutInteractionStateCancelsInFlightAsBefore() throws Exception {
+        Setup setup = openedHost("recovery-no-overlay");
+        var project = data.project().named("recovery-no-overlay").create();
+        Session workflow = parkedSession(project.getId(), setup.instanceId(),
+                SessionAllocator.ALLOC_STATE_ACTIVE, "WORKFLOW", 0L);
+        SessionExecution inFlight = execution(workflow,
+                SessionExecution.State.RUNNING, null);
+        inFlight.setDispatchId(UUID.randomUUID());
+        executionRepository.saveAndFlush(inFlight);
+
+        handler.afterConnectionClosed(setup.session(), CloseStatus.GOING_AWAY);
+        WebSocketSession reconnected = mock(WebSocketSession.class);
+        lenient().when(reconnected.getId()).thenReturn("rec-sock-t10b-" + UUID.randomUUID());
+        lenient().when(reconnected.isOpen()).thenReturn(true);
+        Map<String, Object> attrs = new HashMap<>();
+        attrs.put(HostControlHandshakeInterceptor.ATTR_HOST_ID, setup.host().getId());
+        lenient().when(reconnected.getAttributes()).thenReturn(attrs);
+
+        // A RESTARTED process reports no overlay (no retained state).
+        resume(reconnected, setup.instanceId(), setup.nonce(), List.of(
+                new HostResumePayload.RetainedSession(workflow.getId(),
+                        "ACTIVE", true, inFlight.getId(), 0L, null, null)));
+
+        List<JsonNode> replies = allReplies(reconnected);
+        JsonNode reconcile = replies.stream()
+                .filter(r -> "host.reconcile".equals(r.path("type").asText()))
+                .findFirst().orElseThrow();
+        JsonNode decision = reconcile.path("payload").path("decisions").get(0);
+        assertThat(decision.path("action").asText())
+                .as("a restarted host (no retained overlay) keeps the §13 default")
+                .isEqualTo("CANCEL_EXECUTION");
+        assertThat(executionRepository.findById(inFlight.getId()).orElseThrow().getState())
+                .isEqualTo(SessionExecution.State.CANCELLING);
+    }
+
+    @Test
+    void restartCancelSettlesPendingInteractionHostStateLost() throws Exception {
+        Setup setup = openedHost("recovery-restart-lost");
+        var project = data.project().named("recovery-restart-lost").create();
+        Session workflow = parkedSession(project.getId(), setup.instanceId(),
+                SessionAllocator.ALLOC_STATE_ACTIVE, "WORKFLOW", 0L);
+        SessionExecution inFlight = execution(workflow,
+                SessionExecution.State.RUNNING, null);
+        inFlight.setDispatchId(UUID.randomUUID());
+        executionRepository.saveAndFlush(inFlight);
+
+        // An admitted pending interaction — the in-flight chat the
+        // restarted host cannot settle (its coordinator is gone).
+        var interaction = new ai.myrmec.engine.inference.execution.interaction
+                .ExecutionInteraction();
+        interaction.setExecutionId(inFlight.getId());
+        interaction.setOrdinal(1L);
+        interaction.setActorUserId(UUID.randomUUID());
+        interaction.setClientRequestId(UUID.randomUUID());
+        interaction.setRequestDigest("r".repeat(64));
+        interaction.setStatus(ai.myrmec.engine.inference.execution.interaction
+                .InteractionStatus.ACCEPTED);
+        interaction.setRequestText("what is the status?");
+        interaction.setResponseDeadline(Instant.now().plusSeconds(120));
+        interaction.setAcceptedAt(Instant.now());
+        interaction.setUsageStatus("UNKNOWN");
+        interaction = interactionRepository.saveAndFlush(interaction);
+        inFlight.setPendingInteractionId(interaction.getId());
+        executionRepository.saveAndFlush(inFlight);
+
+        handler.afterConnectionClosed(setup.session(), CloseStatus.GOING_AWAY);
+        WebSocketSession reconnected = mock(WebSocketSession.class);
+        lenient().when(reconnected.getId()).thenReturn("rec-sock-t10e-" + UUID.randomUUID());
+        lenient().when(reconnected.isOpen()).thenReturn(true);
+        Map<String, Object> attrs = new HashMap<>();
+        attrs.put(HostControlHandshakeInterceptor.ATTR_HOST_ID, setup.host().getId());
+        lenient().when(reconnected.getAttributes()).thenReturn(attrs);
+
+        // A RESTARTED process reports no overlay — its retained state is
+        // lost, so the pending chat settles with §22.6's uncertain-restart
+        // vocabulary (never a silent timeout).
+        resume(reconnected, setup.instanceId(), setup.nonce(), List.of(
+                new HostResumePayload.RetainedSession(workflow.getId(),
+                        "ACTIVE", true, inFlight.getId(), 0L, null, null)));
+
+        List<JsonNode> replies = allReplies(reconnected);
+        JsonNode reconcile = replies.stream()
+                .filter(r -> "host.reconcile".equals(r.path("type").asText()))
+                .findFirst().orElseThrow();
+        JsonNode decision = reconcile.path("payload").path("decisions").get(0);
+        assertThat(decision.path("action").asText()).isEqualTo("CANCEL_EXECUTION");
+
+        var settled = interactionRepository.findById(interaction.getId())
+                .orElseThrow();
+        assertThat(settled.getStatus())
+                .isEqualTo(ai.myrmec.engine.inference.execution.interaction
+                        .InteractionStatus.FAILED);
+        assertThat(settled.getError().get("errorCode")).isEqualTo("HOST_STATE_LOST");
+        assertThat(settled.getCompletedAt()).isNotNull();
+        assertThat(executionRepository.findById(inFlight.getId()).orElseThrow()
+                .getPendingInteractionId()).isNull();
+    }
+
+    @Test
+    void staleInteractionStateEvidenceDoesNotRegressObservedState() throws Exception {
+        Setup setup = openedHost("recovery-stale");
+        var project = data.project().named("recovery-stale").create();
+        Session workflow = parkedSession(project.getId(), setup.instanceId(),
+                SessionAllocator.ALLOC_STATE_ACTIVE, "WORKFLOW", 0L);
+        SessionExecution inFlight = execution(workflow,
+                SessionExecution.State.RUNNING, null);
+        inFlight.setDispatchId(UUID.randomUUID());
+        inFlight.setAcceptedControlRevision(5L);
+        inFlight.setControlStateSequence(40L);
+        inFlight.setHoldState("HELD");
+        executionRepository.saveAndFlush(inFlight);
+
+        handler.afterConnectionClosed(setup.session(), CloseStatus.GOING_AWAY);
+        WebSocketSession reconnected = mock(WebSocketSession.class);
+        lenient().when(reconnected.getId()).thenReturn("rec-sock-t10c-" + UUID.randomUUID());
+        lenient().when(reconnected.isOpen()).thenReturn(true);
+        Map<String, Object> attrs = new HashMap<>();
+        attrs.put(HostControlHandshakeInterceptor.ATTR_HOST_ID, setup.host().getId());
+        lenient().when(reconnected.getAttributes()).thenReturn(attrs);
+
+        // A STALE report (stateSequence 7 << recorded 40) never regresses.
+        var stale = new HostResumePayload.RetainedSession.ReportedInteractionState(
+                inFlight.getId(), 1L, 7L, "RUNNING", null, null, List.of());
+        resume(reconnected, setup.instanceId(), setup.nonce(), List.of(
+                new HostResumePayload.RetainedSession(workflow.getId(),
+                        "ACTIVE", true, inFlight.getId(), 0L, null, stale)));
+
+        SessionExecution after = executionRepository.findById(inFlight.getId()).orElseThrow();
+        assertThat(after.getAcceptedControlRevision()).isEqualTo(5L);
+        assertThat(after.getControlStateSequence()).isEqualTo(40L);
+        assertThat(after.getHoldState()).isEqualTo("HELD");
+    }
+
+    @Test
+    void interactionStateNeverRestoresATerminalExecution() throws Exception {
+        Setup setup = openedHost("recovery-terminal");
+        var project = data.project().named("recovery-terminal").create();
+        Session workflow = parkedSession(project.getId(), setup.instanceId(),
+                SessionAllocator.ALLOC_STATE_ACTIVE, "WORKFLOW", 0L);
+        SessionExecution done = execution(workflow,
+                SessionExecution.State.COMPLETED, "tm-done");
+
+        handler.afterConnectionClosed(setup.session(), CloseStatus.GOING_AWAY);
+        WebSocketSession reconnected = mock(WebSocketSession.class);
+        lenient().when(reconnected.getId()).thenReturn("rec-sock-t10d-" + UUID.randomUUID());
+        lenient().when(reconnected.isOpen()).thenReturn(true);
+        Map<String, Object> attrs = new HashMap<>();
+        attrs.put(HostControlHandshakeInterceptor.ATTR_HOST_ID, setup.host().getId());
+        lenient().when(reconnected.getAttributes()).thenReturn(attrs);
+
+        // The host reports an overlay for a TERMINAL execution: §22.8 —
+        // the engine's terminal decision always wins (no projection, no
+        // KEEP restore of the execution; the §13 one-shot close applies).
+        var overlay = new HostResumePayload.RetainedSession.ReportedInteractionState(
+                done.getId(), 9L, 99L, "RUNNING", null, null, List.of());
+        resume(reconnected, setup.instanceId(), setup.nonce(), List.of(
+                new HostResumePayload.RetainedSession(workflow.getId(),
+                        "ACTIVE", true, done.getId(), 0L, null, overlay)));
+
+        List<JsonNode> replies = allReplies(reconnected);
+        JsonNode reconcile = replies.stream()
+                .filter(r -> "host.reconcile".equals(r.path("type").asText()))
+                .findFirst().orElseThrow();
+        JsonNode decision = reconcile.path("payload").path("decisions").get(0);
+        assertThat(decision.path("action").asText())
+                .as("terminal executions are never KEEPed regardless of evidence")
+                .isEqualTo("CLOSE");
+        SessionExecution after = executionRepository.findById(done.getId()).orElseThrow();
+        assertThat(after.getState()).isEqualTo(SessionExecution.State.COMPLETED);
+        assertThat(after.getHoldState()).isEqualTo("RUNNING");
+        assertThat(after.getAcceptedControlRevision()).isZero();
     }
 }

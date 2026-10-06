@@ -9,6 +9,7 @@ import ai.myrmec.engine.conversation.ConversationMessage;
 import ai.myrmec.engine.conversation.ConversationRepository;
 import ai.myrmec.engine.conversation.ConversationService;
 import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
+import ai.myrmec.engine.inference.execution.interaction.InteractionUsageService;
 import ai.myrmec.engine.security.scan.SecretLeakService;
 import ai.myrmec.engine.spi.quota.QuotaPolicyEngine;
 import ai.myrmec.engine.spi.quota.QuotaResourceType;
@@ -59,6 +60,8 @@ public class ExecutionBridge {
     private final OrchestrationEventIngestionService eventIngestionService;
     private final OrchestrationOutcomeService outcomeService;
     private final ExecutionApprovalService executionApprovalService;
+    private final InteractionUsageService usageService;
+    private final SessionExecutionRepository sessionExecutionRepository;
     private final TaskAttemptRepository attemptRepository;
     private final ai.myrmec.engine.workflow.TaskAttemptService taskAttemptService;
     private final ai.myrmec.engine.workflow.WorkflowTaskRepository workflowTaskRepository;
@@ -302,6 +305,13 @@ public class ExecutionBridge {
      * result under the attempt row lock. resultId = executionId; digest over
      * canonical payload bytes for deterministic replay.
      *
+     * <p>§22.8 aggregate settlement: after the terminal is recorded, the
+     * frame's CUMULATIVE usage block settles through the accounting rule
+     * (source ORCHESTRATION, settlementId derived from the terminal frame's
+     * messageId — replay idempotent). Guard: only executions of THIS
+     * feature's orchestration family (an interaction policy present). A
+     * replayed outcome never double-charges (the settlementId dedup).
+     *
      * <p>Deliberately NOT @Transactional: applyResult owns its transaction
      * boundary (exactly like the legacy InboundOrchestrationHandler). A
      * joined outer tx would be poisoned when the dedup/digest conflict throws
@@ -364,11 +374,77 @@ public class ExecutionBridge {
                     dispatchId, executionId, resultDigest, status, disposition, errorCode, payload);
             log.info("execution.terminal {} for dispatch {} → {} (replay={})",
                     executionId, dispatchId, applied.status(), applied.replay());
+            // §22.8 aggregate settlement — AFTER the terminal is durably
+            // recorded, for TERMINAL outcomes only (PAUSED is a suspension,
+            // not terminal; its later outcome re-bridges here). The
+            // settlementId derives from the terminal's resultId (= the
+            // executionId, applyResult's dedup key): replay-safe by the
+            // usage service's settled-set dedup.
+            if (status != OrchestrationOutcomeService.OutcomeStatus.PAUSED) {
+                settleAggregateUsage(dispatchId, executionId, payload);
+            }
         } catch (IllegalStateException conflict) {
             log.error("execution.terminal {} for dispatch {} REJECTED: {}",
                     executionId, dispatchId, conflict.getMessage());
         } catch (IllegalArgumentException unknown) {
             log.warn("execution.terminal {} for unknown dispatch {} — dropped", executionId, dispatchId);
+        }
+    }
+
+    /**
+     * §22.8: the ORCHESTRATION-source aggregate settlement at terminal. The
+     * terminal payload's usage block is the authoritative CUMULATIVE attempt
+     * usage; the accounting rule charges only the unaccounted delta (the
+     * interaction subtotals already accounted ride inside it — no double
+     * billing). Guards: only when the execution row exists for dispatch +
+     * carries an interaction policy (THIS feature's orchestration family),
+     * and only when a usage block is present. Failures never break the
+     * terminal outcome (the accounting seam tolerates late reconciliation).
+     *
+     * <p>Settlement identity: {@code orchestration-terminal-<executionId>}
+     * — the terminal replays through applyResult's resultId dedup, so a
+     * replayed outcome re-settles the SAME settlementId, which the usage
+     * service's settled-set dedup turns into a no-op (no double charge).</p>
+     */
+    private void settleAggregateUsage(UUID dispatchId, UUID executionId,
+                                      Map<String, Object> payload) {
+        try {
+            var execution = sessionExecutionRepository.findByDispatchId(dispatchId)
+                    .filter(e -> executionId.equals(e.getId()))
+                    .orElse(null);
+            if (execution == null || execution.getInteractionPolicy() == null) {
+                return;   // not THIS feature's orchestration family
+            }
+            Map<String, Object> usage = usageBlockOf(payload);
+            boolean known = !usage.isEmpty();
+            usageService.settleUsage(executionId,
+                    "orchestration-terminal-" + executionId,
+                    InteractionUsageService.Source.ORCHESTRATION, null,
+                    known ? usage : null, known ? "KNOWN" : "UNKNOWN");
+        } catch (Exception e) {
+            log.warn("Aggregate usage settlement for execution {} failed (terminal outcome "
+                    + "stands): {}", executionId, e.getMessage());
+        }
+    }
+
+    /** The terminal payload's usage block (§8.5 frame usage), as a token map. */
+    private Map<String, Object> usageBlockOf(Map<String, Object> payload) {
+        if (!(payload.get("usage") instanceof Map<?, ?> usage)) {
+            return Map.of();
+        }
+        Map<String, Object> tokens = new LinkedHashMap<>();
+        copyToken(usage, tokens, "inputTokens");
+        copyToken(usage, tokens, "outputTokens");
+        copyToken(usage, tokens, "totalTokens");
+        if (usage.get("modelId") instanceof String modelId) {
+            tokens.put("modelId", modelId);
+        }
+        return tokens;
+    }
+
+    private void copyToken(Map<?, ?> from, Map<String, Object> to, String key) {
+        if (from.get(key) instanceof Number n) {
+            to.put(key, n.longValue());
         }
     }
 

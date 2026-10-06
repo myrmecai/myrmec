@@ -24,6 +24,9 @@ import { CaptureFilter } from "../executor/CaptureFilter.js";
 import type {
   ExecutionCancelPayload,
   ExecutionStartPayload,
+  ExecutionInteractionPayload,
+  ExecutionControlPayload,
+  ExecutionControlRequestResolvedPayload,
   OrchestrationExecutionStartPayload,
 } from "../protocol/unifiedFrames.js";
 import type { ChatModelFactory, SessionToolFactory } from "../executor/providers.js";
@@ -163,6 +166,18 @@ export class Agent {
       sendExecutionCancel: (p) => send("execution.cancel", p as Record<string, unknown>),
       sendExecutionApprovalRequested: (p) =>
         send("execution.approval.requested", p as Record<string, unknown>),
+      // protocol 22.3/22.4/22.6/22.7 (Task 7): the coordinator's durable
+      // control states + the interaction-loop's dedicated-channel frames.
+      sendExecutionControlState: (p) =>
+        send("execution.control.state", p as Record<string, unknown>),
+      sendExecutionInteractionDelta: (p) =>
+        send("execution.interaction.delta", p as Record<string, unknown>),
+      sendExecutionInteractionComplete: (p) =>
+        send("execution.interaction.complete", p as Record<string, unknown>),
+      sendExecutionInteractionFailed: (p) =>
+        send("execution.interaction.failed", p as Record<string, unknown>),
+      sendExecutionControlRequest: (p) =>
+        send("execution.control.request", p as Record<string, unknown>),
       sendProtocolError: (p) => send("protocol.error", p as Record<string, unknown>),
     };
   }
@@ -196,6 +211,63 @@ export class Agent {
       // executor's outbox acknowledges the matching record by messageId
       // (best-effort; an unknown id is a no-op).
       await this.orchestration?.handleEngineAck(message.acknowledgedMessageId);
+      return;
+    }
+    if (message.kind === "connection-state") {
+      // §22.8 (D7): the supervisor's session connection-state seam.
+      // fatal -> stop the session runtime through the EXISTING close path
+      // (model dispose, vault clear, capacity released) exactly once;
+      // ready=false/true toggle the session's admission gate. Idempotent
+      // for repeated notifications (an already-stopped session is a
+      // registry no-op).
+      this.handleConnectionState(message);
+      return;
+    }
+    if (message.kind === "channel-opened") {
+      // §7.5/§22.8 (D7 cutover, Task 11): the supervisor completed the
+      // dedicated channel handshake — record the binding in the registry
+      // (liveness bookkeeping; the socket stays supervisor-side).
+      this.sessions.bindChannel(
+        message.sessionId,
+        { supervisorSide: true },
+        {
+          sessionId: message.sessionId,
+          highestContiguousSequence: message.opened.highestContiguousSequence,
+        },
+      );
+      return;
+    }
+    if (message.kind === "channel-dead") {
+      // §22.8 (D7): the bound channel died — clear the registry's binding
+      // mark (the fatal session teardown rides connection-state).
+      this.sessions.markChannelDead(message.sessionId);
+      return;
+    }
+    if (message.kind === "channel-unbind") {
+      // Session close: drop the registry's channel binding (the socket
+      // itself is closed supervisor-side).
+      this.sessions.unbindChannel(message.sessionId);
+      return;
+    }
+    if (message.kind === "cancel-execution") {
+      // §13 (A2, Task 11): the CANCEL_EXECUTION resume decision IS the
+      // cancellation command — the executor's existing cancel path (the
+      // orchestration executor keys on executionId with the dispatchId
+      // fallback; the inference executor on executionId).
+      this.orchestration?.handleCancel({
+        dispatchId: message.executionId,
+        executionId: message.executionId,
+      });
+      this.inference.handleCancel({
+        executionId: message.executionId,
+      } as ExecutionCancelPayload);
+      return;
+    }
+    if (message.kind === "close-retained") {
+      // §13 (A2, Task 11): a CLOSE resume decision / retention expiry —
+      // the EXISTING session teardown (model dispose, vault clear,
+      // capacity release; idempotent registry-side).
+      this.sessions.close(message.sessionId);
       return;
     }
     if (message.kind !== "envelope") {
@@ -233,6 +305,33 @@ export class Agent {
         await this.handlePolicyUpdate(
           frame.payload as import("../protocol/unifiedFrames.js").ExecutionPolicyUpdatePayload,
           frame as unknown as { messageId?: string },
+        );
+        return;
+      // -- protocol 22.3/22.6 (Task 7): the inbound interaction command +
+      // the proposal-resolution command ride the DEDICATED Agent Channel
+      // (or the control socket for unbound sessions). Both route to the
+      // OrchestrationExecutor that owns the identity (executionId +
+      // dispatchId); an unresolvable identity answers protocol.error
+      // IDENTITY_MISMATCH (fail closed - never silently dropped).
+      case UnifiedMessageType.EXECUTION_INTERACTION:
+        await this.handleExecutionInteraction(
+          frame.payload as ExecutionInteractionPayload,
+          frame as unknown as { messageId?: string },
+        );
+        return;
+      case UnifiedMessageType.EXECUTION_CONTROL:
+        // §22.4 (Task 11 fix): one engine HOLD/CONTINUE command — the
+        // executor routes it to the dispatch's coordinator (identity
+        // resolved first; unresolvable answers protocol.error
+        // IDENTITY_MISMATCH — fail closed, never silently dropped).
+        await this.handleExecutionControl(
+          frame.payload as ExecutionControlPayload,
+          frame as unknown as { messageId?: string },
+        );
+        return;
+      case UnifiedMessageType.EXECUTION_CONTROL_REQUEST_RESOLVED:
+        this.handleControlRequestResolved(
+          frame.payload as ExecutionControlRequestResolvedPayload,
         );
         return;
       default:
@@ -302,6 +401,112 @@ export class Agent {
       offendingMessageId: frame?.messageId ?? null,
       scope: "EXECUTION",
       details: { executionId: payload.executionId },
+    });
+  }
+
+  /**
+   * protocol 22.6 (Task 7): route one engine-authorized chat interaction
+   * to the OrchestrationExecutor that owns the identity (executionId +
+   * dispatchId BOTH match the live dispatch). The executor forwards into
+   * its InteractiveController; an identity that resolves to nothing (no
+   * orchestration executor, no open session, no live dispatch, or a
+   * dispatch whose recorded executionId disagrees) fails closed with
+   * protocol.error IDENTITY_MISMATCH - the executor owns its internal
+   * outcomes (CAPTURE_BLOCKED, terminal, replay...) and reports them
+   * itself, so a resolvable identity emits NO protocol error here.
+   */
+  private async handleExecutionInteraction(
+    payload: ExecutionInteractionPayload,
+    frame?: { messageId?: string },
+  ): Promise<void> {
+    if (!this.orchestration) {
+      this.log.warn(
+        `execution.interaction for ${payload.executionId} with no orchestration executor - failing closed`,
+      );
+      await this.rejectInteractionIdentity(payload, frame);
+      return;
+    }
+    const verdict = await this.orchestration.handleInteraction(payload);
+    if (verdict !== "handled") {
+      this.log.warn(
+        `execution.interaction refused (${verdict}) for ${payload.executionId}/${payload.dispatchId}`,
+      );
+      await this.rejectInteractionIdentity(payload, frame);
+    }
+  }
+
+  /**
+   * protocol 22.4 (Task 11 fix): route one engine HOLD/CONTINUE control
+   * command to the OrchestrationExecutor that owns the identity. The
+   * executor forwards to the dispatch's coordinator (the disposition is
+   * the coordinator's own durable frames); an identity that resolves to
+   * nothing fails closed with protocol.error IDENTITY_MISMATCH.
+   */
+  private async handleExecutionControl(
+    payload: ExecutionControlPayload,
+    frame?: { messageId?: string },
+  ): Promise<void> {
+    if (!this.orchestration) {
+      this.log.warn(
+        `execution.control for ${payload.executionId} with no orchestration executor - failing closed`,
+      );
+      await this.rejectInteractionIdentity(payload, frame);
+      return;
+    }
+    const verdict = await this.orchestration.handleControlCommand(payload);
+    if (verdict !== "handled") {
+      this.log.warn(
+        `execution.control refused (${verdict}) for ${payload.executionId}/${payload.dispatchId}`,
+      );
+      await this.rejectInteractionIdentity(payload, frame);
+    }
+  }
+
+  /**
+   * protocol 22.7 (Task 7): route the proposal RESOLUTION to the owning
+   * OrchestrationExecutor (the executor forwards to the coordinator's
+   * inhibitor + the controller's proposal waits). Fire-and-forget: the
+   * settle is synchronous coordinator/controller state; an unresolvable
+   * identity fails closed with protocol.error IDENTITY_MISMATCH.
+   */
+  private handleControlRequestResolved(
+    payload: ExecutionControlRequestResolvedPayload,
+  ): void {
+    if (!this.orchestration) {
+      this.log.warn(
+        `execution.control.request.resolved for ${payload.executionId} with no orchestration executor - failing closed`,
+      );
+      void this.rejectInteractionIdentity(payload);
+      return;
+    }
+    const verdict = this.orchestration.settleControlRequestResolved(payload);
+    if (verdict !== "settled") {
+      this.log.warn(
+        `execution.control.request.resolved refused (${verdict}) for ` +
+          `${payload.executionId}/${payload.dispatchId}`,
+      );
+      void this.rejectInteractionIdentity(payload);
+    }
+  }
+
+  /** The shared IDENTITY_MISMATCH protocol.error for both inbound
+   * interaction-family arms (same shape as the policy-update rejection). */
+  private async rejectInteractionIdentity(
+    payload: { executionId: string; dispatchId?: string | null },
+    frame?: { messageId?: string },
+  ): Promise<void> {
+    await this.executionSender.sendProtocolError({
+      code: "IDENTITY_MISMATCH",
+      message:
+        `no live orchestration execution owns executionId=${payload.executionId}` +
+        ` dispatchId=${payload.dispatchId ?? "null"}`,
+      retryable: false,
+      offendingMessageId: frame?.messageId ?? null,
+      scope: "EXECUTION",
+      details: {
+        executionId: payload.executionId,
+        ...(payload.dispatchId != null ? { dispatchId: payload.dispatchId } : {}),
+      },
     });
   }
 
@@ -479,6 +684,12 @@ export class Agent {
       if (open.policy) {
         this.orchestration?.recordSessionPolicy(open.sessionId, open.policy);
       }
+      // §22.2 (Task 7): the orchestration session's interaction policy
+      // block - the executor's controller composes with THESE bounds
+      // (never the platform defaults when the engine published policy).
+      if (open.interaction) {
+        this.orchestration?.recordSessionInteraction(open.sessionId, open.interaction);
+      }
       // section 7.3/section 15 rule 12: capture the session's capture block so an
       // orchestration session's progress stream rides its capture limits.
       if (open.capture) {
@@ -503,5 +714,80 @@ export class Agent {
     if (p.sessionId) {
       this.sessions.close(p.sessionId);
     }
+  }
+
+  /**
+   * §22.8 (D7): apply the supervisor's `connection-state` notification.
+   *
+   * `fatal: true` → stop the session: aborts any in-flight turn (the same
+   * cooperative cancellation an engine execution.cancel drives), cancels an
+   * in-flight orchestration dispatch, releases the session's timers (approval
+   * waits) and capacity through the EXISTING SessionRegistry teardown
+   * (`close()` — model dispose, vault clear, entry dropped; the
+   * enforcers/per-execution state dies with the entry). Idempotent: a
+   * repeated fatal is a registry no-op.
+   *
+   * `ready: false|true` → the session's admission gate (the seam Task 10's
+   * reconciliation completes; until then the mark is recorded and read by
+   * the registry).
+   */
+  private handleConnectionState(message: {
+    kind: "connection-state";
+    sessionId: string;
+    ready: boolean;
+    fatal: boolean;
+  }): void {
+    const { sessionId, ready, fatal } = message;
+    if (fatal) {
+      this.log.info(
+        `connection-state FATAL for session ${sessionId} — stopping the session (§22.8 D7)`,
+      );
+      this.sessionFatalStop(sessionId);
+      return;
+    }
+    // Non-fatal gate flip (control-socket loss / reopen with a live
+    // channel). Unknown sessions have nothing to gate — a silent no-op.
+    this.sessions.applyConnectionState(sessionId, ready, false);
+    // Task 10 §22.8/§14.4: the admission gate AND the live interaction
+    // runtimes ride the SAME notification — ready=false fences every
+    // runtime's idle timer (no auto-resume while disconnected/reconciling);
+    // ready=true is the authoritative KEEP arm (the coordinator re-arms
+    // toward the SAME retained instant). A session with no runtime is a
+    // no-op on both.
+    this.orchestration?.setSessionConnectionReady(sessionId, ready);
+  }
+
+  /**
+   * §22.8 (D7) fatal stop for one session. Reuses the EXISTING teardown
+   * paths and is exact-once per session: the registry `close()` is a no-op
+   * once the entry is gone (a repeated fatal cannot double-release).
+   */
+  private sessionFatalStop(sessionId: string): void {
+    // 1. Cancel any in-flight CONVERSATION turn on the session: the
+    //    executor's cooperative cancellation unwinds the model loop and
+    //    emits execution.cancelled itself (no terminal frames from here -
+    //    the session is dead; the engine's failure/retry policy owns the
+    //    outcome).
+    for (const executionId of this.inference.inFlightExecutionIdsFor(sessionId)) {
+      this.inference.handleCancel({
+        executionId,
+        dispatchId: null,
+        reasonCode: "SESSION_FATAL",
+        requestedAt: new Date().toISOString(),
+        gracePeriodSeconds: 0,
+      });
+    }
+    // 2. Cancel any in-flight ORCHESTRATION dispatch on the session
+    //    (cooperative cancellation at the helper-call boundaries; keyed by
+    //    executionId with the dispatchId fallback).
+    this.orchestration?.handleCancel({
+      dispatchId: null,
+      executionId: sessionId,
+    });
+    // 3. The EXISTING session teardown: releases the approval timers held
+    //    for this session's executions, disposes the model, clears the
+    //    credential vault and drops the entry (capacity released exactly
+    //    once - a repeated fatal is a no-op for the gone entry).
+    this.sessions.close(sessionId);
   }
 }

@@ -232,6 +232,7 @@ public class SessionAllocator {
         session.setAllocationState(ALLOC_STATE_CLOSING);
         session.setAllocationState(ALLOC_STATE_CLOSED);
         session.setClosedAt(Instant.now());
+        session.setCloseReason(reasonCode);
         sessionRepository.save(session);
 
         // Release the serving worker (IDLE = reusable) — capacity returns.

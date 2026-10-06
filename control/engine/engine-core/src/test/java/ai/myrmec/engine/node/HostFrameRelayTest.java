@@ -87,6 +87,21 @@ class HostFrameRelayTest extends IntegrationTestBase {
                 simulatedPeerSockets.put(targetInstanceId, frameJson);
                 return true;
             }
+
+            @Override
+            protected boolean postRelayDedicated(String peerAddress, UUID targetInstanceId,
+                                                 UUID dedicatedSessionId, String frameJson) {
+                relayPosts.incrementAndGet();
+                if (failRelay) {
+                    return false;
+                }
+                // Simulated peer: dedicated delivery resolves the peer's
+                // channel registry only — success requires the session to be
+                // bound there. The tests that assert false run with no peer
+                // binding; tests that assert success register the channel in
+                // THIS registry, which the peer would mirror.
+                return channelRegistry.getChannel(dedicatedSessionId).isPresent();
+            }
         };
         relayPosts.set(0);
         deliveredPosts.set(0);
@@ -145,7 +160,7 @@ class HostFrameRelayTest extends IntegrationTestBase {
     @Test
     void localInstanceSendsDirectlyWithoutRelayHttp() {
         AgentHostInstance instance = instanceOn(nodeRegistry.getSelfNodeId());
-        connectionManager.register(instance.getId(), stubSocket());
+        connectionManager.register(instance.getId(), stubSocket(), java.util.Map.of("sessionInteraction", new ai.myrmec.engine.websocket.host.payload.SessionInteractionCapability(1, true)));
 
         boolean sent = relay.send(null, instance.getId(), "{\"type\":\"session.open\"}");
 
@@ -178,7 +193,7 @@ class HostFrameRelayTest extends IntegrationTestBase {
         String peerNode = "relay-peer-node-" + UUID.randomUUID();
         nodeRepository.save(peerNode(peerNode));
         AgentHostInstance remote = instanceOn(peerNode);
-        connectionManager.register(remote.getId(), stubSocket());
+        connectionManager.register(remote.getId(), stubSocket(), java.util.Map.of("sessionInteraction", new ai.myrmec.engine.websocket.host.payload.SessionInteractionCapability(1, true)));
 
         failRelay = true;
         boolean sent = relay.send(null, remote.getId(), "{\"type\":\"session.open\"}");
@@ -202,6 +217,66 @@ class HostFrameRelayTest extends IntegrationTestBase {
         assertThat(relayPosts.get()).isEqualTo(1);
     }
 
+    // ── (a2) sendDedicated: dedicated-channel-ONLY delivery (D7, §22.3) ──
+
+    @Test
+    void sendDedicatedWithoutBoundChannelReturnsFalseAndNeverWritesControlSocket() {
+        AgentHostInstance instance = instanceOn(nodeRegistry.getSelfNodeId());
+        // Only the control socket exists; NO channel binding for the session.
+        WebSocketSession control = stubSocket();
+        connectionManager.register(instance.getId(), control, java.util.Map.of("sessionInteraction", new ai.myrmec.engine.websocket.host.payload.SessionInteractionCapability(1, true)));
+
+        UUID sessionId = UUID.randomUUID();
+        boolean sent = relay.sendDedicated(sessionId, instance.getId(),
+                "{\"type\":\"session.open\"}");
+
+        assertThat(sent).as("no bound channel — dedicated delivery must fail").isFalse();
+        // The Host Channel is never used as a fallback (D7 / §22.3).
+        assertThat(org.mockito.Mockito.mockingDetails(control).getInvocations()
+                .stream().filter(i -> i.getMethod().getName().equals("sendMessage"))
+                .count()).as("control socket must not receive session frames").isZero();
+        assertThat(relayPosts.get()).as("no relay HTTP for a self-owned instance").isZero();
+    }
+
+    @Test
+    void sendDedicatedDeliversOnTheBoundChannel() throws Exception {
+        AgentHostInstance instance = instanceOn(nodeRegistry.getSelfNodeId());
+        UUID sessionId = UUID.randomUUID();
+        WebSocketSession channel = stubSocket();
+        channelRegistry.register(sessionId, channel);
+
+        String frame = "{\"type\":\"session.open\"}";
+        boolean sent = relay.sendDedicated(sessionId, instance.getId(), frame);
+
+        assertThat(sent).isTrue();
+        org.mockito.Mockito.verify(channel).sendMessage(
+                org.mockito.ArgumentMatchers.argThat((TextMessage m) ->
+                        m.getPayload().equals(frame)));
+        assertThat(relayPosts.get()).as("no relay HTTP for a self-owned instance").isZero();
+    }
+
+    @Test
+    void sendDedicatedRemoteOwnerReturnsFalseAndNeverFallsBackToControl() {
+        String peerNode = "relay-peer-node-" + UUID.randomUUID();
+        nodeRepository.save(peerNode(peerNode));
+        AgentHostInstance remote = instanceOn(peerNode);
+        failRelay = true;
+        // Even a local control socket for the SAME instance must stay silent:
+        // remote dedicated delivery may not fall back, locally or remotely.
+        WebSocketSession control = stubSocket();
+        connectionManager.register(remote.getId(), control, java.util.Map.of("sessionInteraction", new ai.myrmec.engine.websocket.host.payload.SessionInteractionCapability(1, true)));
+
+        UUID sessionId = UUID.randomUUID();
+        boolean sent = relay.sendDedicated(sessionId, remote.getId(), "{\"type\":\"session.open\"}");
+
+        assertThat(sent).as("remote owner whose relay failed — no control fallback").isFalse();
+        assertThat(relayPosts.get()).isEqualTo(1);
+        assertThat(deliveredPosts.get()).isZero();
+        assertThat(org.mockito.Mockito.mockingDetails(control).getInvocations()
+                .stream().filter(i -> i.getMethod().getName().equals("sendMessage"))
+                .count()).as("control socket must not receive session frames").isZero();
+    }
+
     // ── (d) host.open stamps the routing node ──────────────────────────
 
     @Test
@@ -220,7 +295,7 @@ class HostFrameRelayTest extends IntegrationTestBase {
                 { "protocolVersion": 1, "messageId": "m-relay", "type": "host.open",
                   "sentAt": "%s", "payload": { "instanceNonce": "%s", "hostname": "laptop",
                   "runtimeVersion": "1.8.0", "supportedProtocolVersions": [1], "poolSize": 2,
-                  "capabilities": {}, "reportedCapacity": {} } }
+                  "capabilities": { "sessionInteraction": { "version": 1, "temporaryHold": true } }, "reportedCapacity": {} } }
                 """.formatted(java.time.Instant.now(), UUID.randomUUID());
         handler.handleMessage(session, new TextMessage(open));
 
@@ -238,7 +313,7 @@ class HostFrameRelayTest extends IntegrationTestBase {
         MockMvc mvc = MockMvcBuilders.webAppContextSetup(context).build();
         AgentHostInstance local = instanceOn(nodeRegistry.getSelfNodeId());
         WebSocketSession socket = stubSocket();
-        connectionManager.register(local.getId(), socket);
+        connectionManager.register(local.getId(), socket, java.util.Map.of("sessionInteraction", new ai.myrmec.engine.websocket.host.payload.SessionInteractionCapability(1, true)));
 
         String frame = "{\"type\":\"execution.cancel\",\"payload\":{}}";
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders

@@ -48,10 +48,40 @@ export interface ContinuationManifest {
   };
   approvalRequestId?: string;
   suspensionExpiresAt?: string;
+  /**
+   * §22.8 (Task 10): the session-interaction overlay evidence persisted at
+   * safe update points (the control/persistence boundary) — effectiveState,
+   * acceptedControlRevision, stateSequence, idleResumeAt, pendingInteractionId,
+   * pendingControlRequestIds + the known usage subtotal at the write. The
+   * evidence is REPORTABLE ONLY: a worker restart for the same dispatch
+   * reads it as reconciliation evidence (the resume report / an interaction
+   * outcome classification) and NEVER replays it as permission — no runtime
+   * re-arm, no default RUNNING, no model-call reuse (§22.8: "Persistent
+   * overlay/outbox data is evidence, not permission to execute").
+   */
+  interactionOverlay?: InteractionOverlayEvidence;
   /** Creation timestamp (ISO). */
   createdAt: string;
   /** SHA-256 over the canonical manifest content, set on write. */
   stateDigest: string;
+}
+
+/** §22.8 (Task 10): the persisted interaction overlay evidence block. */
+export interface InteractionOverlayEvidence {
+  /** The execution the runtime served. */
+  executionId: string;
+  effectiveState: "RUNNING" | "HOLD_REQUESTED" | "HELD";
+  acceptedControlRevision: number;
+  stateSequence: number;
+  /** The §14.4 armed instant at the write (observation); null when disarmed. */
+  idleResumeAt: string | null;
+  pendingInteractionId: string | null;
+  pendingControlRequestIds: string[];
+  /** §22.8: the KNOWN usage subtotal at the write (token accounting
+   * evidence; UNKNOWN stays unknown — never estimated). */
+  knownUsageSubtotal: { totalTokens: number } | null;
+  /** ISO instant the evidence was written. */
+  updatedAt: string;
 }
 
 export interface ContinuationStateStore {
