@@ -2,10 +2,13 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.websocket.host;
 
+import ai.myrmec.engine.inference.Session;
+import ai.myrmec.engine.inference.SessionAllocator;
 import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.websocket.host.payload.ChannelOpenPayload;
 import ai.myrmec.engine.websocket.host.payload.ChannelOpenedPayload;
 import ai.myrmec.engine.websocket.host.payload.ProtocolErrorPayload;
+import ai.myrmec.engine.websocket.host.payload.SessionCloseReason;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -19,7 +22,7 @@ import java.io.IOException;
 import java.util.UUID;
 
 /**
- * The optional dedicated session-channel socket (protocol §7.5). After
+ * The dedicated session-channel socket (protocol §7.5, D7/§22.8). After
  * receiving {@code session.open} a host MAY open this endpoint and bind it
  * to one session with {@code channel.open}; the offer token (single-session,
  * short-lived, single-use, §15 rule 7 transport-binding-only) is consumed on
@@ -28,9 +31,12 @@ import java.util.UUID;
  * <p>The handshake is the same HOST_JWT gate as the control socket; the
  * channel token rides the payload, NOT the auth. Execution traffic on the
  * bound socket takes the SAME inbound arm as the control socket (delegated);
- * control-only frames get INVALID_MESSAGE. Channel loss never closes the
- * session (§7.5): the registry drops the binding and the session keeps
- * riding the control socket.</p>
+ * control-only frames get INVALID_MESSAGE. <b>Channel loss is FATAL for the
+ * bound session (D7, §22.8): the close callback runs the engine's EXISTING
+ * close path ({@link SessionAllocator#close}) with the closest existing
+ * fatal reason, so capacity returns, durable records stay available for
+ * reconciliation, and engine failure/retry policy determines a new attempt.
+ * No auto-resume, no control-socket rebind.</b></p>
  */
 @Slf4j
 @Component
@@ -43,17 +49,20 @@ public class HostChannelWebSocketHandler extends TextWebSocketHandler {
     private final ChannelConnectionRegistry channelRegistry;
     private final HostControlWebSocketHandler controlHandler;
     private final SessionRepository sessionRepository;
+    private final SessionAllocator sessionAllocator;
 
     public HostChannelWebSocketHandler(ObjectMapper objectMapper,
                                        ChannelTokenService channelTokenService,
                                        ChannelConnectionRegistry channelRegistry,
                                        HostControlWebSocketHandler controlHandler,
-                                       SessionRepository sessionRepository) {
+                                       SessionRepository sessionRepository,
+                                       SessionAllocator sessionAllocator) {
         this.objectMapper = objectMapper;
         this.channelTokenService = channelTokenService;
         this.channelRegistry = channelRegistry;
         this.controlHandler = controlHandler;
         this.sessionRepository = sessionRepository;
+        this.sessionAllocator = sessionAllocator;
     }
 
     @Override
@@ -172,14 +181,36 @@ public class HostChannelWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    /** §7.5: channel loss NEVER closes the session — drop the binding, warn, move on. */
+    /**
+     * D7 (§22.8): channel loss is FATAL for the bound session — run the
+     * engine's EXISTING close path ({@link SessionAllocator#close}) so the
+     * slot returns exactly once, durable execution records stay available
+     * for reconciliation, and the engine's failure/retry policy (not a
+     * channel rebind) determines a new attempt. The reason is the closest
+     * existing fatal string ({@code HOST_LOST}): no new vocabulary.
+     */
     @Override
     public void afterConnectionClosed(WebSocketSession socket, CloseStatus status) {
         UUID sessionId = (UUID) socket.getAttributes().get(ATTR_BOUND_SESSION_ID);
-        if (sessionId != null) {
-            channelRegistry.unregister(sessionId, socket);
-            log.warn("Dedicated channel lost for session {} ({}): session unaffected — "
-                    + "traffic continues on the control socket", sessionId, status);
+        if (sessionId == null) {
+            return;
+        }
+        // Only a close of the LIVE binding is fatal: the registry supports
+        // re-open replacing a stale binding, and a late close event from a
+        // replaced socket must not kill the re-bound live session.
+        if (!channelRegistry.unregister(sessionId, socket)) {
+            log.debug("Stale channel socket closed for session {} (re-bound to a newer "
+                    + "socket) — not fatal", sessionId);
+            return;
+        }
+        log.warn("Dedicated channel lost for session {} ({}): FATAL (§22.8/D7) — "
+                + "closing the session via the existing close path", sessionId, status);
+        try {
+            sessionAllocator.close(sessionId, SessionCloseReason.HOST_LOST);
+        } catch (Exception e) {
+            // The session row is durable engine state; a close-callback
+            // failure must never propagate into the socket infra thread.
+            log.warn("Fatal channel-close of session {} failed: {}", sessionId, e.getMessage());
         }
     }
 }

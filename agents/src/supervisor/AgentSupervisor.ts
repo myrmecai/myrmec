@@ -41,9 +41,14 @@ import type {
   ExecutionCancelPayload,
   ExecutionCancelledPayload,
   ExecutionCompletePayload,
+  ExecutionControlRequestPayload,
+  ExecutionControlStatePayload,
   ExecutionDeltaPayload,
   ExecutionEventPayload,
   ExecutionFailedPayload,
+  ExecutionInteractionDeltaPayload,
+  ExecutionInteractionCompletePayload,
+  ExecutionInteractionFailedPayload,
   ExecutionPausedPayload,
   ExecutionRejectPayload,
   ProtocolErrorPayload,
@@ -228,9 +233,18 @@ export abstract class AgentSupervisor {
       // Protocol 12.1/12.3: forward every inbound engine ack to the
       // subclass's worker-composed sink (the executor's outbox seam).
       ...(this.engineAckSink ? { onEngineAck: this.engineAckSink } : {}),
+      // §22.8 (D7): forward every session connection-state notification
+      // (channel loss is fatal / admission gate flips) to the subclass's
+      // overridable hook - the headless composition forwards it across the
+      // worker bridge so the worker stops the session runtime.
+      onConnectionState: (state) => this.onConnectionState(state),
     });
     client.onExecutionStart((frame) => this.onExecutionStart(frame));
     client.onExecutionCancel((frame) => this.onExecutionCancel(frame));
+    // §22.3 (Task 11 fix): the inbound interaction-command family —
+    // forward execution.control / execution.interaction /
+    // execution.control.request.resolved to the subclass's worker seam.
+    client.onInteractionCommand((frame) => this.onInteractionCommand(frame));
     // Mirror session opens/closes to the subclass's forwarding hooks (the
     // Agent's registry opens/closes the model + tools alongside the
     // transport-side bookkeeping).
@@ -306,6 +320,19 @@ export abstract class AgentSupervisor {
   }
 
   /**
+   * §22.3 (Task 11 fix): the inbound interaction-command family
+   * (execution.control / execution.interaction /
+   * execution.control.request.resolved). Base default: logged no-op;
+   * subclasses forward the raw frame to the worker whose executor owns
+   * the coordinator/controller arms.
+   */
+  protected async onInteractionCommand(
+    _frame: import("../protocol/unifiedFrames.js").ParsedUnifiedFrame,
+  ): Promise<void> {
+    this.log.debug("interaction command received (no Agent wired yet):", _frame.type);
+  }
+
+  /**
    * A `session.open` the client dispatched (after channel bind + opened
    * reply). The base default is a logged no-op; subclasses forward to the
    * Agent's registry.
@@ -317,6 +344,22 @@ export abstract class AgentSupervisor {
   /** A `session.close` the client dispatched. Base default: no-op. */
   protected onSessionClose(_payload: { sessionId: string }): void {
     this.log.debug("session.close received (no Agent wired yet)");
+  }
+
+  /**
+   * §22.8 (D7): a session connection-state notification the client emitted
+   * (bound-channel loss -> `{ready:false, fatal:true}`; control-socket drop
+   * with a live channel -> `{ready:false, fatal:false}`; reopen with a bound
+   * channel -> `{ready:true, fatal:false}`). Base default: logged no-op;
+   * subclasses forward across the worker bridge. Idempotent for repeated
+   * fatals (the worker's stop path is a no-op once the session is gone).
+   */
+  protected onConnectionState(_state: {
+    sessionId: string;
+    ready: boolean;
+    fatal: boolean;
+  }): void {
+    this.log.debug("connection-state received (no worker forwarding wired yet)");
   }
 
   // ==================== PSK delivery (section 6, credential envelope design) ========
@@ -438,6 +481,31 @@ export abstract class AgentSupervisor {
       case "execution.approval.requested":
         return client.sendExecutionApprovalRequested(
           payload as unknown as ExecutionApprovalRequestedPayload,
+        );
+      // -- §22.3/22.4/22.6/22.7 (session interaction family; Task 7) --
+      // Channel-routing (dedicated-only) is the client's sendFrame decision;
+      // the supervisor only maps the envelope to the typed sender. The
+      // durable four carry their outbox record's messageId via
+      // messageIdOverride (12.1); the delta is ephemeral.
+      case "execution.control.state":
+        return client.sendExecutionControlState(
+          payload as unknown as ExecutionControlStatePayload,
+        );
+      case "execution.interaction.delta":
+        return client.sendExecutionInteractionDelta(
+          payload as unknown as ExecutionInteractionDeltaPayload,
+        );
+      case "execution.interaction.complete":
+        return client.sendExecutionInteractionComplete(
+          payload as unknown as ExecutionInteractionCompletePayload,
+        );
+      case "execution.interaction.failed":
+        return client.sendExecutionInteractionFailed(
+          payload as unknown as ExecutionInteractionFailedPayload,
+        );
+      case "execution.control.request":
+        return client.sendExecutionControlRequest(
+          payload as unknown as ExecutionControlRequestPayload,
         );
       case "protocol.error":
         return client.sendProtocolError(

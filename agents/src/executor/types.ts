@@ -98,6 +98,15 @@ export interface SessionTool extends Tool {
   riskClass: RiskClass;
 }
 
+/** The second-argument block every ChatModel call may carry (plan Task 7):
+ * the interaction/orchestration deadline's abort signal. Support is
+ * provider-dependent - an adapter that cannot abort the underlying call
+ * still OBSERVES the signal for its own fencing, and late results are
+ * fenced from tools/output by the caller. */
+export interface ModelCallOptions {
+  signal?: AbortSignal;
+}
+
 /** The model adapter seam. The real implementation (LangChain JS / provider
  * SDK) is a later slice; the loop only needs this one method. */
 export interface ChatModel {
@@ -106,7 +115,11 @@ export interface ChatModel {
    * @param messages the full conversation so far (system → … → latest)
    * @param tools    specs the model may call this turn (may be empty)
    */
-  invoke(messages: ConversationMessage[], tools: ToolSpec[]): Promise<ModelResponse>;
+  invoke(
+    messages: ConversationMessage[],
+    tools: ToolSpec[],
+    options?: ModelCallOptions,
+  ): Promise<ModelResponse>;
 
   /**
    * Stream the model's reply as a sequence of {@link ModelStreamChunk}s. Used
@@ -117,6 +130,7 @@ export interface ChatModel {
   stream?(
     messages: ConversationMessage[],
     tools: ToolSpec[],
+    options?: ModelCallOptions,
   ): AsyncIterable<ModelStreamChunk>;
 }
 

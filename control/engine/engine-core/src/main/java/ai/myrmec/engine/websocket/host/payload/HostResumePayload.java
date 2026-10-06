@@ -31,6 +31,13 @@ public record HostResumePayload(
      * on the wire (§13 example carries only {@code activeExecutionId}) —
      * the engine's own execution rows are the durable authority for
      * terminal dedup, so no per-execution messageIds are required here.
+     *
+     * <p>§22.8 (Task 10): the optional {@code interactionState} block is
+     * the host's RETAINED IN-PROCESS overlay evidence for the session's
+     * live execution — present only when the host still holds the live
+     * coordinator (a restarted process has no retained state and reports
+     * nothing). The engine reconciles it into the observed-state columns
+     * as evidence, never authority: terminal decisions always win.</p>
      */
     public record RetainedSession(
             UUID sessionId,
@@ -38,7 +45,33 @@ public record HostResumePayload(
             boolean capacityHeld,
             UUID activeExecutionId,
             Long lastSentSequence,
-            String lastAcknowledgedMessageId) {
+            String lastAcknowledgedMessageId,
+            ReportedInteractionState interactionState) {
+
+        public RetainedSession(
+                UUID sessionId,
+                String state,
+                boolean capacityHeld,
+                UUID activeExecutionId,
+                Long lastSentSequence,
+                String lastAcknowledgedMessageId) {
+            this(sessionId, state, capacityHeld, activeExecutionId,
+                    lastSentSequence, lastAcknowledgedMessageId, null);
+        }
+
+        /**
+         * §22.8's optional per-session interaction overlay evidence (the
+         * host-side coordinator snapshot — protocol 22.8 verbatim).
+         */
+        public record ReportedInteractionState(
+                UUID executionId,
+                Long acceptedControlRevision,
+                Long stateSequence,
+                String effectiveState,
+                String idleResumeAt,
+                UUID pendingInteractionId,
+                List<UUID> pendingControlRequestIds) {
+        }
     }
 
     /** Jackson convenience: tolerate an absent sessions array. */

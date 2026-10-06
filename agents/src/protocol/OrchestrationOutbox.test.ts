@@ -15,6 +15,7 @@ import {
 } from "./AgentProtocolOrchestrationEventSink.js";
 import { ORCHESTRATION_EVENT_NS, uuidV5 } from "../orchestration/constants.js";
 import type { DispatchIdentity } from "../orchestration/types.js";
+import type { ExecutionControlStatePayload } from "./unifiedFrames.js";
 
 let root: string;
 
@@ -54,6 +55,27 @@ function makeOutbox(
  * loosely typed on purpose - the backend persists unknown payloads). */
 function payloadOf(sent: unknown): Record<string, unknown> {
   return (sent as { payload: Record<string, unknown> }).payload;
+}
+
+/** A minimal 22.4 execution.control.state payload for seam tests. */
+function makeControlState(
+  stateSequence: number,
+  status: "HOLD_REQUESTED" | "HELD" | "RUNNING",
+): ExecutionControlStatePayload {
+  return {
+    executionId: "00000000-0000-4000-8000-000000000001",
+    dispatchId: "00000000-0000-4000-8000-000000000004",
+    controlRevision: 1,
+    stateSequence,
+    status,
+    effectiveState: status,
+    reasonCode: "USER_REQUESTED",
+    changedAt: "2026-10-03T10:00:00.000Z",
+    idleResumeAt: null,
+    safePoint: null,
+    rejectedControlRevision: null,
+    errorCode: null,
+  };
 }
 
 describe("OrchestrationOutbox (unified session execution, protocol 12.1)", () => {
@@ -149,6 +171,91 @@ describe("OrchestrationOutbox (unified session execution, protocol 12.1)", () =>
     // the sender bridge derives BOTH from the record, never mints.
     expect(sends[0]?.record.messageId).toBe(sends[1]?.record.messageId);
     expect(sends[0]?.record.sequence).toBe(sends[1]?.record.sequence);
+  });
+
+  test("control_state records: a unique wire messageId per record, command correlation as envelope metadata, timer states uncorrelated (Fix 2)", async () => {
+    const sent: {
+      frame: { type: string; payload: unknown; correlationId?: string };
+      record: { id: string; messageId?: string; commandMessageId?: string };
+    }[] = [];
+    const { outbox, backend } = makeOutbox(async (frame, record) => {
+      sent.push({ frame, record });
+      return true;
+    });
+
+    // TWO records born of ONE command: the record ids differ by
+    // stateSequence, so their derived wire messageIds differ too.
+    await outbox.persistControlState(
+      makeControlState(1, "HOLD_REQUESTED"),
+      "cmd-msg-1",
+    );
+    await outbox.persistControlState(makeControlState(2, "HELD"), "cmd-msg-1");
+    // A timer-driven state: NO correlation.
+    await outbox.persistControlState(
+      makeControlState(3, "RUNNING"),
+      null,
+    );
+
+    await outbox.drain();
+    const controlSends = sent.filter(
+      (s) => s.frame.type === "execution.control.state",
+    );
+    expect(controlSends).toHaveLength(3);
+    const ids = controlSends.map((s) => s.record.messageId);
+    // DISTINCT wire messageIds (two of them share one command!). The wire
+    // ids must NOT be the command's messageId: each record acks alone.
+    expect(new Set(ids).size).toBe(3);
+    expect(ids).not.toContain("cmd-msg-1");
+    // Correlation metadata: both command-driven records name the command;
+    // the timer-driven one carries NO correlation.
+    expect(controlSends[0]?.frame.correlationId).toBe("cmd-msg-1");
+    expect(controlSends[1]?.frame.correlationId).toBe("cmd-msg-1");
+    expect(controlSends[2]?.frame.correlationId).toBeUndefined();
+    // The stored record still carries the correlation for the bridge.
+    expect(controlSends[0]?.record.commandMessageId).toBe("cmd-msg-1");
+    expect(controlSends[2]?.record.commandMessageId).toBeUndefined();
+    // Envelope identity stays separate from correlation on every frame.
+    for (const s of controlSends) {
+      expect(s.record.messageId).not.toBe(s.frame.correlationId);
+    }
+
+    // Acks are PER RECORD: acknowledging one of the two command records
+    // leaves the other (and the timer record) unacknowledged.
+    const ackedWireId = ids[0] ?? "";
+    await outbox.acknowledgeByMessageId(ackedWireId);
+    const stored = (await backend.list()).filter(
+      (r) => r.kind === "control_state",
+    );
+    const ackedByMessageId = stored.find((r) => r.messageId === ackedWireId);
+    const others = stored.filter((r) => r.messageId !== ackedWireId);
+    expect(ackedByMessageId?.acknowledgedAt).not.toBeNull();
+    expect(ackedByMessageId?.payload).toEqual(
+      expect.objectContaining({ status: "HOLD_REQUESTED" }),
+    );
+    expect(others).toHaveLength(2);
+    expect(others.map((r) => r.acknowledgedAt)).toEqual([null, null]);
+  });
+
+  test("persistControlState record ids stay deterministic per execution+stateSequence and dedupe at enqueue", async () => {
+    const { outbox, backend } = makeOutbox(async () => true);
+    await outbox.persistControlState(
+      makeControlState(1, "HOLD_REQUESTED"),
+      "cmd-msg-1",
+    );
+    // The SAME sequence re-persisted (e.g. a coordinator replay) is a
+    // no-op: the record id dedupes at enqueue.
+    await outbox.persistControlState(
+      makeControlState(1, "HOLD_REQUESTED"),
+      "cmd-msg-1",
+    );
+    const stored = (await backend.list()).filter(
+      (r) => r.kind === "control_state",
+    );
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.id).toBe(
+      `ctl-00000000-0000-4000-8000-000000000001-1`,
+    );
+    expect(stored[0]?.messageId).toBe(stored[0]?.id);
   });
 
   test("acknowledgeByMessageId clears the record; an unknown id is a no-op", async () => {

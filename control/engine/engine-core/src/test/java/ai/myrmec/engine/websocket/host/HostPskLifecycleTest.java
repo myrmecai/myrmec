@@ -61,7 +61,7 @@ class HostPskLifecycleTest extends IntegrationTestBase {
                 { "protocolVersion": 1, "messageId": "m-open", "type": "host.open",
                   "sentAt": "%s", "payload": { "instanceNonce": "%s", "hostname": "laptop",
                   "runtimeVersion": "1.8.0", "supportedProtocolVersions": [1], "poolSize": 2,
-                  "capabilities": {}, "reportedCapacity": {} } }
+                  "capabilities": { "sessionInteraction": { "version": 1, "temporaryHold": true } }, "reportedCapacity": {} } }
                 """.formatted(Instant.now(), UUID.randomUUID());
         handler.handleMessage(session, new TextMessage(open));
 
@@ -82,7 +82,7 @@ class HostPskLifecycleTest extends IntegrationTestBase {
                 { "protocolVersion": 1, "messageId": "m-%s", "type": "host.open",
                   "sentAt": "%s", "payload": { "instanceNonce": "%s", "hostname": "laptop",
                   "runtimeVersion": "1.8.0", "supportedProtocolVersions": [1], "poolSize": 2,
-                  "capabilities": {}, "reportedCapacity": {} } }
+                  "capabilities": { "sessionInteraction": { "version": 1, "temporaryHold": true } }, "reportedCapacity": {} } }
                 """.formatted(Instant.now(), Instant.now(), nonce);
     }
 
@@ -210,7 +210,10 @@ class HostPskLifecycleTest extends IntegrationTestBase {
                         65536, 262144, 8388608, 30),
                 "node-1",
                 setup.pskBase64(),
-                setup.pskKeyId()).toString())
+                setup.pskKeyId(),
+                new ai.myrmec.engine.websocket.host.payload.HostOpenedPayload.AcceptedCapabilities(
+                        ai.myrmec.engine.websocket.host.payload.SessionInteractionCapability
+                                .required())).toString())
                 .doesNotContain(setup.pskBase64())
                 .contains("<redacted>")
                 .contains(setup.pskKeyId().toString());

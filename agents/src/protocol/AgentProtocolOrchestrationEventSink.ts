@@ -65,6 +65,35 @@ export interface OrchestrationProgressEvent {
   changedFileCount?: number;
   progressMessage?: string;
   percentage?: number;
+  /** §22.4/14.2 (Task 5): the flattened execution-snapshot block the
+   * publisher rides on PROGRESS/USAGE_UPDATED - identities, progress
+   * counters, budget limits/totals, usage status. Bounded metadata
+   * only; the CaptureFilter allowlist still applies per type. */
+  executionId?: string;
+  dispatchId?: string;
+  workflowId?: string;
+  runId?: string;
+  stepId?: string;
+  taskId?: string;
+  attemptId?: string;
+  attemptOrdinal?: number;
+  holdState?: string;
+  progressVersion?: number;
+  progressCapturedAt?: string;
+  helperCallsCompleted?: number;
+  verifierRejections?: number;
+  budgetLimits?: Record<string, unknown>;
+  budgetTotal?: Record<string, unknown>;
+  usageStatus?: string;
+  /** §22.8 (Task 8): the USAGE_UPDATED settlement identity block -
+   * the interaction-attributed usage settlement rides the SAME event
+   * type with its source attribution, attributed interaction, and the
+   * deterministic idempotency key (the sink's CapturedFilter allowlist
+   * admits them at METADATA; the snapshot block above keeps riding
+   * unchanged). */
+  source?: string;
+  interactionId?: string;
+  settlementId?: string;
 }
 
 export interface TerminalResult {
@@ -161,6 +190,35 @@ export class AgentProtocolOrchestrationEventSink {
         ? { progressMessage: event.progressMessage }
         : {}),
       ...(event.percentage !== undefined ? { percentage: event.percentage } : {}),
+      // §22.4 snapshot block (Task 5): pass each present field through;
+      // the CaptureFilter allowlist decides what survives.
+      ...(event.executionId !== undefined ? { executionId: event.executionId } : {}),
+      ...(event.dispatchId !== undefined ? { dispatchId: event.dispatchId } : {}),
+      ...(event.workflowId !== undefined ? { workflowId: event.workflowId } : {}),
+      ...(event.runId !== undefined ? { runId: event.runId } : {}),
+      ...(event.stepId !== undefined ? { stepId: event.stepId } : {}),
+      ...(event.taskId !== undefined ? { taskId: event.taskId } : {}),
+      ...(event.attemptId !== undefined ? { attemptId: event.attemptId } : {}),
+      ...(event.attemptOrdinal !== undefined ? { attemptOrdinal: event.attemptOrdinal } : {}),
+      ...(event.holdState !== undefined ? { holdState: event.holdState } : {}),
+      ...(event.progressVersion !== undefined ? { progressVersion: event.progressVersion } : {}),
+      ...(event.progressCapturedAt !== undefined
+        ? { progressCapturedAt: event.progressCapturedAt }
+        : {}),
+      ...(event.helperCallsCompleted !== undefined
+        ? { helperCallsCompleted: event.helperCallsCompleted }
+        : {}),
+      ...(event.verifierRejections !== undefined
+        ? { verifierRejections: event.verifierRejections }
+        : {}),
+      ...(event.budgetLimits !== undefined ? { budgetLimits: event.budgetLimits } : {}),
+      ...(event.budgetTotal !== undefined ? { budgetTotal: event.budgetTotal } : {}),
+      ...(event.usageStatus !== undefined ? { usageStatus: event.usageStatus } : {}),
+      // §22.8 settlement identity (Task 8): the interaction-attributed
+      // usage rides the same flat-field pattern as the snapshot block.
+      ...(event.source !== undefined ? { source: event.source } : {}),
+      ...(event.interactionId !== undefined ? { interactionId: event.interactionId } : {}),
+      ...(event.settlementId !== undefined ? { settlementId: event.settlementId } : {}),
     };
     const filtered =
       filter.level === "METADATA"

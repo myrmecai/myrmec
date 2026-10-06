@@ -1,0 +1,490 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Task 2, plan 2026-10-03-session-interaction (section 3): the
+        session-interaction persistence layer.
+
+        §3.1 extends session_executions with the control/hold/interaction
+        projections + the effective policy/usage snapshots + the public
+        stream cursor. §3.2 creates execution_interactions (transcript +
+        idempotency keys). §3.3 creates execution_control_requests (HOLD/
+        CONTINUE/CANCEL intents + §22.7 proposal dispositions). §3.4 creates
+        execution_command_outbox (persisted dispatch — the SAME-transaction
+        insert point for admission/intent/proposal resolution). §3.5 extends
+        execution_events with the nullable (execution_id, stream_sequence)
+        public cursor pair.
+
+        All NOT NULL additions carry defaultValue so pre-existing rows
+        upgrade in place (Liquibase addColumn + defaultValue fills defaults).
+        Each changeSet is preCondition-guarded with onFail="MARK_RAN" per
+        table/column group, matching the 021-034 house style. Existing-row
+        historical execution_events rows keep stream_sequence NULL — a plain
+        unique index permits that in BOTH H2 and PostgreSQL; no
+        PostgreSQL-only partial unique constraint is required (§3.2/§3.5
+        plan note for parity).
+    -->
+
+    <!-- ================================================================== -->
+    <!-- §3.1 session_executions extensions                                 -->
+    <!-- ================================================================== -->
+
+    <changeSet id="035-session-executions-interaction-columns" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="session_executions"/>
+                <not>
+                    <columnExists tableName="session_executions" columnName="control_revision"/>
+                </not>
+            </and>
+        </preConditions>
+        <addColumn tableName="session_executions">
+            <column name="control_revision" type="bigint" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="accepted_control_revision" type="bigint" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="control_state_sequence" type="bigint" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="hold_state" type="varchar(20)" defaultValue="RUNNING">
+                <constraints nullable="false"/>
+            </column>
+            <column name="hold_changed_at" type="timestamp with time zone"/>
+            <column name="idle_resume_at" type="timestamp with time zone"/>
+            <column name="next_interaction_ordinal" type="bigint" defaultValueNumeric="1">
+                <constraints nullable="false"/>
+            </column>
+            <column name="pending_interaction_id" type="uuid"/>
+            <column name="interaction_policy" type="jsonb"/>
+            <column name="interaction_usage" type="jsonb"/>
+            <column name="stream_sequence" type="bigint" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+    </changeSet>
+
+    <!-- ================================================================== -->
+    <!-- §3.2 execution_interactions                                        -->
+    <!-- ================================================================== -->
+
+    <changeSet id="035-create-execution-interactions" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="execution_interactions"/>
+            </not>
+        </preConditions>
+        <createTable tableName="execution_interactions">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="execution_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="ordinal" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="actor_user_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="client_request_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="request_digest" type="varchar(64)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="ACCEPTED">
+                <constraints nullable="false"/>
+            </column>
+            <column name="request_text" type="text">
+                <constraints nullable="false"/>
+            </column>
+            <column name="answer_text" type="text"/>
+            <column name="error" type="jsonb"/>
+            <column name="usage" type="jsonb"/>
+            <column name="usage_status" type="varchar(10)" defaultValue="UNKNOWN">
+                <constraints nullable="false"/>
+            </column>
+            <column name="response_deadline" type="timestamp with time zone">
+                <constraints nullable="false"/>
+            </column>
+            <column name="accepted_at" type="timestamp with time zone">
+                <constraints nullable="false"/>
+            </column>
+            <column name="completed_at" type="timestamp with time zone"/>
+            <column name="expires_at" type="timestamp with time zone"/>
+            <column name="terminal_message_id" type="varchar(255)"/>
+            <column name="created_at" type="timestamp with time zone">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="035-execution-interactions-fk-execution" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="execution_interactions"/>
+                <not><foreignKeyConstraintExists foreignKeyName="fk_execution_interactions_execution"/></not>
+            </and>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="execution_interactions"
+            baseColumnNames="execution_id"
+            referencedTableName="session_executions"
+            referencedColumnNames="id"
+            constraintName="fk_execution_interactions_execution"
+            onDelete="CASCADE"/>
+    </changeSet>
+
+    <!-- §3.2 unique keys. Plain unique indexes: nullable columns permit
+         multiple NULLs in H2 and PostgreSQL alike (plan parity note). -->
+    <changeSet id="035-execution-interactions-unique-keys" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="execution_interactions"/>
+                <not><indexExists indexName="uk_execution_interactions_execution_ordinal"/></not>
+            </and>
+        </preConditions>
+        <createIndex tableName="execution_interactions"
+                     indexName="uk_execution_interactions_execution_ordinal" unique="true">
+            <column name="execution_id"/>
+            <column name="ordinal"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="035-execution-interactions-unique-client-request" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="execution_interactions"/>
+                <not><indexExists indexName="uk_execution_interactions_execution_actor_client"/></not>
+            </and>
+        </preConditions>
+        <createIndex tableName="execution_interactions"
+                     indexName="uk_execution_interactions_execution_actor_client" unique="true">
+            <column name="execution_id"/>
+            <column name="actor_user_id"/>
+            <column name="client_request_id"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="035-execution-interactions-unique-terminal-message" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="execution_interactions"/>
+                <not><indexExists indexName="uk_execution_interactions_terminal_message"/></not>
+            </and>
+        </preConditions>
+        <createIndex tableName="execution_interactions"
+                     indexName="uk_execution_interactions_terminal_message" unique="true">
+            <column name="terminal_message_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- FK index for the execution lookup (§3.2 house idx_/fk_ naming). -->
+    <changeSet id="035-execution-interactions-idx-execution" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="execution_interactions"/>
+                <not><indexExists indexName="idx_execution_interactions_execution"/></not>
+            </and>
+        </preConditions>
+        <createIndex tableName="execution_interactions"
+                     indexName="idx_execution_interactions_execution">
+            <column name="execution_id"/>
+            <column name="created_at"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================== -->
+    <!-- §3.3 execution_control_requests                                    -->
+    <!-- ================================================================== -->
+
+    <changeSet id="035-create-execution-control-requests" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="execution_control_requests"/>
+            </not>
+        </preConditions>
+        <createTable tableName="execution_control_requests">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="execution_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="interaction_id" type="uuid"/>
+            <column name="actor_user_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="action" type="varchar(10)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="origin" type="varchar(10)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="client_request_id" type="uuid"/>
+            <column name="request_digest" type="varchar(64)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(30)" defaultValue="PENDING">
+                <constraints nullable="false"/>
+            </column>
+            <column name="resolution_revision" type="bigint" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="control_revision" type="bigint"/>
+            <column name="command_message_id" type="varchar(255)"/>
+            <column name="confirmed_by" type="uuid"/>
+            <column name="confirmation_expires_at" type="timestamp with time zone"/>
+            <column name="created_at" type="timestamp with time zone">
+                <constraints nullable="false"/>
+            </column>
+            <column name="decided_at" type="timestamp with time zone"/>
+            <column name="explanation" type="text"/>
+            <column name="error_code" type="varchar(64)"/>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="035-execution-control-requests-fk-execution" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="execution_control_requests"/>
+                <not><foreignKeyConstraintExists foreignKeyName="fk_execution_control_requests_execution"/></not>
+            </and>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="execution_control_requests"
+            baseColumnNames="execution_id"
+            referencedTableName="session_executions"
+            referencedColumnNames="id"
+            constraintName="fk_execution_control_requests_execution"
+            onDelete="CASCADE"/>
+    </changeSet>
+
+    <!-- §3.3: interaction_id is a nullable FK (direct requests have no
+         interaction). NO onDelete cascade — settled audit/intent rows must
+         survive the deletion of their interaction record. -->
+    <changeSet id="035-execution-control-requests-fk-interaction" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="execution_control_requests"/>
+                <not><foreignKeyConstraintExists foreignKeyName="fk_execution_control_requests_interaction"/></not>
+            </and>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="execution_control_requests"
+            baseColumnNames="interaction_id"
+            referencedTableName="execution_interactions"
+            referencedColumnNames="id"
+            constraintName="fk_execution_control_requests_interaction"/>
+    </changeSet>
+
+    <!-- §3.3: the unique idempotency key for direct requests. Plain unique
+         index (client_request_id nullable ⇒ SDK-proposal rows with NULL
+         coexist freely; multiple NULLs are permitted in H2 and PostgreSQL). -->
+    <changeSet id="035-execution-control-requests-unique-client-request" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="execution_control_requests"/>
+                <not><indexExists indexName="uk_execution_control_requests_execution_actor_client"/></not>
+            </and>
+        </preConditions>
+        <createIndex tableName="execution_control_requests"
+                     indexName="uk_execution_control_requests_execution_actor_client" unique="true">
+            <column name="execution_id"/>
+            <column name="actor_user_id"/>
+            <column name="client_request_id"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="035-execution-control-requests-idx-execution" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="execution_control_requests"/>
+                <not><indexExists indexName="idx_execution_control_requests_execution"/></not>
+            </and>
+        </preConditions>
+        <createIndex tableName="execution_control_requests"
+                     indexName="idx_execution_control_requests_execution">
+            <column name="execution_id"/>
+            <column name="created_at"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================== -->
+    <!-- §3.4 execution_command_outbox                                      -->
+    <!-- ================================================================== -->
+
+    <changeSet id="035-create-execution-command-outbox" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="execution_command_outbox"/>
+            </not>
+        </preConditions>
+        <createTable tableName="execution_command_outbox">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="execution_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="session_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="host_instance_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="type" type="varchar(64)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="correlation_id" type="varchar(255)"/>
+            <column name="sequence" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="envelope" type="jsonb">
+                <constraints nullable="false"/>
+            </column>
+            <column name="payload_digest" type="varchar(64)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(10)" defaultValue="PENDING">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone">
+                <constraints nullable="false"/>
+            </column>
+            <column name="expires_at" type="timestamp with time zone">
+                <constraints nullable="false"/>
+            </column>
+            <column name="next_delivery_at" type="timestamp with time zone">
+                <constraints nullable="false"/>
+            </column>
+            <column name="delivery_count" type="int" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="acknowledged_at" type="timestamp with time zone"/>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="035-execution-command-outbox-fk-execution" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="execution_command_outbox"/>
+                <not><foreignKeyConstraintExists foreignKeyName="fk_execution_command_outbox_execution"/></not>
+            </and>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="execution_command_outbox"
+            baseColumnNames="execution_id"
+            referencedTableName="session_executions"
+            referencedColumnNames="id"
+            constraintName="fk_execution_command_outbox_execution"
+            onDelete="CASCADE"/>
+    </changeSet>
+
+    <changeSet id="035-execution-command-outbox-idx-execution" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="execution_command_outbox"/>
+                <not><indexExists indexName="idx_execution_command_outbox_execution"/></not>
+            </and>
+        </preConditions>
+        <createIndex tableName="execution_command_outbox"
+                     indexName="idx_execution_command_outbox_execution">
+            <column name="execution_id"/>
+            <column name="sequence"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- Dispatch-poll sweep input: status + next_delivery_at. -->
+    <changeSet id="035-execution-command-outbox-idx-status-delivery" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="execution_command_outbox"/>
+                <not><indexExists indexName="idx_execution_command_outbox_status_delivery"/></not>
+            </and>
+        </preConditions>
+        <createIndex tableName="execution_command_outbox"
+                     indexName="idx_execution_command_outbox_status_delivery">
+            <column name="status"/>
+            <column name="next_delivery_at"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================== -->
+    <!-- §3.5 execution_events extensions                                   -->
+    <!-- ================================================================== -->
+
+    <changeSet id="035-execution-events-execution-columns" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="execution_events"/>
+                <not>
+                    <columnExists tableName="execution_events" columnName="execution_id"/>
+                </not>
+            </and>
+        </preConditions>
+        <addColumn tableName="execution_events">
+            <column name="execution_id" type="uuid"/>
+            <column name="stream_sequence" type="bigint"/>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="035-execution-events-fk-execution" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="execution_events"/>
+                <columnExists tableName="execution_events" columnName="execution_id"/>
+                <not><foreignKeyConstraintExists foreignKeyName="fk_execution_events_execution"/></not>
+            </and>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="execution_events"
+            baseColumnNames="execution_id"
+            referencedTableName="session_executions"
+            referencedColumnNames="id"
+            constraintName="fk_execution_events_execution"
+            onDelete="CASCADE"/>
+    </changeSet>
+
+    <!-- §3.5 cursor: unique (execution_id, stream_sequence). Existing
+         historical rows stay NULL — a plain unique index permits multiple
+         NULLs in H2 and PostgreSQL (plan parity note). -->
+    <changeSet id="035-execution-events-unique-execution-stream" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="execution_events"/>
+                <columnExists tableName="execution_events" columnName="execution_id"/>
+                <not><indexExists indexName="uk_execution_events_execution_stream"/></not>
+            </and>
+        </preConditions>
+        <createIndex tableName="execution_events"
+                     indexName="uk_execution_events_execution_stream" unique="true">
+            <column name="execution_id"/>
+            <column name="stream_sequence"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="035-execution-events-idx-execution" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="execution_events"/>
+                <columnExists tableName="execution_events" columnName="execution_id"/>
+                <not><indexExists indexName="idx_execution_events_execution"/></not>
+            </and>
+        </preConditions>
+        <createIndex tableName="execution_events"
+                     indexName="idx_execution_events_execution">
+            <column name="execution_id"/>
+            <column name="stream_sequence"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

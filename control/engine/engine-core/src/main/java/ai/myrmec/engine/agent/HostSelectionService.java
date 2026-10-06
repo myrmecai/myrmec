@@ -42,13 +42,17 @@ public class HostSelectionService {
     /**
      * Return all active hosts able to serve {@code projectId} in
      * selection order: project-scoped hosts with live OPEN instances first,
-     * then unscoped live hosts. Empty when no candidate exists.
+     * then unscoped live hosts. Empty when no candidate exists. Fail-closed
+     * (section 22.2): a live host whose advertised capabilities lack the
+     * current sessionInteraction capability is excluded — no old-host
+     * fallback, no partial admission.
      */
     @Transactional(readOnly = true)
     public List<AgentHost> selectCandidatesForProject(UUID projectId) {
         List<AgentHost> active = agentHostRepository.findByStatus(AgentHost.Status.ACTIVE);
         return active.stream()
                 .filter(this::hasLiveInstance)
+                .filter(this::hasCurrentInteractionCapability)
                 .filter(h -> projectId == null || h.getProjectId() == null
                         || projectId.equals(h.getProjectId()))
                 .sorted(java.util.Comparator.comparingInt((AgentHost h) -> score(h, projectId)))
@@ -87,5 +91,43 @@ public class HostSelectionService {
                 .anyMatch(instance -> connectionManager.getSession(instance.getId())
                         .map(s -> s.isOpen())
                         .orElse(false));
+    }
+
+    /**
+     * section 22.2 fail-closed capability gate: at least one live OPEN
+     * instance of the host must have advertised the current
+     * sessionInteraction capability (version 1, temporaryHold=true) at
+     * host.open. Missing/unsupported capability excludes the host from
+     * selection — a stale SDK host never receives sessions rather than
+     * failing midhandshake.
+     */
+    private boolean hasCurrentInteractionCapability(AgentHost host) {
+        return instanceRepository
+                .findByAgentHostIdAndStatus(host.getId(), AgentHostInstance.Status.OPEN)
+                .stream()
+                .filter(instance -> connectionManager.getSession(instance.getId())
+                        .map(s -> s.isOpen())
+                        .orElse(false))
+                .map(instance -> connectionManager
+                        .getAdvertisedCapabilities(instance.getId())
+                        .get("sessionInteraction"))
+                .anyMatch(HostSelectionService::isCurrentInteractionCapability);
+    }
+
+    /** Validate the advertised block against the section 22.2 current contract. */
+    private static boolean isCurrentInteractionCapability(Object advertised) {
+        if (!(advertised instanceof ai.myrmec.engine.websocket.host.payload
+                .SessionInteractionCapability typed)) {
+            return false;
+        }
+        try {
+            // Re-validate defensively: construction can only come from the
+            // parser, but the selection gate must never trust in-memory state.
+            new ai.myrmec.engine.websocket.host.payload.SessionInteractionCapability(
+                    typed.version(), typed.temporaryHold());
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 }

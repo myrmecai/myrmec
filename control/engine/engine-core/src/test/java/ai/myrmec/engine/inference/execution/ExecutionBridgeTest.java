@@ -423,6 +423,99 @@ class ExecutionBridgeTest extends IntegrationTestBase {
     }
 
     @Test
+    void orchestrationTerminalSettlesAggregateUsageOnceReplayDoesNotDoubleCharge() {
+        OrchestrationFixture f = new OrchestrationFixture();
+        Project project = data.project().named("bridge-usage").create();
+
+        // A REAL execution row carrying the interaction policy (THIS
+        // feature's orchestration family) + a project quota to observe.
+        ai.myrmec.engine.inference.Session session = session();
+        session.setServiceType("WORKFLOW");
+        session.setRefId(f.request.getId());
+        session.setProjectId(project.getId());
+        sessionRepository.save(session);
+        SessionExecution execution = new SessionExecution();
+        execution.setSessionId(session.getId());
+        execution.setServiceType("WORKFLOW");
+        execution.setDispatchId(f.attempt.getId());
+        execution.setState(SessionExecution.State.RUNNING);
+        execution.setStartedAt(Instant.now());
+        execution.setInteractionPolicy(
+                ai.myrmec.engine.inference.execution.interaction.InteractionPolicySnapshotService
+                        .policyMap(ai.myrmec.engine.inference.execution.interaction
+                                .InteractionProperties.defaults()));
+        execution = sessionExecutionRepository.save(execution);
+        quotaService.create(
+                ai.myrmec.engine.quota.Quota.Scope.PROJECT, project.getId(),
+                ai.myrmec.engine.quota.Quota.ResourceType.TOKENS, ai.myrmec.engine.quota.Quota.Period.DAILY,
+                10_000L, ai.myrmec.engine.quota.EnforcementMode.BLOCK, ai.myrmec.engine.quota.QuotaType.CEILING,
+                null, null, null, TEST_ADMIN_ID);
+
+        UUID resultExecutionId = execution.getId();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("executionId", resultExecutionId.toString());
+        payload.put("result", Map.of("content", "done"));
+        payload.put("usage", Map.of("totalTokens", 650L));
+
+        executionBridge.onOrchestrationOutcome(
+                f.attempt.getId(), resultExecutionId, SessionExecution.State.COMPLETED, payload);
+
+        // The aggregate terminal settled ORCHESTRATION source once: 650 accounted.
+        var accounting = sessionExecutionRepository.findById(resultExecutionId).orElseThrow()
+                .getInteractionUsage();
+        assertThat(((Number) accounting.get("accountedTokens")).longValue()).isEqualTo(650L);
+        var decision = quotaPolicyEngine.check(
+                ai.myrmec.engine.spi.quota.QuotaScope.PROJECT, project.getId(),
+                ai.myrmec.engine.spi.quota.QuotaResourceType.TOKENS, 0);
+        assertThat(decision.getConsumedAmount()).isEqualTo(650L);
+
+        // A REPLAYED terminal outcome does not double-charge (the terminal
+        // replay path never re-settles; the settled-set dedup holds).
+        executionBridge.onOrchestrationOutcome(
+                f.attempt.getId(), resultExecutionId, SessionExecution.State.COMPLETED, payload);
+
+        var decisionAfterReplay = quotaPolicyEngine.check(
+                ai.myrmec.engine.spi.quota.QuotaScope.PROJECT, project.getId(),
+                ai.myrmec.engine.spi.quota.QuotaResourceType.TOKENS, 0);
+        assertThat(decisionAfterReplay.getConsumedAmount())
+                .as("a replayed terminal outcome never double-charges")
+                .isEqualTo(650L);
+    }
+
+    @Test
+    @Transactional
+    void orchestrationTerminalWithoutInteractionPolicySkipsAggregateSettlement() {
+        OrchestrationFixture f = new OrchestrationFixture();
+
+        // The execution row EXISTS but carries NO interaction policy — an
+        // execution outside THIS feature's orchestration family.
+        ai.myrmec.engine.inference.Session session = session();
+        session.setServiceType("WORKFLOW");
+        session.setRefId(f.request.getId());
+        session.setProjectId(data.project().named("bridge-usage-np").create().getId());
+        sessionRepository.save(session);
+        SessionExecution execution = new SessionExecution();
+        execution.setSessionId(session.getId());
+        execution.setServiceType("WORKFLOW");
+        execution.setDispatchId(f.attempt.getId());
+        execution.setState(SessionExecution.State.RUNNING);
+        execution.setStartedAt(Instant.now());
+        execution = sessionExecutionRepository.save(execution);
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("executionId", execution.getId().toString());
+        payload.put("result", Map.of("content", "done"));
+        payload.put("usage", Map.of("totalTokens", 500L));
+
+        executionBridge.onOrchestrationOutcome(
+                f.attempt.getId(), execution.getId(), SessionExecution.State.COMPLETED, payload);
+
+        // No aggregate settlement: the accounting projection stays untouched.
+        assertThat(sessionExecutionRepository.findById(execution.getId()).orElseThrow()
+                .getInteractionUsage()).isNull();
+    }
+
+    @Test
     @Transactional
     void orchestrationPausedSuspensionBlocksSurviveTheStructuredMap() {
         OrchestrationFixture f = new OrchestrationFixture();

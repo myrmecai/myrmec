@@ -30,9 +30,27 @@ public record HostOpenedPayload(
         StreamLimits streamLimits,
         String serverNodeId,
         String psk,
-        UUID pskKeyId) {
+        UUID pskKeyId,
+        /**
+         * section 22.2: the engine's acceptedCapabilities echo — the
+         * sessionInteraction block the host must advertise to be admitted.
+         * Required (the engine only sends host.opened to capable hosts).
+         * Nested under {@code acceptedCapabilities} per the section 22.2
+         * wire shape.
+         */
+        AcceptedCapabilities acceptedCapabilities) {
 
-    /** §6.3 negotiated stream limits. */
+    /** section 22.2: the acceptedCapabilities container. */
+    public record AcceptedCapabilities(SessionInteractionCapability sessionInteraction) {
+        public AcceptedCapabilities {
+            if (sessionInteraction == null) {
+                throw new IllegalArgumentException(
+                        "acceptedCapabilities.sessionInteraction is required");
+            }
+        }
+    }
+
+    /** section 6.3 negotiated stream limits. */
     public record StreamLimits(
             int maxFrameBytes,
             int maxBufferedDeltaBytesPerSession,
@@ -56,6 +74,7 @@ public record HostOpenedPayload(
                 + ", serverNodeId=" + serverNodeId
                 + ", psk=" + HostFrameLogRedactor.REDACTED
                 + ", pskKeyId=" + pskKeyId
+                + ", acceptedCapabilities=" + acceptedCapabilities
                 + "]";
     }
 }

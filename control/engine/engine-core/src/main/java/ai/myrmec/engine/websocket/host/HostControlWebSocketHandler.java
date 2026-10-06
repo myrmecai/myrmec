@@ -36,9 +36,13 @@ import ai.myrmec.engine.websocket.host.payload.ExecutionAcceptPayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionApprovalRequestedPayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionCancelledPayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionCompletePayload;
+import ai.myrmec.engine.websocket.host.payload.ExecutionControlStatePayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionDeltaPayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionEventPayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionFailedPayload;
+import ai.myrmec.engine.websocket.host.payload.ExecutionInteractionCompletePayload;
+import ai.myrmec.engine.websocket.host.payload.ExecutionInteractionDeltaPayload;
+import ai.myrmec.engine.websocket.host.payload.ExecutionInteractionFailedPayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionPausedPayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionRejectPayload;
 import ai.myrmec.engine.websocket.host.payload.ProtocolAckPayload;
@@ -110,6 +114,8 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     private final EncryptionService encryptionService;
     private final HostResumeReconcileService resumeReconcileService;
     private final ai.myrmec.engine.workflow.OrchestrationDispatchRepository dispatchRepository;
+    private final ai.myrmec.engine.inference.execution.interaction.ExecutionControlService executionControlService;
+    private final ai.myrmec.engine.inference.execution.interaction.ExecutionInteractionService interactionService;
     private final org.springframework.transaction.support.TransactionTemplate transactionTemplate;
 
     @Value("${myrmec.host.heartbeat-interval-seconds:15}")
@@ -156,6 +162,10 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                                        EncryptionService encryptionService,
                                        HostResumeReconcileService resumeReconcileService,
                                        ai.myrmec.engine.workflow.OrchestrationDispatchRepository dispatchRepository,
+                                       @org.springframework.context.annotation.Lazy
+                                       ai.myrmec.engine.inference.execution.interaction.ExecutionControlService executionControlService,
+                                       @org.springframework.context.annotation.Lazy
+                                       ai.myrmec.engine.inference.execution.interaction.ExecutionInteractionService interactionService,
                                        org.springframework.transaction.PlatformTransactionManager transactionManager) {
         this.objectMapper = objectMapper;
         this.agentHostRepository = agentHostRepository;
@@ -183,6 +193,8 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         this.encryptionService = encryptionService;
         this.resumeReconcileService = resumeReconcileService;
         this.dispatchRepository = dispatchRepository;
+        this.executionControlService = executionControlService;
+        this.interactionService = interactionService;
         this.transactionTemplate = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
     }
 
@@ -235,10 +247,28 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             case HostProtocol.EXECUTION_FAILED -> handleExecutionFailed(session, envelope);
             case HostProtocol.EXECUTION_PAUSED -> handleExecutionPaused(session, envelope);
             case HostProtocol.EXECUTION_CANCELLED -> handleExecutionCancelled(session, envelope);
+            // §22.7 (Task 6): the host's chat tool proposes an engine-
+            // authorized control; the disposition resolves through
+            // ExecutionControlService.propose (actor derived from the
+            // persisted interaction).
+            case HostProtocol.EXECUTION_CONTROL_REQUEST ->
+                    handleExecutionControlRequest(session, envelope);
             // §5/§8.7: the host publishes an approval request BEFORE the
             // terminal execution.paused — durable receipt acknowledged (§12.3).
             case HostProtocol.EXECUTION_APPROVAL_REQUESTED ->
                     handleExecutionApprovalRequested(session, envelope);
+            // §22.3 (Task 8): the interaction outcome/observed-state family.
+            // Durable complete/failed settle the interaction rows (ack after
+            // commit §12.3); delta is ephemeral best-effort; control.state
+            // projects onto the 035 observed-state columns.
+            case HostProtocol.EXECUTION_INTERACTION_COMPLETE ->
+                    handleExecutionInteractionComplete(session, envelope);
+            case HostProtocol.EXECUTION_INTERACTION_FAILED ->
+                    handleExecutionInteractionFailed(session, envelope);
+            case HostProtocol.EXECUTION_INTERACTION_DELTA ->
+                    handleExecutionInteractionDelta(session, envelope);
+            case HostProtocol.EXECUTION_CONTROL_STATE ->
+                    handleExecutionControlState(session, envelope);
             case HostProtocol.EXECUTION_START, HostProtocol.EXECUTION_CANCEL ->
                     logEngineToHostIgnored(session, envelope);
             // §8.7 (A4): execution.policy.update is an ENGINE→host frame — a
@@ -286,6 +316,20 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         if (open.instanceNonce() == null) {
             sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
                     "instanceNonce is required", false, "CONNECTION", null);
+            return;
+        }
+
+        // section 22.2 current-contract validation: the sessionInteraction
+        // capability is REQUIRED — missing or unsupported blocks fail host
+        // initialization with protocol.error and mint no instance row. This
+        // is the cutover contract, not an old-host fallback.
+        ai.myrmec.engine.websocket.host.payload.SessionInteractionCapability
+                sessionInteraction;
+        try {
+            sessionInteraction = open.sessionInteractionCapability();
+        } catch (IllegalArgumentException e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    e.getMessage(), false, "CONNECTION", null);
             return;
         }
 
@@ -361,7 +405,8 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         }
 
         session.getAttributes().put(ATTR_HOST_INSTANCE_ID, instance.getId());
-        connectionManager.register(instance.getId(), session);
+        connectionManager.register(instance.getId(), session, Map.of(
+                "sessionInteraction", sessionInteraction));
 
         send(session, HostProtocolEnvelope.reply(HostProtocol.HOST_OPENED, envelope.getMessageId(),
                 new HostOpenedPayload(
@@ -376,7 +421,8 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                                 maxUnackedEventBytes, eventBackpressureTimeoutSeconds),
                         nodeRegistryService.getSelfNodeId(),
                         pskBase64,
-                        pskKeyId),
+                        pskKeyId,
+                        new HostOpenedPayload.AcceptedCapabilities(sessionInteraction)),
                 objectMapper));
     }
 
@@ -716,14 +762,26 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
-     * §20 (decision H5): route a fully-built engine→host envelope to the
-     * instance's owning replica — direct socket on self, HTTP relay on a peer.
+     * §7.5/§22.3: route a fully-built engine→host SESSION frame
+     * (session.open / session.close) to the instance's owning replica
+     * channel-first with control-socket delivery — the same §7.5 routing the
+     * other session frames use. These are admission/lifecycle frames: they
+     * MUST reach the host before any channel binding exists (the channel
+     * offer token rides IN session.open), so dedicated-only delivery cannot
+     * apply here. Dedicated-only (§22.3/D7) applies to the §22 interaction
+     * messages once a channel is bound (sent via
+     * {@code frameRelayService.sendDedicated}).
      */
     private void relayOrSend(UUID sessionId, UUID hostInstanceId, HostProtocolEnvelope envelope) {
         envelope.setSessionId(sessionId);
         try {
             String json = objectMapper.writeValueAsString(envelope);
-            frameRelayService.send(sessionId, hostInstanceId, json);
+            boolean delivered = frameRelayService.send(sessionId, hostInstanceId, json);
+            if (!delivered) {
+                log.warn("Session frame {} undeliverable for session {} (instance {}) — "
+                        + "engine failure/retry classification applies",
+                        envelope.getType(), sessionId, hostInstanceId);
+            }
         } catch (IOException e) {
             log.warn("Failed sending host frame to instance {}: {}", hostInstanceId, e.getMessage());
         }
@@ -1033,6 +1091,403 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         return sessionRepository.findById(execution.getSessionId())
                 .map(ai.myrmec.engine.inference.Session::getHostInstanceId)
                 .orElse(null);
+    }
+
+    /**
+     * §22.7 (Task 6, plan 2026-10-03-session-interaction): the host's chat
+     * tool proposes an engine-authorized control. The engine resolves the
+     * execution's OWNERSHIP CHAIN (plan section 4 — project → workflow →
+     * request → task → attempt → execution) itself, derives the actor from
+     * the persisted interaction (a host-supplied actor is impossible by
+     * payload shape), and resolves the disposition transactionally. The
+     * resolved `execution.control.request.resolved` disposition is the
+     * durable reply; the frame is acknowledged after commit (§12.3).
+     */
+    private void handleExecutionControlRequest(WebSocketSession session,
+                                                HostProtocolEnvelope envelope) {
+        UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
+        if (instanceId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                    "execution.control.request before host.opened", false, "EXECUTION", null);
+            return;
+        }
+        if (envelope.getExecutionId() == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "executionId is required", false, "EXECUTION", null);
+            return;
+        }
+        try {
+            ai.myrmec.engine.websocket.host.payload.ExecutionControlRequestPayload payload =
+                    objectMapper.treeToValue(envelope.getPayload(),
+                            ai.myrmec.engine.websocket.host.payload.ExecutionControlRequestPayload.class);
+            SessionExecution execution = executionRepository.findById(
+                    envelope.getExecutionId()).orElse(null);
+            if (execution == null) {
+                sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                        "execution.control.request for unknown execution", false, "EXECUTION", null);
+                return;
+            }
+            if (!instanceId.equals(executionSessionInstanceId(execution))) {
+                sendError(session, envelope.getMessageId(), HostProtocol.IDENTITY_MISMATCH,
+                        "execution does not belong to this connection's session", false,
+                        "EXECUTION", null);
+                return;
+            }
+            var scope = executionControlService.scopeForExecution(execution.getId());
+            var receipt = executionControlService.propose(scope, payload);
+            // §22.7: the resolved disposition is the durable reply.
+            send(session, HostProtocolEnvelope.reply(
+                    HostProtocol.EXECUTION_CONTROL_REQUEST_RESOLVED,
+                    envelope.getMessageId(),
+                    resolvedPayload(execution, payload, receipt), objectMapper));
+            acknowledge(session, envelope.getMessageId(), execution.getSessionId(), 0L);
+        } catch (Exception e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "execution.control.request payload invalid: " + e.getMessage(),
+                    false, "EXECUTION", null);
+        }
+    }
+
+    /** Map the ProposalReceipt onto the §22.7 resolved payload shape. */
+    private ai.myrmec.engine.websocket.host.payload.ExecutionControlRequestResolvedPayload
+            resolvedPayload(SessionExecution execution,
+                            ai.myrmec.engine.websocket.host.payload.ExecutionControlRequestPayload proposal,
+                            ai.myrmec.engine.inference.execution.interaction.ProposalReceipt receipt) {
+        return new ai.myrmec.engine.websocket.host.payload.ExecutionControlRequestResolvedPayload(
+                execution.getId(),
+                execution.getDispatchId(),
+                proposal.interactionId(),
+                receipt.controlRequestId(),
+                receipt.resolutionRevision(),
+                ai.myrmec.engine.websocket.host.payload.ExecutionControlRequestResolvedPayload
+                        .Status.valueOf(receipt.status()),
+                receipt.expiresAt(),
+                receipt.commandMessageId(),
+                receipt.controlRevision(),
+                receipt.errorCode() == null ? null
+                        : ai.myrmec.engine.websocket.host.payload.ExecutionControlRequestResolvedPayload
+                        .ErrorCode.valueOf(receipt.errorCode()));
+    }
+
+    // ====================================================================
+    // §22.3 (Task 8): the interaction family — durable complete/failed
+    // outcomes, the ephemeral delta, and the observed control state.
+    // ====================================================================
+
+    /**
+     * §22.3/§22.6: the durable {@code execution.interaction.complete}
+     * outcome. Identity walks EXACTLY like the other execution arms (the
+     * §14 correlation: connection instance == the execution's session
+     * instance; payload executionId == envelope.executionId == the loaded
+     * execution; payload.dispatchId == execution.dispatchId) plus the
+     * §22.2 negotiated sessionInteraction capability (fail-closed
+     * UNSUPPORTED_MESSAGE). The service settles the row + usage; the
+     * protocol.ack goes AFTER the service transaction commits (§12.3).
+     */
+    private void handleExecutionInteractionComplete(WebSocketSession session,
+                                                    HostProtocolEnvelope envelope) {
+        settleOutcomeArm(session, envelope, ExecutionInteractionCompletePayload.class,
+                HostProtocol.EXECUTION_INTERACTION_COMPLETE, (execution, payload) ->
+                        interactionService.complete(
+                                executionControlService.scopeForExecution(execution.getId()),
+                                envelope.getMessageId(),
+                                (ExecutionInteractionCompletePayload) payload));
+    }
+
+    /** §22.3/§22.6: the durable {@code execution.interaction.failed} outcome. */
+    private void handleExecutionInteractionFailed(WebSocketSession session,
+                                                  HostProtocolEnvelope envelope) {
+        settleOutcomeArm(session, envelope, ExecutionInteractionFailedPayload.class,
+                HostProtocol.EXECUTION_INTERACTION_FAILED, (execution, payload) ->
+                        interactionService.fail(
+                                executionControlService.scopeForExecution(execution.getId()),
+                                envelope.getMessageId(),
+                                (ExecutionInteractionFailedPayload) payload));
+    }
+
+    /**
+     * §22.3/§22.6: the ephemeral best-effort delta. Identity check ONLY —
+     * no durable record, no ack (deltas are never acknowledged durably).
+     * A failing identity is silently dropped for the connection's safety
+     * (§22.3: deltas carry no durability semantics; replay resolves through
+     * the durable complete). Logged at debug.
+     */
+    private void handleExecutionInteractionDelta(WebSocketSession session,
+                                                 HostProtocolEnvelope envelope) {
+        UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
+        if (instanceId == null || envelope.getExecutionId() == null) {
+            log.debug("Dropping execution.interaction.delta (unbound connection or no executionId)");
+            return;
+        }
+        if (!advertisesSessionInteraction(instanceId)) {
+            log.debug("Dropping execution.interaction.delta for instance {} — no negotiated "
+                    + "sessionInteraction capability", instanceId);
+            return;
+        }
+        try {
+            ExecutionInteractionDeltaPayload payload = objectMapper.treeToValue(
+                    envelope.getPayload(), ExecutionInteractionDeltaPayload.class);
+            SessionExecution execution = executionRepository.findById(
+                    envelope.getExecutionId()).orElse(null);
+            if (execution == null
+                    // §22.3 identity (control-arm equivalent — silent drop:
+                    // the delta itself carries no durable semantics).
+                    || !payload.executionId().equals(execution.getId())
+                    || !payload.dispatchId().equals(execution.getDispatchId())) {
+                log.debug("Dropping execution.interaction.delta (unknown execution or "
+                        + "dispatch identity mismatch) for execution {}", envelope.getExecutionId());
+                return;
+            }
+            // §22.3: the delta binds to the session the execution serves.
+            if (!instanceId.equals(executionSessionInstanceId(execution))) {
+                log.debug("Dropping execution.interaction.delta for execution {} — instance "
+                        + "correlation mismatch", execution.getId());
+                return;
+            }
+            // Ephemeral: consumed in-memory by Task 9's stream broker; the
+            // engine records nothing. The COMPLETE record replaces the
+            // provisional deltas (§22.6).
+            log.debug("execution.interaction.delta {} index {} for interaction {} "
+                    + "(ephemeral, no durable record)", envelope.getMessageId(),
+                    payload.index(), payload.interactionId());
+        } catch (Exception e) {
+            // Malformed deltas are best-effort dropped — never a protocol
+            // error (the durable complete is the authority; §22.6).
+            log.debug("Dropping malformed execution.interaction.delta: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * §22.3/§22.4: the host's durable observed-state report. Identity walks
+     * like the other execution arms (IDENTITY_MISMATCH on mismatch); the
+     * projection onto the 035 observed-state columns runs UNDER THE
+     * EXECUTION ROW LOCK with the highest-{@code stateSequence}-wins gate
+     * (a stale lower sequence is a logged no-op). Ack after commit (§12.3).
+     */
+    private void handleExecutionControlState(WebSocketSession session,
+                                             HostProtocolEnvelope envelope) {
+        UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
+        if (instanceId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                    "execution.control.state before host.opened", false, "EXECUTION", null);
+            return;
+        }
+        if (envelope.getExecutionId() == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "executionId is required", false, "EXECUTION", null);
+            return;
+        }
+        if (!advertisesSessionInteraction(instanceId)) {
+            sendError(session, envelope.getMessageId(), HostProtocol.UNSUPPORTED_MESSAGE,
+                    "the connection did not negotiate the sessionInteraction capability (§22.2)",
+                    false, "EXECUTION", null);
+            return;
+        }
+        try {
+            ExecutionControlStatePayload payload = objectMapper.treeToValue(
+                    envelope.getPayload(), ExecutionControlStatePayload.class);
+            SessionExecution execution = executionRepository.findById(
+                    envelope.getExecutionId()).orElse(null);
+            if (execution == null) {
+                sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                        "execution.control.state for unknown execution", false,
+                        "EXECUTION", null);
+                return;
+            }
+            // §22.3 identity walk (the other execution arms' pattern).
+            if (!instanceId.equals(executionSessionInstanceId(execution))) {
+                sendError(session, envelope.getMessageId(), HostProtocol.IDENTITY_MISMATCH,
+                        "execution does not belong to this connection's session", false,
+                        "EXECUTION", null);
+                return;
+            }
+            if (!payload.executionId().equals(execution.getId())
+                    || !executionIdsMatchDispatch(execution, payload)) {
+                sendError(session, envelope.getMessageId(), HostProtocol.IDENTITY_MISMATCH,
+                        "state report identity does not match the admitted execution",
+                        false, "EXECUTION", null);
+                return;
+            }
+            // The projection commits in its OWN transaction; the ack rides
+            // ONLY after that commit (§12.3).
+            Boolean projected = transactionTemplate.execute(tx ->
+                    projectControlState(payload));
+            if (!Boolean.TRUE.equals(projected)) {
+                return;   // unknown execution gone (concurrent) — nothing to ack
+            }
+            acknowledge(session, envelope.getMessageId(), execution.getSessionId(), 0L);
+        } catch (Exception e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "execution.control.state payload invalid: " + e.getMessage(),
+                    false, "EXECUTION", null);
+        }
+    }
+
+    /**
+     * The control.state projection, transactional (an own transaction via
+     * the TransactionTemplate — the handler method itself is not
+     * {@code @Transactional}). Returns true when the projection settled
+     * (durable write OR designed stale no-op — the caller acks); false when
+     * the execution vanished concurrently.
+     *
+     * <p>Column mapping (§22.4 → 035): {@code controlStateSequence} takes
+     * the payload's stateSequence — highest wins, a stale lower sequence is
+     * a logged no-op; {@code acceptedControlRevision} advances to the
+     * payload's {@code controlRevision} ONLY on non-REJECTED statuses (a
+     * REJECTED report carries {@code rejectedControlRevision} — the
+     * accepted revision never advances from a rejection); {@code holdState}
+     * = effectiveState; {@code holdChangedAt} = changedAt;
+     * {@code idleResumeAt} = idleResumeAt.</p>
+     */
+    private boolean projectControlState(ExecutionControlStatePayload payload) {
+        SessionExecution locked = executionRepository
+                .findWithLockById(payload.executionId()).orElse(null);
+        if (locked == null) {
+            log.debug("execution.control.state for vanished execution {} — no projection",
+                    payload.executionId());
+            return false;
+        }
+        long priorSequence = locked.getControlStateSequence() == null
+                ? 0L : locked.getControlStateSequence();
+        if (payload.stateSequence() <= priorSequence) {
+            // Stale (out-of-order redelivery) — logged no-op, never regresses;
+            // the frame IS acknowledged (the idempotent-durable contract).
+            log.debug("execution.control.state sequence {} not newer than {} for execution "
+                    + "{} — stale report ignored", payload.stateSequence(), priorSequence,
+                    locked.getId());
+            return true;
+        }
+        locked.setControlStateSequence(payload.stateSequence());
+        // §22.4: acceptedControlRevision tracks the highest ACCEPTED engine
+        // revision the host observed — a REJECTED report never advances it.
+        if (payload.status() != ExecutionControlStatePayload.Status.REJECTED) {
+            long priorRevision = locked.getAcceptedControlRevision() == null
+                    ? 0L : locked.getAcceptedControlRevision();
+            if (payload.controlRevision() > priorRevision) {
+                locked.setAcceptedControlRevision(payload.controlRevision());
+            }
+        }
+        locked.setHoldState(payload.effectiveState().name());
+        locked.setHoldChangedAt(payload.changedAt());
+        locked.setIdleResumeAt(payload.idleResumeAt());
+        executionRepository.save(locked);
+        log.debug("Observed control state {} (seq {}) projected for execution {}",
+                payload.status(), payload.stateSequence(), locked.getId());
+        return true;
+    }
+
+    /** The shared durable-outcome arm (§22.6 complete/failed). */
+    private void settleOutcomeArm(WebSocketSession session, HostProtocolEnvelope envelope,
+                                  Class<?> payloadType, String frameType,
+                                  OutcomeApplier applier) {
+        UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
+        if (instanceId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                    frameType + " before host.opened", false, "EXECUTION", null);
+            return;
+        }
+        if (envelope.getExecutionId() == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "executionId is required", false, "EXECUTION", null);
+            return;
+        }
+        if (!advertisesSessionInteraction(instanceId)) {
+            sendError(session, envelope.getMessageId(), HostProtocol.UNSUPPORTED_MESSAGE,
+                    "the connection did not negotiate the sessionInteraction capability (§22.2)",
+                    false, "EXECUTION", null);
+            return;
+        }
+        Object payload;
+        try {
+            payload = objectMapper.treeToValue(envelope.getPayload(), payloadType);
+        } catch (Exception e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    frameType + " payload failed validation: " + e.getMessage(),
+                    false, "EXECUTION", null);
+            return;
+        }
+        try {
+            SessionExecution execution = executionRepository.findById(
+                    envelope.getExecutionId()).orElse(null);
+            if (execution == null) {
+                sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                        frameType + " for unknown execution", false, "EXECUTION", null);
+                return;
+            }
+            // §22.3 identity walk (the other execution arms' pattern): the
+            // execution must belong to THIS connection's session instance.
+            if (!instanceId.equals(executionSessionInstanceId(execution))) {
+                sendError(session, envelope.getMessageId(), HostProtocol.IDENTITY_MISMATCH,
+                        "execution does not belong to this connection's session", false,
+                        "EXECUTION", null);
+                return;
+            }
+            // §22.3 identity: the payload's execution/dispatch pair must be
+            // the admitted execution's own ids (verified again in the
+            // service against the locked row).
+            if (!envelope.getExecutionId().equals(payloadExecutionIdOf(payload))
+                    || !executionIdsMatchDispatch(execution, payload)) {
+                sendError(session, envelope.getMessageId(), HostProtocol.IDENTITY_MISMATCH,
+                        "outcome identity does not match the admitted execution", false,
+                        "EXECUTION", null);
+                return;
+            }
+            // The service's OWN transaction (settle + usage accounting).
+            applier.apply(execution, payload);
+            // §12.3: ack AFTER the service transaction committed.
+            SessionExecution refreshed = executionRepository.findById(
+                    execution.getId()).orElse(execution);
+            acknowledge(session, envelope.getMessageId(), refreshed.getSessionId(), 0L);
+        } catch (ai.myrmec.engine.inference.execution.interaction.InteractionProtocolException e) {
+            // §22.3: the service's protocol refusals surface as protocol.error
+            // with the SAME code (IDENTITY_MISMATCH / INVALID_MESSAGE).
+            sendError(session, envelope.getMessageId(), e.getCode(),
+                    e.getMessage(), false, "EXECUTION", null);
+        } catch (ai.myrmec.engine._system.exception.ResourceNotFoundException e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                    frameType + " for unknown execution", false, "EXECUTION", null);
+        } catch (Exception e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    frameType + " payload invalid: " + e.getMessage(), false, "EXECUTION", null);
+        }
+    }
+
+    /** The §22.3 capability gate: the connection negotiated sessionInteraction. */
+    private boolean advertisesSessionInteraction(UUID instanceId) {
+        Object capability = connectionManager.getAdvertisedCapabilities(instanceId)
+                .get("sessionInteraction");
+        return capability instanceof ai.myrmec.engine.websocket.host.payload
+                .SessionInteractionCapability
+                || capability instanceof Map<?, ?>;
+    }
+
+    /** The payload's payload.executionId (typed per frame family). */
+    private java.util.UUID payloadExecutionIdOf(Object payload) {
+        return switch (payload) {
+            case ExecutionInteractionCompletePayload complete -> complete.executionId();
+            case ExecutionInteractionFailedPayload failed -> failed.executionId();
+            case ExecutionInteractionDeltaPayload delta -> delta.executionId();
+            case ExecutionControlStatePayload state -> state.executionId();
+            default -> null;
+        };
+    }
+
+    /** The payload's dispatchId must equal the execution's own (§22.3). */
+    private boolean executionIdsMatchDispatch(SessionExecution execution, Object payload) {
+        java.util.UUID dispatchId = switch (payload) {
+            case ExecutionInteractionCompletePayload complete -> complete.dispatchId();
+            case ExecutionInteractionFailedPayload failed -> failed.dispatchId();
+            case ExecutionInteractionDeltaPayload delta -> delta.dispatchId();
+            case ExecutionControlStatePayload state -> state.dispatchId();
+            default -> null;
+        };
+        return dispatchId != null && dispatchId.equals(execution.getDispatchId());
+    }
+
+    /** The outcome applier seam (complete/failed call their service arms). */
+    @FunctionalInterface
+    private interface OutcomeApplier {
+        void apply(SessionExecution execution, Object payload);
     }
 
     /** The durable host serving the execution's session (null when unresolvable). */
@@ -1353,6 +1808,21 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             // other host→engine execution frames.
             case HostProtocol.EXECUTION_APPROVAL_REQUESTED ->
                     handleExecutionApprovalRequested(channelSocket, envelope);
+            // §22.7 (Task 6): the chat-proposal frame rides the dedicated
+            // channel like the rest of the execution traffic.
+            case HostProtocol.EXECUTION_CONTROL_REQUEST ->
+                    handleExecutionControlRequest(channelSocket, envelope);
+            // §22.3 (Task 8): the interaction family rides the dedicated
+            // channel too (durable complete/failed are dedicated-only in
+            // the SDK; the arms behave identically on either socket).
+            case HostProtocol.EXECUTION_INTERACTION_COMPLETE ->
+                    handleExecutionInteractionComplete(channelSocket, envelope);
+            case HostProtocol.EXECUTION_INTERACTION_FAILED ->
+                    handleExecutionInteractionFailed(channelSocket, envelope);
+            case HostProtocol.EXECUTION_INTERACTION_DELTA ->
+                    handleExecutionInteractionDelta(channelSocket, envelope);
+            case HostProtocol.EXECUTION_CONTROL_STATE ->
+                    handleExecutionControlState(channelSocket, envelope);
             default -> sendError(channelSocket, envelope.getMessageId(),
                     HostProtocol.INVALID_MESSAGE,
                     "Frame type " + type + " is not permitted on the dedicated channel",

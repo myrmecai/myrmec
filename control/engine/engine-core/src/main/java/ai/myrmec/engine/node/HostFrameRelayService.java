@@ -18,9 +18,12 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Inter-node host-socket routing (protocol §20, decision H5): resolves the
- * replica that owns a host instance's socket and either delivers locally
- * (same node) or relays the frame over the HTTP mesh to the owning peer.
+ * Inter-node host-socket routing (protocol §20, decision H5; §22.3/D7 for the
+ * dedicated-only half): resolves the replica that owns a host instance's
+ * socket and either delivers locally (same node) or relays the frame over the
+ * HTTP mesh to the owning peer. {@link #send} is channel-first WITH a control
+ * fallback; {@link #sendDedicated} is the §22.3 dedicated-only arm that NEVER
+ * touches a control socket.
  *
  * <p><b>Owner identity</b> comes from {@code agent_host_instances}.
  * control_node_id} — stamped at {@code host.open} from the same
@@ -94,6 +97,15 @@ public class HostFrameRelayService {
         return route(null, hostInstanceId, envelopeJson, false);
     }
 
+    /**
+     * §22.3/D7: dedicated-channel-only delivery. False when the bound channel
+     * socket is unavailable (locally or on the owner node). NEVER falls back
+     * to the Host Channel.
+     */
+    public boolean sendDedicated(UUID sessionId, UUID hostInstanceId, String envelopeJson) {
+        return routeDedicated(sessionId, hostInstanceId, envelopeJson);
+    }
+
     private boolean route(UUID sessionId, UUID hostInstanceId, String envelopeJson,
                           boolean channelFirst) {
         String ownerNode = nodeOf(hostInstanceId);
@@ -103,6 +115,91 @@ public class HostFrameRelayService {
             return sendLocal(sessionId, hostInstanceId, envelopeJson, channelFirst);
         }
         return relayOrFallback(sessionId, hostInstanceId, ownerNode, envelopeJson, channelFirst);
+    }
+
+    /**
+     * §22.3/D7 dedicated-only routing: the session's bound channel socket on
+     * the owner node, or failure. Local owner → the local channel registry
+     * only; remote owner → the relay POST with the dedicated-session marker
+     * (the peer resolves its channel registry and never its control socket).
+     * There is NO fallback to the Host Channel anywhere in this path.
+     */
+    private boolean routeDedicated(UUID sessionId, UUID hostInstanceId, String envelopeJson) {
+        if (sessionId == null) {
+            // Dedicated delivery is session-scoped by definition.
+            log.debug("sendDedicated refused: no sessionId (instance {})", hostInstanceId);
+            return false;
+        }
+        String ownerNode = nodeOf(hostInstanceId);
+        if (ownerNode == null || isSelf(ownerNode)) {
+            // Unknown owner (legacy row / instance gone) or self-owned: the
+            // local channel registry is the ONLY target.
+            return sendDedicatedLocal(sessionId, hostInstanceId, envelopeJson);
+        }
+        // Remote owner: relay and let the owning replica resolve ITS channel
+        // registry. A relay failure/absence is a false return, never a local
+        // control-socket write.
+        return relayDedicated(sessionId, hostInstanceId, ownerNode, envelopeJson);
+    }
+
+    /** Local delivery bound to the session's channel socket; NO control fallback. */
+    private boolean sendDedicatedLocal(UUID sessionId, UUID hostInstanceId, String envelopeJson) {
+        Optional<WebSocketSession> channel = channelRegistry.getChannel(sessionId);
+        if (channel.isEmpty()) {
+            log.debug("No dedicated channel bound for session {} (instance {}) — dedicated send fails",
+                    sessionId, hostInstanceId);
+            return false;
+        }
+        try {
+            channel.get().sendMessage(new TextMessage(envelopeJson));
+            return true;
+        } catch (Exception e) {
+            log.warn("Failed dedicated channel send to session {}: {}", sessionId, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * §20 relay half for D7: POST with {@code dedicatedSessionId} so the peer
+     * resolves ITS session channel registry (and only that — the peer must not
+     * fall back to its control socket). Any relay failure / absence → false.
+     */
+    private boolean relayDedicated(UUID sessionId, UUID hostInstanceId,
+                                   String ownerNode, String envelopeJson) {
+        if (!relayEnabled || relaySecret.isBlank()) {
+            log.debug("Relay disabled — dedicated channel of session {} lives on node {} "
+                    + "but this replica cannot relay; dedicated send fails",
+                    sessionId, ownerNode);
+            return false;
+        }
+        Optional<String> peerAddress = addressOf(ownerNode);
+        if (peerAddress.isEmpty()) {
+            log.warn("No relay address for node {} (instance {}) — dedicated send for "
+                    + "session {} fails (no control fallback, §22.3)",
+                    ownerNode, hostInstanceId, sessionId);
+            return false;
+        }
+        // Reuse the same POST seam; the dedicated flag rides the request body.
+        return postRelayDedicated(peerAddress.get(), hostInstanceId, sessionId, envelopeJson);
+    }
+
+    /** Dedicated POST to a peer's internal relay endpoint. Overridable seam for tests. */
+    protected boolean postRelayDedicated(String peerAddress, UUID targetInstanceId,
+                                         UUID dedicatedSessionId, String frameJson) {
+        try {
+            Boolean delivered = restClient.post()
+                    .uri("http://{addr}/api/v1/internal/agent-relay", peerAddress)
+                    .header(AgentRelayController.NODE_SECRET_HEADER, relaySecret)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(new AgentRelayRequest(targetInstanceId, frameJson, dedicatedSessionId))
+                    .retrieve()
+                    .body(Boolean.class);
+            return Boolean.TRUE.equals(delivered);
+        } catch (Exception e) {
+            log.warn("Dedicated relay POST to peer {} for instance {} failed: {}",
+                    peerAddress, targetInstanceId, e.getMessage());
+            return false;
+        }
     }
 
     /**

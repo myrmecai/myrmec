@@ -13,9 +13,11 @@ import ai.myrmec.engine.websocket.host.payload.ExecutionStartPayload;
 import ai.myrmec.engine.websocket.host.payload.OrchestrationExecutionStartPayload;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -28,6 +30,7 @@ import java.util.UUID;
  */
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class ExecutionCommandSender {
 
     private final HostFrameRelayService relayService;
@@ -95,6 +98,31 @@ public class ExecutionCommandSender {
             String json = objectMapper.writeValueAsString(envelope);
             return relayService.send(sessionId, hostInstanceId, json);
         } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * §3.4 (plan 2026-10-03-session-interaction): send an ALREADY-PERSISTED
+     * envelope. The outbox row's map IS the wire envelope (its {@code id} is
+     * the frame's {@code messageId}); this re-serializes the STORED map and
+     * hands the exact bytes to the relay — never a rebuilt envelope, never a
+     * reminted messageId. Dedicated-channel first (§22.3/D7: session frames
+     * ride the session's bound Agent Channel). Returns false when nothing
+     * was delivered; the outbox row stays PENDING for retransmission.
+     */
+    public boolean sendPersisted(UUID sessionId, UUID hostInstanceId,
+                                 Map<String, Object> storedEnvelope) {
+        try {
+            String json = objectMapper.writeValueAsString(storedEnvelope);
+            boolean sent = relayService.sendDedicated(sessionId, hostInstanceId, json);
+            if (!sent) {
+                log.debug("Persisted envelope {} undelivered on the dedicated channel "
+                        + "(session {}) — outbox row stays PENDING", storedEnvelope.get("messageId"), sessionId);
+            }
+            return sent;
+        } catch (Exception e) {
+            log.warn("Persisted-envelope send failed (session {}): {}", sessionId, e.getMessage());
             return false;
         }
     }

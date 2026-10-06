@@ -114,4 +114,44 @@ describe("AgentWorkerHost", () => {
 
     expect(worker.terminated).toBe(true);
   });
+
+  it("forwards a connection-state notification into the worker", () => {
+    const worker = new FakeWorker();
+    const host = new AgentWorkerHost({ worker, onFrame: () => {} });
+
+    host.dispatchConnectionState({
+      sessionId: "33333333-3333-4333-8333-333333333333",
+      ready: false,
+      fatal: true,
+    });
+
+    expect(worker.posted).toHaveLength(1);
+    expect(worker.posted[0]).toEqual({
+      kind: "connection-state",
+      sessionId: "33333333-3333-4333-8333-333333333333",
+      ready: false,
+      fatal: true,
+    });
+  });
+
+  it("routes a worker-initiated connection-state is NOT a thing — unknown inbound stays unknown", () => {
+    // connection-state is parent->worker only; a worker posting it is a
+    // protocol violation the host logs (the outbound union excludes it).
+    const worker = new FakeWorker();
+    const warn = vi.fn();
+    new AgentWorkerHost({
+      worker,
+      onFrame: () => {},
+      logger: { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() },
+    });
+
+    worker.emit("message", {
+      kind: "connection-state",
+      sessionId: "33333333-3333-4333-8333-333333333333",
+      ready: true,
+      fatal: false,
+    });
+
+    expect(warn).toHaveBeenCalled();
+  });
 });

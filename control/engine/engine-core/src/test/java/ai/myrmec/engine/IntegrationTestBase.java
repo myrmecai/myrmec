@@ -168,6 +168,20 @@ public abstract class IntegrationTestBase {
     @Autowired
     protected ai.myrmec.engine.workflow.OrchestrationDispatchRepository orchestrationDispatchRepository;
 
+    // Session-interaction tables (plan 035): explicit cleanup BEFORE
+    // session_executions — execution_control_requests.interaction_id is a
+    // NON-cascading FK to execution_interactions, so the two tables must go
+    // in FK order rather than trusting an H2-chosen cascade order.
+    @Autowired
+    protected ai.myrmec.engine.inference.execution.interaction.ExecutionControlRequestRepository
+            executionControlRequestRepository;
+    @Autowired
+    protected ai.myrmec.engine.inference.execution.interaction.ExecutionCommandOutboxRepository
+            executionCommandOutboxRepository;
+    @Autowired
+    protected ai.myrmec.engine.inference.execution.interaction.ExecutionInteractionRepository
+            executionInteractionRepository;
+
     /**
      * Test admin - retrieved or created for E2E tests.
      */
@@ -192,6 +206,12 @@ public abstract class IntegrationTestBase {
         executionSnapshotRepository.deleteAllInBatch();
         // context_manifests references conversations(id); clear before conversations.
         contextManifestRepository.deleteAllInBatch();
+        // §035 session-interaction tables reference session_executions(id) —
+        // clear them BEFORE the executions (control_requests.interaction_id
+        // is a NON-cascading FK between the two).
+        executionControlRequestRepository.deleteAllInBatch();
+        executionCommandOutboxRepository.deleteAllInBatch();
+        executionInteractionRepository.deleteAllInBatch();
         // executions reference sessions(id); clear before sessions.
         sessionExecutionRepository.deleteAllInBatch();
         // sessions references projects(id); clear before projects.

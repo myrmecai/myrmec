@@ -7,6 +7,7 @@ import type {
   ChatModel,
   ConversationMessage,
   ModelResponse,
+  ModelStreamChunk,
   ModelToolCall,
   Tool,
   ToolSpec,
@@ -366,5 +367,233 @@ describe("TurnExecutor — message assembly", () => {
     await new TurnExecutor().execute(task, { model });
 
     expect(model.calls[0].messages.map((m) => m.role)).toEqual(["user"]);
+  });
+});
+
+// -- Task 7: streaming onOutput + the third ChatModel argument ---------
+
+describe("TurnExecutor — onOutput streaming callback (Task 7)", () => {
+  it("streams sanitized fragments through onOutput and assembles the final response ONCE", async () => {
+    class FragmentingStreamModel implements ChatModel {
+      async invoke(): Promise<ModelResponse> {
+        throw new Error("streaming path expected");
+      }
+      async *stream(
+        _messages: ConversationMessage[],
+        _tools: ToolSpec[],
+        _options?: { signal?: AbortSignal },
+      ): AsyncIterable<ModelStreamChunk> {
+        yield { content: "Hel" };
+        yield { content: "lo " };
+        yield { content: "world" };
+        yield {
+          usage: { promptTokens: 3, completionTokens: 4, totalTokens: 7 },
+        };
+      }
+    }
+
+    const outputs: string[] = [];
+    const result = await new TurnExecutor().execute(makeTask(), {
+      model: new FragmentingStreamModel(),
+      onOutput: async (text) => {
+        outputs.push(text);
+      },
+    });
+
+    expect(result.status).toBe("COMPLETE");
+    // Each fragment reached the output callback (sanitization is the
+    // CALLER's pipeline; the executor hands the provisional fragments).
+    expect(outputs).toEqual(["Hel", "lo ", "world"]);
+    // The final response is assembled ONCE and the usage recorded.
+    expect(result.completion).toBe("Hello world");
+    expect(result.usage).toEqual({ promptTokens: 3, completionTokens: 4, totalTokens: 7 });
+  });
+
+  it("fragmented streamed tool calls are assembled once (never executed as fragments)", async () => {
+    let streamCalls = 0;
+    class FragmentedToolStreamModel implements ChatModel {
+      async invoke(): Promise<ModelResponse> {
+        throw new Error("streaming path expected");
+      }
+      async *stream(
+        _messages: ConversationMessage[],
+        _tools: ToolSpec[],
+      ): AsyncIterable<ModelStreamChunk> {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          yield { content: "let me check" };
+          // The provider streams ONE tool call split across chunks.
+          yield { toolCalls: [{ id: "c1", name: "add", args: { a: 2, b: 3 } }] };
+          yield { usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } };
+          return;
+        }
+        yield {
+          content: "the sum is 5",
+          usage: { promptTokens: 2, completionTokens: 2, totalTokens: 4 },
+        };
+      }
+    }
+    const add = fakeTool("add", (args) => (args.a as number) + (args.b as number));
+
+    const outputs: string[] = [];
+    const result = await new TurnExecutor().execute(makeTask(), {
+      model: new FragmentedToolStreamModel(),
+      tools: [add],
+      onOutput: async (text) => {
+        outputs.push(text);
+      },
+    });
+
+    // The assembled tool call executed exactly once with complete args.
+    expect(result.status).toBe("COMPLETE");
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].toolName).toBe("add");
+    expect(result.toolCalls[0].result).toBe(5);
+    // Tool-call fragments never leak through the output callback: only
+    // CONTENT fragments streamed (both turns' text).
+    expect(outputs).toEqual(["let me check", "the sum is 5"]);
+  });
+
+  it("an empty stream falls back to invoke (the safe fallback path)", async () => {
+    class EmptyStreamModel implements ChatModel {
+      public invokeCalls = 0;
+      async invoke(): Promise<ModelResponse> {
+        this.invokeCalls += 1;
+        return { content: "invoke fallback", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } };
+      }
+      // A stream that yields NOTHING and ends (degenerate provider).
+      // eslint-disable-next-line require-yield
+      async *stream(): AsyncIterable<ModelStreamChunk> {
+        return;
+      }
+    }
+    const model = new EmptyStreamModel();
+    const outputs: string[] = [];
+    const result = await new TurnExecutor().execute(makeTask(), {
+      model,
+      onOutput: async (text) => {
+        outputs.push(text);
+      },
+    });
+    expect(result.status).toBe("COMPLETE");
+    expect(result.completion).toBe("invoke fallback");
+    expect(outputs).toEqual(["invoke fallback"]);
+  });
+
+  it("a stream that THROWS with NOTHING yielded falls back to invoke; a partial stream failure is a provider error", async () => {
+    class EarlyThrowStreamModel implements ChatModel {
+      public invokeCalls = 0;
+      async invoke(): Promise<ModelResponse> {
+        this.invokeCalls += 1;
+        return {
+          content: "recovered via invoke",
+          usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+        };
+      }
+      /* eslint-disable require-yield -- a generator that only throws */
+      async *stream(): AsyncIterable<ModelStreamChunk> {
+        throw new Error("stream died immediately");
+      }
+      /* eslint-enable require-yield */
+    }
+    const outputs: string[] = [];
+    const recovered = await new TurnExecutor().execute(makeTask(), {
+      model: new EarlyThrowStreamModel(),
+      onOutput: async (text) => {
+        outputs.push(text);
+      },
+    });
+    expect(recovered.status).toBe("COMPLETE");
+    expect(recovered.completion).toBe("recovered via invoke");
+    expect(outputs).toEqual(["recovered via invoke"]);
+
+    class LateThrowStreamModel implements ChatModel {
+      async invoke(): Promise<ModelResponse> {
+        throw new Error("should not fall back after partials");
+      }
+      async *stream(): AsyncIterable<ModelStreamChunk> {
+        yield { content: "par" };
+        throw new Error("stream exploded mid-turn");
+      }
+    }
+    const partialOutputs: string[] = [];
+    const partial = await new TurnExecutor().execute(makeTask(), {
+      model: new LateThrowStreamModel(),
+      onOutput: async (text) => {
+        partialOutputs.push(text);
+      },
+    });
+    // Partials streamed something already: no silent restart - FAILED.
+    expect(partial.status).toBe("FAILED");
+    expect(partial.failure?.finishReason).toBe("PROVIDER_ERROR");
+    expect(partialOutputs).toEqual(["par"]);
+  });
+
+  it("passes the third {signal} argument to invoke and stream (deadlines flow to the model)", async () => {
+    const signals: Array<AbortSignal | null | undefined> = [];
+    class SignalRecordingModel implements ChatModel {
+      async invoke(
+        _messages: ConversationMessage[],
+        _tools: ToolSpec[],
+        options?: { signal?: AbortSignal },
+      ): Promise<ModelResponse> {
+        signals.push(options?.signal ?? null);
+        return { content: "done", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } };
+      }
+      async *stream(
+        _messages: ConversationMessage[],
+        _tools: ToolSpec[],
+        options?: { signal?: AbortSignal },
+      ): AsyncIterable<ModelStreamChunk> {
+        signals.push(options?.signal ?? null);
+        yield { content: "done" };
+      }
+    }
+
+    const controller = new AbortController();
+    await new TurnExecutor().execute(makeTask(), {
+      model: new SignalRecordingModel(),
+      modelSignal: controller.signal,
+    });
+    await new TurnExecutor().execute(makeTask(), {
+      model: new SignalRecordingModel(),
+      modelSignal: controller.signal,
+      onOutput: async () => {}, // stream path
+    });
+
+    // Both paths received THE caller's signal (not a fabricated one).
+    expect(signals[0]).toBe(controller.signal);
+    expect(signals[1]).toBe(controller.signal);
+  });
+
+  it("without a modelSignal the third argument still threads {signal: undefined} (no compat overloads)", async () => {
+    const signals: Array<AbortSignal | null | undefined> = [];
+    class SignalRecordingModel implements ChatModel {
+      async invoke(
+        _messages: ConversationMessage[],
+        _tools: ToolSpec[],
+        options?: { signal?: AbortSignal },
+      ): Promise<ModelResponse> {
+        // Record the RAW options.signal (no null coercion) so the exact
+        // threaded value is observable.
+        signals.push(options?.signal);
+        return { content: "done" };
+      }
+    }
+    await new TurnExecutor().execute(makeTask(), { model: new SignalRecordingModel() });
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toBeUndefined();
+  });
+
+  it("onOutput is supported on the UN-streamed path too: the final invoke answer emits one provisional fragment", async () => {
+    const outputs: string[] = [];
+    const result = await new TurnExecutor().execute(makeTask(), {
+      model: new ScriptedModel([{ content: "invoke answer" }]),
+      onOutput: async (text) => {
+        outputs.push(text);
+      },
+    });
+    expect(result.status).toBe("COMPLETE");
+    expect(outputs).toEqual(["invoke answer"]);
   });
 });

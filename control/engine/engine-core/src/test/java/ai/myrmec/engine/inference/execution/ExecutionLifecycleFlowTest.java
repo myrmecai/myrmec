@@ -88,7 +88,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
                 { "protocolVersion": 1, "messageId": "m-open", "type": "host.open",
                   "sentAt": "%s", "payload": { "instanceNonce": "%s", "hostname": "laptop",
                   "runtimeVersion": "1.8.0", "supportedProtocolVersions": [1], "poolSize": 4,
-                  "capabilities": {}, "reportedCapacity": {} } }
+                  "capabilities": { "sessionInteraction": { "version": 1, "temporaryHold": true } }, "reportedCapacity": {} } }
                 """.formatted(Instant.now(), UUID.randomUUID());
         ((WebSocketHandler) handler).handleMessage(session, new TextMessage(open));
         return new Host(host, profile, session);
@@ -472,6 +472,132 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
         assertThat(terminal.getState()).isEqualTo(SessionExecution.State.CANCELLED);
         assertThat(terminal.getTerminalMessageId()).isEqualTo("m-cancelled");
         assertThat(ackForMessageId(setup.host().session(), "m-cancelled")).isNotNull();
+    }
+
+    @Autowired ai.myrmec.engine.inference.execution.interaction
+            .ExecutionCommandOutboxRepository outboxRepo;
+    @Autowired ai.myrmec.engine.inference.execution.interaction
+            .ExecutionControlRequestRepository controlRepo;
+    @Autowired ai.myrmec.engine.inference.execution.interaction
+            .ExecutionInteractionRepository interactionRepo;
+
+    /**
+     * §22.8/§3.4 (Task 10): the FIRST terminal linearization invalidates
+     * the pending interaction-family artifacts — the pending dispatch
+     * command EXPIRES, the CONFIRMATION_REQUIRED proposal settles
+     * EXPIRED/EXECUTION_TERMINAL, and the pending interaction settles
+     * FAILED (its pointer cleared) — exactly once, idempotently.
+     */
+    @org.junit.jupiter.api.Test
+    void terminalLinearizationInvalidatesPendingInteractionFamily() {
+        var project = data.project().named("terminal-invalidation").create();
+        var created = data.agent().named("terminal-invalidation-host")
+                .withMaxAgents(2).create();
+        AgentHostInstance instance = instances.saveAndFlush(AgentHostInstance.open(
+                created.agent(), null, UUID.randomUUID().toString(), "laptop", 2,
+                java.util.Map.of(), "node-1"));
+        Session session = new Session();
+        session.setServiceType("WORKFLOW");
+        session.setRefId(UUID.randomUUID());
+        session.setProjectId(project.getId());
+        session.setKind("ORCHESTRATION_TASK");
+        session.setHostInstanceId(instance.getId());
+        session.setAllocationState(SessionAllocator.ALLOC_STATE_ACTIVE);
+        session = sessionRepository.saveAndFlush(session);
+        SessionExecution execution = new SessionExecution();
+        execution.setSessionId(session.getId());
+        execution.setServiceType("WORKFLOW");
+        execution.setDispatchId(UUID.randomUUID());
+        execution.setState(SessionExecution.State.RUNNING);
+        execution.setControlRevision(0L);
+        execution.setAcceptedControlRevision(0L);
+        execution.setControlStateSequence(0L);
+        execution.setHoldState("RUNNING");
+        execution.setDeadline(Instant.now().plusSeconds(600));
+        execution = executionRepository.saveAndFlush(execution);
+
+        // Seed the pending family: a PENDING outbox command, a
+        // CONFIRMATION_REQUIRED proposal, an admitted pending interaction.
+        var command = new ai.myrmec.engine.inference.execution.interaction
+                .ExecutionCommandOutbox();
+        command.setId(UUID.randomUUID());
+        command.setExecutionId(execution.getId());
+        command.setSessionId(session.getId());
+        command.setHostInstanceId(instance.getId());
+        command.setType("execution.control");
+        command.setSequence(1L);
+        command.setEnvelope(java.util.Map.of("type", "execution.control"));
+        command.setPayloadDigest("a".repeat(64));
+        command.setStatus(ai.myrmec.engine.inference.execution.interaction
+                .OutboxStatus.PENDING);
+        command.setExpiresAt(Instant.now().plusSeconds(300));
+        command.setNextDeliveryAt(Instant.now());
+        outboxRepo.saveAndFlush(command);
+
+        var proposal = new ai.myrmec.engine.inference.execution.interaction
+                .ExecutionControlRequest();
+        proposal.setId(UUID.randomUUID());
+        proposal.setExecutionId(execution.getId());
+        proposal.setActorUserId(UUID.randomUUID());
+        proposal.setAction("CANCEL");
+        proposal.setOrigin("CHAT");
+        proposal.setRequestDigest("b".repeat(64));
+        proposal.setStatus(ai.myrmec.engine.inference.execution.interaction
+                .InteractionControlStatus.CONFIRMATION_REQUIRED);
+        proposal.setResolutionRevision(1L);
+        proposal.setConfirmationExpiresAt(Instant.now().plusSeconds(60));
+        controlRepo.saveAndFlush(proposal);
+
+        var interaction = new ai.myrmec.engine.inference.execution.interaction
+                .ExecutionInteraction();
+        interaction.setExecutionId(execution.getId());
+        interaction.setOrdinal(1L);
+        interaction.setActorUserId(UUID.randomUUID());
+        interaction.setClientRequestId(UUID.randomUUID());
+        interaction.setRequestDigest("c".repeat(64));
+        interaction.setStatus(ai.myrmec.engine.inference.execution.interaction
+                .InteractionStatus.ACCEPTED);
+        interaction.setRequestText("cancel please");
+        interaction.setResponseDeadline(Instant.now().plusSeconds(120));
+        interaction.setAcceptedAt(Instant.now());
+        interaction.setUsageStatus("UNKNOWN");
+        interaction = interactionRepo.saveAndFlush(interaction);
+        execution.setPendingInteractionId(interaction.getId());
+        executionRepository.saveAndFlush(execution);
+
+        // The FIRST terminal linearization.
+        boolean terminal = registry.terminal(execution.getId(),
+                SessionExecution.State.COMPLETED, "tm-invalidation",
+                java.util.Map.of("result", "ok"));
+        assertThat(terminal).isTrue();
+
+        // The pending command EXPIRED.
+        assertThat(outboxRepo.findById(command.getId()).orElseThrow().getStatus())
+                .isEqualTo(ai.myrmec.engine.inference.execution.interaction
+                        .OutboxStatus.EXPIRED);
+        // The proposal settled EXPIRED/EXECUTION_TERMINAL.
+        var settledProposal = controlRepo.findById(proposal.getId()).orElseThrow();
+        assertThat(settledProposal.getStatus())
+                .isEqualTo(ai.myrmec.engine.inference.execution.interaction
+                        .InteractionControlStatus.EXPIRED);
+        assertThat(settledProposal.getErrorCode()).isEqualTo("EXECUTION_TERMINAL");
+        // The pending interaction FAILED with the terminal code and its
+        // pointer cleared (retained outcome-only replay).
+        var settledInteraction = interactionRepo.findById(interaction.getId())
+                .orElseThrow();
+        assertThat(settledInteraction.getStatus())
+                .isEqualTo(ai.myrmec.engine.inference.execution.interaction
+                        .InteractionStatus.FAILED);
+        assertThat(settledInteraction.getError().get("errorCode"))
+                .isEqualTo("EXECUTION_TERMINAL");
+        assertThat(executionRepository.findById(execution.getId()).orElseThrow()
+                .getPendingInteractionId()).isNull();
+
+        // Idempotent: a replayed terminal never re-runs the invalidation.
+        boolean replay = registry.terminal(execution.getId(),
+                SessionExecution.State.COMPLETED, "tm-invalidation",
+                java.util.Map.of("result", "ok"));
+        assertThat(replay).isTrue();
     }
 
     private ai.myrmec.engine.websocket.host.payload.ExecutionStartPayload buildStartPayload(

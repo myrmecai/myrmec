@@ -54,13 +54,39 @@ public record SessionOpenPayload(
         List<SessionCredential> credentials,  // sealed session secrets (design §9); null/empty when keyless
         ChannelOffer channel,             // §7.5 dedicated-transport offer; null when disabled
         SessionPolicy policy,             // §7.3 (Wave 6): host-enforced limits; null = no policy
-        CapturePolicy capture) {          // §7.3/§15: sensitive-capture policy; null = engine defaults
+        CapturePolicy capture,            // §7.3/§15: sensitive-capture policy; null = engine defaults
+        InteractionPolicy interaction) {  // §22.2: REQUIRED for WORKFLOW kind; null for CONVERSATION
 
     /** §7.5: the dedicated-transport offer on session.open. */
     public record ChannelOffer(String endpoint, String token) {}
 
     /** §7.3 (Wave 6): the host-enforced execution policy. Null fields = no limit. */
     public record SessionPolicy(Integer maxIterations, Integer executionTimeoutSeconds) {}
+
+    /**
+     * section 22.2: the effective immutable interaction policy — an
+     * {@code interaction} sibling of {@code assignment} REQUIRED on
+     * orchestration (WORKFLOW-kind) session.open payloads and ABSENT on
+     * conversation sessions (their execution behavior is unchanged).
+     * Values are the section 22.2 defaults tightened by project policy;
+     * bounds are enforced by
+     * {@code ai.myrmec.engine.inference.execution.interaction.InteractionProperties}.
+     */
+    public record InteractionPolicy(
+            int version,
+            boolean enabled,
+            int idleResumeAfterSeconds,
+            int responseTimeoutSeconds,
+            int maxInputBytes,
+            int maxOutputBytes,
+            int maxModelIterations,
+            int maxHistoryBytes,
+            int transcriptRetentionDays,
+            ContentMode contentMode) {
+
+        /** section 22.2: chat scope — USER_CHAT_ONLY, or NONE (controls only). */
+        public enum ContentMode { USER_CHAT_ONLY, NONE }
+    }
 
     /** §7.3/§15 rule 12: what the host may emit on the event stream. */
     public record CapturePolicy(String level, Integer maxBytes) {
@@ -78,7 +104,7 @@ public record SessionOpenPayload(
         return new SessionOpenPayload(sessionId, kind, projectId, profileVersionId,
                 model, workspace, tools, knowledgeSources, autoHitlOnDestructive,
                 executionMode, ref, assignment, digest, credentials, channel,
-                policy, capture);
+                policy, capture, interaction);
     }
 
     /** Copy the context with the §7.5 channel offer installed. */
@@ -86,7 +112,15 @@ public record SessionOpenPayload(
         return new SessionOpenPayload(sessionId, kind, projectId, profileVersionId,
                 model, workspace, tools, knowledgeSources, autoHitlOnDestructive,
                 executionMode, ref, orchestration, assignmentDigest, credentials, offer,
-                policy, capture);
+                policy, capture, interaction);
+    }
+
+    /** Copy the context with the §22.2 interaction policy installed. */
+    public SessionOpenPayload withInteraction(InteractionPolicy interaction) {
+        return new SessionOpenPayload(sessionId, kind, projectId, profileVersionId,
+                model, workspace, tools, knowledgeSources, autoHitlOnDestructive,
+                executionMode, ref, orchestration, assignmentDigest, credentials, channel,
+                policy, capture, interaction);
     }
 
     public record ModelConfig(

@@ -33,6 +33,109 @@ import type {
   OrchestrationExecutionStartPayload,
   SessionOpenPayload,
 } from "../protocol/unifiedFrames.js";
+import type { HostRetentionLifecycle } from "./HostControlClient.js";
+
+/**
+ * §7.5/§22.8 (D7 cutover, Task 11): the supervisor-side session
+ * lifecycle bridge. The SessionRegistry lives in the WORKER thread, but
+ * `HostControlClient.openChannel` needs a SYNC supervisor-side
+ * collaborator — this bridge owns the two halves that must stay local
+ * (the durable cursor mirror feeds channel.open's resumeFromSequence;
+ * the bind/dead/unbind bookkeeping forwards fire-and-forget into the
+ * worker's registry, which no-ops unknown sessions).
+ *
+ * The §13 retention half is CONSERVATIVE: a headless control-socket drop
+ * reports no retained sessions (the worker's in-process state cannot be
+ * proven to the engine across the restart seam — §22.8's retained
+ * in-process evidence is the LOCAL host's registry report), so the
+ * engine's resume decides CLOSE per the §13 one-shot default.
+ * closeRetained/cancelExecution forward through the worker bridge
+ * (fatal connection-state / the executor's cancel path).
+ */
+class HeadlessSessionLifecycleBridge implements HostRetentionLifecycle {
+  /** Mirror of the per-session durable-event cursor (monotonic max). */
+  private readonly cursors = new Map<string, number>();
+
+  constructor(
+    private readonly dispatch: (sessionId: string, message: {
+      kind: "channel-opened" | "channel-dead" | "channel-unbind"
+        | "cancel-execution" | "close-retained";
+      sessionId: string;
+      opened?: { highestContiguousSequence: number };
+    }) => void,
+  ) {}
+
+  getHighestContiguousSequence(sessionId: string): number {
+    return this.cursors.get(sessionId) ?? 0;
+  }
+
+  observeDurableSequence(sessionId: string, sequence: number): void {
+    const prior = this.cursors.get(sessionId) ?? 0;
+    if (sequence > prior) {
+      this.cursors.set(sessionId, sequence);
+    }
+  }
+
+  bindChannel(
+    sessionId: string,
+    _socket: unknown,
+    opened: { highestContiguousSequence: number },
+  ): void {
+    // The socket reference stays supervisor-side (the client owns the
+    // transport); the worker's registry records liveness bookkeeping.
+    this.dispatch(sessionId, {
+      kind: "channel-opened",
+      sessionId,
+      opened: { highestContiguousSequence: opened.highestContiguousSequence },
+    });
+  }
+
+  markChannelDead(sessionId: string): void {
+    this.dispatch(sessionId, { kind: "channel-dead", sessionId });
+  }
+
+  unbindChannel(sessionId: string): { socket: unknown } | null {
+    this.dispatch(sessionId, { kind: "channel-unbind", sessionId });
+    // The socket object never crossed the boundary — nothing to return.
+    return null;
+  }
+
+  // ---- §13 retention (A2): the conservative headless half ----
+
+  markAllDisconnected(): void {
+    // Retention bookkeeping only — the retained-set view stays empty
+    // (see the class doc: the worker's in-process state is not provable
+    // across the restart seam headless).
+  }
+
+  retainedSessionIds(): string[] {
+    return [];
+  }
+
+  buildRetainedSummaries(): Array<{
+    sessionId: string;
+    state: string;
+    capacityHeld: boolean;
+  }> {
+    return [];
+  }
+
+  rebindAfterReconcile(sessionId: string): number {
+    return this.getHighestContiguousSequence(sessionId);
+  }
+
+  closeRetained(sessionId: string): void {
+    // The worker's existing fatal teardown path (idempotent registry-side).
+    this.dispatch(sessionId, { kind: "close-retained", sessionId });
+  }
+
+  cancelExecution(executionId: string): void {
+    // Forward the §13 CANCEL_EXECUTION decision's cancellation into the
+    // worker's executor (the existing execution.cancel handling).
+    this.dispatch(executionId, { kind: "cancel-execution", sessionId: executionId });
+  }
+}
+
 
 export interface HeadlessAgentSupervisorOptions {
   engineUrl: string;
@@ -191,6 +294,27 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
         this.log.warn(`Agent worker exited (code=${code}); restart deferred`),
       logger: this.log,
     });
+    // §7.5/§22.8 (D7 cutover, Task 11): wire the session lifecycle bridge —
+    // HostControlClient now binds the dedicated Agent Channel on every
+    // session.open offer (the supervisor-side cursor mirror feeds
+    // channel.open's resumeFromSequence; bind/dead/unbind bookkeeping
+    // forwards fire-and-forget into the worker's registry, and the fatal
+    // teardown rides the EXISTING connection-state seam).
+    this.sessionRegistry = new HeadlessSessionLifecycleBridge(
+      (sessionId, message) => {
+        if (message.kind === "channel-opened") {
+          this.host?.dispatchChannelOpened(sessionId, message.opened!);
+        } else if (message.kind === "channel-dead") {
+          this.host?.dispatchChannelDead(sessionId);
+        } else if (message.kind === "channel-unbind") {
+          this.host?.dispatchChannelUnbind(sessionId);
+        } else if (message.kind === "cancel-execution") {
+          this.host?.dispatchCancelExecution(sessionId);
+        } else if (message.kind === "close-retained") {
+          this.host?.dispatchCloseRetained(sessionId);
+        }
+      },
+    );
   }
 
   protected override async stopWorkers(): Promise<void> {
@@ -263,6 +387,41 @@ export class HeadlessAgentSupervisor extends AgentSupervisor {
     this.forwardToWorkerEnvelope(
       makeEnvelope("session.close", payload as Record<string, unknown>),
     );
+  }
+
+  /**
+   * §22.3 (Task 11 fix): the inbound interaction-command family — forward the
+   * raw frame to the worker; its switch routes execution.control /
+   * execution.interaction / execution.control.request.resolved to the
+   * executor's coordinator/controller arms.
+   */
+  protected override async onInteractionCommand(
+    frame: import("../protocol/unifiedFrames.js").ParsedUnifiedFrame,
+  ): Promise<void> {
+    this.forwardToWorkerEnvelope(
+      frame as unknown as import("../protocol/envelope.js").RawEnvelope,
+    );
+  }
+
+  /**
+   * §22.8 (D7): a session connection-state notification - forward across
+   * the worker bridge so the worker stops the session runtime (fatal) or
+   * flips its admission gate (ready=false/true). Repeated fatals are
+   * idempotent worker-side (the registry teardown is a no-op once gone).
+   */
+  protected override onConnectionState(state: {
+    sessionId: string;
+    ready: boolean;
+    fatal: boolean;
+  }): void {
+    if (!this.host) {
+      this.log.warn(
+        "Dropping connection-state; no worker spawned yet: session",
+        state.sessionId,
+      );
+      return;
+    }
+    this.host.dispatchConnectionState(state);
   }
 
   protected override forwardToWorker(frame: RawEnvelope): void {

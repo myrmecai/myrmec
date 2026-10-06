@@ -58,4 +58,34 @@ public interface NodeTransport {
      * frame and MUST NOT call it for frames they themselves published.</p>
      */
     void setFanoutHandler(BiConsumer<UUID, String> handler);
+
+    /**
+     * Task 9 (plan 2026-10-03-session-interaction §3.5/§4): the typed
+     * EXECUTION-stream fan-out arm — publish an execution stream frame so
+     * peer instances deliver it to their local execution subscribers
+     * ({@code /api/v1/projects/../executions/{executionId}/stream}).
+     *
+     * <p>Same contract as the conversation arm: fire-and-forget; the local
+     * instance has ALREADY delivered to its own subscribers; implementations
+     * must be safe from many threads and must never self-deliver. Keyed by
+     * the executionId, NOT a conversation id.</p>
+     *
+     * @param executionId the execution the frame belongs to
+     * @param envelopeJson the already-serialized execution stream envelope
+     *                     ({@code {streamSequence, name, payload, executionId}})
+     */
+    default void publishExecutionEvent(UUID executionId, String envelopeJson) {
+        // Single-arm deployments (no relay enabled) have nothing to do.
+    }
+
+    /**
+     * Task 9: register the inbound execution-stream relay handler (the
+     * peer-side delivery callback). Semantics mirror
+     * {@link #setFanoutHandler(BiConsumer)} — local delivery only, no
+     * amplification, never called for frames this instance published.
+     */
+    default void setExecutionFanoutHandler(
+            BiConsumer<StreamRelayRequest, String> handler) {
+        // No-op default: transports without an execution arm stay inert.
+    }
 }

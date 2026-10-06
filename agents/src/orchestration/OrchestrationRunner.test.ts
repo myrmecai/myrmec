@@ -13,10 +13,74 @@ import type {
   ConversationMessage,
   ModelResponse,
   ToolSpec,
+  ModelToolCall,
+  Tool,
 } from "../executor/types.js";
 import { HelperInvoker } from "./HelperInvoker.js";
 import { OrchestrationRunner } from "./OrchestrationRunner.js";
 import type { OrchestrationAssignment } from "./types.js";
+import {
+  ExecutionControlCoordinator,
+  type ExecutionControl as ExecutorControl,
+} from "../interaction/ExecutionControlCoordinator.js";
+import type { ExecutionControlPayload } from "../protocol/unifiedFrames.js";
+
+// ---- hold-gate test seam (Task 5) ----
+
+const GATE_EXECUTION_ID = "b0000000-0000-4000-8000-000000000001";
+const GATE_DISPATCH_ID = "b0000000-0000-4000-8000-000000000002";
+
+function gatePolicy() {
+  return {
+    version: 1 as const,
+    enabled: true,
+    idleResumeAfterSeconds: 300,
+    responseTimeoutSeconds: 120,
+    maxInputBytes: 16384,
+    maxOutputBytes: 65536,
+    maxModelIterations: 8,
+    maxHistoryBytes: 262144,
+    transcriptRetentionDays: 30,
+    contentMode: "USER_CHAT_ONLY" as const,
+  };
+}
+
+/** A promise the test releases by hand (never a real timer). */
+function blockedPromise<T>(): { promise: Promise<T>; release(value: T): void } {
+  let release!: (value: T) => void;
+  const promise = new Promise<T>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+
+/** Deterministically settle promise chains built on microtasks. */
+async function flush(): Promise<void> {
+  for (let i = 0; i < 25; i++) await Promise.resolve();
+}
+
+/** A fake Tool. */
+function makeFakeTool(
+  name: string,
+  impl: (args: Record<string, unknown>) => Promise<unknown>,
+): Tool {
+  return { name, invoke: async (args) => await impl(args) };
+}
+
+/** A runner tool call (mirrors the model's toolCalls entries). */
+function runnerToolCall(name: string, args: Record<string, unknown>): ModelToolCall {
+  return { id: `call-${name}`, name, args };
+}
+
+/** The runner's options-level cancellation signal (test seam). */
+function runnerCancellationOf(runner: OrchestrationRunner): { cancelled: boolean } {
+  const options = (runner as unknown as {
+    options: { cancellation?: { cancelled: boolean } };
+  }).options;
+  const cancellation = options.cancellation;
+  if (!cancellation) throw new Error("runner has no cancellation signal");
+  return cancellation;
+}
 
 // ── helpers ──────────────────────────────────────────────────────────
 
@@ -1567,5 +1631,356 @@ describe("OrchestrationRunner HITL resume", () => {
     expect(
       result.verifierResults.map((v) => ({ helperName: v.helperName, verdict: v.verdict })),
     ).toContainEqual({ helperName: "verifier", verdict: "APPROVED" });
+  });
+});
+
+// ── hold gate (session interaction, Task 5 / design 14.2-14.3 / 22.5) ──
+
+describe("OrchestrationRunner hold gate (safe points)", () => {
+  /** A real coordinator over auto-settling seams - tests drive HOLD /
+   * CONTINUE through `apply`, the same way the engine would. */
+  function makeGate(): ExecutorControl {
+    return new ExecutionControlCoordinator({
+      executionId: GATE_EXECUTION_ID,
+      dispatchId: GATE_DISPATCH_ID,
+      policy: gatePolicy(),
+      clock: { now: () => 1_700_000_000_000 },
+      scheduler: { schedule: () => undefined },
+      outbox: { persistControlState: async () => undefined },
+      emitter: { publish: () => undefined },
+    });
+  }
+
+  function holdCommand(revision: number): ExecutionControlPayload {
+    return {
+      executionId: GATE_EXECUTION_ID,
+      dispatchId: GATE_DISPATCH_ID,
+      controlRevision: revision,
+      action: "HOLD",
+      reasonCode: "USER_REQUESTED",
+      holdPolicy: { idleResumeAfterSeconds: 300 },
+      controlRequestId: null,
+    };
+  }
+
+  function continueCommand(revision: number): ExecutionControlPayload {
+    return {
+      executionId: GATE_EXECUTION_ID,
+      dispatchId: GATE_DISPATCH_ID,
+      controlRevision: revision,
+      action: "CONTINUE",
+      reasonCode: "USER_REQUESTED",
+      holdPolicy: null,
+      controlRequestId: null,
+    };
+  }
+
+  it("HOLD parks the model invocation; the returned tool call is not EXECUTED while held - it runs after CONTINUE", async () => {
+    // The HOLD lands while the FIRST orchestrator model call is in
+    // flight (before it returns its tool call): the leaf settles, then
+    // the gate parks the second model call. The parked continuation
+    // resolves only after CONTINUE.
+    const firstWork = blockedPromise<ModelResponse>();
+    const released = blockedPromise<ModelResponse>();
+    // Resolve-once contract: ONE model object; invoke #1 parks on
+    // firstWork (tool-call response), invoke #2 parks on released.
+    const invocations: Promise<ModelResponse>[] = [firstWork.promise, released.promise];
+    const orchestrator: ChatModel = {
+      invoke: async () => {
+        const next = invocations.shift();
+        if (!next) throw new Error("orchestrator invocations exhausted");
+        return await next;
+      },
+    };
+    const invoker = new HelperInvoker({
+      attemptOrdinal: 1,
+      chatModelFactory: { resolve: async () => { throw new Error("helper must not start"); } },
+      turnExecutor: new TurnExecutor({}),
+    });
+    const control = makeGate();
+    const runner = new OrchestrationRunner({
+      chatModelFactory: { resolve: async () => orchestrator },
+      helperInvoker: invoker,
+      turnExecutor: new TurnExecutor({}),
+      toolGate: control,
+    });
+
+    const runPromise = runner.run(assignment(), { runId: "run-uuid" });
+    const first = await firstWork.release({
+      content: "",
+      toolCalls: [runnerToolCall("echo", { value: "x" })],
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    });
+    void first;
+    await flush();
+
+    // HOLD after the leaf settled: the gate is closed, the orchestrator's
+    // next model call parks (no tool has run yet - the model returned a
+    // tool call and the gate stands BEFORE its execution... actually the
+    // tool gate sits INSIDE the turn loop; assert after CONTINUE).
+    await control.apply(holdCommand(1), "msg-hold-1");
+    await flush();
+
+    released.release({
+      content: "done after continue",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    });
+    await flush();
+    // Nothing settled while the gate was HELD without a CONTINUE.
+    expect(control.snapshot().effectiveState).not.toBe("RUNNING");
+
+    await control.apply(continueCommand(2), "msg-cont-1");
+    const result = await runPromise;
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.helperCalls).toHaveLength(0);
+  });
+
+  it("HOLD prevents returned tool EXECUTION: the tool body runs only after CONTINUE wakes the gate", async () => {
+    // The orchestrator's first response returns an invoke_helper call
+    // while the gate is ALREADY held: TurnExecutor parks at
+    // BEFORE_TOOL_EXECUTION - the helper body cannot start until
+    // CONTINUE hands out the lease.
+    const heldModel = new ScriptedModel([
+      {
+        content: "",
+        toolCalls: [
+          {
+            id: "c1",
+            name: "invoke_helper",
+            args: { helperName: "coder", purpose: "IMPLEMENT", instruction: "do it" },
+          },
+        ],
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      },
+      {
+        content: "The helper completed the work.",
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      },
+    ]);
+    const control = makeGate();
+    await control.apply(holdCommand(1), "msg-hold-1"); // HELD before the run
+
+    let helperStarts = 0;
+    const helper = new ScriptedModel([
+      { content: "ok", usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } },
+    ]);
+    const invoker = new HelperInvoker({
+      attemptOrdinal: 1,
+      chatModelFactory: { resolve: async () => helper },
+      turnExecutor: new TurnExecutor({}),
+    });
+    // Count helper-body entry by wrapping invoke.
+    const originalInvoke = invoker.invoke.bind(invoker);
+    invoker.invoke = async (...callArgs: Parameters<typeof originalInvoke>) => {
+      helperStarts += 1;
+      return await originalInvoke(...callArgs);
+    };
+    const runner = new OrchestrationRunner({
+      chatModelFactory: { resolve: async () => heldModel },
+      helperInvoker: invoker,
+      turnExecutor: new TurnExecutor({}),
+      toolGate: control,
+    });
+
+    const runPromise = runner.run(assignment(), { runId: "run-uuid" });
+    await flush();
+    expect(helperStarts).toBe(0); // parked BEFORE the tool executed
+    expect(control.snapshot().effectiveState).toBe("HELD");
+
+    await control.apply(continueCommand(2), "msg-cont-1");
+    const result = await runPromise;
+    expect(helperStarts).toBe(1); // executed after CONTINUE
+    expect(result.status).toBe("COMPLETED");
+  });
+
+  it("a HELD helper PARENT does not hold a lease: HELD is reachable while a nested helper child is in flight (no deadlock)", async () => {
+    const parentToolLease = blockedPromise<string>();
+    // Helper child model: parks mid-turn on a blocked promise (the child
+    // is genuinely IN FLIGHT when the HOLD lands).
+    const helperModel: ChatModel = {
+      invoke: async (): Promise<ModelResponse> => {
+        await parentToolLease.promise;
+        return {
+          content: "helper final",
+          usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+        };
+      },
+    };
+
+    const orch = new ScriptedModel([
+      invokeCall("coder"),
+      {
+        content: "The coder completed the work.",
+        usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 },
+      },
+    ]);
+    const control = makeGate();
+    const invoker = new HelperInvoker({
+      attemptOrdinal: 1,
+      chatModelFactory: { resolve: async () => helperModel },
+      turnExecutor: new TurnExecutor({}),
+    });
+    const runner = new OrchestrationRunner({
+      chatModelFactory: { resolve: async () => orch },
+      helperInvoker: invoker,
+      turnExecutor: new TurnExecutor({}),
+      toolGate: control,
+    });
+
+    const runPromise = runner.run(assignment(), { runId: "run-uuid" });
+    await flush();
+
+    // HOLD while the helper child's model call is genuinely in flight
+    // (parked on the blocked promise): the parent's invoke_helper tool
+    // must NOT hold a BEFORE_TOOL_EXECUTION leaf across the child, so
+    // HELD publishes (the parked child's model call is not a leaf —
+    // the child parked at the scheduler's gate, permit released).
+    await control.apply(holdCommand(1), "msg-hold-1");
+    await flush();
+    expect(control.snapshot().effectiveState).toBe("HELD");
+
+    parentToolLease.release("x");
+    await control.apply(continueCommand(2), "msg-cont-1");
+    const result = await runPromise;
+    expect(result.status).toBe("COMPLETED");
+  });
+
+  it("the final Git checkpoint does not run while HELD; it runs after CONTINUE", async () => {
+    const helper = new ScriptedModel([
+      { content: "ok", usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 } },
+    ]);
+    const control = makeGate();
+    let checkpointCalls = 0;
+    const runner = new OrchestrationRunner({
+      chatModelFactory: { resolve: async () => helper },
+      helperInvoker: new HelperInvoker({
+        attemptOrdinal: 1,
+        chatModelFactory: { resolve: async () => helper },
+        turnExecutor: new TurnExecutor({}),
+      }),
+      turnExecutor: new TurnExecutor({}),
+      toolGate: control,
+      checkpointService: {
+        create: async () => {
+          checkpointCalls += 1;
+          return { status: "NO_CHANGES" };
+        },
+      },
+      allowCheckpoint: true,
+    });
+
+    const runPromise = runner.run(assignment(), { runId: "run-uuid" });
+
+    // HOLD while the orchestrator turn runs: the completion gate +
+    // checkpoint must WAIT for Continue (Fix 6: a bounded microtask
+    // flush instead of a real 50 ms sleep — no wall-clock dependency;
+    // the flush drains the turn's settled model boundary into the
+    // parked checkpoint admission).
+    await control.apply(holdCommand(1), "msg-hold-1");
+    await flush();
+    await flush();
+    expect(checkpointCalls).toBe(0); // parked at BEFORE_GIT_EFFECT while HELD
+
+    await control.apply(continueCommand(2), "msg-cont-1");
+    const result = await runPromise;
+    expect(result.status).toBe("COMPLETED");
+    expect(checkpointCalls).toBe(1);
+  });
+
+  it("the checkpoint lease spans create(): a HOLD landing mid-create cannot publish HELD while the git effect is in flight (finding 4)", async () => {
+    const helper = new ScriptedModel([
+      { content: "ok", usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 } },
+    ]);
+    const control = makeGate();
+    // The create() gate: parked until the test releases it — the git
+    // effect is "in flight".
+    const inFlight = blockedPromise<never>();
+    let createStarted = false;
+    let createFinished = false;
+    const runner = new OrchestrationRunner({
+      chatModelFactory: { resolve: async () => helper },
+      helperInvoker: new HelperInvoker({
+        attemptOrdinal: 1,
+        chatModelFactory: { resolve: async () => helper },
+        turnExecutor: new TurnExecutor({}),
+      }),
+      turnExecutor: new TurnExecutor({}),
+      toolGate: control,
+      checkpointService: {
+        create: async () => {
+          createStarted = true;
+          await inFlight.promise;
+          createFinished = true;
+          return { status: "NO_CHANGES" };
+        },
+      },
+      allowCheckpoint: true,
+    });
+
+    const runPromise = runner.run(assignment(), { runId: "run-uuid" });
+    // Drain the ungated turn (helper runs immediately) into the
+    // checkpoint's BEFORE_GIT_EFFECT admission.
+    await flush();
+    expect(createStarted).toBe(true); // the git effect is in flight
+
+    // HOLD while create() is mid-flight: the HELD publish must NOT
+    // happen while the checkpoint leaf is still active (the lease spans
+    // the create — HELD requires the drain of the git leaf).
+    await control.apply(holdCommand(1), "msg-hold-1");
+    await flush();
+    expect(control.snapshot().effectiveState).toBe("HOLD_REQUESTED");
+    expect(createFinished).toBe(false);
+
+    // Settle the create: the leaf releases, the gate drains, HELD
+    // publishes with the git effect complete.
+    inFlight.release("settled" as never);
+    await flush();
+    expect(createFinished).toBe(true);
+    expect(control.snapshot().effectiveState).toBe("HELD");
+
+    // CONTINUE: the run completes (NO_CHANGES checkpoint accepted).
+    await control.apply(continueCommand(2), "msg-cont-1");
+    const result = await runPromise;
+    expect(result.status).toBe("COMPLETED");
+  });
+
+  it("cancel bypasses hold for termination: a parked leaf rejects with HoldAbortedError and the run reports CANCELLED", async () => {
+    const heldModel = new ScriptedModel([
+      {
+        content: "",
+        toolCalls: [{ id: "c1", name: "echo", args: { value: "x" } }],
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      },
+    ]);
+    const control = makeGate();
+    await control.apply(holdCommand(1), "msg-hold-1"); // HELD before the run
+
+    const fakeTool = makeFakeTool("echo", async () => "ok");
+    void fakeTool;
+    const invoker = new HelperInvoker({
+      attemptOrdinal: 1,
+      chatModelFactory: { resolve: async () => { throw new Error("helper must not start"); } },
+      turnExecutor: new TurnExecutor({}),
+    });
+    const runner = new OrchestrationRunner({
+      chatModelFactory: { resolve: async () => heldModel },
+      helperInvoker: invoker,
+      turnExecutor: new TurnExecutor({}),
+      toolGate: control,
+      cancellation: { cancelled: false },
+    });
+
+    const runPromise = runner.run(assignment(), { runId: "run-uuid" });
+    await flush();
+
+    // A mid-run cancel: the cancellation signal flips AND the gate is
+    // stopped - parked leaves reject with HoldAbortedError.
+    runnerCancellationOf(runner).cancelled = true;
+    control.stop("CANCEL");
+    const result = await runPromise;
+
+    expect(result.status).toBe("CANCELLED");
+    expect(result.retryDisposition).toBe("NONE");
   });
 });

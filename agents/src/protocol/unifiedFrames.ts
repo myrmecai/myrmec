@@ -53,6 +53,16 @@ export const MessageType = {
   EXECUTION_POLICY_UPDATE: "execution.policy.update",
   EXECUTION_APPROVAL_REQUESTED: "execution.approval.requested",
 
+  // §22 session interaction + temporary hold (dedicated Agent Channel; §22.3).
+  EXECUTION_CONTROL: "execution.control",
+  EXECUTION_CONTROL_STATE: "execution.control.state",
+  EXECUTION_INTERACTION: "execution.interaction",
+  EXECUTION_INTERACTION_DELTA: "execution.interaction.delta",
+  EXECUTION_INTERACTION_COMPLETE: "execution.interaction.complete",
+  EXECUTION_INTERACTION_FAILED: "execution.interaction.failed",
+  EXECUTION_CONTROL_REQUEST: "execution.control.request",
+  EXECUTION_CONTROL_REQUEST_RESOLVED: "execution.control.request.resolved",
+
   PROTOCOL_ACK: "protocol.ack",
   PROTOCOL_ERROR: "protocol.error",
 } as const;
@@ -93,13 +103,39 @@ export type UnifiedEnvelope = z.infer<typeof unifiedEnvelopeSchema>;
 
 // ---- Host lifecycle payloads (§6) ----
 
+// ---- §22.2 session-interaction capability (current-contract, fail-closed) ----
+
+/** The typed sessionInteraction capability block (§22.2). Version 1 +
+ * temporaryHold=true is the ONLY accepted shape — no old-peer fallback. */
+export const sessionInteractionCapabilitySchema = z.object({
+  version: z.literal(1),
+  temporaryHold: z.literal(true),
+});
+export type SessionInteractionCapability = z.infer<
+  typeof sessionInteractionCapabilitySchema
+>;
+
+/** The capabilities map on host.open/host.opened: sessionInteraction is
+ * REQUIRED (current-contract validation); other keys pass through. */
+export const hostOpenCapabilitySchema = z.object({
+  sessionInteraction: sessionInteractionCapabilitySchema,
+}).passthrough();
+
+/** §22.2: the SDK's mandatory capability advertisement. The client stamps
+ * this onto every host.open; the engine echoes it in acceptedCapabilities. */
+export const SESSION_INTERACTION_CAPABILITY = {
+  sessionInteraction: { version: 1, temporaryHold: true },
+} as const satisfies Record<string, unknown>;
+
 export const hostOpenPayloadSchema = z.object({
   instanceNonce: uuid,
   hostname: z.string(),
   runtimeVersion: z.string(),
   supportedProtocolVersions: z.array(z.number().int()),
   poolSize: z.number().int(),
-  capabilities: mapUnknown,
+  // §22.2: sessionInteraction is REQUIRED — current-contract validation has
+  // no old-host fallback (engine rejects missing/unsupported at host.open).
+  capabilities: hostOpenCapabilitySchema,
   reportedCapacity: mapUnknown,
   /**
    * Local-owner model (§3.7/§4.1, additive): the id of the user logged into
@@ -134,6 +170,9 @@ export const hostOpenedPayloadSchema = z.object({
   // holds it in process memory only.
   psk: z.string().nullish(),
   pskKeyId: z.string().nullish(),
+  // §22.2: the engine's acceptedCapabilities echo (required — the engine
+  // only opens capable hosts).
+  acceptedCapabilities: hostOpenCapabilitySchema,
 });
 export type HostOpenedPayload = z.infer<typeof hostOpenedPayloadSchema>;
 
@@ -156,12 +195,36 @@ export type HostCapacityPayload = z.infer<typeof hostCapacityPayloadSchema>;
 // ---- Reconnect & reconciliation payloads (§13, A2) ----
 
 /**
+ * §22.8 (Task 10): the optional interactionState block one reported session
+ * carries on host.resume — the §22.2 live runtime's coordinator snapshot
+ * (observed evidence, never permission). Fields mirror the engine's
+ * 035 observed-state projection. Reported ONLY while a live interaction
+ * runtime exists for the session; a session without one omits the block.
+ */
+export const reportedInteractionStateSchema = z.object({
+  executionId: uuid,
+  acceptedControlRevision: z.number().int().min(0),
+  stateSequence: z.number().int().min(0),
+  effectiveState: z.enum(["RUNNING", "HOLD_REQUESTED", "HELD"]),
+  // The §14.4 armed resume instant (observation — the engine's timer
+  // authority is separate); null when the clock was not armed.
+  idleResumeAt: isoString.nullish(),
+  pendingInteractionId: uuid.nullish(),
+  pendingControlRequestIds: z.array(uuid).default([]),
+});
+export type ReportedInteractionState = z.infer<
+  typeof reportedInteractionStateSchema
+>;
+
+/**
  * One session the host retained across a control-socket drop (§13). Fields
  * mirror the engine's `HostResumePayload.RetainedSession` record:
  * `capacityHeld` is the reconciliation assertion (the engine may KEEP only
  * when true), `lastSentSequence` the host's durable-event cursor, and
  * `lastAcknowledgedMessageId` the last terminal/session frame the host
- * acknowledged (terminal-resend dedup, §12.1).
+ * acknowledged (terminal-resend dedup, §12.1). `interactionState` is the
+ * §22.8 optional overlay evidence of the session's live interaction runtime
+ * (Task 10).
  */
 export const hostRetainedSessionSchema = z.object({
   sessionId: uuid,
@@ -170,6 +233,9 @@ export const hostRetainedSessionSchema = z.object({
   activeExecutionId: uuid.nullish(),
   lastSentSequence: z.number().int().nullish(),
   lastAcknowledgedMessageId: z.string().nullish(),
+  // §22.8 (Task 10): present only when the host holds a live interaction
+  // runtime for the session; absent (dropped by JSON.stringify) otherwise.
+  interactionState: reportedInteractionStateSchema.nullish(),
 });
 export type HostRetainedSession = z.infer<typeof hostRetainedSessionSchema>;
 
@@ -421,6 +487,217 @@ export const sessionCredentialSchema = z.object({
 });
 export type SessionCredential = z.infer<typeof sessionCredentialSchema>;
 
+// ---- §22 session interaction + temporary hold (Task 1 wire contract) ----
+// Declared BEFORE sessionOpenPayloadSchema, which composes the interaction
+// policy in its kind-discriminated superRefine.
+
+/**
+ * §22.2: the effective immutable interaction policy on orchestration
+ * session.open payloads. Bounds are the tighten-only domain — the engine
+ * validates before send; a frame outside these ranges fails parse.
+ */
+export const interactionPolicySchema = z.object({
+  version: z.literal(1),
+  enabled: z.boolean(),
+  idleResumeAfterSeconds: z.number().int().min(30).max(3600),
+  responseTimeoutSeconds: z.number().int().min(5).max(300),
+  maxInputBytes: z.number().int().min(1).max(16384),
+  maxOutputBytes: z.number().int().min(1).max(65536),
+  maxModelIterations: z.number().int().min(1).max(8),
+  maxHistoryBytes: z.number().int().min(1).max(262144),
+  transcriptRetentionDays: z.number().int().min(1).max(30),
+  contentMode: z.enum(["USER_CHAT_ONLY", "NONE"]),
+});
+export type InteractionPolicy = z.infer<typeof interactionPolicySchema>;
+
+/** §22.4 execution.control (engine→host, durable command). HOLD requires
+ * the holdPolicy block; CONTINUE omits it. */
+export const executionControlPayloadSchema = z
+  .object({
+    executionId: uuid,
+    dispatchId: uuid,
+    controlRevision: z.number().int().min(1),
+    action: z.enum(["HOLD", "CONTINUE"]),
+    reasonCode: z.string().min(1),
+    // §22.4: HOLD requires holdPolicy matching the session policy — the
+    // §22.2 tighten-only idle domain (30..3600) applies to the command.
+    holdPolicy: z
+      .object({ idleResumeAfterSeconds: z.number().int().min(30).max(3600) })
+      .nullish(),
+    controlRequestId: uuid.nullish(),
+  })
+  .superRefine((value, ctx) => {
+    // §22.4: HOLD requires holdPolicy matching the session policy; CONTINUE
+    // omits it.
+    if (value.action === "HOLD" && value.holdPolicy == null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["holdPolicy"],
+        message: "HOLD requires holdPolicy (§22.4)",
+      });
+    }
+  });
+export type ExecutionControlPayload = z.infer<
+  typeof executionControlPayloadSchema
+>;
+
+/** §22.4 execution.control.state (host→engine, durable event). */
+export const executionControlStatePayloadSchema = z.object({
+  executionId: uuid,
+  dispatchId: uuid,
+  controlRevision: z.number().int().min(0),
+  stateSequence: z.number().int().min(1),
+  status: z.enum(["HOLD_REQUESTED", "HELD", "RUNNING", "REJECTED"]),
+  effectiveState: z.enum(["RUNNING", "HOLD_REQUESTED", "HELD"]),
+  reasonCode: z.string().min(1),
+  changedAt: isoString,
+  // Present only when HELD with the idle clock armed; null otherwise.
+  idleResumeAt: isoString.nullish(),
+  // Present on HELD only.
+  safePoint: z
+    .enum([
+      "BEFORE_MODEL_CALL",
+      "BEFORE_TOOL_EXECUTION",
+      "BEFORE_HELPER_CALL",
+      "BEFORE_GIT_EFFECT",
+    ])
+    .nullish(),
+  // A REJECTED state carries the refused command's revision.
+  rejectedControlRevision: z.number().int().min(1).nullish(),
+  errorCode: z.string().nullish(),
+});
+export type ExecutionControlStatePayload = z.infer<
+  typeof executionControlStatePayloadSchema
+>;
+
+/** §22.6 execution.interaction (engine→host, durable command): one
+ * authorized user message. Actor identity is engine-stamped. */
+export const executionInteractionPayloadSchema = z.object({
+  executionId: uuid,
+  dispatchId: uuid,
+  interactionId: uuid,
+  ordinal: z.number().int().min(1),
+  actorUserId: uuid,
+  message: z.object({ text: z.string().min(1) }),
+  acceptedAt: isoString,
+  responseDeadline: isoString,
+});
+export type ExecutionInteractionPayload = z.infer<
+  typeof executionInteractionPayloadSchema
+>;
+
+/** §22.6 execution.interaction.delta (host→engine, ephemeral): best-effort
+ * answer fragment. index starts at 0 per interaction; no replay promised. */
+export const executionInteractionDeltaPayloadSchema = z.object({
+  executionId: uuid,
+  dispatchId: uuid,
+  interactionId: uuid,
+  index: z.number().int().min(0),
+  text: z.string().min(1),
+});
+export type ExecutionInteractionDeltaPayload = z.infer<
+  typeof executionInteractionDeltaPayloadSchema
+>;
+
+/** §22.6 attributed chat usage; null tokens mean unknown. */
+export const interactionUsageSchema = z.object({
+  inputTokens: z.number().int().min(0).nullish(),
+  outputTokens: z.number().int().min(0).nullish(),
+  modelId: z.string().nullish(),
+});
+export type InteractionUsage = z.infer<typeof interactionUsageSchema>;
+
+/** §22.6 execution.interaction.complete (host→engine, durable event): the
+ * complete answer + usage; replaces provisional deltas. */
+export const executionInteractionCompletePayloadSchema = z.object({
+  executionId: uuid,
+  dispatchId: uuid,
+  interactionId: uuid,
+  ordinal: z.number().int().min(1),
+  answer: z.object({ text: z.string().min(1) }),
+  // KNOWN usage carries the block; UNKNOWN usage is null — never zero.
+  usage: interactionUsageSchema.nullish(),
+  usageStatus: z.enum(["KNOWN", "UNKNOWN"]),
+  controlRequestIds: z.array(uuid),
+  completedAt: isoString,
+});
+export type ExecutionInteractionCompletePayload = z.infer<
+  typeof executionInteractionCompletePayloadSchema
+>;
+
+/** §22.6 the closed interaction-failure error-code catalogue. */
+export const interactionErrorCodeSchema = z.enum([
+  "INTERACTION_TIMEOUT",
+  "MODEL_ERROR",
+  "OUTPUT_LIMIT_EXCEEDED",
+  "TOKEN_USAGE_UNAVAILABLE",
+  "EXECUTION_TERMINAL",
+  "EXECUTION_CANCELLED",
+  "HOST_STATE_LOST",
+  "CAPTURE_BLOCKED",
+]);
+
+/** §22.6 execution.interaction.failed (host→engine, durable event):
+ * interaction-only failure + partial usage; does not fail the attempt. */
+export const executionInteractionFailedPayloadSchema = z.object({
+  executionId: uuid,
+  dispatchId: uuid,
+  interactionId: uuid,
+  ordinal: z.number().int().min(1),
+  error: z.object({
+    errorCode: interactionErrorCodeSchema,
+    message: z.string().min(1),
+    retryable: z.boolean(),
+  }),
+  usage: interactionUsageSchema.nullish(),
+  usageStatus: z.enum(["KNOWN", "UNKNOWN"]),
+  controlRequestIds: z.array(uuid),
+  completedAt: isoString,
+});
+export type ExecutionInteractionFailedPayload = z.infer<
+  typeof executionInteractionFailedPayloadSchema
+>;
+
+/** §22.7 execution.control.request (host→engine, durable event): the chat
+ * tool's proposal for an engine-authorized control. The host cannot supply
+ * an actor — the engine derives it from the persisted interaction. */
+export const executionControlRequestPayloadSchema = z.object({
+  executionId: uuid,
+  dispatchId: uuid,
+  interactionId: uuid,
+  controlRequestId: uuid,
+  action: z.enum(["HOLD", "CONTINUE", "CANCEL"]),
+  explanation: z.string().nullish(),
+});
+export type ExecutionControlRequestPayload = z.infer<
+  typeof executionControlRequestPayloadSchema
+>;
+
+/** §22.7 execution.control.request.resolved (engine→host, durable command):
+ * proposal disposition — NOT observed execution state. */
+export const executionControlRequestResolvedPayloadSchema = z.object({
+  executionId: uuid,
+  dispatchId: uuid,
+  interactionId: uuid,
+  controlRequestId: uuid,
+  resolutionRevision: z.number().int().min(1),
+  status: z.enum(["ACCEPTED", "CONFIRMATION_REQUIRED", "REJECTED", "DECLINED", "EXPIRED"]),
+  // CONFIRMATION_REQUIRED carries the engine-stamped expiry.
+  expiresAt: isoString.nullish(),
+  // ACCEPTED includes the persisted commandMessageId (dispatch committed).
+  commandMessageId: z.string().min(1).nullish(),
+  // ACCEPTED for HOLD/CONTINUE includes the engine's controlRevision.
+  controlRevision: z.number().int().min(1).nullish(),
+  // Refusal codes are the §22.7 catalogue (extensible entries ride later
+  // protocol bumps — unknown codes fail parse on the current contract).
+  errorCode: z
+    .enum(["FORBIDDEN", "EXECUTION_TERMINAL", "INVALID_INTERACTION", "CONFIRMATION_EXPIRED"])
+    .nullish(),
+});
+export type ExecutionControlRequestResolvedPayload = z.infer<
+  typeof executionControlRequestResolvedPayloadSchema
+>;
+
 export const sessionOpenPayloadSchema = z.object({
   sessionId: uuid,
   kind: z.string(),
@@ -459,9 +736,38 @@ export const sessionOpenPayloadSchema = z.object({
   // the platform default (tool arguments/results/prompts stay off the
   // event stream, bounded metadata only).
   capture: capturePolicySchema.nullish(),
-});
+  // §22.2: the effective immutable interaction policy — REQUIRED sibling of
+  // `assignment` on WORKFLOW-kind sessions, ABSENT on CONVERSATION ones
+  // (their execution behavior is unchanged). Fail-closed by kind via the
+  // chained superRefine below.
+  interaction: interactionPolicySchema.nullish(),
+})
+  // §22.2 kind discrimination: WORKFLOW requires the block, CONVERSATION
+  // must not carry it.
+  .superRefine((value, ctx) => {
+    if (value.kind === "WORKFLOW" && value.interaction == null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["interaction"],
+        message:
+          "WORKFLOW session.open requires the interaction policy block (§22.2)",
+      });
+    }
+    if (value.kind !== "WORKFLOW" && value.interaction != null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["interaction"],
+        message:
+          "only WORKFLOW-kind sessions carry the interaction policy block (§22.2)",
+      });
+    }
+  });
 export type SessionChannelOffer = NonNullable<
   NonNullable<SessionOpenPayload["channel"]>
+>;
+/** The kind-checked session.open schema used by the dispatcher (§22.2). */
+export type SessionOpenPayloadKindChecked = z.infer<
+  typeof sessionOpenPayloadSchema
 >;
 export type SessionOpenPayload = z.infer<typeof sessionOpenPayloadSchema>;
 
@@ -846,6 +1152,38 @@ export type ExecutionApprovalRequestedFrame =
     payload: ExecutionApprovalRequestedPayload;
   };
 
+export type ExecutionControlFrame = UnifiedFrame<"execution.control"> & {
+  payload: ExecutionControlPayload;
+};
+export type ExecutionControlStateFrame =
+  UnifiedFrame<"execution.control.state"> & {
+    payload: ExecutionControlStatePayload;
+  };
+export type ExecutionInteractionFrame =
+  UnifiedFrame<"execution.interaction"> & {
+    payload: ExecutionInteractionPayload;
+  };
+export type ExecutionInteractionDeltaFrame =
+  UnifiedFrame<"execution.interaction.delta"> & {
+    payload: ExecutionInteractionDeltaPayload;
+  };
+export type ExecutionInteractionCompleteFrame =
+  UnifiedFrame<"execution.interaction.complete"> & {
+    payload: ExecutionInteractionCompletePayload;
+  };
+export type ExecutionInteractionFailedFrame =
+  UnifiedFrame<"execution.interaction.failed"> & {
+    payload: ExecutionInteractionFailedPayload;
+  };
+export type ExecutionControlRequestFrame =
+  UnifiedFrame<"execution.control.request"> & {
+    payload: ExecutionControlRequestPayload;
+  };
+export type ExecutionControlRequestResolvedFrame =
+  UnifiedFrame<"execution.control.request.resolved"> & {
+    payload: ExecutionControlRequestResolvedPayload;
+  };
+
 export type ProtocolAckFrame = UnifiedFrame<"protocol.ack"> & {
   payload: ProtocolAckPayload;
 };
@@ -896,6 +1234,15 @@ export const unifiedPayloadSchemas: Record<
   [MessageType.EXECUTION_POLICY_UPDATE]: executionPolicyUpdatePayloadSchema,
   [MessageType.EXECUTION_APPROVAL_REQUESTED]: executionApprovalRequestedPayloadSchema,
 
+  [MessageType.EXECUTION_CONTROL]: executionControlPayloadSchema,
+  [MessageType.EXECUTION_CONTROL_STATE]: executionControlStatePayloadSchema,
+  [MessageType.EXECUTION_INTERACTION]: executionInteractionPayloadSchema,
+  [MessageType.EXECUTION_INTERACTION_DELTA]: executionInteractionDeltaPayloadSchema,
+  [MessageType.EXECUTION_INTERACTION_COMPLETE]: executionInteractionCompletePayloadSchema,
+  [MessageType.EXECUTION_INTERACTION_FAILED]: executionInteractionFailedPayloadSchema,
+  [MessageType.EXECUTION_CONTROL_REQUEST]: executionControlRequestPayloadSchema,
+  [MessageType.EXECUTION_CONTROL_REQUEST_RESOLVED]: executionControlRequestResolvedPayloadSchema,
+
   [MessageType.PROTOCOL_ACK]: protocolAckPayloadSchema,
   [MessageType.PROTOCOL_ERROR]: protocolErrorPayloadSchema,
 };
@@ -928,6 +1275,14 @@ export type ParsedUnifiedFrame =
   | ExecutionCancelledFrame
   | ExecutionPolicyUpdateFrame
   | ExecutionApprovalRequestedFrame
+  | ExecutionControlFrame
+  | ExecutionControlStateFrame
+  | ExecutionInteractionFrame
+  | ExecutionInteractionDeltaFrame
+  | ExecutionInteractionCompleteFrame
+  | ExecutionInteractionFailedFrame
+  | ExecutionControlRequestFrame
+  | ExecutionControlRequestResolvedFrame
   | ProtocolAckFrame
   | ProtocolErrorFrame;
 

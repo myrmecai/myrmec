@@ -6,7 +6,8 @@ import { Agent } from "./agentWorker.js";
 import type { WorkerInbound, WorkerOutbound } from "./agentWorkerProtocol.js";
 import { MessageType as UnifiedMessageType } from "../protocol/unifiedFrames.js";
 import type { ChatModelFactory, SessionToolFactory } from "../executor/providers.js";
-import type { ChatModel, ModelStreamChunk } from "../executor/types.js";
+import type { ChatModel, ModelStreamChunk, ModelResponse } from "../executor/types.js";
+import type { SessionRegistry } from "../session/SessionRegistry.js";
 
 /** Streaming model that yields fixed chunks for Agent-level tests. */
 class FixedStreamModel implements ChatModel {
@@ -31,6 +32,25 @@ const noopChatModelFactory: ChatModelFactory = {
 const noopSessionToolFactory: SessionToolFactory = {
   resolve: async () => new Map(),
 };
+
+/** Disposable model whose `close` call count is observable (fatal teardown). */
+class DisposableModel implements ChatModel {
+  closeCalls = 0;
+  async invoke(): Promise<ModelResponse> {
+    return { content: "" };
+  }
+  close(): void {
+    this.closeCalls += 1;
+  }
+}
+
+function connectionState(payload: {
+  sessionId: string;
+  ready: boolean;
+  fatal: boolean;
+}): WorkerInbound {
+  return { kind: "connection-state", ...payload };
+}
 
 function inbound(type: string, payload: unknown): WorkerInbound {
   return {
@@ -586,4 +606,240 @@ describe("Agent", () => {
     ).not.toThrow();
     expect(frames()).toHaveLength(0);
   });
+
+  // -- §22.8 D7: connection-state notifications from the supervisor --
+
+  function registryOf(worker: Agent): SessionRegistry {
+    return (worker as unknown as { sessions: SessionRegistry }).sessions;
+  }
+
+  it("stops the session exactly once on a fatal connection-state (model disposed once, entry gone)", async () => {
+    const { post } = sink();
+    const model = new DisposableModel();
+    const chatModelFactory: ChatModelFactory = { resolve: async () => model };
+    const worker = new Agent({
+      post,
+      chatModelFactory,
+      sessionToolFactory: noopSessionToolFactory,
+    });
+    await worker.handle(inbound(UnifiedMessageType.SESSION_OPEN, sessionOpenPayload()));
+    expect(registryOf(worker).has(SESSION_ID)).toBe(true);
+
+    await worker.handle(connectionState({ sessionId: SESSION_ID, ready: false, fatal: true }));
+
+    // The existing session teardown ran exactly once: entry dropped, model
+    // disposed once (§22.8: idempotent fatal).
+    expect(registryOf(worker).has(SESSION_ID)).toBe(false);
+    expect(model.closeCalls).toBe(1);
+
+    // A repeated fatal is a no-op — no throw, no second dispose.
+    await worker.handle(connectionState({ sessionId: SESSION_ID, ready: false, fatal: true }));
+    expect(model.closeCalls).toBe(1);
+  });
+
+  it("fatal for an UNKNOWN session is a silent no-op", async () => {
+    const { post, frames } = sink();
+    const warn = vi.fn();
+    const worker = new Agent({
+      post,
+      chatModelFactory: noopChatModelFactory,
+      sessionToolFactory: noopSessionToolFactory,
+      logger: { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() },
+    });
+
+    await worker.handle(
+      connectionState({ sessionId: "99999999-9999-4999-8999-999999999999", ready: false, fatal: true }),
+    );
+
+    expect(frames()).toHaveLength(0);
+  });
+
+  it("round-trips the readiness mark (ready=false recorded, ready=true clears)", async () => {
+    const { post } = sink();
+    const worker = new Agent({
+      post,
+      chatModelFactory: resolvingChatModelFactory,
+      sessionToolFactory: noopSessionToolFactory,
+    });
+    await worker.handle(inbound(UnifiedMessageType.SESSION_OPEN, sessionOpenPayload()));
+
+    await worker.handle(connectionState({ sessionId: SESSION_ID, ready: false, fatal: false }));
+    expect(registryOf(worker).stateOf(SESSION_ID)?.ready).toBe(false);
+
+    await worker.handle(connectionState({ sessionId: SESSION_ID, ready: true, fatal: false }));
+    expect(registryOf(worker).stateOf(SESSION_ID)?.ready).toBe(true);
+  });
+
+  it("unknown connection-state session is ignored without emission", async () => {
+    const { post, frames } = sink();
+    const warn = vi.fn();
+    const worker = new Agent({
+      post,
+      chatModelFactory: noopChatModelFactory,
+      sessionToolFactory: noopSessionToolFactory,
+      logger: { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() },
+    });
+
+    await worker.handle(
+      connectionState({ sessionId: "88888888-8888-4888-8888-888888888888", ready: true, fatal: false }),
+    );
+
+    expect(frames()).toHaveLength(0);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("fatal wins over a pending readiness flip: fatal after ready=false still closes", async () => {
+    const { post } = sink();
+    const model = new DisposableModel();
+    const chatModelFactory: ChatModelFactory = { resolve: async () => model };
+    const worker = new Agent({
+      post,
+      chatModelFactory,
+      sessionToolFactory: noopSessionToolFactory,
+    });
+    await worker.handle(inbound(UnifiedMessageType.SESSION_OPEN, sessionOpenPayload()));
+
+    await worker.handle(connectionState({ sessionId: SESSION_ID, ready: false, fatal: false }));
+    await worker.handle(connectionState({ sessionId: SESSION_ID, ready: false, fatal: true }));
+
+    expect(registryOf(worker).has(SESSION_ID)).toBe(false);
+    expect(model.closeCalls).toBe(1);
+  });
+
+  // -- section 22.6/22.3: inbound interaction frame routing (Task 7) --
+
+  function interactionInbound(overrides: Record<string, unknown> = {}): WorkerInbound {
+    return inbound(UnifiedMessageType.EXECUTION_INTERACTION, {
+      executionId: EXECUTION_ID,
+      dispatchId: dispatchIdOf(),
+      interactionId: "66666666-6666-4666-8666-666666666666",
+      ordinal: 1,
+      actorUserId: "88888888-8888-4888-8888-888888888888",
+      message: { text: "what is happening?" },
+      acceptedAt: new Date().toISOString(),
+      responseDeadline: new Date(Date.now() + 120_000).toISOString(),
+      ...overrides,
+    });
+  }
+
+  /** The dispatch id an orchestration start install used (tests reuse
+   * the same value for the interaction routing check). */
+  const cachedDispatchId = "55555555-5555-4555-8555-555555555555";
+  function dispatchIdOf(): string {
+    return cachedDispatchId;
+  }
+
+  it("routes execution.interaction to the owning session's executor (controller handle) - an unknown identity answers protocol.error IDENTITY_MISMATCH", async () => {
+    const { post, frames, typesSent } = sink();
+    const warn = vi.fn();
+    const worker = new Agent({
+      post,
+      chatModelFactory: streamingChatModelFactory,
+      sessionToolFactory: noopSessionToolFactory,
+      workspaceRoot: `C:/tmp/myrmec-ws-${Math.random().toString(36).slice(2)}`,
+      outboxRoot: `C:/tmp/myrmec-outbox-${Math.random().toString(36).slice(2)}`,
+      logger: { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() },
+    });
+
+    // No orchestration session was ever opened: the interaction identity
+    // cannot resolve -> fail closed with protocol.error (IDENTITY_MISMATCH).
+    await worker.handle(interactionInbound());
+
+    await vi.waitFor(() => {
+      expect(typesSent()).toContain("protocol.error");
+    });
+    const error = frames().find((f) => f.type === "protocol.error")?.payload as {
+      code: string;
+      message: string;
+    };
+    expect(error.code).toBe("IDENTITY_MISMATCH");
+  });
+
+  it("routes execution.control.request.resolved to the owning coordinator - an unknown identity answers protocol.error IDENTITY_MISMATCH", async () => {
+    const { post, frames, typesSent } = sink();
+    const worker = new Agent({
+      post,
+      chatModelFactory: streamingChatModelFactory,
+      sessionToolFactory: noopSessionToolFactory,
+      workspaceRoot: `C:/tmp/myrmec-ws-${Math.random().toString(36).slice(2)}`,
+      outboxRoot: `C:/tmp/myrmec-outbox-${Math.random().toString(36).slice(2)}`,
+    });
+
+    await worker.handle(
+      inbound(UnifiedMessageType.EXECUTION_CONTROL_REQUEST_RESOLVED, {
+        executionId: EXECUTION_ID,
+        dispatchId: dispatchIdOf(),
+        interactionId: "66666666-6666-4666-8666-666666666666",
+        controlRequestId: "77777777-7777-4777-8777-777777777777",
+        resolutionRevision: 1,
+        status: "ACCEPTED",
+        expiresAt: null,
+        commandMessageId: "cmd-1",
+        controlRevision: 3,
+        errorCode: null,
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(typesSent()).toContain("protocol.error");
+    });
+    const error = frames().find((f) => f.type === "protocol.error")?.payload as {
+      code: string;
+    };
+    expect(error.code).toBe("IDENTITY_MISMATCH");
+  });
+
+  it("routes execution.interaction to a LIVE orchestration session's controller (accept: no protocol.error)", async () => {
+    const { post, typesSent } = sink();
+    const worker = new Agent({
+      post,
+      chatModelFactory: streamingChatModelFactory,
+      sessionToolFactory: noopSessionToolFactory,
+      workspaceRoot: `C:/tmp/myrmec-ws-${Math.random().toString(36).slice(2)}`,
+      outboxRoot: `C:/tmp/myrmec-outbox-${Math.random().toString(36).slice(2)}`,
+    });
+
+    // session.open installs the assignment; execution.start admits the
+    // dispatch (the interaction's identity must match the LIVE dispatch).
+    await worker.handle(
+      inbound(
+        UnifiedMessageType.SESSION_OPEN,
+        orchestrationSessionOpenPayload(orchestrationAssignment(), ORCH_DIGEST),
+      ),
+    );
+    await worker.handle(
+      inbound(UnifiedMessageType.EXECUTION_START, {
+        executionId: ORCH_EXECUTION_ID,
+        sessionId: ORCH_SESSION_ID,
+        dispatchId: ORCH_DISPATCH_ID,
+        attemptId: ORCH_ATTEMPT_ID,
+        assignmentDigest: ORCH_DIGEST,
+        deadline: new Date(Date.now() + 300_000).toISOString(),
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(typesSent()).toContain(UnifiedMessageType.EXECUTION_ACCEPT);
+    }, 10000);
+
+    // An interaction for the LIVE dispatch: routed to the controller
+    // (no IDENTITY_MISMATCH may fire for a resolvable session+dispatch).
+    await worker.handle(
+      inbound(UnifiedMessageType.EXECUTION_INTERACTION, {
+        executionId: ORCH_EXECUTION_ID,
+        dispatchId: ORCH_DISPATCH_ID,
+        interactionId: "66666666-6666-4666-8666-666666666666",
+        ordinal: 1,
+        actorUserId: "88888888-8888-4888-8888-888888888888",
+        message: { text: "why so slow?" },
+        acceptedAt: new Date().toISOString(),
+        responseDeadline: new Date(Date.now() + 120_000).toISOString(),
+      }),
+    );
+    // Give async routing a bounded moment, then assert the identity was
+    // NOT refused (the executor owns any further outcome handling).
+    await vi.waitFor(() => {
+      const errors = typesSent().filter((t) => t === "protocol.error");
+      expect(errors.length).toBe(0);
+    }, 200);
+  }, 30000);
 });

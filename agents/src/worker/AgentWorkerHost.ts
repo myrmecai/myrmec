@@ -71,6 +71,16 @@ export class AgentWorkerHost {
         options.onEngineAck?.(message.acknowledgedMessageId);
         return;
       }
+      // §22.8 (D7): connection-state is parent->worker ONLY - a worker
+      // posting it is a protocol violation; the strict outbound union keeps
+      // it untypeable, this guard keeps it unrouteable.
+      if ((value as { kind?: string })?.kind === "connection-state") {
+        this.log.warn(
+          "AgentWorkerHost: worker posted a parent-only connection-state message - ignored",
+          value,
+        );
+        return;
+      }
       this.log.warn("AgentWorkerHost: unknown worker message", value);
     });
 
@@ -109,6 +119,68 @@ export class AgentWorkerHost {
    */
   dispatchEngineAck(acknowledgedMessageId: string): void {
     const message: WorkerInbound = { kind: "ack", acknowledgedMessageId };
+    this.worker.postMessage(message);
+  }
+
+  /**
+   * §22.8 (D7): forward the supervisor's connection-state notification for
+   * one session INTO the worker (`{sessionId, ready, fatal}`). `fatal: true`
+   * stops the session's runtime exactly once (the worker's existing session
+   * teardown); `ready: false` suspends and `ready: true` resumes admission.
+   */
+  dispatchConnectionState(state: {
+    sessionId: string;
+    ready: boolean;
+    fatal: boolean;
+  }): void {
+    const message: WorkerInbound = {
+      kind: "connection-state",
+      sessionId: state.sessionId,
+      ready: state.ready,
+      fatal: state.fatal,
+    };
+    this.worker.postMessage(message);
+  }
+
+  /**
+   * §7.5/§22.8 (D7 cutover, Task 11): forward the supervisor-side channel
+   * handshake result into the worker — the SessionRegistry records the
+   * binding (liveness bookkeeping). Fire-and-forget (unknown session is
+   * a registry no-op); the socket itself stays supervisor-side.
+   */
+  dispatchChannelOpened(sessionId: string, opened: {
+    highestContiguousSequence: number;
+  }): void {
+    const message: WorkerInbound = { kind: "channel-opened", sessionId, opened };
+    this.worker.postMessage(message);
+  }
+
+  /** §22.8 (D7): the session's bound channel died — the registry clears
+   * its binding mark (the fatal teardown rides connection-state). */
+  dispatchChannelDead(sessionId: string): void {
+    const message: WorkerInbound = { kind: "channel-dead", sessionId };
+    this.worker.postMessage(message);
+  }
+
+  /** Session close: the registry drops its channel binding. */
+  dispatchChannelUnbind(sessionId: string): void {
+    const message: WorkerInbound = { kind: "channel-unbind", sessionId };
+    this.worker.postMessage(message);
+  }
+
+  /**
+   * §13 (A2, Task 11): a CANCEL_EXECUTION resume decision — the worker's
+   * executor takes the existing execution.cancel path for the execution.
+   */
+  dispatchCancelExecution(executionId: string): void {
+    const message: WorkerInbound = { kind: "cancel-execution", executionId };
+    this.worker.postMessage(message);
+  }
+
+  /** §13 (A2, Task 11): a CLOSE resume decision — the worker runs the
+   * existing fatal session teardown (idempotent registry-side). */
+  dispatchCloseRetained(sessionId: string): void {
+    const message: WorkerInbound = { kind: "close-retained", sessionId };
     this.worker.postMessage(message);
   }
 

@@ -17,6 +17,7 @@ import {
   type HostTokenProvider,
 } from "./HostControlClient.js";
 import { MessageType, SUPPORTED_PROTOCOL_VERSION } from "../protocol/unifiedFrames.js";
+import type { ReportedInteractionState } from "../protocol/unifiedFrames.js";
 import type { Logger } from "../models/index.js";
 
 const silentLogger: Logger = {
@@ -141,6 +142,18 @@ class FakeRetentionLifecycle implements HostRetentionLifecycle {
   readonly cancelledExecutions: string[] = [];
   readonly closedSessions: string[] = [];
   readonly reboundSessions: string[] = [];
+  /** Task 10 §22.8: the session-keyed live coordinator crosswalk. */
+  readonly coordinators = new Map<string, FakeInteractionCoordinator>();
+  readonly boundExecutions = new Map<
+    string,
+    { executionId: string; dispatchId: string }
+  >();
+  /** Task 10 §22.8: connection-state notifications the lifecycle received. */
+  readonly notifications: Array<{
+    sessionId: string;
+    ready: boolean;
+    fatal: boolean;
+  }> = [];
 
   openSession(sessionId: string, cursor = 0): void {
     this.sessions.set(sessionId, {
@@ -151,6 +164,23 @@ class FakeRetentionLifecycle implements HostRetentionLifecycle {
       disconnected: false,
       modelClosed: false,
     });
+  }
+
+  /** Bind a live interaction runtime for the session (the executor seam). */
+  bindInteractionCoordinator(
+    sessionId: string,
+    coordinator: FakeInteractionCoordinator,
+    executionId: string,
+    dispatchId: string,
+  ): void {
+    this.coordinators.set(sessionId, coordinator);
+    this.boundExecutions.set(sessionId, { executionId, dispatchId });
+  }
+
+  /** Unbind (runtime teardown / session close). */
+  unbindInteractionCoordinator(sessionId: string): void {
+    this.coordinators.delete(sessionId);
+    this.boundExecutions.delete(sessionId);
   }
 
   getHighestContiguousSequence(sid: string): number {
@@ -201,12 +231,39 @@ class FakeRetentionLifecycle implements HostRetentionLifecycle {
     return [...this.sessions.entries()].filter(([, s]) => s.disconnected).map(([id]) => id);
   }
 
-  buildRetainedSummaries(): Array<{ sessionId: string; state: string; capacityHeld: boolean }> {
-    return this.retainedSessionIds().map((sid) => ({
-      sessionId: sid,
-      state: "ACTIVE",
-      capacityHeld: true,
-    }));
+  buildRetainedSummaries(): Array<{
+    sessionId: string;
+    state: string;
+    capacityHeld: boolean;
+    interactionState?: ReportedInteractionState;
+  }> {
+    return this.retainedSessionIds().map((sid) => {
+      const summary: {
+        sessionId: string;
+        state: string;
+        capacityHeld: boolean;
+        interactionState?: ReportedInteractionState;
+      } = {
+        sessionId: sid,
+        state: "ACTIVE",
+        capacityHeld: true,
+      };
+      const coordinator = this.coordinators.get(sid);
+      const bound = this.boundExecutions.get(sid);
+      if (coordinator && bound) {
+        const snap = coordinator.snapshot();
+        summary.interactionState = {
+          executionId: bound.executionId,
+          acceptedControlRevision: snap.acceptedControlRevision,
+          stateSequence: snap.stateSequence,
+          effectiveState: snap.effectiveState,
+          idleResumeAt: snap.idleResumeAt ?? undefined,
+          pendingInteractionId: snap.pendingInteractionId ?? undefined,
+          pendingControlRequestIds: [...snap.pendingControlRequestIds],
+        };
+      }
+      return summary;
+    });
   }
 
   rebindAfterReconcile(sid: string): number {
@@ -228,6 +285,8 @@ class FakeRetentionLifecycle implements HostRetentionLifecycle {
     s.vault.clear();
     s.modelClosed = true;
     this.sessions.delete(sid);
+    // Task 10 §22.8: the runtime crosswalk dies with the session entry.
+    this.unbindInteractionCoordinator(sid);
     this.closedSessions.push(sid);
   }
 
@@ -241,12 +300,24 @@ class FakeRetentionLifecycle implements HostRetentionLifecycle {
   }
 }
 
+/** Subject-ish literal without tokens (the legacy partial call sites) —
+ * openSessionWithCursor/dropAndReconnect read only the fields they use. */
 interface TestSubject {
   client: HostControlClient;
   conn: FakeHostControlConnection;
   tokens: HostTokenProvider;
   retention: FakeRetentionLifecycle;
   channelConns: FakeChannelConnection[];
+  /** Task 10 §22.8: connection-state notifications the client emitted.
+   * Optional — the legacy partial subjects report none. */
+  notifications?: Array<{ sessionId: string; ready: boolean; fatal: boolean }>;
+}
+
+/** Complete a partial subject with the token provider. */
+function toSubjectPartial(
+  parts: Pick<TestSubject, "client" | "conn" | "retention" | "channelConns">,
+): TestSubject {
+  return { ...parts, tokens: makeTokenProvider() };
 }
 
 function makeSubject(options: { retentionWindowMs?: number } = {}): TestSubject {
@@ -254,6 +325,11 @@ function makeSubject(options: { retentionWindowMs?: number } = {}): TestSubject 
   const tokens = makeTokenProvider();
   const retention = new FakeRetentionLifecycle();
   const channelConns: FakeChannelConnection[] = [];
+  const notifications: Array<{
+    sessionId: string;
+    ready: boolean;
+    fatal: boolean;
+  }> = [];
   const client = new HostControlClient({
     engineUrl: "http://engine.local",
     tokenProvider: tokens,
@@ -273,8 +349,11 @@ function makeSubject(options: { retentionWindowMs?: number } = {}): TestSubject 
       channelConns.push(c);
       return c;
     },
+    onConnectionState: (state) => {
+      notifications.push({ ...state });
+    },
   });
-  return { client, conn, tokens, retention, channelConns };
+  return { client, conn, tokens, retention, channelConns, notifications };
 }
 
 function hostOpenedFrame(instanceId: string, intervalSeconds: number): Record<string, unknown> {
@@ -300,6 +379,10 @@ function hostOpenedFrame(instanceId: string, intervalSeconds: number): Record<st
         eventBackpressureTimeoutSeconds: 30,
       },
       serverNodeId: "node-a",
+      // §22.2: the engine echoes the accepted negotiated capabilities.
+      acceptedCapabilities: {
+        sessionInteraction: { version: 1, temporaryHold: true },
+      },
     },
   };
 }
@@ -319,10 +402,15 @@ function reconcileFrame(
   };
 }
 
-function parseByType(sent: string[], type: string): Array<Record<string, unknown>> {
+function parseByType(
+  sent: string[],
+  type: string,
+): Array<Record<string, unknown> & { payload?: Record<string, unknown> }> {
   return sent
     .map((raw) => JSON.parse(raw) as Record<string, unknown>)
-    .filter((f) => f.type === type);
+    .filter((f) => f.type === type) as Array<
+    Record<string, unknown> & { payload?: Record<string, unknown> }
+  >;
 }
 
 /** Drive a session.open so the registry holds a session, then ack a durable
@@ -352,6 +440,38 @@ async function openSessionWithCursor(
   });
 }
 
+// ── §22.8 (Task 10): the interaction-runtime overlay fixtures ──────
+
+/** Coordinator snapshot shape the registry's crosswalk reads. */
+interface FakeCoordinatorSnapshot {
+  effectiveState: "RUNNING" | "HOLD_REQUESTED" | "HELD";
+  acceptedControlRevision: number;
+  stateSequence: number;
+  idleResumeAt: string | null;
+  pendingInteractionId: string | null;
+  pendingControlRequestIds: ReadonlyArray<string>;
+}
+
+/** Fake §14.2 coordinator: records setConnectionReady calls + serves a
+ * pinned snapshot (the registry reads it to build interactionState). */
+class FakeInteractionCoordinator {
+  readonly readyCalls: boolean[] = [];
+  constructor(public snapshotValue: FakeCoordinatorSnapshot) {}
+
+  setConnectionReady(ready: boolean): void {
+    this.readyCalls.push(ready);
+  }
+
+  snapshot(): FakeCoordinatorSnapshot {
+    return { ...this.snapshotValue };
+  }
+}
+
+const interactionUuid = "66666666-6666-4666-8666-666666666666";
+
+/** The dispatchId the resume tests bind their live runtime under. */
+const cachedDispatchId = "55555555-5555-4555-8555-555555555555";
+
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
 });
@@ -366,7 +486,7 @@ describe("§13 drop retention (A2)", () => {
     const { client, conn, retention } = makeSubject();
     await client.start();
     await conn.simulateInbound(hostOpenedFrame(hostInstanceId, 60));
-    await openSessionWithCursor({ client, conn, retention, channelConns: [] }, sessionId, 9);
+    await openSessionWithCursor(toSubjectPartial({ client, conn, retention, channelConns: [] }), sessionId, 9);
     conn.sent.length = 0;
 
     // Drop the control socket.
@@ -389,7 +509,7 @@ describe("§13 drop retention (A2)", () => {
     const { client, conn, retention } = makeSubject({ retentionWindowMs: 5_000 });
     await client.start();
     await conn.simulateInbound(hostOpenedFrame(hostInstanceId, 60));
-    await openSessionWithCursor({ client, conn, retention, channelConns: [] }, sessionId, 4);
+    await openSessionWithCursor(toSubjectPartial({ client, conn, retention, channelConns: [] }), sessionId, 4);
 
     await conn.simulateClose(1006, "abnormal");
     expect(retention.retainedSessionIds()).toEqual([sessionId]);
@@ -404,7 +524,7 @@ describe("§13 drop retention (A2)", () => {
     const { client, conn, retention } = makeSubject({ retentionWindowMs: 5_000 });
     await client.start();
     await conn.simulateInbound(hostOpenedFrame(hostInstanceId, 60));
-    await openSessionWithCursor({ client, conn, retention, channelConns: [] }, sessionId, 2);
+    await openSessionWithCursor(toSubjectPartial({ client, conn, retention, channelConns: [] }), sessionId, 2);
     await conn.simulateClose(1006, "abnormal");
 
     await client.stop("Host shutdown");
@@ -416,22 +536,24 @@ describe("§13 drop retention (A2)", () => {
   });
 });
 
-describe("§13 host.resume on reconnect (A2)", () => {
-  async function dropAndReconnect(
-    subject: TestSubject,
-    newInstance = hostInstanceId,
-  ): Promise<void> {
-    const { conn } = subject;
-    await conn.simulateClose(1006, "abnormal");
-    await vi.advanceTimersByTimeAsync(2_000);
-    // The engine's fresh host.opened on the re-dialed socket. handleHostOpened
-    // runs the resume handshake (host.resume → host.reconcile) internally, so
-    // the dispatch must NOT be awaited — flush until host.resume is on the
-    // wire, then the test delivers host.reconcile.
-    void conn.simulateInbound(hostOpenedFrame(newInstance, 60));
-    await vi.advanceTimersByTimeAsync(50);
-  }
+/** Drop + reconnect so handleHostOpened runs the resume handshake
+ * (host.resume -> host.reconcile); the test delivers host.reconcile after. */
+async function dropAndReconnect(
+  subject: TestSubject,
+  newInstance = hostInstanceId,
+): Promise<void> {
+  const { conn } = subject;
+  await conn.simulateClose(1006, "abnormal");
+  await vi.advanceTimersByTimeAsync(2_000);
+  // The engine's fresh host.opened on the re-dialed socket. handleHostOpened
+  // runs the resume handshake (host.resume → host.reconcile) internally, so
+  // the dispatch must NOT be awaited — flush until host.resume is on the
+  // wire, then the test delivers host.reconcile.
+  void conn.simulateInbound(hostOpenedFrame(newInstance, 60));
+  await vi.advanceTimersByTimeAsync(50);
+}
 
+describe("§13 host.resume on reconnect (A2)", () => {
   it("sends host.resume with correct summaries on reconnect within the window", async () => {
     const { client, conn, retention } = makeSubject();
     await client.start();
@@ -439,9 +561,9 @@ describe("§13 host.resume on reconnect (A2)", () => {
     // The PREVIOUS instance's nonce — the §6.1 resume identity reported on
     // host.resume (the reconnect rotates the live one).
     const firstNonce = client.currentNonce;
-    await openSessionWithCursor({ client, conn, retention, channelConns: [] }, sessionId, 9);
+    await openSessionWithCursor(toSubjectPartial({ client, conn, retention, channelConns: [] }), sessionId, 9);
     await openSessionWithCursor(
-      { client, conn, retention, channelConns: [] },
+      toSubjectPartial({ client, conn, retention, channelConns: [] }),
       sessionId2,
       12,
     );
@@ -459,7 +581,7 @@ describe("§13 host.resume on reconnect (A2)", () => {
     });
     conn.sent.length = 0;
 
-    await dropAndReconnect({ client, conn, retention, channelConns: [] });
+    await dropAndReconnect(toSubjectPartial({ client, conn, retention, channelConns: [] }));
 
     const resumes = parseByType(conn.sent, MessageType.HOST_RESUME);
     expect(resumes).toHaveLength(1);
@@ -486,10 +608,10 @@ describe("§13 host.resume on reconnect (A2)", () => {
     const { client, conn, retention } = makeSubject();
     await client.start();
     await conn.simulateInbound(hostOpenedFrame(hostInstanceId, 60));
-    await openSessionWithCursor({ client, conn, retention, channelConns: [] }, sessionId, 5);
+    await openSessionWithCursor(toSubjectPartial({ client, conn, retention, channelConns: [] }), sessionId, 5);
     conn.sent.length = 0;
 
-    await dropAndReconnect({ client, conn, retention, channelConns: [] });
+    await dropAndReconnect(toSubjectPartial({ client, conn, retention, channelConns: [] }));
     // The resume was answered with KEEP.
     await conn.simulateInbound(
       reconcileFrame("m-reconcile", [
@@ -544,19 +666,19 @@ describe("§13 host.resume on reconnect (A2)", () => {
     expect(retention.sessions.get(sessionId)?.cursor).toBe(6);
     const acks = parseByType(conn.sent, MessageType.PROTOCOL_ACK);
     expect(acks).toHaveLength(2);
-    expect(acks[0].payload.acknowledgedMessageId).toBe("m-replay-6");
-    expect(acks[0].payload.highestContiguousSequence).toBe(6);
-    expect(acks[1].payload.acknowledgedMessageId).toBe("m-replay-6");
+    expect(acks[0]?.payload?.acknowledgedMessageId).toBe("m-replay-6");
+    expect(acks[0]?.payload?.highestContiguousSequence).toBe(6);
+    expect(acks[1]?.payload?.acknowledgedMessageId).toBe("m-replay-6");
   });
 
   it("CANCEL_EXECUTION: cancel hook applied, no execution.cancel frame sent", async () => {
     const { client, conn, retention } = makeSubject();
     await client.start();
     await conn.simulateInbound(hostOpenedFrame(hostInstanceId, 60));
-    await openSessionWithCursor({ client, conn, retention, channelConns: [] }, sessionId, 3);
+    await openSessionWithCursor(toSubjectPartial({ client, conn, retention, channelConns: [] }), sessionId, 3);
     conn.sent.length = 0;
 
-    await dropAndReconnect({ client, conn, retention, channelConns: [] });
+    await dropAndReconnect(toSubjectPartial({ client, conn, retention, channelConns: [] }));
     await conn.simulateInbound(
       reconcileFrame("m-reconcile", [
         {
@@ -581,15 +703,15 @@ describe("§13 host.resume on reconnect (A2)", () => {
     const { client, conn, retention } = makeSubject();
     await client.start();
     await conn.simulateInbound(hostOpenedFrame(hostInstanceId, 60));
-    await openSessionWithCursor({ client, conn, retention, channelConns: [] }, sessionId, 3);
+    await openSessionWithCursor(toSubjectPartial({ client, conn, retention, channelConns: [] }), sessionId, 3);
     await openSessionWithCursor(
-      { client, conn, retention, channelConns: [] },
+      toSubjectPartial({ client, conn, retention, channelConns: [] }),
       sessionId2,
       2,
     );
     conn.sent.length = 0;
 
-    await dropAndReconnect({ client, conn, retention, channelConns: [] });
+    await dropAndReconnect(toSubjectPartial({ client, conn, retention, channelConns: [] }));
     await conn.simulateInbound(
       reconcileFrame("m-reconcile", [
         { sessionId, action: "CLOSE", reasonCode: "TASK_ALREADY_RETRIED" },
@@ -610,7 +732,7 @@ describe("§13 host.resume on reconnect (A2)", () => {
     const { client, conn, retention } = makeSubject();
     await client.start();
     await conn.simulateInbound(hostOpenedFrame(hostInstanceId, 60));
-    await openSessionWithCursor({ client, conn, retention, channelConns: [] }, sessionId, 7);
+    await openSessionWithCursor(toSubjectPartial({ client, conn, retention, channelConns: [] }), sessionId, 7);
     conn.sent.length = 0;
 
     // Drop → resume is sent on reconnect (the same fire-and-flush as the
@@ -645,5 +767,164 @@ describe("§13 host.resume on reconnect (A2)", () => {
     // The client is on the fresh-host path — connected, OPEN, no resume pending.
     expect(client.currentState).toBe("OPEN");
     expect(conn.connected).toBe(true);
+  });
+});
+
+// ── §22.8 (Task 10): the interactionState overlay on the resume report ──
+
+/** Build a HELD coordinator snapshot (the §22.2 live runtime evidence). */
+function heldSnapshot(
+  idleResumeAt: string,
+  pendingInteractionId: string | null = null,
+): FakeCoordinatorSnapshot {
+  return {
+    effectiveState: "HELD",
+    acceptedControlRevision: 3,
+    stateSequence: 7,
+    idleResumeAt,
+    pendingInteractionId,
+    pendingControlRequestIds: [],
+  };
+}
+
+describe("§22.8 Task 10: interactionState on the resume report", () => {
+  it("reports the live runtime's coordinator snapshot as interactionState on host.resume", async () => {
+    const subject = makeSubject();
+    const { client, conn, retention } = subject;
+    await client.start();
+    await conn.simulateInbound(hostOpenedFrame(hostInstanceId, 60));
+    await openSessionWithCursor(subject, sessionId, 9);
+    // The executor composed a live runtime for the session, HELD with the
+    // idle clock armed (the §14.4 instant survives the drop).
+    const idleResumeAt = new Date(Date.now() + 120_000).toISOString();
+    retention.bindInteractionCoordinator(
+      sessionId,
+      new FakeInteractionCoordinator(heldSnapshot(idleResumeAt, interactionUuid)),
+      executionId,
+      cachedDispatchId,
+    );
+    conn.sent.length = 0;
+
+    await dropAndReconnect(subject);
+    const resumes = parseByType(conn.sent, MessageType.HOST_RESUME);
+    expect(resumes).toHaveLength(1);
+    const sessions = resumes[0]?.payload?.sessions as Array<Record<string, unknown>>;
+    const reported = sessions.find((s) => s.sessionId === sessionId);
+    const state = reported?.interactionState as Record<string, unknown>;
+    expect(state).toBeDefined();
+    expect(state.executionId).toBe(executionId);
+    expect(state.acceptedControlRevision).toBe(3);
+    expect(state.stateSequence).toBe(7);
+    expect(state.effectiveState).toBe("HELD");
+    expect(state.idleResumeAt).toBe(idleResumeAt);
+    expect(state.pendingInteractionId).toBe(interactionUuid);
+    expect(state.pendingControlRequestIds).toEqual([]);
+  });
+
+  it("a session WITHOUT a live runtime reports NO interactionState block", async () => {
+    const subject = makeSubject();
+    const { client, conn } = subject;
+    await client.start();
+    await conn.simulateInbound(hostOpenedFrame(hostInstanceId, 60));
+    await openSessionWithCursor(subject, sessionId, 4);
+    // No coordinator ever bound (the composition fell back / no dispatch).
+    conn.sent.length = 0;
+
+    await dropAndReconnect(subject);
+    const resumes = parseByType(conn.sent, MessageType.HOST_RESUME);
+    const sessions = resumes[0]?.payload?.sessions as Array<Record<string, unknown>>;
+    const reported = sessions.find((s) => s.sessionId === sessionId);
+    expect(reported).toBeDefined();
+    expect("interactionState" in (reported as Record<string, unknown>)).toBe(false);
+  });
+
+  it("KEEP arms the runtime (setConnectionReady true) and the idle instant is retained by the coordinator", async () => {
+    const subject = makeSubject();
+    const { client, conn, retention } = subject;
+    await client.start();
+    await conn.simulateInbound(hostOpenedFrame(hostInstanceId, 60));
+    await openSessionWithCursor(subject, sessionId, 5);
+    const idleResumeAt = new Date(Date.now() + 120_000).toISOString();
+    const coordinator = new FakeInteractionCoordinator(heldSnapshot(idleResumeAt));
+    retention.bindInteractionCoordinator(sessionId, coordinator, executionId, cachedDispatchId);
+    conn.sent.length = 0;
+
+    // The drop fences (ready=false) — then KEEP re-arms.
+    await dropAndReconnect(subject);
+    // The drop's ready=false reached the coordinator seam?
+    // (The client does NOT call coordinator.setConnectionReady directly —
+    // the connection-state seam forwards; the fake lifecycle records it.)
+    await conn.simulateInbound(
+      reconcileFrame("m-reconcile", [
+        { sessionId, action: "KEEP", resumeFromSequence: 5 },
+      ]),
+    );
+    await vi.advanceTimersByTimeAsync(1);
+
+    // The KEEP emitted exactly one ready=true connection-state — the §14.4
+    // arm the owning supervisor forwards into the worker's coordinator.
+    const readyTrue = subject.notifications?.filter(
+      (n) => n.sessionId === sessionId && n.ready && !n.fatal,
+    );
+    expect(readyTrue).toHaveLength(1);
+    // The session was re-bound (the pre-2026 behavior preserved).
+    expect(retention.reboundSessions).toEqual([sessionId]);
+    // The coordinator KEEPS its retained instant: the armed instant never
+    // resets on recovery (§14.4: re-arm toward the SAME instant).
+    expect(coordinator.snapshotValue.idleResumeAt).toBe(idleResumeAt);
+  });
+
+  it("CANCEL_EXECUTION/CLOSE outcomes tear the runtime binding down with the session", async () => {
+    const subject = makeSubject();
+    const { client, conn, retention } = subject;
+    await client.start();
+    await conn.simulateInbound(hostOpenedFrame(hostInstanceId, 60));
+    await openSessionWithCursor(subject, sessionId, 3);
+    retention.bindInteractionCoordinator(
+      sessionId,
+      new FakeInteractionCoordinator(heldSnapshot(new Date(Date.now() + 60_000).toISOString())),
+      executionId,
+      cachedDispatchId,
+    );
+    conn.sent.length = 0;
+
+    await dropAndReconnect(subject);
+    await conn.simulateInbound(
+      reconcileFrame("m-reconcile", [
+        { sessionId, action: "CLOSE", reasonCode: "SESSION_NOT_FOUND" },
+      ]),
+    );
+    await vi.advanceTimersByTimeAsync(1);
+
+    // The CLOSE dropped the session AND its runtime crosswalk.
+    expect(retention.closedSessions).toEqual([sessionId]);
+    expect(retention.coordinators.has(sessionId)).toBe(false);
+    // No ready=true ever emitted for a closed session.
+    expect(
+      subject.notifications?.some((n) => n.sessionId === sessionId && n.ready),
+    ).toBe(false);
+  });
+
+  it("the drop emits ready=false for retained sessions so connected runtimes fence (no auto-resume while disconnected)", async () => {
+    const subject = makeSubject();
+    const { client, conn, retention } = subject;
+    await client.start();
+    await conn.simulateInbound(hostOpenedFrame(hostInstanceId, 60));
+    await openSessionWithCursor(subject, sessionId, 2);
+    retention.bindInteractionCoordinator(
+      sessionId,
+      new FakeInteractionCoordinator(heldSnapshot(new Date(Date.now() + 60_000).toISOString())),
+      executionId,
+      cachedDispatchId,
+    );
+
+    await conn.simulateClose(1006, "abnormal");
+    await vi.advanceTimersByTimeAsync(0);
+
+    // The retained session got exactly one ready=false on the drop — the
+    // §14.4 fence the owning worker applies to the live coordinator.
+    const drops = subject.notifications?.filter((n) => n.sessionId === sessionId);
+    expect(drops).toHaveLength(1);
+    expect(drops?.[0]).toEqual({ sessionId, ready: false, fatal: false });
   });
 });

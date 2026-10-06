@@ -33,14 +33,19 @@ public class StreamRelayController {
     public static final String NODE_SECRET_HEADER = "X-Node-Secret";
 
     private final ConversationStreamBroker broker;
+    private final ai.myrmec.engine.inference.execution.interaction.ExecutionStreamBroker
+            executionBroker;
     private final boolean relayEnabled;
     private final byte[] relaySecret;
 
     public StreamRelayController(
             ConversationStreamBroker broker,
+            ai.myrmec.engine.inference.execution.interaction.ExecutionStreamBroker
+                    executionBroker,
             @Value("${myrmec.node.relay.enabled:false}") boolean relayEnabled,
             @Value("${myrmec.node.relay.secret:}") String relaySecret) {
         this.broker = broker;
+        this.executionBroker = executionBroker;
         this.relayEnabled = relayEnabled;
         this.relaySecret = relaySecret.getBytes(StandardCharsets.UTF_8);
     }
@@ -58,7 +63,12 @@ public class StreamRelayController {
                     request.conversationId());
             return ResponseEntity.status(403).build();
         }
-        broker.deliverRemote(request.conversationId(), request.frameJson());
+        if (request.isExecutionArm()) {
+            // Task 9: the execution stream fan-out arm (no conversation row).
+            executionBroker.deliverRemoteFrameRelay(request);
+        } else {
+            broker.deliverRemote(request.conversationId(), request.frameJson());
+        }
         return ResponseEntity.ok(true);
     }
 

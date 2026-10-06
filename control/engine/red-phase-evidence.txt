@@ -1,0 +1,1 @@
+Task3a RED phase evidence (2026-10-03): mvn test-compile fails with 'cannot find symbol: method sendDedicated(UUID,UUID,String)' at HostFrameRelayTest 215/234/255 — the deliverable-1 API is absent. Test-only run (compilation RED, per brief RED definition).

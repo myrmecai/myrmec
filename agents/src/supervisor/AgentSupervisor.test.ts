@@ -4,6 +4,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { AgentSupervisor } from "./AgentSupervisor.js";
 import type {
+  HostControlClient,
   HostControlConnection,
 } from "./HostControlClient.js";
 import { MessageType, SUPPORTED_PROTOCOL_VERSION } from "../protocol/unifiedFrames.js";
@@ -67,6 +68,11 @@ class TestSupervisor extends AgentSupervisor {
   readonly sessionClosed: string[] = [];
   readonly started: unknown[] = [];
   readonly cancelled: unknown[] = [];
+  readonly connectionStates: Array<{
+    sessionId: string;
+    ready: boolean;
+    fatal: boolean;
+  }> = [];
   token = "tok-1";
 
   constructor(
@@ -116,6 +122,14 @@ class TestSupervisor extends AgentSupervisor {
 
   protected override onSessionClose(payload: { sessionId: string }): void {
     this.sessionClosed.push(payload.sessionId);
+  }
+
+  protected override onConnectionState(state: {
+    sessionId: string;
+    ready: boolean;
+    fatal: boolean;
+  }): void {
+    this.connectionStates.push(state);
   }
 
   protected override async onExecutionStart(
@@ -171,6 +185,10 @@ describe("AgentSupervisor on the unified wire (composition root)", () => {
           eventBackpressureTimeoutSeconds: 30,
         },
         serverNodeId: "node-a",
+        // §22.2: the engine echoes the accepted negotiated capabilities.
+        acceptedCapabilities: {
+          sessionInteraction: { version: 1, temporaryHold: true },
+        },
       },
     };
   }
@@ -312,6 +330,34 @@ describe("AgentSupervisor on the unified wire (composition root)", () => {
     await sup.stop();
   });
 
+  it("wires the client's connection-state seam through to the overridable hook (§22.8 D7)", async () => {
+    const conn = new FakeHostControlConnection();
+    const sup = new TestSupervisor(silentLogger, conn);
+    await sup.start();
+
+    // The composition contract: buildClient() registered
+    // `onConnectionState: (state) => this.onConnectionState(state)` on the
+    // client. Invoke THAT registered closure (the client emits it on
+    // channel loss / socket drop; the private field is the exact wiring
+    // under test, mirroring the suite's private-access conventions).
+    const client = (sup as unknown as {
+      client: {
+        onConnectionState:
+          | ((state: { sessionId: string; ready: boolean; fatal: boolean }) => void)
+          | null;
+      };
+    }).client;
+    expect(client.onConnectionState).toBeTypeOf("function");
+    client.onConnectionState!({ sessionId, ready: false, fatal: true });
+    client.onConnectionState!({ sessionId, ready: true, fatal: false });
+
+    expect(sup.connectionStates).toEqual([
+      { sessionId, ready: false, fatal: true },
+      { sessionId, ready: true, fatal: false },
+    ]);
+    await sup.stop();
+  });
+
   it("routes Agent execution frames through the client's typed senders", async () => {
     const conn = new FakeHostControlConnection();
     const sup = new TestSupervisor(silentLogger, conn);
@@ -339,6 +385,141 @@ describe("AgentSupervisor on the unified wire (composition root)", () => {
       MessageType.EXECUTION_DELTA,
       MessageType.EXECUTION_COMPLETE,
     ]);
+    await sup.stop();
+  });
+
+  it("routes the §22 interaction-family frames through post() to the typed senders", async () => {
+    const conn = new FakeHostControlConnection();
+    const sup = new TestSupervisor(silentLogger, conn);
+    await sup.start();
+    await conn.simulateInbound(hostOpenedFrame());
+    conn.sent.length = 0;
+
+    const interactionId = "66666666-6666-4666-8666-666666666666";
+    const dispatchId = "55555555-5555-4555-8555-555555555555";
+    const controlRequestId = "77777777-7777-4777-8777-777777777777";
+    const completedAt = new Date().toISOString();
+    // §22.3 observation point: the composed client's senders are the mapping
+    // under test here (the wire-level dedicated-only routing is the client
+    // suite's subject). Invoke the protected post() and observe through the
+    // client's sender seam by replacing it post-construction - the exact
+    // private-access convention this suite already uses.
+    const client = (sup as unknown as { client: HostControlClient }).client;
+    const sent: Array<{ type: string; messageId?: string; correlationId?: string | null }> = [];
+    client.sendExecutionControlState = async (payload) => {
+      sent.push({
+        type: "execution.control.state",
+        messageId: (payload as { messageIdOverride?: string }).messageIdOverride,
+        correlationId: (payload as { correlationIdOverride?: string }).correlationIdOverride ?? null,
+      });
+    };
+    client.sendExecutionInteractionDelta = async () => {
+      sent.push({ type: "execution.interaction.delta" });
+    };
+    client.sendExecutionInteractionComplete = async (payload) => {
+      sent.push({
+        type: "execution.interaction.complete",
+        messageId: (payload as { messageIdOverride?: string }).messageIdOverride,
+      });
+    };
+    client.sendExecutionInteractionFailed = async (payload) => {
+      sent.push({
+        type: "execution.interaction.failed",
+        messageId: (payload as { messageIdOverride?: string }).messageIdOverride,
+      });
+    };
+    client.sendExecutionControlRequest = async (payload) => {
+      sent.push({
+        type: "execution.control.request",
+        messageId: (payload as { messageIdOverride?: string }).messageIdOverride,
+      });
+    };
+
+    // The worker bridge's Envelope shapes for the §22.3 family (the durable
+    // four carry their outbox record identity via messageIdOverride).
+    await sup.route(
+      makeEnvelope("execution.control.state", {
+        executionId,
+        dispatchId,
+        controlRevision: 1,
+        stateSequence: 2,
+        status: "HELD",
+        effectiveState: "HELD",
+        reasonCode: "USER_REQUESTED",
+        changedAt: completedAt,
+        messageIdOverride: "ctl-x-2",
+        correlationIdOverride: "m-cmd",
+      }),
+    );
+    await sup.route(
+      makeEnvelope("execution.interaction.delta", {
+        executionId,
+        dispatchId,
+        interactionId,
+        index: 0,
+        text: "frag",
+      }),
+    );
+    await sup.route(
+      makeEnvelope("execution.interaction.complete", {
+        executionId,
+        dispatchId,
+        interactionId,
+        ordinal: 1,
+        answer: { text: "done" },
+        usage: null,
+        usageStatus: "UNKNOWN",
+        controlRequestIds: [],
+        completedAt,
+        messageIdOverride: "interaction-1-complete",
+      }),
+    );
+    await sup.route(
+      makeEnvelope("execution.interaction.failed", {
+        executionId,
+        dispatchId,
+        interactionId,
+        ordinal: 1,
+        error: { errorCode: "MODEL_ERROR", message: "fail", retryable: false },
+        usage: null,
+        usageStatus: "UNKNOWN",
+        controlRequestIds: [],
+        completedAt,
+        messageIdOverride: "interaction-1-failed",
+      }),
+    );
+    await sup.route(
+      makeEnvelope("execution.control.request", {
+        executionId,
+        dispatchId,
+        interactionId,
+        controlRequestId,
+        action: "CANCEL",
+        explanation: "User asked to stop this attempt.",
+        messageIdOverride: "cr-1",
+      }),
+    );
+
+    expect(sent.map((f) => f.type)).toEqual([
+      "execution.control.state",
+      "execution.interaction.delta",
+      "execution.interaction.complete",
+      "execution.interaction.failed",
+      "execution.control.request",
+    ]);
+    // The §12.1 identity overrides/§22.4 correlation survived the post()
+    // mapping intact (the supervisor maps the envelope verbatim).
+    const stateFrame = sent[0] as { messageId?: string; correlationId?: string | null };
+    expect(stateFrame.messageId).toBe("ctl-x-2");
+    expect(stateFrame.correlationId).toBe("m-cmd");
+    expect(sent[2].messageId).toBe("interaction-1-complete");
+    expect(sent[3].messageId).toBe("interaction-1-failed");
+    expect(sent[4].messageId).toBe("cr-1");
+    // No unknown-frame warnings for the family.
+    expect(silentLogger.warn).not.toHaveBeenCalledWith(
+      "Unknown Agent frame type - dropped:",
+      expect.any(String),
+    );
     await sup.stop();
   });
 

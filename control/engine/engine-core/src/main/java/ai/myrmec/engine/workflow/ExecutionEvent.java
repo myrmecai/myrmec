@@ -138,6 +138,24 @@ public class ExecutionEvent {
     private Long sequenceNumber;
 
     /**
+     * §3.5 (plan 2026-10-03-session-interaction): the §11.2 execution this
+     * event's public stream cursor belongs to; null for legacy
+     * task-attempt/conversation rows (existing historical rows stay NULL —
+     * the unique index permits that in H2 and PostgreSQL alike).
+     */
+    @Column(name = "execution_id", updatable = false)
+    private UUID executionId;
+
+    /**
+     * §3.5: the public durable stream cursor allocated under the execution
+     * row lock; unique (execution_id, stream_sequence). NOT the wire replay
+     * cursor of the conversation §8.4 sink (sequence_number keeps its
+     * existing meaning).
+     */
+    @Column(name = "stream_sequence", updatable = false)
+    private Long streamSequence;
+
+    /**
      * When this event occurred.
      */
     @Column(name = "created_at", nullable = false, updatable = false)

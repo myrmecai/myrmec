@@ -28,6 +28,11 @@ import {
   type ExecutionEventPayload,
   type ExecutionFailedPayload,
   type ExecutionApprovalRequestedPayload,
+  type ExecutionControlRequestPayload,
+  type ExecutionControlStatePayload,
+  type ExecutionInteractionDeltaPayload,
+  type ExecutionInteractionCompletePayload,
+  type ExecutionInteractionFailedPayload,
   type ExecutionPausedPayload,
   type ExecutionRejectPayload,
   type HostCapacityPayload,
@@ -39,6 +44,8 @@ import {
   type ProtocolAckPayload,
   type ProtocolErrorPayload,
   type ReconcileDecision,
+  type ReportedInteractionState,
+  SESSION_INTERACTION_CAPABILITY,
   type SessionAcceptPayload,
   type SessionClosedPayload,
   type SessionOfferPayload,
@@ -107,13 +114,17 @@ export interface HostControlClientOptions {
    */
   onPsk?: (psk: Uint8Array) => void;
   /**
-   * section 7.5 (A1): session-lifecycle collaborator. When a `session.open` carries
+   * §22.8 (D7): session-lifecycle collaborator. When a `session.open` carries
    * a `channel` offer the client opens the dedicated channel socket, runs the
-   * channel.open/opened handshake, and registers the bound socket here;
-   * channel loss is NON-fatal (the session keeps riding the control socket).
-   * Inbound execution frames on the channel socket are dispatched through the
-   * same pipeline as control-socket frames. Optional - when omitted the
-   * client stays control-only (existing behavior unchanged).
+   * channel.open/opened handshake, and registers the bound socket here.
+   * Channel loss for a BOUND channel is FATAL for the session (§22.8 D7):
+   * the client emits the fatal connection-state, does NOT re-route session
+   * frames onto the control socket, and lets the session teardown run
+   * (the consumer's sessionLifecycle closeRetained path / supervisor
+   * forwarding). Inbound execution frames on the channel socket are
+   * dispatched through the same pipeline as control-socket frames.
+   * Optional - when omitted the client stays control-only (existing behavior
+   * unchanged).
    */
   sessionLifecycle?: HostSessionLifecycle;
   /**
@@ -144,6 +155,21 @@ export interface HostControlClientOptions {
    * behavior.
    */
   onEngineAck?: (acknowledgedMessageId: string) => void;
+  /**
+   * §22.8 (D7): the connection-state seam. Invoked with
+   * `{sessionId, ready, fatal}` whenever a session's transport conditions
+   * change:
+   *  - bound channel lost  -> `{ready: false, fatal: true}`  (session dies)
+   *  - control socket lost with a live bound channel -> `{ready: false, fatal: false}`
+   *  - control socket reopened with the channel still bound -> `{ready: true, fatal: false}`
+   * The supervisor forwards this to the owning worker across the thread
+   * bridge. Optional - omitted keeps the previous notification-free behavior.
+   */
+  onConnectionState?: (state: {
+    sessionId: string;
+    ready: boolean;
+    fatal: boolean;
+  }) => void;
 }
 
 /**
@@ -156,11 +182,14 @@ export interface HostRetentionLifecycle extends HostSessionLifecycle {
   markAllDisconnected(): void;
   /** All retained session ids, insertion order. */
   retainedSessionIds(): string[];
-  /** section 13 host.resume summaries for every retained session. */
+  /** section 13 host.resume summaries for every retained session. The
+   * §22.8 (Task 10) optional interactionState block rides when the session
+   * holds a live interaction runtime (observed evidence, never permission). */
   buildRetainedSummaries(): Array<{
     sessionId: string;
     state: string;
     capacityHeld: boolean;
+    interactionState?: ReportedInteractionState;
   }>;
   /** Re-bind a session the engine decided to KEEP. */
   rebindAfterReconcile(sessionId: string): number;
@@ -176,11 +205,24 @@ export interface HostRetentionLifecycle extends HostSessionLifecycle {
 }
 
 /**
+ * §22.8 (D7): one session connection-state notification - the supervisor seam
+ * the client invokes on every session transport change, forwarded to the
+ * owning worker across the thread bridge.
+ */
+export interface HostConnectionState {
+  sessionId: string;
+  /** Required channel bound AND reconciliation permits work. */
+  ready: boolean;
+  /** Fatal loss (channel died / session must stop). Idempotent. */
+  fatal: boolean;
+}
+
+/**
  * section 7.5 (A1): one bound dedicated-channel client per session. Owns the
  * channel socket + the channel.open -> channel.opened handshake, forwards
  * inbound frames through the shared dispatch, and reports death (close /
- * error) so the session falls back to the control socket - never closing
- * the session itself.
+ * error) - which, for a BOUND channel, is FATAL for the session (§22.8 D7):
+ * the session must stop, not fall back to the control socket.
  */
 export class SessionChannelClient {
   private readonly connection: ChannelConnection;
@@ -346,7 +388,8 @@ export interface HostSessionLifecycle {
     socket: unknown,
     opened: ChannelOpenedPayload,
   ): void;
-  /** Mark the channel dead (section 7.5: non-fatal - keep the session). */
+  /** Mark the channel dead (§22.8 D7: fatal for the session - the consumer
+   * tears the session down / stops its admission). */
   markChannelDead(sessionId: string): void;
   /** Drop the binding on session close (returns the socket to close). */
   unbindChannel(sessionId: string): { socket: unknown } | null;
@@ -479,7 +522,8 @@ class WebSocketHostControlConnection implements HostControlConnection {
 /**
  * section 7.5 (A1): raw WebSocket abstraction for the dedicated channel socket.
  * Same shape as {@link HostControlConnection} minus the reconnect machinery -
- * channel loss is non-fatal and reconnect is A2/Wave 5.
+ * channel loss is FATAL for the session (§22.8 D7); channel REconnect is
+ * A2/Wave 5 (not part of the fatal gate).
  */
 export interface ChannelConnection {
   connect(token: string): Promise<void>;
@@ -625,6 +669,24 @@ const CHANNEL_PREFERRED_OUTBOUND_TYPES: ReadonlySet<string> = new Set([
   UnifiedMessageType.EXECUTION_PAUSED,
 ]);
 
+/** section 22.3 (session interaction): outbound frame families that MUST use
+ * the session's dedicated Agent Channel - "All new messages use the session's
+ * dedicated Agent Channel". Unlike the channel-PREFERRED set above there is
+ * NO control-socket fallback, not even for a session that was never bound to
+ * a channel: the engine's control socket refuses these types
+ * (handleChannelInbound's exclusive arm owns them server-side), so routing
+ * them there would only buy an INVALID_MESSAGE rejection that risks a
+ * protocol.error close. A REQUIRED frame without a live bound channel is
+ * DROPPED (warn) - the durable four retransmit from the outbox; the delta is
+ * ephemeral by contract (22.6: "no replay is promised"). */
+const CHANNEL_REQUIRED_OUTBOUND_TYPES: ReadonlySet<string> = new Set([
+  UnifiedMessageType.EXECUTION_CONTROL_STATE,
+  UnifiedMessageType.EXECUTION_INTERACTION_DELTA,
+  UnifiedMessageType.EXECUTION_INTERACTION_COMPLETE,
+  UnifiedMessageType.EXECUTION_INTERACTION_FAILED,
+  UnifiedMessageType.EXECUTION_CONTROL_REQUEST,
+]);
+
 /** Simple append-only bounded LRU set for seen messageIds. */
 class MessageIdDedupe {
   private readonly seen = new Set<string>();
@@ -680,6 +742,16 @@ export class HostControlClient {
   private readonly seen: MessageIdDedupe;
   private executionHandler: ExecutionHandler | null = null;
   private executionCancelHandler: ExecutionCancelHandler | null = null;
+  /**
+   * §22.3 (Task 11 fix): the inbound interaction-command family handler —
+   * execution.control / execution.interaction /
+   * execution.control.request.resolved (the engine→host durable commands).
+   * The supervisor wires it to the worker forward; the frames were
+   * previously acked but NEVER dispatched ("Unhandled unified frame").
+   */
+  private interactionCommandHandler:
+    | ((frame: ParsedUnifiedFrame) => void | Promise<void>)
+    | null = null;
   private sessionOpenObserver:
     | ((frame: UnifiedFrame<"session.open">) => void | Promise<void>)
     | null = null;
@@ -733,6 +805,19 @@ export class HostControlClient {
    * protocol.ack (the supervisor wires it to the executor's outbox seam).
    */
   private readonly onEngineAck: ((acknowledgedMessageId: string) => void) | null;
+  /**
+   * §22.8 (D7): the connection-state seam - supervisor-registered hook that
+   * receives `{sessionId, ready, fatal}` for every session transport change.
+   */
+  private readonly onConnectionState:
+    | ((state: { sessionId: string; ready: boolean; fatal: boolean }) => void)
+    | null;
+  /**
+   * §22.8 (D7): sessions whose bound channel was lost (fatal). Once a
+   * session is here its frames are never re-routed onto the control socket
+   * and no second fatal is emitted (idempotent).
+   */
+  private readonly fatallyLostSessions = new Set<string>();
 
   constructor(options: HostControlClientOptions) {
     this.engineUrl = options.engineUrl.replace(/\/+$/, "");
@@ -751,6 +836,7 @@ export class HostControlClient {
     this.retention = options.retention ?? null;
     this.retentionWindowMs = options.retentionWindowMs ?? 300_000;
     this.onEngineAck = options.onEngineAck ?? null;
+    this.onConnectionState = options.onConnectionState ?? null;
     this.connection =
       options.connection ??
       new WebSocketHostControlConnection(this.engineUrl, this.path);
@@ -785,6 +871,19 @@ export class HostControlClient {
   /** Register a callback for execution.cancel frames (section 8.4: engine->host). */
   onExecutionCancel(handler: ExecutionCancelHandler): void {
     this.executionCancelHandler = handler;
+  }
+
+  /**
+   * §22.3 (Task 11 fix): register the handler for the inbound
+   * interaction-command family (execution.control / execution.interaction /
+   * execution.control.request.resolved) — the supervisor forwards them
+   * to the worker whose executor routes them to the coordinator /
+   * controller / proposal-settle arms.
+   */
+  onInteractionCommand(
+    handler: (frame: ParsedUnifiedFrame) => void | Promise<void>,
+  ): void {
+    this.interactionCommandHandler = handler;
   }
 
   /**
@@ -1164,6 +1263,123 @@ export class HostControlClient {
     });
   }
 
+  // ==================== §22.3/22.4/22.6/22.7 session-interaction senders ====================
+  //
+  // Protocol 22.3: these families ride the session's DEDICATED Agent Channel
+  // (CHANNEL_REQUIRED_OUTBOUND_TYPES in sendFrame - no control-socket
+  // fallback). Durability classes per the 22.3 catalogue: the delta is
+  // EPHEMERAL (never acknowledged, no replay promised); control.state,
+  // interaction.complete/failed and control.request are DURABLE EVENTS -
+  // the executor persists each record in its outbox BEFORE this send and
+  // stamps `messageIdOverride` with the record's wire identity, so a
+  // retransmission reuses the SAME messageId (12.1). Exactly like the
+  // terminal/approval senders above, the client itself only transports.
+
+  /** Send execution.control.state (§22.4, durable event).
+   * A payload carrying `correlationIdOverride` (the originating CONTROL
+   * command's messageId from the outbox record's `commandMessageId`) has it
+   * stamped onto the envelope's correlationId - 22.4: command-driven states
+   * correlate to the command messageId, timer-driven states carry none. The
+   * messageId itself is the outbox record's identity via `messageIdOverride`
+   * (12.1 stability). */
+  async sendExecutionControlState(
+    payload: ExecutionControlStatePayload,
+  ): Promise<void> {
+    const messageIdOverride = (
+      payload as ExecutionControlStatePayload & { messageIdOverride?: string }
+    ).messageIdOverride;
+    const correlationIdOverride = (
+      payload as ExecutionControlStatePayload & {
+        correlationIdOverride?: string;
+      }
+    ).correlationIdOverride;
+    await this.sendFrame({
+      protocolVersion: SUPPORTED_PROTOCOL_VERSION,
+      messageId: messageIdOverride ?? this.nextMessageId(),
+      type: UnifiedMessageType.EXECUTION_CONTROL_STATE,
+      sentAt: new Date().toISOString(),
+      executionId: payload.executionId,
+      correlationId: correlationIdOverride ?? null,
+      payload,
+    });
+  }
+
+  /** Send one execution.interaction.delta (§22.6, EPHEMERAL).
+   * Fire-and-forget by contract: no outbox record, no messageId stability
+   * guarantee across sends (each fragment is a fresh frame), no replay - a
+   * send failure only warns (sendFrame drops on a channel failure; 22.6:
+   * "no replay is promised"). */
+  async sendExecutionInteractionDelta(
+    payload: ExecutionInteractionDeltaPayload,
+  ): Promise<void> {
+    await this.sendFrame({
+      protocolVersion: SUPPORTED_PROTOCOL_VERSION,
+      messageId: this.nextMessageId(),
+      type: UnifiedMessageType.EXECUTION_INTERACTION_DELTA,
+      sentAt: new Date().toISOString(),
+      executionId: payload.executionId,
+      payload,
+    });
+  }
+
+  /** Send execution.interaction.complete (§22.6, durable event).
+   * Same section 12.1 retransmit rule as the terminal frames. */
+  async sendExecutionInteractionComplete(
+    payload: ExecutionInteractionCompletePayload,
+  ): Promise<void> {
+    const override = (
+      payload as ExecutionInteractionCompletePayload & {
+        messageIdOverride?: string;
+      }
+    ).messageIdOverride;
+    await this.sendFrame({
+      protocolVersion: SUPPORTED_PROTOCOL_VERSION,
+      messageId: override ?? this.nextMessageId(),
+      type: UnifiedMessageType.EXECUTION_INTERACTION_COMPLETE,
+      sentAt: new Date().toISOString(),
+      executionId: payload.executionId,
+      payload,
+    });
+  }
+
+  /** Send execution.interaction.failed (§22.6, durable event).
+   * Same section 12.1 retransmit rule as the terminal frames. */
+  async sendExecutionInteractionFailed(
+    payload: ExecutionInteractionFailedPayload,
+  ): Promise<void> {
+    const override = (
+      payload as ExecutionInteractionFailedPayload & {
+        messageIdOverride?: string;
+      }
+    ).messageIdOverride;
+    await this.sendFrame({
+      protocolVersion: SUPPORTED_PROTOCOL_VERSION,
+      messageId: override ?? this.nextMessageId(),
+      type: UnifiedMessageType.EXECUTION_INTERACTION_FAILED,
+      sentAt: new Date().toISOString(),
+      executionId: payload.executionId,
+      payload,
+    });
+  }
+
+  /** Send execution.control.request (§22.7, durable event).
+   * Same section 12.1 retransmit rule as the terminal frames. */
+  async sendExecutionControlRequest(
+    payload: ExecutionControlRequestPayload,
+  ): Promise<void> {
+    const override = (
+      payload as ExecutionControlRequestPayload & { messageIdOverride?: string }
+    ).messageIdOverride;
+    await this.sendFrame({
+      protocolVersion: SUPPORTED_PROTOCOL_VERSION,
+      messageId: override ?? this.nextMessageId(),
+      type: UnifiedMessageType.EXECUTION_CONTROL_REQUEST,
+      sentAt: new Date().toISOString(),
+      executionId: payload.executionId,
+      payload,
+    });
+  }
+
   /** Advertise capacity change (host.capacity). */
   async sendHostCapacity(payload: HostCapacityPayload): Promise<void> {
     await this.sendFrame({
@@ -1185,10 +1401,13 @@ export class HostControlClient {
       sessionId: frame.sessionId ?? null,
       executionId: frame.executionId ?? null,
     };
-    // section 7.5 (A1): execution.delta/event/terminal PREFER the bound channel
-    // socket for their session; everything else is control-only. A channel
-    // send failure falls back to the control socket (best-effort) - channel
-    // loss must not break an execution.
+    // section 7.5 (A1) + §22.8 (D7) + §22.3: execution.delta/event/terminal
+    // PREFER the bound channel socket for their session, and the §22.3
+    // interaction family (control.state / interaction.* / control.request)
+    // REQUIRES it; everything else is control-only. For a session whose
+    // bound channel was lost there is NO control-socket fallback: the
+    // session is dead (fatal), the session frame is DROPPED, and the
+    // engine's existing failure/retry classification owns the consequence.
     const channel = this.channelForOutbound(fullFrame);
     if (channel) {
       try {
@@ -1203,23 +1422,80 @@ export class HostControlClient {
         }
         return;
       } catch (err) {
+        // The send failed on an open channel - the frame is dead here too:
+        // §22.8 D7 forbids a silent control-socket re-route.
         this.log.warn(
-          "Channel send failed; falling back to the control socket:",
+          "Channel send failed; frame dropped (no control fallback, §22.8):",
           err instanceof Error ? err.message : String(err),
         );
+        return;
       }
+    }
+    if (CHANNEL_REQUIRED_OUTBOUND_TYPES.has(fullFrame.type)) {
+      // §22.3: the interaction family is dedicated-ONLY - no control-socket
+      // fallback for ANY reason (never bound, handshake fell back to
+      // CONTROL, or fatal channel loss). The engine's control socket
+      // refuses these types (its channel arm owns them exclusively), so a
+      // fallback would only buy an INVALID_MESSAGE rejection. The durable
+      // four retransmit from the executor's outbox; the delta is ephemeral
+      // (22.6: "no replay is promised").
+      this.log.warn(
+        "Dropping §22.3 interaction-family frame with no bound channel (dedicated-only):",
+        fullFrame.type,
+        fullFrame.executionId ?? fullFrame.sessionId,
+      );
+      return;
+    }
+    if (
+      CHANNEL_PREFERRED_OUTBOUND_TYPES.has(fullFrame.type) &&
+      this.isSessionFatallyLost(fullFrame)
+    ) {
+      // §22.8 D7: the session's channel died - the engine has already
+      // closed its side; session frames must not ride the control socket.
+      this.log.warn(
+        "Dropping session frame for fatally lost session (no control fallback):",
+        fullFrame.type,
+        fullFrame.executionId ?? fullFrame.sessionId,
+      );
+      return;
     }
     await this.connection.send(encodeUnifiedFrame(fullFrame));
   }
 
   /**
-   * section 7.5 (A1): resolve the outbound channel for an execution frame - the
-   * bound, alive channel for the frame's session, else null (control).
-   * Resolves the session from the envelope's sessionId, falling back to the
+   * §22.8 (D7): whether the frame belongs to a session whose bound channel
+   * was fatally lost. Resolves the session from the envelope's sessionId,
+   * falling back to the executionId->sessionId map (execution frames).
+   */
+  private isSessionFatallyLost(frame: ParsedUnifiedFrame): boolean {
+    const sessionId =
+      frame.sessionId ?? this.executionSessions.get(frame.executionId ?? "");
+    if (!sessionId) {
+      // An execution frame whose session cannot be resolved rides the
+      // control socket as before (the client never mapped it to a channel).
+      // Note: after a fatal loss the mapping IS dropped together with the
+      // channel (fatalTeardown), so an unresolvable session cannot hide a
+      // dead one.
+      return false;
+    }
+    return this.fatallyLostSessions.has(sessionId);
+  }
+
+  /**
+   * section 7.5 (A1) + §22.3: resolve the outbound channel for an execution
+   * frame - the bound, alive channel for the frame's session, else null.
+   * Both the channel-PREFERRED families (control fallback allowed when the
+   * session never rode a channel) and the channel-REQUIRED interaction
+   * family (§22.3 - dedicated-only) resolve here; the REQUIRED class's
+   * no-fallback consequence is enforced by sendFrame. Resolves the session
+   * from the envelope's sessionId, falling back to the
    * executionId->sessionId map the client fills on execution.start.
    */
   private channelForOutbound(frame: ParsedUnifiedFrame): SessionChannelClient | null {
-    if (!CHANNEL_PREFERRED_OUTBOUND_TYPES.has(frame.type)) {
+    if (
+      !CHANNEL_PREFERRED_OUTBOUND_TYPES.has(frame.type) &&
+      !CHANNEL_REQUIRED_OUTBOUND_TYPES.has(frame.type)
+    ) {
       return null;
     }
     const sessionId =
@@ -1257,7 +1533,14 @@ export class HostControlClient {
       runtimeVersion: this.runtimeVersion,
       supportedProtocolVersions: [SUPPORTED_PROTOCOL_VERSION],
       poolSize: this.poolSize,
-      capabilities: this.capabilities,
+      // section 22.2: the sessionInteraction capability is ALWAYS advertised
+      // (current-contract validation — the engine rejects a host without it).
+      // Extra option-provided capability keys ride alongside; a caller cannot
+      // mute or weaken the mandatory block (the literal overrides).
+      capabilities: {
+        ...this.capabilities,
+        ...SESSION_INTERACTION_CAPABILITY,
+      },
       reportedCapacity: this.reportedCapacity,
       // section 3.7 local-owner model: present only for LOCAL/plugin hosts -
       // spreading undefined keeps the field off the MANAGED wire.
@@ -1287,13 +1570,42 @@ export class HostControlClient {
     // the window pending host.resume/host.reconcile; teardown happens only
     // on a CLOSE decision, a protocol.error reject, or retention expiry.
     // Bound channel sockets are INDEPENDENT transports - where one is still
-    // alive (and the engine still routes to it) the section 7.5 binding stands and
-    // is resumed as-is; one that died with the engine flows through the
-    // existing onDead path (non-fatal, session rides the control socket).
+    // alive (and the engine still routes to it) the section 7.5 binding stands
+    // and is resumed as-is; one that died flows through the fatal path
+    // (§22.8 D7 - the session stops, no control-socket fallback).
     if (this.running && this.retention && this.previousHostInstanceId) {
       this.retention.markAllDisconnected();
       this.armRetentionTimer();
       this.resumedThisConnection = false;
+      // §22.8/§14.4 (Task 10): EVERY retained session's live interaction
+      // runtime fences on the drop — idles never fire while the host
+      // channel is down (no auto-resume while disconnected/reconciling).
+      // The coordinator retains the armed instant; the KEEP arm re-arms
+      // toward the SAME instant. Bound channels below keep their existing
+      // non-fatal notification (this is the same ready=false, deduped by
+      // the coordinator's state check).
+      for (const retainedId of this.retention.retainedSessionIds()) {
+        this.emitConnectionState({
+          sessionId: retainedId,
+          ready: false,
+          fatal: false,
+        });
+      }
+    }
+    // §22.8 (D7): a control-socket loss with a LIVE bound agent channel
+    // suspends admission for those sessions - ready=false, non-fatal. The
+    // conservative ready=true flip on reopen (below / handleHostOpened) is
+    // the seam; the KEEP reconciliation arms the runtime.
+    if (this.running) {
+      for (const [boundSessionId, channel] of this.channels) {
+        if (channel.isOpen) {
+          this.emitConnectionState({
+            sessionId: boundSessionId,
+            ready: false,
+            fatal: false,
+          });
+        }
+      }
     }
 
     if (!this.running) {
@@ -1402,6 +1714,7 @@ export class HostControlClient {
       sessionId: string;
       state: string;
       capacityHeld: boolean;
+      interactionState?: ReportedInteractionState;
     }>,
   ): Promise<void> {
     const retention = this.retention;
@@ -1418,6 +1731,13 @@ export class HostControlClient {
         activeExecutionId: null,
         lastSentSequence: retention.getHighestContiguousSequence(s.sessionId),
         lastAcknowledgedMessageId: this.lastAcknowledgedMessageIds.get(s.sessionId) ?? null,
+        // §22.8 (Task 10): the optional interactionState block — present
+        // ONLY while the session reports a live interaction runtime; a
+        // session without one omits the block (explicit undefined so the
+        // wire never carries an interactionState: null).
+        ...(s.interactionState !== undefined
+          ? { interactionState: s.interactionState }
+          : {}),
       })),
     };
     this.log.info(
@@ -1513,6 +1833,15 @@ export class HostControlClient {
           `Reconcile KEEP for session ${sessionId} (cursor ${cursor}, ` +
             `resume from ${decision.resumeFromSequence ?? "n/a"})`,
         );
+        // §22.8 (Task 10): authoritative KEEP arms the session's live
+        // interaction runtime — setConnectionReady(true) re-arms the idle
+        // timer toward the SAME retained instant (§14.4: an already-passed
+        // interval resumes on the first tick after authoritative recovery;
+        // the coordinator's fenceIdleTimer on the drop kept the instant).
+        // The registry resolves the bound runtime; a session without one
+        // has nothing to arm (no-op) and its ready=true gate flips through
+        // the connection-state seam below.
+        this.emitConnectionState({ sessionId, ready: true, fatal: false });
         continue;
       }
       if (decision.action === ReconcileAction.CANCEL_EXECUTION) {
@@ -1630,6 +1959,29 @@ export class HostControlClient {
       await this.handleExecutionCancel(frame as UnifiedFrame<"execution.cancel">);
       return;
     }
+    // §22.3 (Task 11 fix): the inbound interaction-command family —
+    // execution.control / execution.interaction /
+    // execution.control.request.resolved. These are DURABLE commands: the
+    // durable-ack block above already recorded the cursor and acked them;
+    // dispatch to the supervisor's worker forward AFTER the ack (the
+    // engine's 202/retransmit contract holds regardless of the host's
+    // application outcome — a lost ack re-delivers, and the executor's
+    // idempotent apply/replay arms absorb it).
+    if (
+      frame.type === UnifiedMessageType.EXECUTION_CONTROL
+      || frame.type === UnifiedMessageType.EXECUTION_INTERACTION
+      || frame.type === UnifiedMessageType.EXECUTION_CONTROL_REQUEST_RESOLVED
+    ) {
+      try {
+        await this.interactionCommandHandler?.(frame);
+      } catch (err) {
+        this.log.warn(
+          `interaction-command handler failed for ${frame.type}:`,
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+      return;
+    }
 
     if (!CLIENT_HANDLED_TYPES.has(frame.type)) {
       this.log.warn("Unhandled unified frame type:", frame.type);
@@ -1640,6 +1992,19 @@ export class HostControlClient {
     frame: UnifiedFrame<"host.opened">,
   ): Promise<void> {
     const payload = frame.payload as HostOpenedPayload;
+    // §22.2: the engine's acceptedCapabilities echo must confirm the
+    // negotiated sessionInteraction capability — a mismatched echo means
+    // the engine does not actually serve the contract the SDK advertised,
+    // which is a cutover violation, not a degradation to ride out.
+    const accepted = payload.acceptedCapabilities?.sessionInteraction;
+    if (!accepted || accepted.version !== 1 || accepted.temporaryHold !== true) {
+      this.log.error(
+        "host.opened did not confirm the sessionInteraction capability — "
+          + "engine does not serve §22; closing the socket (fail closed)",
+      );
+      await this.connection.disconnect("SESSION_INTERACTION_UNSUPPORTED");
+      return;
+    }
     // section 13 (A2): a reconnection (retained state + a previous instance) runs
     // the resume handshake INSTEAD of treating this as a fresh world. The
     // fresh-host path is the protocol.error fallback.
@@ -1658,6 +2023,27 @@ export class HostControlClient {
       // resume (protocol.error) wipes state; the fresh host.open fallback
       // re-opens the instance and new work proceeds there.
       await this.attemptResume();
+    }
+    // §22.8 (D7) seam: after a control-socket reopen WITHOUT a resume
+    // handshake (no retained state / no retention wired), sessions whose
+    // agent channel is STILL bound flip back to ready — the pre-A2 behavior
+    // for a world that was never reconciled. WITH a resume handshake
+    // (resumedThisConnection), the authoritative KEEP reconciliation owns
+    // the ready=true arm (§22.8: reconnect does not auto-resume until KEEP)
+    // — a lapsed reconcile keeps the runtime fenced.
+    if (!this.resumedThisConnection) {
+      for (const [boundSessionId, channel] of this.channels) {
+        if (
+          channel.isOpen &&
+          !this.fatallyLostSessions.has(boundSessionId)
+        ) {
+          this.emitConnectionState({
+            sessionId: boundSessionId,
+            ready: true,
+            fatal: false,
+          });
+        }
+      }
     }
     // PSK receive path (design section 6/section 10): decode, validate, keep in process
     // memory ONLY, hand to the SessionRegistry via the callback. The value
@@ -1751,8 +2137,10 @@ export class HostControlClient {
 
     // section 7.5 (A1): the engine minted a dedicated-channel offer - open the
     // channel socket and run the bind handshake BEFORE confirming the open.
-    // A failed handshake is non-fatal: the session rides the control socket
-    // (the engine accepts execution arms on both sockets).
+    // A FAILED HANDSHAKE is non-fatal (no bind ever happened - the session
+    // rides the control socket; the engine accepts execution arms on both
+    // sockets). A LATER LOSS of the bound channel is what §22.8 D7 makes
+    // fatal.
     let channelMode = "CONTROL";
     const offer = payload.channel ?? null;
     if (offer) {
@@ -1810,12 +2198,16 @@ export class HostControlClient {
       {
         onFrame: (raw) => this.handleRaw(raw),
         onDead: (reason) => {
+          // §22.8 (D7): a BOUND channel dying is FATAL for the session - no
+          // control-socket fallback. One fatal emission (idempotent), the
+          // binding is dropped, the frame-carrier mapping is invalidated and
+          // the session teardown runs through the existing session-close
+          // path the consumer owns (closeRetained).
           this.log.warn(
             `Dedicated channel lost for session ${sessionId} (${reason}): ` +
-              "session unaffected - traffic continues on the control socket",
+              "FATAL - stopping the session (§22.8 D7)",
           );
-          lifecycle.markChannelDead(sessionId);
-          this.channels.delete(sessionId);
+          this.fatalTeardown(sessionId);
         },
       },
       this.log,
@@ -1834,6 +2226,59 @@ export class HostControlClient {
     return opened;
   }
 
+  /**
+   * §22.8 (D7): the fatal channel-loss teardown for one session. Idempotent:
+   * a second close event for the same session emits nothing and re-runs
+   * nothing. Steps: ONE fatal connection-state to the supervisor seam, drop
+   * the binding (client map + registry `markChannelDead`), and run the
+   * EXISTING session teardown the collaborator owns (the §13
+   * `closeRetained` path - the same path a CLOSE reconcile decision uses).
+   * The executionId->session frame mappings are KEPT: they let any follow-up
+   * execution frame for the dead session resolve to the fatally-lost session
+   * and be DROPPED (no control-socket fallback), instead of silently riding
+   * the control socket as an unmapped frame.
+   */
+  private fatalTeardown(sessionId: string): void {
+    if (this.fatallyLostSessions.has(sessionId)) {
+      return;
+    }
+    this.fatallyLostSessions.add(sessionId);
+    this.emitConnectionState({ sessionId, ready: false, fatal: true });
+    const channel = this.channels.get(sessionId);
+    this.channels.delete(sessionId);
+    void channel?.close("Session fatal: channel lost");
+    this.sessionLifecycle?.markChannelDead(sessionId);
+    // The existing session-stop path (§13 CLOSE reconcile uses the same):
+    // closes the registry entry - model dispose, vault clear - while the
+    // notification lets the supervisor stop the worker-side runtime
+    // exactly once. Teardown must never throw out of a socket callback.
+    try {
+      (this.sessionLifecycle as
+        | (HostSessionLifecycle & {
+            closeRetained?: (sessionId: string) => void;
+          })
+        | null)?.closeRetained?.(sessionId);
+    } catch (err) {
+      this.log.error(
+        "Fatal teardown closeRetained failed:",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
+  /** Fire the §22.8 (D7) supervisor seam (best-effort, never throws). */
+  private emitConnectionState(state: HostConnectionState): void {
+    try {
+      this.onConnectionState?.(state);
+    } catch (err) {
+      // A notification failure must never break the transport.
+      this.log.error(
+        "onConnectionState handler failed:",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
   /** Close a session's channel socket alongside the control teardown (section 7.5). */
   private async closeChannel(sessionId: string, reason: string): Promise<void> {
     const channel = this.channels.get(sessionId);
@@ -1842,6 +2287,10 @@ export class HostControlClient {
       await channel.close(reason);
     }
     this.sessionLifecycle?.unbindChannel(sessionId);
+    // A deliberate close is not a fatal loss - clear the fatal marker so a
+    // later session with the same id starts clean (§22.8 D7 idempotency is
+    // per channel LIFETIME, not per session id forever).
+    this.fatallyLostSessions.delete(sessionId);
     // Drop the session's execution mappings - they resolve to a channel
     // that no longer exists.
     for (const [executionId, mapped] of this.executionSessions) {
