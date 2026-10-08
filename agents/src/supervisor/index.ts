@@ -2,4 +2,5 @@
 // Copyright 2026 The Myrmec Authors
 
 export * from "./AgentSupervisor.js";
+export * from "./WorkerHostAgentSupervisor.js";
 export * from "./HeadlessAgentSupervisor.js";
