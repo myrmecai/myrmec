@@ -1937,6 +1937,16 @@ export class HostControlClient {
         this.lastAcknowledgedMessageIds.set(frame.sessionId, messageId);
       }
       await this.ack(frame);
+    } else if (frame.type === UnifiedMessageType.EXECUTION_CONTROL) {
+      // §22.4 (Task 11 fix): execution.control is a durable engine→host
+      // command with no public cursor (the outbox is private), so it is NOT
+      // in DURABLE_INBOUND_TYPES. It still requires a protocol.ack so the
+      // engine can flip the outbox row from PENDING to ACKED and stop
+      // retransmission. The cursor is not advanced for this private command.
+      if (frame.sessionId) {
+        this.lastAcknowledgedMessageIds.set(frame.sessionId, messageId);
+      }
+      await this.ack(frame);
     }
 
     if (frame.type === UnifiedMessageType.SESSION_OFFER) {

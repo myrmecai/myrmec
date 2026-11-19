@@ -12,9 +12,9 @@ import java.util.UUID;
  */
 public interface KnowledgeSourceRepository extends JpaRepository<KnowledgeSource, UUID> {
 
-    List<KnowledgeSource> findByScopeAndProjectIdIsNull(String scope);
+    List<KnowledgeSource> findByScopeAndTeamIdIsNull(String scope);
 
-    List<KnowledgeSource> findByScopeAndProjectId(String scope, UUID projectId);
+    List<KnowledgeSource> findByScopeAndTeamId(String scope, UUID teamId);
 
     List<KnowledgeSource> findByProviderVersionId(UUID providerVersionId);
 }

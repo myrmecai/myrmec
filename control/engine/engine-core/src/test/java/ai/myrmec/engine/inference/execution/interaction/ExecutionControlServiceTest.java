@@ -12,7 +12,7 @@ import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.User;
 import ai.myrmec.engine.user.UserPrincipal;
@@ -68,7 +68,7 @@ class ExecutionControlServiceTest extends IntegrationTestBase {
     @Autowired ExecutionControlRequestRepository controlRequests;
     @Autowired ExecutionCommandOutboxRepository outboxRepository;
     @Autowired WorkflowRequestRepository requestRepository;
-    @Autowired ai.myrmec.engine.project.ProjectRepository projectRepository;
+    @Autowired ai.myrmec.engine.team.TeamRepository TeamRepository;
     @Autowired WorkflowRepository workflowRepository;
     @Autowired WorkflowTaskRepository taskRepository;
     @Autowired TaskAttemptRepository attemptRepository;
@@ -77,7 +77,7 @@ class ExecutionControlServiceTest extends IntegrationTestBase {
     @Autowired UserRoleRepository userRoleRepository;
     @Autowired PlatformTransactionManager transactionManager;
 
-    private Project project;
+    private team team;
     private Workflow workflow;
     private WorkflowRequest request;
     private WorkflowTask task;
@@ -90,8 +90,8 @@ class ExecutionControlServiceTest extends IntegrationTestBase {
 
     @BeforeEach
     void seed() {
-        project = data.project().named("ctrl-proj").create();
-        workflow = workflowOf(project);
+        team = data.team().named("ctrl-proj").create();
+        workflow = workflowOf(team);
         User admin = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
 
         WorkflowRequest req = new WorkflowRequest();
@@ -125,7 +125,7 @@ class ExecutionControlServiceTest extends IntegrationTestBase {
         session = new Session();
         session.setServiceType("WORKFLOW");
         session.setRefId(request.getId());
-        session.setProjectId(project.getId());
+        session.setTeamId(team.getId());
         session.setKind("ORCHESTRATION_TASK");
         session.setStatus("ACTIVE");
         session.setAllocationState("ACTIVE");
@@ -146,8 +146,8 @@ class ExecutionControlServiceTest extends IntegrationTestBase {
 
         editorUser = seedUser("editor");
         viewerUser = seedUser("viewer");
-        grant(editorUser.getId(), UserRole.Role.EDITOR, project.getId());
-        grant(viewerUser.getId(), UserRole.Role.VIEWER, project.getId());
+        grant(editorUser.getId(), UserRole.Role.EDITOR, team.getId());
+        grant(viewerUser.getId(), UserRole.Role.VIEWER, team.getId());
     }
 
     // ------------------------------------------------------------------
@@ -271,7 +271,7 @@ class ExecutionControlServiceTest extends IntegrationTestBase {
     @DisplayName("viewer denied (403); platform-only admin denied (separation of duties)")
     void viewerAndPlatformOnlyAdminDenied() {
         var viewer = principal(viewerUser.getId(),
-                List.of("proj:" + project.getId() + ":VIEWER"));
+                List.of("proj:" + team.getId() + ":VIEWER"));
         assertThatThrownBy(() -> control(viewer, UUID.randomUUID(), "HOLD"))
                 .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
 
@@ -280,20 +280,20 @@ class ExecutionControlServiceTest extends IntegrationTestBase {
         assertThatThrownBy(() -> control(platformOnly, UUID.randomUUID(), "HOLD"))
                 .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
 
-        // Even carrying system AND project claims, the authorization is the
+        // Even carrying system AND team claims, the authorization is the
         // EDITOR claim (the evaluator resolves claims; the granted rows back
         // token minting) — the extra PLATFORM_ADMIN claim neither grants nor
         // revokes data access (§4: PLATFORM_ADMIN alone implies nothing on
         // the data axis).
         var editorWithPlatformClaim = principal(editorUser.getId(), List.of("sys:PLATFORM_ADMIN",
-                "proj:" + project.getId() + ":EDITOR"));
+                "proj:" + team.getId() + ":EDITOR"));
         ControlReceipt allowed = control(editorWithPlatformClaim, UUID.randomUUID(), "HOLD");
         assertThat(allowed.status()).isEqualTo("ACCEPTED");
 
         // A VIEWER-only claim set stays denied even with PLATFORM_ADMIN
         // alongside (no EDITOR-equivalent claim anywhere).
         var viewerWithPlatformClaim = principal(viewerUser.getId(), List.of("sys:PLATFORM_ADMIN",
-                "proj:" + project.getId() + ":VIEWER"));
+                "proj:" + team.getId() + ":VIEWER"));
         assertThatThrownBy(() -> control(viewerWithPlatformClaim, UUID.randomUUID(), "HOLD"))
                 .as("PLATFORM_ADMIN + VIEWER claims grant no EDITOR privilege")
                 .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
@@ -305,7 +305,7 @@ class ExecutionControlServiceTest extends IntegrationTestBase {
     @Test
     @DisplayName("foreign attempt (ownership-chain mismatch) → 404 before any host lookup")
     void foreignAttemptFails404() {
-        ExecutionScope bad = new ExecutionScope(project.getId(), workflow.getId(),
+        ExecutionScope bad = new ExecutionScope(team.getId(), workflow.getId(),
                 request.getId(), task.getId(),
                 UUID.randomUUID(), execution.getId());
         assertThatThrownBy(() -> service.control(bad, editor(),
@@ -510,7 +510,7 @@ class ExecutionControlServiceTest extends IntegrationTestBase {
                 service.propose(scope(), chatPayload(ExecutionControlRequestPayload.Action.CANCEL));
 
         var viewer = principal(viewerUser.getId(),
-                List.of("proj:" + project.getId() + ":VIEWER"));
+                List.of("proj:" + team.getId() + ":VIEWER"));
         assertThatThrownBy(() -> service.decide(scope(), proposal.controlRequestId(),
                 viewer, new Decision("CONFIRM")))
                 .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
@@ -626,8 +626,8 @@ class ExecutionControlServiceTest extends IntegrationTestBase {
         long cursorAfterAdmit = currentExecution().getStreamSequence();
 
         tx(() -> userRoleRepository.deleteAll(
-                userRoleRepository.findByUserIdAndProjectId(editorUser.getId(),
-                        project.getId())));
+                userRoleRepository.findByUserIdAndTeamId(editorUser.getId(),
+                        team.getId())));
 
         ProposalReceipt receipt = service.propose(scope(),
                 chatPayload(ExecutionControlRequestPayload.Action.HOLD));
@@ -703,10 +703,10 @@ class ExecutionControlServiceTest extends IntegrationTestBase {
     @DisplayName("group-scoped EDITOR grant qualifies the derived actor (ancestor cascade via grant rows)")
     void groupScopedEditorGrantQualifiesActor() {
         admittedInteraction();
-        // The project sits in the DEFAULT group tree; a GROUP-scoped EDITOR
-        // on the project's own group must satisfy the row-based recheck
-        // (ProjectAccessEvaluator's ancestor walk).
-        UUID group = projectRepository.findById(project.getId()).orElseThrow().getGroupId();
+        // The team sits in the DEFAULT group tree; a GROUP-scoped EDITOR
+        // on the team's own group must satisfy the row-based recheck
+        // (TeamAccessEvaluator's ancestor walk).
+        UUID group = TeamRepository.findById(team.getId()).orElseThrow().getGroupId();
         UserRole groupGrant = new UserRole();
         groupGrant.setUserId(editorUser.getId());
         groupGrant.setRole(UserRole.Role.EDITOR);
@@ -716,12 +716,12 @@ class ExecutionControlServiceTest extends IntegrationTestBase {
         userRoleRepository.save(groupGrant);
 
         tx(() -> userRoleRepository.deleteAll(
-                userRoleRepository.findByUserIdAndProjectId(editorUser.getId(),
-                        project.getId())));
+                userRoleRepository.findByUserIdAndTeamId(editorUser.getId(),
+                        team.getId())));
 
         ProposalReceipt receipt = service.propose(scope(),
                 chatPayload(ExecutionControlRequestPayload.Action.CONTINUE));
-        assertThat(receipt.status()).as("group grant cascades to the project")
+        assertThat(receipt.status()).as("group grant cascades to the team")
                 .isEqualTo("ACCEPTED");
     }
 
@@ -980,7 +980,7 @@ class ExecutionControlServiceTest extends IntegrationTestBase {
 
     private UserPrincipal editor() {
         return principal(editorUser.getId(),
-                List.of("proj:" + project.getId() + ":EDITOR"));
+                List.of("proj:" + team.getId() + ":EDITOR"));
     }
 
     private UserPrincipal principal(UUID userId, List<String> roles) {
@@ -1011,7 +1011,7 @@ class ExecutionControlServiceTest extends IntegrationTestBase {
     }
 
     private ExecutionScope scope() {
-        return new ExecutionScope(project.getId(), workflow.getId(), request.getId(),
+        return new ExecutionScope(team.getId(), workflow.getId(), request.getId(),
                 task.getId(), attempt.getId(), execution.getId());
     }
 
@@ -1034,19 +1034,19 @@ class ExecutionControlServiceTest extends IntegrationTestBase {
         return userRepository.save(user);
     }
 
-    private void grant(UUID userId, UserRole.Role role, UUID projectId) {
+    private void grant(UUID userId, UserRole.Role role, UUID teamId) {
         UserRole row = new UserRole();
         row.setUserId(userId);
         row.setRole(role);
-        row.setScopeType(UserRole.ScopeType.PROJECT);
-        row.setProjectId(projectId);
+        row.setScopeType(UserRole.ScopeType.TEAM);
+        row.setTeamId(teamId);
         row.setGrantedByUserId(TEST_ADMIN_ID);
         userRoleRepository.save(row);
     }
 
-    private Workflow workflowOf(Project parent) {
+    private Workflow workflowOf(team parent) {
         Workflow wf = new Workflow();
-        wf.setProject(parent);
+        wf.setTeam(parent);
         wf.setName("ctrl-wf-" + System.nanoTime());
         wf.setSteps(List.of());
         wf.setVersion(1);

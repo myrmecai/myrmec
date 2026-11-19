@@ -12,11 +12,11 @@ import java.util.UUID;
  */
 public interface KnowledgeProviderRepository extends JpaRepository<KnowledgeProvider, UUID> {
 
-    List<KnowledgeProvider> findByScopeAndProjectIdIsNull(String scope);
+    List<KnowledgeProvider> findByScopeAndTeamIdIsNull(String scope);
 
-    List<KnowledgeProvider> findByScopeAndProjectId(String scope, UUID projectId);
+    List<KnowledgeProvider> findByScopeAndTeamId(String scope, UUID teamId);
 
-    boolean existsByScopeAndProjectIdIsNullAndName(String scope, String name);
+    boolean existsByScopeAndTeamIdIsNullAndName(String scope, String name);
 
-    boolean existsByScopeAndProjectIdAndName(String scope, UUID projectId, String name);
+    boolean existsByScopeAndTeamIdAndName(String scope, UUID teamId, String name);
 }

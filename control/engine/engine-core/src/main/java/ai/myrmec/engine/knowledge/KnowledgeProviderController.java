@@ -36,11 +36,11 @@ public class KnowledgeProviderController {
 
     @GetMapping("/api/v1/admin/knowledge-providers")
     @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasRole('ORG_ADMIN')")
-    @Operation(summary = "List knowledge providers (optional project filter)")
+    @Operation(summary = "List knowledge providers (optional Team filter)")
     public ResponseEntity<List<KnowledgeProviderResponse>> list(
-            @RequestParam(required = false) UUID projectId) {
-        if (projectId != null) {
-            return ResponseEntity.ok(service.findAllProjectScoped(projectId).stream()
+            @RequestParam(required = false) UUID teamId) {
+        if (teamId != null) {
+            return ResponseEntity.ok(service.findAllTeamScoped(teamId).stream()
                     .map(KnowledgeProviderResponse::from).toList());
         }
         return ResponseEntity.ok(service.findAllOrgScoped().stream()
@@ -78,7 +78,7 @@ public class KnowledgeProviderController {
     public ResponseEntity<KnowledgeProviderResponse> create(
             @Valid @RequestBody CreateKnowledgeProviderRequest request,
             @CurrentUser UUID userId) {
-        var provider = service.create(request.scope(), request.projectId(), request.name(),
+        var provider = service.create(request.scope(), request.teamId(), request.name(),
                 request.description(), request.type(), userId,
                 userId != null ? userId.toString() : ActorType.SYSTEM);
         return ResponseEntity.status(HttpStatus.CREATED).body(KnowledgeProviderResponse.from(provider));

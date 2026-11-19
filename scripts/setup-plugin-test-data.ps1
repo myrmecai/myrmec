@@ -435,7 +435,7 @@ Write-Host "7. Creating project..." -ForegroundColor Yellow
 $projectBody = @{
     name = "Address Book Application"
     description = "Contact management application for plugin testing"
-    workspaceRepoUrl = "https://github.com/myrmec-org/test-data.git"
+    workspaceRepoUrl = "https://github.com/myrmecai/test-data.git"
     workspaceRepoBranch = "main"
 }
 

@@ -1,7 +1,7 @@
 package ai.myrmec.engine.conversation;
 
 import ai.myrmec.engine.IntegrationTestBase;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.AuthenticationProvider;
 import ai.myrmec.engine.user.User;
@@ -52,9 +52,9 @@ class ConversationServiceTest extends IntegrationTestBase {
 
     @Test
     void createConversationSeedsOwnerParticipantAndAppendsMonotonicMessages() {
-        Project project = data.project().named("conv-test").create();
+        team team = data.team().named("conv-test").create();
         Conversation conversation = conversationService.createConversation(
-                project.getId(), TEST_ADMIN_ID, "Test session");
+                team.getId(), TEST_ADMIN_ID, "Test session");
 
         // Owner participant gets seeded
         assertThat(conversation.getId()).isNotNull();
@@ -90,9 +90,9 @@ class ConversationServiceTest extends IntegrationTestBase {
 
     @Test
     void addParticipantUpsertsExistingRole() {
-        Project project = data.project().named("conv-acl").create();
+        team team = data.team().named("conv-acl").create();
         Conversation conversation = conversationService.createConversation(
-                project.getId(), TEST_ADMIN_ID, "ACL test");
+                team.getId(), TEST_ADMIN_ID, "ACL test");
 
         UUID otherUser = seedUser(UUID.randomUUID().toString().substring(0, 8));
         ConversationParticipant first = conversationService.addParticipant(

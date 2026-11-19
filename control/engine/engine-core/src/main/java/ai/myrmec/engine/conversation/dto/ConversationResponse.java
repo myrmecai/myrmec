@@ -7,7 +7,7 @@ import java.util.UUID;
 
 public record ConversationResponse(
         UUID id,
-        UUID projectId,
+        UUID teamId,
         UUID agentId,
         UUID agentHostId,
         UUID assistantId,
@@ -28,7 +28,7 @@ public record ConversationResponse(
     public static ConversationResponse from(Conversation c) {
         return new ConversationResponse(
                 c.getId(),
-                c.getProjectId(),
+                c.getTeamId(),
                 c.getAgentId(),
                 c.getAgentHostId(),
                 c.getAssistantId(),

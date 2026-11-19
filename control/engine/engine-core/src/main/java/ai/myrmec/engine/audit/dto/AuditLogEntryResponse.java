@@ -54,7 +54,7 @@ public record AuditLogEntryResponse(
                 e.getEntityType(),
                 e.getEntityId() != null ? e.getEntityId().toString() : null,
                 e.getScopeType(),
-                e.getProjectId() != null ? e.getProjectId().toString() : null,
+                e.getTeamId() != null ? e.getTeamId().toString() : null,
                 null,  // ipAddress — not stored
                 null,  // userAgent — not stored
                 null,  // requestId — not stored

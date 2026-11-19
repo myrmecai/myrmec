@@ -12,11 +12,11 @@ import java.util.UUID;
  */
 public interface InstructionAssetRepository extends JpaRepository<InstructionAsset, UUID> {
 
-    List<InstructionAsset> findByScopeAndProjectIdIsNull(String scope);
+    List<InstructionAsset> findByScopeAndTeamIdIsNull(String scope);
 
-    List<InstructionAsset> findByScopeAndProjectId(String scope, UUID projectId);
+    List<InstructionAsset> findByScopeAndTeamId(String scope, UUID teamId);
 
-    boolean existsByScopeAndProjectIdIsNullAndName(String scope, String name);
+    boolean existsByScopeAndTeamIdIsNullAndName(String scope, String name);
 
-    boolean existsByScopeAndProjectIdAndName(String scope, UUID projectId, String name);
+    boolean existsByScopeAndTeamIdAndName(String scope, UUID teamId, String name);
 }

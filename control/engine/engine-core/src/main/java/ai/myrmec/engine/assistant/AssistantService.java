@@ -41,17 +41,17 @@ public class AssistantService {
      * with the chosen brain. The creator is granted OWNER.
      */
     @Transactional
-    public Assistant createAssistant(UUID projectId, String name, String description,
+    public Assistant createAssistant(UUID teamId, String name, String description,
                                      UUID agentProfileId, UUID createdBy) {
         String trimmedName = name == null ? "" : name.trim();
         if (trimmedName.isEmpty()) {
             throw BadRequestException.requiredField("name");
         }
-        requireUniqueName(projectId, trimmedName, null);
+        requireUniqueName(teamId, trimmedName, null);
         requireActiveProfile(agentProfileId);
 
         Assistant assistant = new Assistant();
-        assistant.setProjectId(projectId);
+        assistant.setTeamId(teamId);
         assistant.setName(trimmedName);
         assistant.setDescription(description);
         assistant.setCreatedBy(createdBy);
@@ -63,7 +63,7 @@ public class AssistantService {
             grantOwner(saved.getId(), createdBy);
         }
 
-        log.info("Created assistant {} in project {}", saved.getId(), projectId);
+        log.info("Created assistant {} in Team {}", saved.getId(), teamId);
         return saved;
     }
 
@@ -73,8 +73,8 @@ public class AssistantService {
     }
 
     @Transactional(readOnly = true)
-    public List<Assistant> listByProject(UUID projectId) {
-        return assistantRepository.findByProjectIdOrderByNameAsc(projectId);
+    public List<Assistant> listByTeam(UUID teamId) {
+        return assistantRepository.findByTeamIdOrderByNameAsc(teamId);
     }
 
     /** Zone-1 parent-row edit (§5.3): name/description in place, no version bump. */
@@ -87,7 +87,7 @@ public class AssistantService {
                 throw BadRequestException.requiredField("name");
             }
             if (!Objects.equals(trimmedName, assistant.getName())) {
-                requireUniqueName(assistant.getProjectId(), trimmedName, assistantId);
+                requireUniqueName(assistant.getTeamId(), trimmedName, assistantId);
             }
             assistant.setName(trimmedName);
         }
@@ -122,7 +122,7 @@ public class AssistantService {
         if (assistant.getArchivedAt() != null) {
             // Re-assert name uniqueness — another assistant may have taken the
             // name while this one was archived.
-            requireUniqueName(assistant.getProjectId(), assistant.getName(), assistantId);
+            requireUniqueName(assistant.getTeamId(), assistant.getName(), assistantId);
             assistant.setArchivedAt(null);
             assistant = assistantRepository.save(assistant);
         }
@@ -182,8 +182,8 @@ public class AssistantService {
         grantRepository.save(grant);
     }
 
-    private void requireUniqueName(UUID projectId, String name, UUID excludeAssistantId) {
-        assistantRepository.findByProjectIdAndNameIgnoreCaseAndArchivedAtIsNull(projectId, name)
+    private void requireUniqueName(UUID teamId, String name, UUID excludeAssistantId) {
+        assistantRepository.findByTeamIdAndNameIgnoreCaseAndArchivedAtIsNull(teamId, name)
                 .filter(other -> !Objects.equals(other.getId(), excludeAssistantId))
                 .ifPresent(other -> {
                     throw new DuplicateResourceException("Assistant", "name", name);

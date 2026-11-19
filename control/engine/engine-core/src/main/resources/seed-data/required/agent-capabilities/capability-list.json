@@ -1,0 +1,230 @@
+[
+  {
+    "capabilityKey": "fs.workspace.read",
+    "displayName": "Read Workspace Files",
+    "description": "Grants permission to read code files and explore directory structures within the assigned session workspace.",
+    "active": true
+  },
+  {
+    "capabilityKey": "fs.workspace.write",
+    "displayName": "Write & Modify Files",
+    "description": "Grants permission to create, edit, and update code files within allowed workspace paths.",
+    "active": true
+  },
+  {
+    "capabilityKey": "fs.workspace.delete",
+    "displayName": "Delete Files",
+    "description": "Grants permission to remove files or empty directories inside the workspace.",
+    "active": true
+  },
+  {
+    "capabilityKey": "vcs.worktree.manage",
+    "displayName": "Manage Git Worktrees",
+    "description": "Permission to initialize, switch, and clean up isolated Git worktrees for agent tasks.",
+    "active": true
+  },
+  {
+    "capabilityKey": "vcs.diff.read",
+    "displayName": "Inspect Git Diffs",
+    "description": "Permission to generate and read unified diffs between the working tree and base branches.",
+    "active": true
+  },
+  {
+    "capabilityKey": "vcs.commit",
+    "displayName": "Local Git Commit",
+    "description": "Permission to stage changes (git add) and create local commits within the worktree branch.",
+    "active": true
+  },
+  {
+    "capabilityKey": "exec.sandbox.shell",
+    "displayName": "Sandbox Shell Execution",
+    "description": "Permission to execute arbitrary shell commands inside the secure, isolated container sandbox.",
+    "active": true
+  },
+  {
+    "capabilityKey": "exec.test.run",
+    "displayName": "Run Test Suites",
+    "description": "Scoped permission to trigger unit tests and test runners (e.g., npm test, pytest, mvn test).",
+    "active": true
+  },
+  {
+    "capabilityKey": "exec.build.compile",
+    "displayName": "Build & Compile",
+    "description": "Scoped permission to run project builds and compilation tools.",
+    "active": true
+  },
+  {
+    "capabilityKey": "orch.subagent.delegate",
+    "displayName": "Delegate to Sub-Agents",
+    "description": "Permission for the primary orchestrator model to invoke and coordinate helper sub-agents.",
+    "active": true
+  },
+  {
+    "capabilityKey": "mcp.github.read",
+    "displayName": "GitHub Read Integration",
+    "description": "Permission to query repositories, issues, PRs, and commit history via GitHub MCP servers.",
+    "active": true
+  },
+  {
+    "capabilityKey": "mcp.jira.read",
+    "displayName": "Jira Read Integration",
+    "description": "Permission to search and read Jira tickets, epics, and requirements.",
+    "active": true
+  },
+  {
+    "capabilityKey": "mcp.database.readonly",
+    "displayName": "Read-Only Database Query",
+    "description": "Permission to execute read-only SQL queries against registered internal test/dev databases.",
+    "active": true
+  },
+  {
+    "capabilityKey": "code.analyze.lint",
+    "displayName": "Run Linters & Formatters",
+    "description": "Permission to run static code analysis tools (e.g., ESLint, Checkstyle, SonarQube CLI, Prettier).",
+    "active": true
+  },
+  {
+    "capabilityKey": "code.analyze.security",
+    "displayName": "Security & Vulnerability Scanning",
+    "description": "Permission to execute security scanners (e.g., Snyk, Trivy, OWASP Dependency-Check) on the workspace.",
+    "active": true
+  },
+  {
+    "capabilityKey": "code.dependencies.read",
+    "displayName": "Inspect Dependencies",
+    "description": "Permission to read dependency manifests (package.json, pom.xml, go.mod, requirements.txt).",
+    "active": true
+  },
+  {
+    "capabilityKey": "code.dependencies.install",
+    "displayName": "Install & Update Packages",
+    "description": "Permission to execute package manager installations (e.g., npm install, mvn dependency:resolve, pip install).",
+    "active": true
+  },
+  {
+    "capabilityKey": "runtime.node.execute",
+    "displayName": "Node.js Runtime Execution",
+    "description": "Permission to execute Node.js scripts, build tools (Webpack, Vite), or TypeScript compilation (tsc).",
+    "active": true
+  },
+  {
+    "capabilityKey": "runtime.java.execute",
+    "displayName": "Java & Maven/Gradle Execution",
+    "description": "Permission to run Java compilation, Maven goals (mvn clean compile), or Gradle tasks.",
+    "active": true
+  },
+  {
+    "capabilityKey": "runtime.python.execute",
+    "displayName": "Python Runtime Execution",
+    "description": "Permission to execute Python scripts, virtual environments, or dependency management (poetry, pipenv).",
+    "active": true
+  },
+  {
+    "capabilityKey": "runtime.docker.build",
+    "displayName": "Docker Build & Inspect",
+    "description": "Permission to build container images (docker build) or inspect Dockerfiles and Compose configs.",
+    "active": true
+  },
+  {
+    "capabilityKey": "db.schema.migrate",
+    "displayName": "Database Migrations",
+    "description": "Permission to run database migration tools (e.g., Liquibase, Flyway, Prisma) against dev/test databases.",
+    "active": true
+  },
+  {
+    "capabilityKey": "code.design.ast_analyze",
+    "displayName": "AST & Structure Analysis",
+    "description": "Permission to parse code Abstract Syntax Trees (ASTs) to analyze class hierarchies, method signatures, and symbol references across files.",
+    "active": true
+  },
+  {
+    "capabilityKey": "code.design.api_scaffold",
+    "displayName": "API & Schema Generation",
+    "description": "Permission to generate or update OpenAPI specifications, GraphQL schemas, gRPC protos, database entities, and DTO structures.",
+    "active": true
+  },
+  {
+    "capabilityKey": "code.architecture.diagram",
+    "displayName": "Architecture Modeling & Diagrams",
+    "description": "Permission to generate C4 architectural models, PlantUML diagrams, or Architecture Decision Record (ADR) documentation.",
+    "active": true
+  },
+  {
+    "capabilityKey": "code.architecture.compliance",
+    "displayName": "Architectural Compliance Check",
+    "description": "Permission to scan codebases against defined structural rules (e.g., preventing domain layers from depending on infrastructure layers, detecting cyclic dependencies).",
+    "active": true
+  },
+  {
+    "capabilityKey": "code.refactor.structural",
+    "displayName": "Multi-File Structural Refactoring",
+    "description": "Permission to execute complex, multi-file refactoring operations (e.g., interface extraction, package reorganization, global renaming).",
+    "active": true
+  },
+  {
+    "capabilityKey": "code.test.generate",
+    "displayName": "Test Suite Generation",
+    "description": "Permission to automatically generate comprehensive unit tests (JUnit, Jest, PyTest), mock objects, and test fixtures for implemented features.",
+    "active": true
+  },
+  {
+    "capabilityKey": "cs.ticket.manage",
+    "displayName": "CRM & Ticket Management",
+    "description": "Permission to read, update, tag, and draft replies in customer ticketing and CRM systems (e.g., Zendesk, Salesforce Service Cloud).",
+    "active": true
+  },
+  {
+    "capabilityKey": "cs.sentiment.analyze",
+    "displayName": "Customer Sentiment Analysis",
+    "description": "Permission to evaluate customer messages for tone, urgency, churn risk, and escalation triggers.",
+    "active": true
+  },
+  {
+    "capabilityKey": "cs.kb.search",
+    "displayName": "Knowledge Base & FAQ Search",
+    "description": "Permission to query internal documentation, support articles, and FAQ repositories for approved answers.",
+    "active": true
+  },
+  {
+    "capabilityKey": "ops.incident.triage",
+    "displayName": "Incident Triage & Log Analysis",
+    "description": "Permission to inspect monitoring alerts, error logs, and metrics (e.g., Datadog, PagerDuty) to diagnose system outages.",
+    "active": true
+  },
+  {
+    "capabilityKey": "ops.runbook.execute",
+    "displayName": "Runbook Automation",
+    "description": "Permission to trigger pre-approved operational remediation scripts or diagnostic commands.",
+    "active": true
+  },
+  {
+    "capabilityKey": "ops.access.provision",
+    "displayName": "Access & Identity Management",
+    "description": "Permission to review or initiate user access requests, permission audits, or SSO group lookups.",
+    "active": true
+  },
+  {
+    "capabilityKey": "data.bi.query_readonly",
+    "displayName": "Business Intelligence Query",
+    "description": "Permission to execute read-only analytics queries against data warehouses (e.g., Snowflake, BigQuery, PostgreSQL analytics DBs).",
+    "active": true
+  },
+  {
+    "capabilityKey": "data.report.generate",
+    "displayName": "Executive Report Generation",
+    "description": "Permission to aggregate metrics, summarize KPI trends, and compile structured business briefing documents.",
+    "active": true
+  },
+  {
+    "capabilityKey": "compliance.doc.review",
+    "displayName": "Document & Policy Review",
+    "description": "Permission to scan contracts, PRDs, or architecture documents against regulatory standards (e.g., GDPR, ISO 27001, internal policies).",
+    "active": true
+  },
+  {
+    "capabilityKey": "hr.policy.lookup",
+    "displayName": "HR Policy & Benefits Lookup",
+    "description": "Permission to query internal employee handbooks and benefits portals to answer HR inquiries accurately.",
+    "active": true
+  }
+]

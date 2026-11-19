@@ -22,11 +22,11 @@ import ai.myrmec.engine.governance.GovernanceProfileService;
 import ai.myrmec.engine.instruction.InstructionAsset;
 import ai.myrmec.engine.instruction.InstructionAssetService;
 import ai.myrmec.engine.instruction.InstructionAssetVersion;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectInstructionBinding;
-import ai.myrmec.engine.project.ProjectInstructionBindingRepository;
-import ai.myrmec.engine.project.ProjectService;
-import ai.myrmec.engine.project.dto.CreateProjectRequest;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamInstructionBinding;
+import ai.myrmec.engine.team.ProjectInstructionBindingRepository;
+import ai.myrmec.engine.team.TeamService;
+import ai.myrmec.engine.team.dto.CreateTeamRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -48,11 +48,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <pre>{@code
  *   @Autowired TestDataBuilder data;
  *
- *   Project project = data.project().named("Reservoir").create();
+ *   team team = data.team().named("Reservoir").create();
  *   AgentProfile profile = data.agentProfile().named("solver").create();
  *   AgentHostCreationResult agent = data.agent()
  *           .named("agent-1")
- *           .inProject(project)
+ *           .inTeam(team)
  *           .create();
  * }</pre>
  *
@@ -71,7 +71,7 @@ public class TestDataBuilder {
 
     private static final AtomicInteger SEQUENCE = new AtomicInteger();
 
-    private final ProjectService projectService;
+    private final TeamService TeamService;
     private final AgentProfileService agentProfileService;
     private final AgentHostService agentService;
     private final KnowledgeProviderService knowledgeProviderService;
@@ -85,7 +85,7 @@ public class TestDataBuilder {
 
     @Autowired
     public TestDataBuilder(
-            ProjectService projectService,
+            TeamService TeamService,
             AgentProfileService agentProfileService,
             AgentHostService agentService,
             KnowledgeProviderService knowledgeProviderService,
@@ -96,7 +96,7 @@ public class TestDataBuilder {
             ConversationService conversationService,
             ConversationRepository conversationRepository,
             GovernanceProfileService governanceProfileService) {
-        this.projectService = projectService;
+        this.TeamService = TeamService;
         this.agentProfileService = agentProfileService;
         this.agentService = agentService;
         this.knowledgeProviderService = knowledgeProviderService;
@@ -109,8 +109,8 @@ public class TestDataBuilder {
         this.governanceProfileService = governanceProfileService;
     }
 
-    /** Start a new project builder. */
-    public ProjectBuilder project() {
+    /** Start a new Team Builder. */
+    public ProjectBuilder team() {
         return new ProjectBuilder();
     }
 
@@ -171,31 +171,31 @@ public class TestDataBuilder {
     }
 
     // ====================================================================
-    // Project builder
+    // Team Builder
     // ====================================================================
 
     /**
-     * Builder for {@link Project} fixtures. Delegates to
-     * {@link ProjectService#create(CreateProjectRequest)} so the fixture
+     * Builder for {@link team} fixtures. Delegates to
+     * {@link TeamService#create(CreateTeamRequest)} so the fixture
      * exercises the same validation + group-resolution code as the REST
      * endpoint.
      */
     public final class ProjectBuilder {
-        private String name = "test-project";
-        private String description = "Test project fixture";
+        private String name = "test-team";
+        private String description = "Test team fixture";
         private boolean autoSuffix = true;
         private UUID groupId;
         private String workspaceRepoUrl;
         private String workspaceRepoBranch;
 
-        /** Set the project name verbatim (no monotonic suffix). */
+        /** Set the team name verbatim (no monotonic suffix). */
         public ProjectBuilder uniquelyNamed(String exact) {
             this.name = exact;
             this.autoSuffix = false;
             return this;
         }
 
-        /** Set the project name; a monotonic suffix is appended. */
+        /** Set the team name; a monotonic suffix is appended. */
         public ProjectBuilder named(String base) {
             this.name = base;
             this.autoSuffix = true;
@@ -218,14 +218,14 @@ public class TestDataBuilder {
             return this;
         }
 
-        public Project create() {
-            CreateProjectRequest request = new CreateProjectRequest();
+        public team create() {
+            CreateTeamRequest request = new CreateTeamRequest();
             request.setName(autoSuffix ? unique(name) : name);
             request.setDescription(description);
             request.setGroupId(groupId);
             request.setWorkspaceRepoUrl(workspaceRepoUrl);
             request.setWorkspaceRepoBranch(workspaceRepoBranch);
-            return projectService.create(request);
+            return TeamService.create(request);
         }
     }
 
@@ -315,7 +315,7 @@ public class TestDataBuilder {
         private String name = "test-agent";
         private boolean autoSuffix = true;
         private String description = "Test agent";
-        private UUID projectId;
+        private UUID teamId;
         private Integer maxAgents = 1;
         private ModelAccessMode modelAccessMode;
         private AgentHostType hostType;
@@ -337,13 +337,13 @@ public class TestDataBuilder {
             return this;
         }
 
-        public AgentBuilder inProject(Project project) {
-            this.projectId = project.getId();
+        public AgentBuilder inTeam(Team team) {
+            this.teamId = team.getId();
             return this;
         }
 
-        public AgentBuilder inProject(UUID projectId) {
-            this.projectId = projectId;
+        public AgentBuilder inTeam(UUID teamId) {
+            this.teamId = teamId;
             return this;
         }
 
@@ -367,7 +367,7 @@ public class TestDataBuilder {
             AgentHostCreationResult result = agentService.createAgent(
                     effectiveName,
                     description,
-                    projectId,
+                    teamId,
                     maxAgents,
                     modelAccessMode,
                     hostType
@@ -397,7 +397,7 @@ public class TestDataBuilder {
         private String description = "Test knowledge provider";
         private String type = "MANAGED";
         private String scope = "ORGANIZATION";
-        private UUID projectId;
+        private UUID teamId;
         private UUID actorId;
         private String actorName = "Test Admin";
         private boolean publish = false;
@@ -425,19 +425,19 @@ public class TestDataBuilder {
             return this;
         }
 
-        public KnowledgeProviderBuilder inProject(UUID projectId) {
-            this.projectId = projectId;
-            this.scope = "PROJECT";
+        public KnowledgeProviderBuilder inTeam(UUID teamId) {
+            this.teamId = teamId;
+            this.scope = "TEAM";
             return this;
         }
 
-        public KnowledgeProviderBuilder inProject(Project project) {
-            return inProject(project.getId());
+        public KnowledgeProviderBuilder inTeam(Team team) {
+            return inTeam(team.getId());
         }
 
         public KnowledgeProviderBuilder orgScoped() {
             this.scope = "ORGANIZATION";
-            this.projectId = null;
+            this.teamId = null;
             return this;
         }
 
@@ -463,7 +463,7 @@ public class TestDataBuilder {
             UUID effectiveActor = actorId != null ? actorId : null;
             String effectiveName = autoSuffix ? unique(name) : name;
             KnowledgeProvider provider = knowledgeProviderService.create(
-                    scope, projectId, effectiveName, description, type,
+                    scope, teamId, effectiveName, description, type,
                     effectiveActor, actorName);
 
             if (publish) {
@@ -500,7 +500,7 @@ public class TestDataBuilder {
         private String description = "Test knowledge source";
         private UUID providerVersionId;
         private String scope = "ORGANIZATION";
-        private UUID projectId;
+        private UUID teamId;
         private String availability = "GLOBAL";
         private Integer priority = 0;
         private Map<String, Object> config;
@@ -533,19 +533,19 @@ public class TestDataBuilder {
             return forVersion(version.getId());
         }
 
-        public KnowledgeSourceBuilder inProject(UUID projectId) {
-            this.projectId = projectId;
-            this.scope = "PROJECT";
+        public KnowledgeSourceBuilder inTeam(UUID teamId) {
+            this.teamId = teamId;
+            this.scope = "TEAM";
             return this;
         }
 
-        public KnowledgeSourceBuilder inProject(Project project) {
-            return inProject(project.getId());
+        public KnowledgeSourceBuilder inTeam(Team team) {
+            return inTeam(team.getId());
         }
 
         public KnowledgeSourceBuilder orgScoped() {
             this.scope = "ORGANIZATION";
-            this.projectId = null;
+            this.teamId = null;
             return this;
         }
 
@@ -578,7 +578,7 @@ public class TestDataBuilder {
             }
             String effectiveName = autoSuffix ? unique(name) : name;
             return knowledgeSourceService.create(
-                    scope, projectId, effectiveName, description,
+                    scope, teamId, effectiveName, description,
                     providerVersionId, config, availability, priority,
                     actorId, actorName);
         }
@@ -660,7 +660,7 @@ public class TestDataBuilder {
         private String name = "test-instruction";
         private boolean autoSuffix = true;
         private String scope = "ORGANIZATION";
-        private UUID projectId;
+        private UUID teamId;
         private String description = "Test instruction";
         private String category = "GENERAL";
         private String availability = "REQUIRED";
@@ -683,9 +683,9 @@ public class TestDataBuilder {
             return this;
         }
 
-        public InstructionAssetBuilder inProject(UUID projectId) {
-            this.projectId = projectId;
-            this.scope = "PROJECT";
+        public InstructionAssetBuilder inTeam(UUID teamId) {
+            this.teamId = teamId;
+            this.scope = "TEAM";
             return this;
         }
 
@@ -712,7 +712,7 @@ public class TestDataBuilder {
         public InstructionAsset create() {
             String effectiveName = autoSuffix ? unique(name) : name;
             InstructionAsset asset = instructionAssetService.create(
-                    scope, projectId, effectiveName, description, category, null, "Test Admin");
+                    scope, teamId, effectiveName, description, category, null, "Test Admin");
 
             // Create draft with INLINE content and set availability
             instructionAssetService.createDraft(
@@ -767,17 +767,17 @@ public class TestDataBuilder {
     // ====================================================================
 
     public final class ConversationBuilder {
-        private UUID projectId;
+        private UUID teamId;
         private UUID createdBy;
         private String title = "Test conversation";
 
-        public ConversationBuilder inProject(UUID projectId) {
-            this.projectId = projectId;
+        public ConversationBuilder inTeam(UUID teamId) {
+            this.teamId = teamId;
             return this;
         }
 
-        public ConversationBuilder inProject(Project project) {
-            return inProject(project.getId());
+        public ConversationBuilder inTeam(Team team) {
+            return inTeam(team.getId());
         }
 
         public ConversationBuilder createdBy(UUID userId) {
@@ -791,11 +791,11 @@ public class TestDataBuilder {
         }
 
         public Conversation create() {
-            if (projectId == null) {
+            if (teamId == null) {
                 throw new IllegalStateException(
-                        "ConversationBuilder requires a project — call inProject() before create()");
+                        "ConversationBuilder requires a team — call inTeam() before create()");
             }
-            return conversationService.createConversation(projectId, createdBy, title);
+            return conversationService.createConversation(teamId, createdBy, title);
         }
     }
 }

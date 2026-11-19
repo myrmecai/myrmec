@@ -7,7 +7,7 @@ import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionAllocator;
 import ai.myrmec.engine.inference.execution.SessionExecution;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.user.User;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,7 +49,7 @@ class WorkflowDispatchUnifiedProtocolTest extends WorkflowDispatchSupport {
     @Autowired private WorkflowTaskRepository taskRepository;
     @Autowired private TaskAttemptRepository attemptRepository;
 
-    private Project project;
+    private team team;
     private AgentProfile profile;
     private User admin;
 
@@ -65,7 +65,7 @@ class WorkflowDispatchUnifiedProtocolTest extends WorkflowDispatchSupport {
         String originUrl = origin.toAbsolutePath().toString().replace('\\', '/');
         git(seed, "push", originUrl, "main");
 
-        project = data.project().named("unified").withRepo(originUrl, "main").create();
+        team = data.team().named("unified").withRepo(originUrl, "main").create();
         profile = data.agentProfile().named("unified-profile").create();
         admin = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
     }
@@ -73,10 +73,10 @@ class WorkflowDispatchUnifiedProtocolTest extends WorkflowDispatchSupport {
     @Test
     @DisplayName("an ORCHESTRATOR task dispatches via session.offer → session.open(assignment) → execution.start; the legacy relay send never runs")
     void orchestrationTaskRidesTheUnifiedWire() throws Exception {
-        SocketHost host = openHost("unified-host", profile, project, 4);
+        SocketHost host = openHost("unified-host", profile, team, 4);
         Workflow wf = orchestratorWorkflow("unified");
         WorkflowRequest request = runningRequest(wf, "unified");
-        runService.pinRun(request.getId(), wf.getId(), project.getId(), profile.getId());
+        runService.pinRun(request.getId(), wf.getId(), team.getId(), profile.getId());
         WorkflowTask task = pendingTask(request, "build");
 
         dispatcher.dispatchPendingTasks();
@@ -174,7 +174,7 @@ class WorkflowDispatchUnifiedProtocolTest extends WorkflowDispatchSupport {
     @Test
     @DisplayName("an ordinary INFERENCE task dispatches via session.offer → session.open → execution.start with the §8.1 input block; no assignment, no relay")
     void ordinaryTaskRidesTheUnifiedWire() throws Exception {
-        SocketHost host = openHost("unified-plain-host", profile, project, 4);
+        SocketHost host = openHost("unified-plain-host", profile, team, 4);
         Workflow wf = plainInferenceWorkflow("unified-plain");
         WorkflowRequest request = runningRequest(wf, "unified-plain");
         WorkflowTask task = pendingTask(request, "analyze");
@@ -213,7 +213,7 @@ class WorkflowDispatchUnifiedProtocolTest extends WorkflowDispatchSupport {
     @Test
     @DisplayName("a workflow terminal returns the slot: the WORKFLOW session closes and capacity is available again")
     void workflowTerminalClosesTheSession() throws Exception {
-        SocketHost host = openHost("unified-term-host", profile, project, 1);
+        SocketHost host = openHost("unified-term-host", profile, team, 1);
         Workflow wf = plainInferenceWorkflow("unified-term");
         WorkflowRequest request = runningRequest(wf, "unified-term");
         WorkflowTask task = pendingTask(request, "analyze");
@@ -253,7 +253,7 @@ class WorkflowDispatchUnifiedProtocolTest extends WorkflowDispatchSupport {
                 .isEqualTo(SessionAllocator.ALLOC_STATE_CLOSED);
         assertThat(sessionAllocator.offer(TaskDispatcherService.SESSION_KIND_TASK,
                 UUID.randomUUID(), TaskDispatcherService.SERVICE_TYPE_WORKFLOW,
-                project.getId(), host.host().getId()))
+                team.getId(), host.host().getId()))
                 .as("the released slot accepts a new reservation")
                 .isPresent();
     }
@@ -261,10 +261,10 @@ class WorkflowDispatchUnifiedProtocolTest extends WorkflowDispatchSupport {
     @Test
     @DisplayName("execution.accept with a dispatchId flips the OrchestrationDispatch row to ACCEPTED (design section 12 touchpoint 1)")
     void dispatchRowFlipsToAcceptedOnExecutionAccept() throws Exception {
-        SocketHost host = openHost("unified-flip-host", profile, project, 4);
+        SocketHost host = openHost("unified-flip-host", profile, team, 4);
         Workflow wf = orchestratorWorkflow("unified-flip");
         WorkflowRequest request = runningRequest(wf, "unified-flip");
-        runService.pinRun(request.getId(), wf.getId(), project.getId(), profile.getId());
+        runService.pinRun(request.getId(), wf.getId(), team.getId(), profile.getId());
         WorkflowTask task = pendingTask(request, "build");
 
         dispatcher.dispatchPendingTasks();
@@ -341,7 +341,7 @@ class WorkflowDispatchUnifiedProtocolTest extends WorkflowDispatchSupport {
         step.put("pauseMode", "NONE");
 
         Workflow wf = new Workflow();
-        wf.setProject(project);
+        wf.setTeam(team);
         wf.setName(tag + "-wf-" + System.nanoTime());
         wf.setSteps(List.of(step));
         wf.setVersion(1);
@@ -382,7 +382,7 @@ class WorkflowDispatchUnifiedProtocolTest extends WorkflowDispatchSupport {
                 "maxRetries", 1, "initialBackoffSeconds", 2, "maxBackoffSeconds", 30));
 
         Workflow wf = new Workflow();
-        wf.setProject(project);
+        wf.setTeam(team);
         wf.setName(tag + "-wf-" + System.nanoTime());
         wf.setSteps(List.of(step));
         wf.setVersion(1);

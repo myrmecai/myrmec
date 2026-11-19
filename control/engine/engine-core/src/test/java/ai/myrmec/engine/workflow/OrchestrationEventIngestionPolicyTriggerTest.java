@@ -7,7 +7,7 @@ import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionPolicyService;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.User;
 import org.junit.jupiter.api.BeforeEach;
@@ -68,12 +68,12 @@ class OrchestrationEventIngestionPolicyTriggerTest extends IntegrationTestBase {
                 eventRepository, attemptRepository, policyService,
                 sessionExecutionRepository);
 
-        Project project = data.project().named("ingest-trigger").withRepo("https://x.git", "main").create();
+        team team = data.team().named("ingest-trigger").withRepo("https://x.git", "main").create();
         AgentProfile profile = data.agentProfile().named("ingest-profile").create();
         User admin = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
 
         Workflow wf = new Workflow();
-        wf.setProject(project);
+        wf.setTeam(team);
         wf.setName("ingest-wf-" + System.nanoTime());
         wf.setSteps(List.of());
         wf.setVersion(1);
@@ -106,7 +106,7 @@ class OrchestrationEventIngestionPolicyTriggerTest extends IntegrationTestBase {
         // The execution row bound to the dispatch (dispatch == attempt UUID)
         // - the seam the policy producer is keyed on.
         SessionExecution execution = new SessionExecution();
-        execution.setSessionId(sessionOfWorkflow(project, request).getId());
+        execution.setSessionId(sessionOfWorkflow(team, request).getId());
         execution.setServiceType("WORKFLOW");
         execution.setRequestId(task.getId().toString());
         execution.setDispatchId(attempt.getId());
@@ -116,11 +116,11 @@ class OrchestrationEventIngestionPolicyTriggerTest extends IntegrationTestBase {
     }
 
     /** A minimal WORKFLOW session row (allocation state irrelevant here). */
-    private Session sessionOfWorkflow(Project project, WorkflowRequest request) {
+    private Session sessionOfWorkflow(team team, WorkflowRequest request) {
         Session session = new Session();
         session.setServiceType("WORKFLOW");
         session.setRefId(request.getId());
-        session.setProjectId(project.getId());
+        session.setTeamId(team.getId());
         session.setStatus("ACTIVE");
         session.setAllocationState(ai.myrmec.engine.inference.SessionAllocator.ALLOC_STATE_ACTIVE);
         return sessionRepository.save(session);

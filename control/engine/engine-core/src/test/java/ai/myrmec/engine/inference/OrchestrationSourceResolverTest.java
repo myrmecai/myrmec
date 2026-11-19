@@ -3,7 +3,7 @@
 package ai.myrmec.engine.inference;
 
 import ai.myrmec.engine.IntegrationTestBase;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.User;
 import ai.myrmec.engine.workflow.Workflow;
@@ -46,7 +46,7 @@ class OrchestrationSourceResolverTest extends IntegrationTestBase {
     @Autowired
     private WorkflowRequestRepository requestRepository;
 
-    private Project project;
+    private team team;
     private User admin;
     private String originUrl;
 
@@ -63,7 +63,7 @@ class OrchestrationSourceResolverTest extends IntegrationTestBase {
         git(seed, "push", originUrl, "main");
         seed.toFile().deleteOnExit();
 
-        project = data.project().named("resolver").withRepo(originUrl, "main").create();
+        team = data.team().named("resolver").withRepo(originUrl, "main").create();
         admin = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
     }
 
@@ -140,7 +140,7 @@ class OrchestrationSourceResolverTest extends IntegrationTestBase {
 
     private Workflow workflowWithArtifactsRepo(String tag) {
         Workflow wf = new Workflow();
-        wf.setProject(project);
+        wf.setTeam(team);
         wf.setName(tag + "-wf-" + System.nanoTime());
         wf.setSteps(List.of());
         wf.setVersion(1);

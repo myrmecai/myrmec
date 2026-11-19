@@ -23,8 +23,8 @@ import java.util.UUID;
  * <p>Authenticated by Keycloak via the {@code client-credentials} grant: Myrmec
  * stores no secret, only {@link #keycloakClientId} (the token's client/azp
  * claim), which the external filter chain resolves to this row at request time.
- * A service account is scoped to exactly one {@code project}; the assistants it
- * may open all live in that project and are further gated by
+ * A service account is scoped to exactly one {@code Team}; the assistants it
+ * may open all live in that Team and are further gated by
  * {@code assistant_grants(USE)} ∩ {@code EXTERNAL_API ∈ usable_via}.</p>
  */
 @Entity
@@ -39,8 +39,8 @@ public class ServiceAccount {
     @Column(name = "id", nullable = false, updatable = false)
     private UUID id;
 
-    @Column(name = "project_id", nullable = false, updatable = false)
-    private UUID projectId;
+    @Column(name = "team_id", nullable = false, updatable = false)
+    private UUID teamId;
 
     @Column(name = "name", nullable = false, length = 120)
     private String name;

@@ -60,11 +60,11 @@ class InteractionPersistenceTest extends IntegrationTestBase {
 
     /** A session + a RUNNING execution row (the admission lock owner). */
     private SessionExecution runningExecution() {
-        var project = data.project().named("ip-proj").create();
+        var team = data.team().named("ip-proj").create();
         var session = new ai.myrmec.engine.inference.Session();
         session.setServiceType("CONVERSATION");
         session.setRefId(UUID.randomUUID());
-        session.setProjectId(project.getId());
+        session.setTeamId(team.getId());
         session.setStatus("ACTIVE");
         session.setAllocationState("ACTIVE");
         session = sessionRepository.saveAndFlush(session);

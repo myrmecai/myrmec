@@ -26,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Public agent-profile roster ({@code GET /api/v1/agent-profiles}).
  *
- * <p>Authoring surfaces (workflow editor) load this list as project
+ * <p>Authoring surfaces (workflow editor) load this list as team
  * members — the {@code SecurityConfig} admin ACL must not gate it, the
  * projection must carry identity + version pointers but never the
  * behaviour contract (system prompt, tool codes) or draft state, and
@@ -42,7 +42,7 @@ class AgentProfileControllerTest extends IntegrationTestBase {
     private AgentProfileService profileService;
 
     @Test
-    @DisplayName("project-scoped user lists active profiles via the public endpoint")
+    @DisplayName("team-scoped user lists active profiles via the public endpoint")
     void projectUserCanListPublicProfiles() {
         // A profile whose published version carries the behaviour contract.
         AgentProfile seeded = profileService.createProfile(
@@ -55,12 +55,12 @@ class AgentProfileControllerTest extends IntegrationTestBase {
                 null);
         UUID profileId = seeded.getId();
 
-        // A project-scoped EDITOR (the workflow-authoring persona) — a
+        // A team-scoped EDITOR (the workflow-authoring persona) — a
         // real user row, or the JWT filter drops the token to anonymous.
-        var project = data.project()
+        var team = data.team()
                 .named("pub-roster-prj-" + UUID.randomUUID().toString().substring(0, 8))
                 .create();
-        HttpHeaders editorHeaders = userHeaders(createUserRow(), project.getId());
+        HttpHeaders editorHeaders = userHeaders(createUserRow(), team.getId());
 
         ResponseEntity<List<AgentProfileResponse>> listed = restTemplate.exchange(
                 "/api/v1/agent-profiles",

@@ -15,7 +15,7 @@ package ai.myrmec.engine.agent;
  * GATEWAY-mode hosts loudly instead of silently degrading to Direct.
  *
  * <p>Settable only by {@code PLATFORM_ADMIN} (design &sect;5.1); not exposed
- * at project scope.
+ * at Team scope.
  */
 public enum ModelAccessMode {
     DIRECT,

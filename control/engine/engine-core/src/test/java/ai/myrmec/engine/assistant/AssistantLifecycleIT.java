@@ -4,7 +4,7 @@ import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.DraftConflictException;
 import ai.myrmec.engine.agent.AgentProfile;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -193,11 +193,11 @@ class AssistantLifecycleIT extends IntegrationTestBase {
     // ==================== Helpers ====================
 
     private Fixture newAssistant() {
-        Project project = data.project().named("assistant-it").create();
+        team team = data.team().named("assistant-it").create();
         AgentProfile profile = data.agentProfile().named("assistant-it-profile").create();
         String name = "Support Assistant " + UUID.randomUUID();
         Assistant assistant = assistantService.createAssistant(
-                project.getId(), name, "desc", profile.getId(), TEST_ADMIN_ID);
+                team.getId(), name, "desc", profile.getId(), TEST_ADMIN_ID);
         return new Fixture(assistant.getId(), profile.getId(), name);
     }
 

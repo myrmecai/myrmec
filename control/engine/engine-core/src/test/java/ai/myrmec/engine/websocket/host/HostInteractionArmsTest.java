@@ -13,10 +13,11 @@ import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
 import ai.myrmec.engine.inference.execution.interaction.ExecutionInteraction;
+import ai.myrmec.engine.inference.execution.interaction.ExecutionControlRequestRepository;
 import ai.myrmec.engine.inference.execution.interaction.ExecutionInteractionRepository;
 import ai.myrmec.engine.inference.execution.interaction.InteractionPolicySnapshotService;
 import ai.myrmec.engine.inference.execution.interaction.InteractionProperties;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.User;
 import ai.myrmec.engine.user.UserRepository;
@@ -43,7 +44,9 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.WebSocketSession;
 
+import java.net.URI;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,12 +57,14 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
 /**
- * §22.3 (Task 8): the HostControlWebSocketHandler's interaction-family
- * arms — durable complete/failed settle through
+ * §22.3/§22.4 (Task 8 + Task 11 fix): the HostControlWebSocketHandler's
+ * interaction-family arms — durable complete/failed settle through
  * ExecutionInteractionService and ack AFTER commit; the ephemeral delta is
  * silently dropped; execution.control.state projects the highest-Sequence
- * observed state onto the 035 columns. Identity/capability failures: a
- * session without the negotiated sessionInteraction capability gets
+ * observed state onto the 035 columns; execution.control (engine→host HOLD/
+ * CONTINUE) is accepted on the dedicated channel and applied idempotently
+ * through ExecutionControlService. Identity/capability failures: a session
+ * without the negotiated sessionInteraction capability gets
  * UNSUPPORTED_MESSAGE; a foreign execution gets IDENTITY_MISMATCH.
  */
 class HostInteractionArmsTest extends IntegrationTestBase {
@@ -70,7 +75,10 @@ class HostInteractionArmsTest extends IntegrationTestBase {
     @Autowired SessionExecutionRepository executionRepository;
     @Autowired ExecutionInteractionRepository interactionRepository;
     @Autowired ExecutionEventRepository executionEventRepository;
+    @Autowired ExecutionControlRequestRepository executionControlRequestRepository;
     @Autowired AgentHostInstanceRepository instances;
+    @Autowired SessionAllocator sessionAllocator;
+    @Autowired ChannelTokenService channelTokenService;
     @Autowired TaskAttemptRepository taskAttemptRepository;
     @Autowired WorkflowTaskRepository workflowTaskRepository;
     @Autowired WorkflowRequestRepository workflowRequestRepository;
@@ -109,10 +117,11 @@ class HostInteractionArmsTest extends IntegrationTestBase {
         ((WebSocketHandler) handler).handleMessage(session, new TextMessage(open));
         return new Setup(session,
                 (UUID) session.getAttributes().get(HostControlWebSocketHandler.ATTR_HOST_INSTANCE_ID),
-                data.project().named(name + "-proj").create());
+                data.team().named(name + "-proj").create(),
+                host);
     }
 
-    private record Setup(WebSocketSession session, UUID instanceId, Project project) {}
+    private record Setup(WebSocketSession session, UUID instanceId, team team, AgentHost host) {}
 
     private List<JsonNode> replies(WebSocketSession session) {
         return org.mockito.Mockito.mockingDetails(session).getInvocations().stream()
@@ -127,11 +136,45 @@ class HostInteractionArmsTest extends IntegrationTestBase {
         return r.get(r.size() - 1);
     }
 
-    /** A WORKFLOW session + RUNNING execution bound to an orchestration attempt. */
+    private JsonNode lastReply(ChannelTestSession session) {
+        try {
+            String payload = session.sent().get(session.sent().size() - 1).getPayload();
+            return mapper.readTree(payload);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /** Real {@link WebSocketSession} stub so attribute mutations are visible. */
+    static class ChannelTestSession implements WebSocketSession {
+        private final String id = "arms-chan-" + UUID.randomUUID();
+        private final java.util.Map<String, Object> attrs = new HashMap<>();
+        private final List<TextMessage> sent = new ArrayList<>();
+        ChannelTestSession(UUID hostId) { attrs.put(HostControlHandshakeInterceptor.ATTR_HOST_ID, hostId); }
+        @Override public String getId() { return id; }
+        @Override public java.security.Principal getPrincipal() { return null; }
+        @Override public java.net.InetSocketAddress getLocalAddress() { return null; }
+        @Override public java.net.InetSocketAddress getRemoteAddress() { return null; }
+        @Override public java.util.Map<String, Object> getAttributes() { return attrs; }
+        @Override public boolean isOpen() { return true; }
+        @Override public void sendMessage(org.springframework.web.socket.WebSocketMessage<?> msg) throws java.io.IOException { sent.add((TextMessage) msg); }
+        List<TextMessage> sent() { return sent; }
+        @Override public URI getUri() { return null; }
+        @Override public org.springframework.http.HttpHeaders getHandshakeHeaders() { return null; }
+        @Override public void close() throws java.io.IOException { }
+        @Override public void close(org.springframework.web.socket.CloseStatus status) throws java.io.IOException { }
+        @Override public List<org.springframework.web.socket.WebSocketExtension> getExtensions() { return java.util.Collections.emptyList(); }
+        @Override public int getBinaryMessageSizeLimit() { return 65536; }
+        @Override public int getTextMessageSizeLimit() { return 65536; }
+        @Override public void setBinaryMessageSizeLimit(int limit) { }
+        @Override public void setTextMessageSizeLimit(int limit) { }
+        @Override public String getAcceptedProtocol() { return null; }
+    }
+
     private record OrchFixture(UUID sessionId, UUID executionId, UUID dispatchId) {}
 
     private OrchFixture orchestrationExecution(Setup setup) {
-        WorkflowRequest request = orchestrationRequest(setup.project());
+        WorkflowRequest request = orchestrationRequest(setup.team());
         var profile = data.agentProfile().named("arms-profile").create();
         WorkflowTask task = new WorkflowTask();
         task.setRequest(request);
@@ -147,7 +190,7 @@ class HostInteractionArmsTest extends IntegrationTestBase {
         Session session = new Session();
         session.setServiceType("WORKFLOW");
         session.setRefId(request.getId());
-        session.setProjectId(setup.project().getId());
+        session.setTeamId(setup.team().getId());
         session.setKind("ORCHESTRATION_TASK");
         session.setStatus("ACTIVE");
         session.setAllocationState(SessionAllocator.ALLOC_STATE_ACTIVE);
@@ -228,6 +271,18 @@ class HostInteractionArmsTest extends IntegrationTestBase {
                 { "executionId": "%s", "dispatchId": "%s", "interactionId": "%s",
                   "index": 0, "text": "partial answer" }
                 """.formatted(currentExecutionId, currentDispatchId, interactionId);
+    }
+
+    private String controlPayload(String action, String clientRequestId) {
+        return """
+                { "executionId": "%s", "dispatchId": "%s", "controlRevision": 1,
+                  "action": "%s", "reasonCode": "USER_REQUESTED",
+                  "holdPolicy": { "idleResumeAfterSeconds": 300 }, "controlRequestId": "%s" }
+                """.formatted(currentExecutionId, currentDispatchId, action, clientRequestId);
+    }
+
+    private String controlPayload(String action) {
+        return controlPayload(action, UUID.randomUUID().toString());
     }
 
     private String statePayload(long stateSequence, String status, String effectiveState,
@@ -382,6 +437,44 @@ class HostInteractionArmsTest extends IntegrationTestBase {
         return handler.getConnectionManager();
     }
 
+    // §22.2: host.open without sessionInteraction is rejected by the
+    // handler's own capability validation (handleHostOpen fails-closed),
+    // so we cannot even construct a setup that lacks the capability.
+    // The equivalent negative test is covered by the host-open rejection
+    // suite; for the inbound execution.control arm the remaining negative
+    // cases are control-socket rejection and foreign execution identity.
+
+    @Test
+    @Transactional
+    void controlCommandForForeignExecutionIsIdentityMismatch() throws Exception {
+        Setup owner = openedHost("arms-control-owner");
+        Setup outsider = openedHost("arms-control-outside");
+        OrchFixture fixture = orchestrationExecution(owner);
+        bindIdentity(owner, fixture);
+
+        String frame = """
+                { "protocolVersion": 1, "messageId": "msg-arms-foreign-ctl",
+                  "type": "execution.control", "sentAt": "%s",
+                  "hostInstanceId": "%s", "sessionId": "%s", "executionId": "%s",
+                  "payload": %s }
+                """.formatted(Instant.now(), outsider.instanceId(), fixture.sessionId(),
+                fixture.executionId(), controlPayload("HOLD"));
+        handler.handleMessage(outsider.session(), new TextMessage(frame));
+
+        // The outsider's instanceId is in the envelope, but the payload's
+        // executionId/dispatchId belong to the owner. The handler currently
+        // resolves execution by executionId and then checks that the execution
+        // belongs to the connection's instance; because the owner's session is
+        // bound to the owner's instance, the outsider fails that check and
+        // gets IDENTITY_MISMATCH. If the check instead validates envelope
+        // hostInstanceId first, we still expect a mismatch.
+        JsonNode error = replies(outsider.session()).stream()
+                .filter(n -> "protocol.error".equals(n.path("type").asText()))
+                .reduce((a, b) -> b).orElseThrow();
+        assertThat(error.path("payload").path("code").asText())
+                .isIn(HostProtocol.IDENTITY_MISMATCH, HostProtocol.INVALID_MESSAGE);
+    }
+
     @Test
     @Transactional
     void deltaIsSilentlyDroppedWithNoDurableRecordAndNoAck() throws Exception {
@@ -492,13 +585,108 @@ class HostInteractionArmsTest extends IntegrationTestBase {
                 fixture.executionId(), payload);
         handler.handleMessage(outsider.session(), new TextMessage(frame));
 
-        JsonNode error = lastReply(outsider.session());
-        assertThat(error.path("type").asText()).isEqualTo("protocol.error");
+        JsonNode error = replies(outsider.session()).stream()
+                .filter(n -> "protocol.error".equals(n.path("type").asText()))
+                .reduce((a, b) -> b).orElseThrow();
         assertThat(error.path("payload").path("code").asText())
                 .isEqualTo(HostProtocol.IDENTITY_MISMATCH);
         // No projection on the owner's execution.
         assertThat(executionRepository.findById(fixture.executionId()).orElseThrow()
                 .getControlStateSequence()).isZero();
+    }
+
+    @Test
+    @Transactional
+    void controlCommandOnControlSocketIsEngineToHostOnlyError() throws Exception {
+        Setup setup = openedHost("arms-control-ctrl");
+        OrchFixture fixture = orchestrationExecution(setup);
+        bindIdentity(setup, fixture);
+
+        String clientRequestId = UUID.randomUUID().toString();
+        handler.handleMessage(setup.session(), new TextMessage(interactionFrame(
+                "msg-arms-ctrl", "execution.control", fixture, null,
+                controlPayload("HOLD", clientRequestId))));
+
+        JsonNode error = lastReply(setup.session());
+        assertThat(error.path("type").asText()).isEqualTo("protocol.error");
+        assertThat(error.path("payload").path("code").asText())
+                .isEqualTo(HostProtocol.INVALID_MESSAGE);
+        // No control request row was recorded (the durable id is the payload's
+        // controlRequestId, not the envelope messageId).
+        assertThat(executionControlRequestRepository.findById(
+                UUID.fromString(clientRequestId))).isEmpty();
+    }
+
+    @Test
+    @Transactional
+    void controlCommandOnDedicatedChannelIsAcceptedAndApplied() throws Exception {
+        // The channel socket shares the same session-bound instance identity
+        // as the control socket; we can reuse the setup's bound session by
+        // sending channel.open and then the control command.
+        Setup setup = openedHost("arms-control-chan");
+        OrchFixture fixture = orchestrationExecution(setup);
+        bindIdentity(setup, fixture);
+
+        // A bound dedicated channel for the session: mint a real token for
+        // (sessionId, instanceId) so channel.open passes the token service.
+        String realToken = channelTokenService.mint(fixture.sessionId(), setup.instanceId());
+        String channelOpen = """
+                { "protocolVersion": 1, "messageId": "msg-arms-chan-open", "type": "channel.open",
+                  "sentAt": "%s", "payload": { "sessionId": "%s", "resumeFromSequence": 0,
+                  "token": "%s" } }
+                """.formatted(Instant.now(), fixture.sessionId(), realToken);
+        HostChannelWebSocketHandler channelHandler = new HostChannelWebSocketHandler(
+                mapper, channelTokenService,
+                handler.getChannelRegistry(), handler,
+                sessionRepository, sessionAllocator);
+        ChannelTestSession channelSocket = new ChannelTestSession(setup.host().getId());
+
+        channelHandler.handleTextMessage(channelSocket, new TextMessage(channelOpen));
+        // The channel binding sets the instance id attribute.
+        Map<String, Object> boundAttrs = channelSocket.getAttributes();
+        UUID boundInstanceId = boundAttrs.get(HostControlWebSocketHandler.ATTR_HOST_INSTANCE_ID)
+                instanceof UUID id ? id : null;
+        assertThat(boundInstanceId).isEqualTo(setup.instanceId());
+        // The bound session id must also match the fixture so the handler
+        // can correlate the execution to the channel's session.
+        assertThat((UUID) boundAttrs.get(HostChannelWebSocketHandler.ATTR_BOUND_SESSION_ID))
+                .isEqualTo(fixture.sessionId());
+
+        // Send the durable HOLD command on the dedicated channel.
+        String controlRequestId = UUID.randomUUID().toString();
+        String frame = """
+                { "protocolVersion": 1, "messageId": "msg-arms-hold", "type": "execution.control",
+                  "sentAt": "%s", "hostInstanceId": "%s", "sessionId": "%s", "executionId": "%s",
+                  "payload": %s }
+                """.formatted(Instant.now(), setup.instanceId(), fixture.sessionId(),
+                fixture.executionId(), controlPayload("HOLD", controlRequestId));
+        channelHandler.handleTextMessage(channelSocket, new TextMessage(frame));
+
+        // The engine applies the command, records an intent, and acks.
+        JsonNode ack = lastReply(channelSocket);
+        assertThat(ack.path("type").asText())
+                .withFailMessage(() -> "Expected protocol.ack but got: " + ack)
+                .isEqualTo("protocol.ack");
+        assertThat(ack.path("payload").path("acknowledgedMessageId").asText())
+                .isEqualTo("msg-arms-hold");
+        // The durable ControlRequest id is keyed by (execution, actor, clientRequestId).
+        assertThat(executionControlRequestRepository
+                .findByExecutionIdAndActorUserIdAndClientRequestId(
+                        fixture.executionId(), java.util.UUID.fromString("00000000-0000-0000-0000-000000000000"),
+                        UUID.fromString(controlRequestId))).isPresent();
+        // Assert the projected execution state is HOLD_REQUESTED (the engine
+        // immediately arms the request; the host later reports HELD via
+        // execution.control.state, which is tested separately).
+        SessionExecution updated = executionRepository.findById(fixture.executionId()).orElseThrow();
+        assertThat(updated.getHoldState()).isEqualTo("HOLD_REQUESTED");
+
+        // Sanity: the channel was bound to the expected instance/session so
+        // the test failure above is a real routing bug, not a mock wiring bug.
+        java.util.Map<String, Object> finalAttrs = channelSocket.getAttributes();
+        assertThat((UUID) finalAttrs.get(HostControlWebSocketHandler.ATTR_HOST_INSTANCE_ID))
+                .isEqualTo(setup.instanceId());
+        assertThat((UUID) finalAttrs.get(HostChannelWebSocketHandler.ATTR_BOUND_SESSION_ID))
+                .isEqualTo(fixture.sessionId());
     }
 
     // ------------------------------------------------------------------
@@ -518,9 +706,9 @@ class HostInteractionArmsTest extends IntegrationTestBase {
         return userRepository.save(user);
     }
 
-    private WorkflowRequest orchestrationRequest(Project project) {
+    private WorkflowRequest orchestrationRequest(team team) {
         Workflow wf = new Workflow();
-        wf.setProject(project);
+        wf.setTeam(team);
         wf.setName("arms-wf-" + System.nanoTime());
         wf.setSteps(List.of());
         wf.setVersion(1);

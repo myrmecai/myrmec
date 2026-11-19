@@ -10,7 +10,7 @@ import java.util.Map;
 import java.util.UUID;
 
 public record CreateWorkflowRequest(
-        @NotNull UUID projectId,
+        @NotNull UUID teamId,
         @NotBlank @Size(max = 100) String name,
         @Size(max = 1000) String description,
         @NotNull @Valid List<WorkflowStepDto> steps,

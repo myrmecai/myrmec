@@ -74,7 +74,7 @@ import java.util.function.LongFunction;
  *       forbids {@code execution.start} before {@code session.opened}.</li>
  * </ol>
  *
- * <p><b>Best-effort.</b> When no host with live capacity serves the project the
+ * <p><b>Best-effort.</b> When no host with live capacity serves the Team the
  * dispatcher logs a warning, emits the one-time #86 no-agent notice, and
  * returns {@code false} &mdash; it does not queue. The conversation row still
  * carries the USER message, and the #87 backlog drainer re-dispatches the
@@ -195,10 +195,10 @@ public class ConversationTurnDispatcher {
 
         checkQuota(conversation);
 
-        Optional<AgentHost> hostOpt = hostSelectionService.selectForProject(conversation.getProjectId());
+        Optional<AgentHost> hostOpt = hostSelectionService.selectForTeam(conversation.getTeamId());
         if (hostOpt.isEmpty()) {
-            log.warn("No host with live capacity serves project {} \u2014 declining turn for conv {}",
-                    conversation.getProjectId(), conversationId);
+            log.warn("No host with live capacity serves Team {} \u2014 declining turn for conv {}",
+                    conversation.getTeamId(), conversationId);
             // #86 â€” don't silently drop the turn. Surface a one-time SYSTEM
             // notice so the user knows their message was received and will be
             // answered once a host comes online; the #87 backlog drainer
@@ -253,10 +253,10 @@ public class ConversationTurnDispatcher {
         }
         Conversation conversation = convOpt.get();
 
-        Optional<AgentHost> hostOpt = hostSelectionService.selectForProject(conversation.getProjectId());
+        Optional<AgentHost> hostOpt = hostSelectionService.selectForTeam(conversation.getTeamId());
         if (hostOpt.isEmpty()) {
-            log.info("No host with live capacity serves project {} \u2014 deferring summary of conv {}",
-                    conversation.getProjectId(), conversationId);
+            log.info("No host with live capacity serves Team {} \u2014 deferring summary of conv {}",
+                    conversation.getTeamId(), conversationId);
             return false;
         }
         UUID hostId = hostOpt.get().getId();
@@ -326,7 +326,7 @@ public class ConversationTurnDispatcher {
 
         UUID sessionId = sessionAllocator.offer(
                 SERVICE_TYPE_CONVERSATION, conversationId, SERVICE_TYPE_CONVERSATION,
-                conversation.getProjectId(), hostId).orElse(null);
+                conversation.getTeamId(), hostId).orElse(null);
         if (sessionId == null) {
             log.warn("No allocation capacity on host {} for conv {}", hostId, conversationId);
             conversationNoticeService.emitNoAgentNotice(conversationId);
@@ -389,7 +389,7 @@ public class ConversationTurnDispatcher {
     private ConversationTurnBundle buildTurn(Conversation conversation, long sequenceNo) {
         UUID conversationId = conversation.getId();
         Map<String, Object> input = executionInputAssembler.assembleConversationInput(
-                conversationId, conversationId, conversation.getProjectId(), sequenceNo);
+                conversationId, conversationId, conversation.getTeamId(), sequenceNo);
         return new ConversationTurnBundle(conversationId, input, sequenceNo);
     }
 
@@ -470,16 +470,16 @@ public class ConversationTurnDispatcher {
      *
      * <p>When the conversation has a pinned assistant, check at SERVICE scope
      * (scopeId = assistantId). {@code check(SERVICE, assistantId, ...)}
-     * internally walks SERVICE&nbsp;&rarr;&nbsp;PROJECT&nbsp;&rarr;&nbsp;GROUP&nbsp;&rarr;&nbsp;ORG
+     * internally walks SERVICE&nbsp;&rarr;&nbsp;Team&nbsp;&rarr;&nbsp;GROUP&nbsp;&rarr;&nbsp;ORG
      * via {@code buildScopeChain} and returns the most restrictive decision, so
      * a SERVICE RESERVATION block takes priority over the GROUP ceiling &mdash;
      * the 429 will carry {@code scopeHit=SERVICE}. For conversations with no
-     * assistant, fall back to PROJECT scope (scopeId = projectId).</p>
+     * assistant, fall back to Team scope (scopeId = teamId).</p>
      */
     private void checkQuota(Conversation conversation) {
-        UUID dispatchProjectId = conversation.getProjectId();
+        UUID dispatchteamId = conversation.getTeamId();
         UUID assistantId = conversation.getAssistantId();
-        if (dispatchProjectId == null && assistantId == null) {
+        if (dispatchteamId == null && assistantId == null) {
             return;
         }
         QuotaDecision decision;
@@ -490,15 +490,15 @@ public class ConversationTurnDispatcher {
             effectiveScopeId = assistantId;
         } else {
             decision = quotaPolicyEngine.check(
-                    QuotaScope.PROJECT, dispatchProjectId, QuotaResourceType.TOKENS, 0L);
-            effectiveScopeId = dispatchProjectId;
+                    QuotaScope.TEAM, dispatchteamId, QuotaResourceType.TOKENS, 0L);
+            effectiveScopeId = dispatchteamId;
         }
         if (decision.isBlocked()) {
             log.warn("Conversation turn blocked by quota -- conv {} scopeId {} (used {} of {})",
                     conversation.getId(), effectiveScopeId,
                     decision.getConsumedAmount(), decision.getLimitAmount());
             throw new ai.myrmec.engine._system.exception.QuotaExceededException(
-                    decision.getScopeHit() != null ? decision.getScopeHit() : QuotaScope.PROJECT,
+                    decision.getScopeHit() != null ? decision.getScopeHit() : QuotaScope.TEAM,
                     effectiveScopeId,
                     QuotaResourceType.TOKENS,
                     decision.getLimitAmount(),
@@ -514,7 +514,7 @@ public class ConversationTurnDispatcher {
     private void writeSnapshot(Conversation conversation, ExecutionStartPayload payload,
                                String eventType) {
         snapshotWriter.write(ai.myrmec.engine.snapshot.SnapshotWriter.SnapshotRequest.builder()
-                .projectId(conversation.getProjectId())
+                .teamId(conversation.getTeamId())
                 .eventType(eventType)
                 .agentId(conversation.getAgentId())
                 .conversationId(conversation.getId())

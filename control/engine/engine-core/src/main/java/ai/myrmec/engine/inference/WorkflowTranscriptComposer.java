@@ -18,7 +18,7 @@ import java.util.Map;
  * and {@code buildMessages()} from
  * {@code agents/src/executor/assembleTask.ts} byte-for-byte:
  * <ul>
- *   <li>system message = profile.systemPrompt + # Project Context block with
+ *   <li>system message = profile.systemPrompt + # Team Context block with
  *       knowledge compiled grouped by category in the fixed order
  *       STANDARD â†’ REQUIREMENT â†’ ARCHITECTURE â†’ INSTRUCTION</li>
  *   <li>user message(s) = stepPrompt + input handling:
@@ -63,8 +63,8 @@ public class WorkflowTranscriptComposer implements TranscriptComposer {
         }
         String knowledge = compileKnowledgeSection(spec.getKnowledge());
         if (knowledge != null && !knowledge.isEmpty()) {
-            parts.add("\n\n# Project Context\n\n"
-                    + "The following information provides project standards, "
+            parts.add("\n\n# Team Context\n\n"
+                    + "The following information provides Team standards, "
                     + "requirements, and instructions you should follow:\n\n"
                     + knowledge);
         }

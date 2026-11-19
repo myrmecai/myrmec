@@ -17,43 +17,43 @@ import java.util.UUID;
  * REST endpoints for managing workflows.
  */
 @RestController
-@RequestMapping("/api/v1/projects/{projectId}/workflows")
+@RequestMapping("/api/v1/teams/{teamId}/workflows")
 @RequiredArgsConstructor
 public class WorkflowController {
 
     private final WorkflowService workflowService;
 
     @GetMapping
-    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
-    public List<WorkflowResponse> findByProject(@PathVariable UUID projectId) {
-        return workflowService.findByProject(projectId);
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
+    public List<WorkflowResponse> findByTeam(@PathVariable UUID teamId) {
+        return workflowService.findByTeam(teamId);
     }
 
     @GetMapping("/published")
-    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
-    public List<WorkflowResponse> findPublishedByProject(@PathVariable UUID projectId) {
-        return workflowService.findPublishedByProject(projectId);
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
+    public List<WorkflowResponse> findPublishedByTeam(@PathVariable UUID teamId) {
+        return workflowService.findPublishedByTeam(teamId);
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
-    public WorkflowResponse findById(@PathVariable UUID projectId, @PathVariable UUID id) {
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
+    public WorkflowResponse findById(@PathVariable UUID teamId, @PathVariable UUID id) {
         WorkflowResponse workflow = workflowService.findById(id);
-        // Ensure workflow belongs to the project
-        if (!workflow.projectId().equals(projectId)) {
-            throw new IllegalArgumentException("Workflow does not belong to this project");
+        // Ensure workflow belongs to the Team
+        if (!workflow.teamId().equals(teamId)) {
+            throw new IllegalArgumentException("Workflow does not belong to this Team");
         }
         return workflow;
     }
 
     @PostMapping
-    @PreAuthorize("@projectAccess.canEdit(#projectId, authentication) and @projectAccess.allowsServiceType(#projectId, 'WORKFLOW')")
+    @PreAuthorize("@teamAccess.canEdit(#teamId, authentication) and @teamAccess.allowsServiceType(#teamId, 'WORKFLOW')")
     public ResponseEntity<WorkflowResponse> create(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @Valid @RequestBody CreateWorkflowRequest request,
             @AuthenticationPrincipal UserPrincipal principal) {
-        // Ensure path projectId matches request
-        if (!projectId.equals(request.projectId())) {
+        // Ensure path teamId matches request
+        if (!teamId.equals(request.teamId())) {
             return ResponseEntity.badRequest().build();
         }
 
@@ -64,21 +64,21 @@ public class WorkflowController {
 
     @PutMapping("/{id}")
     public WorkflowResponse update(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID id,
             @Valid @RequestBody UpdateWorkflowRequest request) {
         WorkflowResponse existing = workflowService.findById(id);
-        if (!existing.projectId().equals(projectId)) {
-            throw new IllegalArgumentException("Workflow does not belong to this project");
+        if (!existing.teamId().equals(teamId)) {
+            throw new IllegalArgumentException("Workflow does not belong to this Team");
         }
         return workflowService.update(id, request);
     }
 
     @PostMapping("/{id}/publish")
-    public WorkflowResponse publish(@PathVariable UUID projectId, @PathVariable UUID id) {
+    public WorkflowResponse publish(@PathVariable UUID teamId, @PathVariable UUID id) {
         WorkflowResponse existing = workflowService.findById(id);
-        if (!existing.projectId().equals(projectId)) {
-            throw new IllegalArgumentException("Workflow does not belong to this project");
+        if (!existing.teamId().equals(teamId)) {
+            throw new IllegalArgumentException("Workflow does not belong to this Team");
         }
         return workflowService.publish(id);
     }
@@ -90,30 +90,30 @@ public class WorkflowController {
      */
     @PostMapping("/{id}/orchestration-bindings")
     public WorkflowResponse setOrchestrationBindings(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID id,
             @RequestBody java.util.Map<String, UUID> bindings) {
         WorkflowResponse existing = workflowService.findById(id);
-        if (!existing.projectId().equals(projectId)) {
-            throw new IllegalArgumentException("Workflow does not belong to this project");
+        if (!existing.teamId().equals(teamId)) {
+            throw new IllegalArgumentException("Workflow does not belong to this Team");
         }
         return workflowService.setOrchestrationBindings(id, bindings);
     }
 
     @PostMapping("/{id}/archive")
-    public WorkflowResponse archive(@PathVariable UUID projectId, @PathVariable UUID id) {
+    public WorkflowResponse archive(@PathVariable UUID teamId, @PathVariable UUID id) {
         WorkflowResponse existing = workflowService.findById(id);
-        if (!existing.projectId().equals(projectId)) {
-            throw new IllegalArgumentException("Workflow does not belong to this project");
+        if (!existing.teamId().equals(teamId)) {
+            throw new IllegalArgumentException("Workflow does not belong to this Team");
         }
         return workflowService.archive(id);
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable UUID projectId, @PathVariable UUID id) {
+    public ResponseEntity<Void> delete(@PathVariable UUID teamId, @PathVariable UUID id) {
         WorkflowResponse existing = workflowService.findById(id);
-        if (!existing.projectId().equals(projectId)) {
-            throw new IllegalArgumentException("Workflow does not belong to this project");
+        if (!existing.teamId().equals(teamId)) {
+            throw new IllegalArgumentException("Workflow does not belong to this Team");
         }
         workflowService.delete(id);
         return ResponseEntity.noContent().build();

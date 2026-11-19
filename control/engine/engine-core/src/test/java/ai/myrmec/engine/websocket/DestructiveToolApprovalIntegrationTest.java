@@ -28,7 +28,7 @@ import static org.mockito.Mockito.when;
  * Phase 3 (#113) — DESTRUCTIVE / IRREVERSIBLE tool approval workflow.
  *
  * <p>When an agent calls a tool marked DESTRUCTIVE or IRREVERSIBLE and the
- * project has {@code autoHitlOnDestructive=true}, the engine requests
+ * team has {@code autoHitlOnDestructive=true}, the engine requests
  * approval via {@link ExecutionApprovalService}, flipping the task to
  * {@code requires_approval=true} / {@code approval_status=PENDING} and
  * recording the tool-call payload for approvers.

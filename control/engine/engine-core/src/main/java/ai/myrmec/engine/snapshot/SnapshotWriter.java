@@ -1,7 +1,7 @@
 package ai.myrmec.engine.snapshot;
 
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
@@ -42,17 +42,17 @@ public class SnapshotWriter {
     public static final int MAX_INLINE_SIZE_BYTES = 256 * 1024;
 
     private final ExecutionSnapshotRepository snapshotRepository;
-    private final ProjectRepository projectRepository;
+    private final TeamRepository teamRepository;
     private final ObjectMapper objectMapper;
     private final boolean enabled;
 
     public SnapshotWriter(
             ExecutionSnapshotRepository snapshotRepository,
-            ProjectRepository projectRepository,
+            TeamRepository teamRepository,
             ObjectMapper objectMapper,
             @Value("${myrmec.snapshots.enabled:true}") boolean enabled) {
         this.snapshotRepository = snapshotRepository;
-        this.projectRepository = projectRepository;
+        this.teamRepository = teamRepository;
         this.objectMapper = objectMapper;
         this.enabled = enabled;
     }
@@ -69,15 +69,15 @@ public class SnapshotWriter {
         if (!enabled) {
             return Optional.empty();
         }
-        if (req == null || req.getProjectId() == null || req.getEventType() == null) {
-            log.warn("Snapshot write rejected — projectId + eventType required");
+        if (req == null || req.getTeamId() == null || req.getEventType() == null) {
+            log.warn("Snapshot write rejected — teamId + eventType required");
             return Optional.empty();
         }
         try {
-            // Sampling check (per-project knob). Default 1.0 = always keep.
-            Project project = projectRepository.findById(req.getProjectId()).orElse(null);
-            if (project != null) {
-                java.math.BigDecimal rate = project.getSnapshotSamplingRate();
+            // Sampling check (per-team knob). Default 1.0 = always keep.
+            Team team = teamRepository.findById(req.getTeamId()).orElse(null);
+            if (team != null) {
+                java.math.BigDecimal rate = team.getSnapshotSamplingRate();
                 if (rate != null && rate.compareTo(java.math.BigDecimal.ONE) < 0) {
                     double roll = ThreadLocalRandom.current().nextDouble();
                     if (roll > rate.doubleValue()) {
@@ -99,7 +99,7 @@ public class SnapshotWriter {
             String sha = json == null ? null : sha256Hex(json);
 
             ExecutionSnapshot row = new ExecutionSnapshot();
-            row.setProjectId(req.getProjectId());
+            row.setTeamId(req.getTeamId());
             row.setAgentId(req.getAgentId());
             row.setConversationId(req.getConversationId());
             row.setMessageId(req.getMessageId());
@@ -117,8 +117,8 @@ public class SnapshotWriter {
             row.setSampled(true);
             return Optional.of(snapshotRepository.save(row));
         } catch (Exception e) {
-            log.warn("Snapshot write failed for project {} event {}: {}",
-                    req.getProjectId(), req.getEventType(), e.getMessage(), e);
+            log.warn("Snapshot write failed for Team {} event {}: {}",
+                    req.getTeamId(), req.getEventType(), e.getMessage(), e);
             return Optional.empty();
         }
     }
@@ -152,7 +152,7 @@ public class SnapshotWriter {
     @lombok.Value
     @Builder
     public static class SnapshotRequest {
-        UUID projectId;
+        UUID teamId;
         String eventType;
         Object payload;
         UUID agentId;

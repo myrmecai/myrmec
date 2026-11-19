@@ -1,7 +1,7 @@
 package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine.user.UserPrincipal;
-import ai.myrmec.engine.workflow.dto.AccessibleProjectResponse;
+import ai.myrmec.engine.workflow.dto.AccessibleTeamResponse;
 import ai.myrmec.engine.workflow.dto.PagedResponse;
 import ai.myrmec.engine.workflow.dto.WorkflowListItemResponse;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +19,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Cross-project workflow list endpoints. Scoped to the calling user's
+ * Cross-Team workflow list endpoints. Scoped to the calling user's
  * accessible projects (system-wide role holders see everything).
  */
 @RestController
@@ -35,7 +35,7 @@ public class WorkflowsListController {
     public PagedResponse<WorkflowListItemResponse> list(
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(name = "status", required = false) List<WorkflowStatus> statuses,
-            @RequestParam(name = "projectId", required = false) List<UUID> projectIds,
+            @RequestParam(name = "teamId", required = false) List<UUID> teamIds,
             @RequestParam(name = "search", required = false) String search,
             @RequestParam(name = "lastRunStatus", required = false) List<String> lastRunStatusTokens,
             @RequestParam(name = "createdFrom", required = false) Instant createdFrom,
@@ -68,7 +68,7 @@ public class WorkflowsListController {
 
         WorkflowListService.Filter filter = new WorkflowListService.Filter(
                 statuses == null ? null : new HashSet<>(statuses),
-                projectIds == null ? null : new HashSet<>(projectIds),
+                teamIds == null ? null : new HashSet<>(teamIds),
                 search,
                 runStatuses.isEmpty() ? null : runStatuses,
                 includeNeverRun,
@@ -82,8 +82,8 @@ public class WorkflowsListController {
     }
 
     @GetMapping("/accessible-projects")
-    public List<AccessibleProjectResponse> accessibleProjects(
+    public List<AccessibleTeamResponse> accessibleTeams(
             @AuthenticationPrincipal UserPrincipal principal) {
-        return workflowListService.accessibleProjects(principal.getUserId());
+        return workflowListService.accessibleTeams(principal.getUserId());
     }
 }

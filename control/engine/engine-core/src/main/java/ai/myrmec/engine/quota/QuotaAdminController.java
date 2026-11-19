@@ -35,7 +35,7 @@ import java.time.Instant;
  *
  * <p>All mutating endpoints are gated by {@code PLATFORM_ADMIN}; the
  * consumption probe is also restricted to admins for now because a
- * project-scoped variant needs ACL plumbing that would belong in a
+ * Team-scoped variant needs ACL plumbing that would belong in a
  * follow-up.
  */
 @RestController
@@ -83,7 +83,7 @@ public class QuotaAdminController {
         // assertPermitted, not assertAllowed — CONFIGURABLE permits PER_SERVICE.
         if (scope != Quota.Scope.ORG) {
             governanceEnforcer.assertPermitted(
-                req.getScopeId() != null ? GovernanceScope.ofProject(req.getScopeId()) : GovernanceScope.orgScope(),
+                req.getScopeId() != null ? GovernanceScope.ofTeam(req.getScopeId()) : GovernanceScope.orgScope(),
                 ProductFeature.BUDGET_OVERRIDE,
                 "PER_SERVICE");
         }

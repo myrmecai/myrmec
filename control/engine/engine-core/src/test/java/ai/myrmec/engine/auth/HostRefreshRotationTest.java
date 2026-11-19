@@ -8,7 +8,6 @@ import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentHostCreationResult;
 import ai.myrmec.engine.auth.dto.HostRefreshRequest;
 import ai.myrmec.engine.auth.dto.HostRefreshResponse;
-import ai.myrmec.engine.auth.dto.HostRegisterRequest;
 import ai.myrmec.engine.auth.dto.HostRegisterResponse;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
@@ -73,11 +72,7 @@ class HostRefreshRotationTest extends IntegrationTestBase {
     }
 
     private HostRegisterResponse register(AgentHostCreationResult result) {
-        HostRegisterRequest request = new HostRegisterRequest();
-        request.setRegistrationKey(result.registrationKey());
-        request.setHostname("rot-host");
-        request.setRuntimeVersion("1.8.0");
-        return hostAuthService.registerManaged(request);
+        return hostAuthService.registerManaged(result.registrationKey());
     }
 
     private HostRefreshResponse rotate(String refreshToken) {

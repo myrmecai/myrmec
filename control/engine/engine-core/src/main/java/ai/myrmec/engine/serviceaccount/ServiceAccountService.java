@@ -2,7 +2,7 @@ package ai.myrmec.engine.serviceaccount;
 
 import ai.myrmec.engine._system.exception.DuplicateResourceException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.TeamRepository;
 import ai.myrmec.engine.serviceaccount.dto.CreateServiceAccountRequest;
 import ai.myrmec.engine.serviceaccount.dto.UpdateServiceAccountRequest;
 import lombok.RequiredArgsConstructor;
@@ -26,12 +26,12 @@ import java.util.UUID;
 public class ServiceAccountService {
 
     private final ServiceAccountRepository serviceAccountRepository;
-    private final ProjectRepository projectRepository;
+    private final TeamRepository teamRepository;
 
     @Transactional
     public ServiceAccount create(CreateServiceAccountRequest request, UUID createdBy) {
-        if (!projectRepository.existsById(request.projectId())) {
-            throw ResourceNotFoundException.project(request.projectId());
+        if (!teamRepository.existsById(request.teamId())) {
+            throw ResourceNotFoundException.team(request.teamId());
         }
         if (serviceAccountRepository.existsByKeycloakClientId(request.keycloakClientId())) {
             throw new DuplicateResourceException(
@@ -39,7 +39,7 @@ public class ServiceAccountService {
         }
 
         ServiceAccount sa = new ServiceAccount();
-        sa.setProjectId(request.projectId());
+        sa.setTeamId(request.teamId());
         sa.setName(request.name());
         sa.setDescription(request.description());
         sa.setKeycloakClientId(request.keycloakClientId());
@@ -52,10 +52,10 @@ public class ServiceAccountService {
     }
 
     @Transactional(readOnly = true)
-    public List<ServiceAccount> list(UUID projectId) {
-        return projectId == null
+    public List<ServiceAccount> list(UUID teamId) {
+        return teamId == null
                 ? serviceAccountRepository.findAllByOrderByCreatedAtDesc()
-                : serviceAccountRepository.findByProjectIdOrderByCreatedAtDesc(projectId);
+                : serviceAccountRepository.findByTeamIdOrderByCreatedAtDesc(teamId);
     }
 
     @Transactional(readOnly = true)

@@ -1,0 +1,34 @@
+<configuration>
+    <conversionRule conversionWord="ex" 
+          converterClass="ai.myrmec.engine._system.common.StackTraceConverter" />
+    <conversionRule conversionWord="exception"
+                    converterClass="ai.myrmec.engine._system.common.StackTraceConverter"/>
+    <conversionRule conversionWord="throwable"
+                    converterClass="ai.myrmec.engine._system.common.StackTraceConverter"/>
+    <conversionRule conversionWord="xEx"
+                    converterClass="ai.myrmec.engine._system.common.StackTraceConverter"/>
+    <conversionRule conversionWord="xException"
+                    converterClass="ai.myrmec.engine._system.common.StackTraceConverter"/>
+    <conversionRule conversionWord="xThrowable"
+                    converterClass="ai.myrmec.engine._system.common.StackTraceConverter"/>
+    <conversionRule conversionWord="wex"
+                    converterClass="ai.myrmec.engine._system.common.StackTraceConverter"/>
+    <conversionRule conversionWord="wEx"
+                    converterClass="ai.myrmec.engine._system.common.StackTraceConverter"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n%ex</pattern>
+        </encoder>
+    </appender>
+    <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <throwableConverter class="ai.myrmec.engine._system.common.StackTraceConverter"/>
+        </encoder>
+    </appender>
+
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE" />
+    </root>
+</configuration>

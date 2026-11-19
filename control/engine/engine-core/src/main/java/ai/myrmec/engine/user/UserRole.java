@@ -11,7 +11,7 @@ import java.util.UUID;
 
 /**
  * User role assignment. Roles can be scoped to the whole system, to a group, or
- * to a single project. A user may hold multiple roles simultaneously across and
+ * to a single Team. A user may hold multiple roles simultaneously across and
  * within scopes (effective permissions = union, after implicit-role expansion).
  */
 @Entity
@@ -24,15 +24,15 @@ public class UserRole {
     /**
      * Role catalog. Privilege model is intentionally not a single linear axis —
      * see {@link #isAtLeast(Role)} for the data-access subset and the resolver
-     * for implicit-role expansion (PROJECT_OWNER → EDITOR → VIEWER, etc.).
+     * for implicit-role expansion (TEAM_OWNER → EDITOR → VIEWER, etc.).
      */
     public enum Role {
         /** Platform / technical admin: models, providers, agents, auth, global secrets, users. */
         PLATFORM_ADMIN,
         /** Business governance: groups, role grants, policy, audit. Implicit AUDITOR. */
         ORG_ADMIN,
-        /** Project-scope owner: delete/transfer, manage members, set project quota. Implicit EDITOR. */
-        PROJECT_OWNER,
+        /** Team-scope owner: delete/transfer, manage members, set Team quota. Implicit EDITOR. */
+        TEAM_OWNER,
         /** Authoring rights on workflows / secrets / knowledge repos. */
         EDITOR,
         /** Read-only data access in scope. */
@@ -47,7 +47,7 @@ public class UserRole {
         /**
          * Check if this role has at least the data-access privilege of {@code other}.
          *
-         * <p>Only meaningful on the data-access axis (PROJECT_OWNER &gt; EDITOR &gt; VIEWER).
+         * <p>Only meaningful on the data-access axis (TEAM_OWNER &gt; EDITOR &gt; VIEWER).
          * For roles off this axis (PLATFORM_ADMIN, ORG_ADMIN, BUDGET_OWNER, APPROVER,
          * AUDITOR) the result is {@code false}; consult the resolver for those.
          */
@@ -59,7 +59,7 @@ public class UserRole {
 
         public int dataAccessRank() {
             return switch (this) {
-                case PROJECT_OWNER -> 3;
+                case TEAM_OWNER -> 3;
                 case EDITOR -> 2;
                 case VIEWER -> 1;
                 default -> -1;
@@ -73,7 +73,7 @@ public class UserRole {
          * set of effective roles the holder can act under at that scope.
          *
          * <ul>
-         *   <li>{@code PROJECT_OWNER} &rArr; {@code EDITOR} &rArr; {@code VIEWER}</li>
+         *   <li>{@code TEAM_OWNER} &rArr; {@code EDITOR} &rArr; {@code VIEWER}</li>
          *   <li>{@code EDITOR} &rArr; {@code VIEWER}</li>
          *   <li>{@code APPROVER} &rArr; {@code VIEWER}</li>
          *   <li>{@code AUDITOR} &rArr; {@code VIEWER} (auditor is read-only across data + audit + spend)</li>
@@ -82,11 +82,11 @@ public class UserRole {
          *
          * <p>{@code PLATFORM_ADMIN} does <b>not</b> imply any data-access role:
          * platform admins manage infra and must be separately granted to read
-         * project content (separation of duties).
+         * Team content (separation of duties).
          */
         public java.util.Set<Role> impliedRoles() {
             return switch (this) {
-                case PROJECT_OWNER -> java.util.Set.of(PROJECT_OWNER, EDITOR, VIEWER);
+                case TEAM_OWNER -> java.util.Set.of(TEAM_OWNER, EDITOR, VIEWER);
                 case EDITOR -> java.util.Set.of(EDITOR, VIEWER);
                 case APPROVER -> java.util.Set.of(APPROVER, VIEWER);
                 case AUDITOR -> java.util.Set.of(AUDITOR, VIEWER);
@@ -102,7 +102,7 @@ public class UserRole {
     public enum ScopeType {
         SYSTEM,
         GROUP,
-        PROJECT
+        TEAM
     }
 
     @Id
@@ -125,9 +125,9 @@ public class UserRole {
     @Column(name = "group_id")
     private UUID groupId;
 
-    /** Set when {@code scopeType == PROJECT}. */
-    @Column(name = "project_id")
-    private UUID projectId;
+    /** Set when {@code scopeType == Team}. */
+    @Column(name = "team_id")
+    private UUID teamId;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -155,21 +155,21 @@ public class UserRole {
         }
         switch (scopeType) {
             case SYSTEM -> {
-                if (groupId != null || projectId != null) {
+                if (groupId != null || teamId != null) {
                     throw new BadRequestException(
-                            "SYSTEM-scoped role must not have groupId or projectId");
+                            "SYSTEM-scoped role must not have groupId or teamId");
                 }
             }
             case GROUP -> {
-                if (groupId == null || projectId != null) {
+                if (groupId == null || teamId != null) {
                     throw new BadRequestException(
-                            "GROUP-scoped role requires groupId and forbids projectId");
+                            "GROUP-scoped role requires groupId and forbids teamId");
                 }
             }
-            case PROJECT -> {
-                if (projectId == null || groupId != null) {
+            case TEAM -> {
+                if (teamId == null || groupId != null) {
                     throw new BadRequestException(
-                            "PROJECT-scoped role requires projectId and forbids groupId");
+                            "Team-scoped role requires teamId and forbids groupId");
                 }
             }
         }
@@ -185,14 +185,14 @@ public class UserRole {
      * <ul>
      *   <li>SYSTEM:  {@code sys:ROLE}</li>
      *   <li>GROUP:   {@code grp:<groupId>:ROLE}</li>
-     *   <li>PROJECT: {@code proj:<projectId>:ROLE}</li>
+     *   <li>TEAM: {@code proj:<teamId>:ROLE}</li>
      * </ul>
      */
     public String toJwtClaim() {
         return switch (scopeType) {
             case SYSTEM -> "sys:" + role.name();
             case GROUP -> "grp:" + groupId + ":" + role.name();
-            case PROJECT -> "proj:" + projectId + ":" + role.name();
+            case TEAM -> "proj:" + teamId + ":" + role.name();
         };
     }
 }

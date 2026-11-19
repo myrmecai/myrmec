@@ -33,7 +33,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Task 9 (plan §4 routes, ownership chain
- * {@code /api/v1/projects/{projectId}/workflows/{workflowId}/requests/
+ * {@code /api/v1/teams/{teamId}/workflows/{workflowId}/requests/
  * {requestId}/tasks/{taskId}/attempts/{attemptId}/executions/{executionId}}):
  * the read/view surface — GET /snapshot (the ExecutionView), GET /events
  * (the durable cursor page), GET /stream (the replay/live/gap SSE).
@@ -44,7 +44,7 @@ import java.util.concurrent.TimeUnit;
  * equivalent is implied ({@code canView}).</p>
  */
 @RestController
-@RequestMapping("/api/v1/projects/{projectId}/workflows/{workflowId}/requests"
+@RequestMapping("/api/v1/teams/{teamId}/workflows/{workflowId}/requests"
         + "/{requestId}/tasks/{taskId}/attempts/{attemptId}"
         + "/executions/{executionId}")
 @Slf4j
@@ -69,16 +69,16 @@ public class ExecutionViewController {
      * {@code earliestAvailableStreamSequence} for the replay-gap check).
      */
     @GetMapping("/snapshot")
-    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
     public ExecutionViewService.ExecutionView snapshot(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID workflowId,
             @PathVariable UUID requestId,
             @PathVariable UUID taskId,
             @PathVariable UUID attemptId,
             @PathVariable UUID executionId) {
         return viewService.snapshot(
-                scopeOf(projectId, workflowId, requestId, taskId, attemptId, executionId));
+                scopeOf(teamId, workflowId, requestId, taskId, attemptId, executionId));
     }
 
     // =================================================================
@@ -91,9 +91,9 @@ public class ExecutionViewController {
      * timestamp order), afterSequence EXCLUSIVE.
      */
     @GetMapping("/events")
-    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
     public Map<String, Object> events(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID workflowId,
             @PathVariable UUID requestId,
             @PathVariable UUID taskId,
@@ -102,7 +102,7 @@ public class ExecutionViewController {
             @RequestParam(name = "afterSequence", defaultValue = "0") long afterSequence,
             @RequestParam(name = "limit", defaultValue = "100") int limit) {
         ExecutionViewService.ExecutionPage page = viewService.eventPage(
-                scopeOf(projectId, workflowId, requestId, taskId, attemptId, executionId),
+                scopeOf(teamId, workflowId, requestId, taskId, attemptId, executionId),
                 afterSequence, limit);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("events", page.events());
@@ -132,9 +132,9 @@ public class ExecutionViewController {
      * </ol>
      */
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
     public SseEmitter stream(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID workflowId,
             @PathVariable UUID requestId,
             @PathVariable UUID taskId,
@@ -145,7 +145,7 @@ public class ExecutionViewController {
             @org.springframework.web.bind.annotation.RequestHeader(
                     value = "Last-Event-ID",
                     required = false) String lastEventId) {
-        var scope = scopeOf(projectId, workflowId, requestId, taskId,
+        var scope = scopeOf(teamId, workflowId, requestId, taskId,
                 attemptId, executionId);
         // The §4 ownership chain resolves 404 BEFORE the stream opens.
         var execution = viewService.resolveChain(scope);
@@ -217,10 +217,10 @@ public class ExecutionViewController {
         return objectMapper;
     }
 
-    private static ExecutionScope scopeOf(UUID projectId, UUID workflowId,
+    private static ExecutionScope scopeOf(UUID teamId, UUID workflowId,
                                           UUID requestId, UUID taskId, UUID attemptId,
                                           UUID executionId) {
-        return new ExecutionScope(projectId, workflowId, requestId, taskId,
+        return new ExecutionScope(teamId, workflowId, requestId, taskId,
                 attemptId, executionId);
     }
 

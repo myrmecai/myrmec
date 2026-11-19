@@ -16,10 +16,10 @@ public record SecretResponse(
         UUID id,
         String name,
         CredentialType type,
-        String scope,           // "GLOBAL" or "PROJECT"
+        String scope,           // "GLOBAL" or "TEAM"
         SecretBackend backend,
-        UUID projectId,         // null for globals
-        String projectName,     // null for globals
+        UUID teamId,         // null for globals
+        String teamName,     // null for globals
         UUID createdById,
         String createdByEmail,
         Instant createdAt,
@@ -32,10 +32,10 @@ public record SecretResponse(
                 secret.getId(),
                 secret.getName(),
                 secret.getType(),
-                global ? "GLOBAL" : "PROJECT",
+                global ? "GLOBAL" : "TEAM",
                 secret.getBackend(),
-                global ? null : secret.getProject().getId(),
-                global ? null : secret.getProject().getName(),
+                global ? null : secret.getTeam().getId(),
+                global ? null : secret.getTeam().getName(),
                 secret.getCreatedBy() != null ? secret.getCreatedBy().getId() : null,
                 secret.getCreatedBy() != null ? secret.getCreatedBy().getEmail() : null,
                 secret.getCreatedAt(),

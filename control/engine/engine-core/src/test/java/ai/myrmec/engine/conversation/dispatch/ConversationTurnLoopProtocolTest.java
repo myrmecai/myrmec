@@ -17,7 +17,7 @@ import ai.myrmec.engine.inference.SessionAllocator;
 import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.websocket.host.HostControlHandshakeInterceptor;
 import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
@@ -122,17 +122,17 @@ class ConversationTurnLoopProtocolTest extends IntegrationTestBase {
     void userMessagePostDispatchesTurnAndAgentReplyFansOutToViewer() throws Exception {
         // ---------- Arrange: a live host on the control socket ----------
         Host hostSetup = openedHost();
-        Project project = data.project().named("turn-loop").create();
+        team team = data.team().named("turn-loop").create();
 
         // Conversation pinned to an assistant version (§3.7): the dispatcher and
         // the input assembler resolve the profile from the pin, never the host.
         ai.myrmec.engine.assistant.Assistant pinAssistant = assistantService.createAssistant(
-                project.getId(), "Loop Pin Assistant", "desc",
+                team.getId(), "Loop Pin Assistant", "desc",
                 hostSetup.profile().getId(), TEST_ADMIN_ID);
         ai.myrmec.engine.assistant.AssistantVersion pinVersion =
                 assistantVersionService.publish(pinAssistant.getId(), TEST_ADMIN_ID);
         Conversation conv = conversationService.createConversation(
-                project.getId(), TEST_ADMIN_ID, "loop conv", hostSetup.host().getId(), null);
+                team.getId(), TEST_ADMIN_ID, "loop conv", hostSetup.host().getId(), null);
         conv.setAssistantId(pinAssistant.getId());
         conv.setAssistantVersionId(pinVersion.getId());
         conv.setAgentProfileVersionId(pinVersion.getAgentProfileVersionId());

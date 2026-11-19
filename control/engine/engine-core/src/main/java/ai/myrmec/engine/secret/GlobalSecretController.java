@@ -17,7 +17,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Global secrets — visible to every project, managed only by SYSTEM_ADMIN.
+ * Global secrets — visible to every Team, managed only by SYSTEM_ADMIN.
  *
  * <p>Lives under {@code /api/v1/admin/secrets} so existing
  * {@code SecurityConfig} ACL ({@code /api/v1/admin/**} requires

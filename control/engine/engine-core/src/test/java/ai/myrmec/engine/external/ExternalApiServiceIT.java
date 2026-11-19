@@ -12,7 +12,7 @@ import ai.myrmec.engine.assistant.AssistantVersion;
 import ai.myrmec.engine.assistant.AssistantVersionService;
 import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.conversation.ConversationMessage;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.serviceaccount.ServiceAccount;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
@@ -55,21 +55,21 @@ class ExternalApiServiceIT extends IntegrationTestBase {
 
     @Test
     void discoveryReturnsOnlyDoublyGatedAssistants() {
-        Project project = data.project().named("ext-disco").create();
+        team team = data.team().named("ext-disco").create();
         AgentProfile profile = data.agentProfile().named("ext-disco-profile").create();
-        ServiceAccount sa = serviceAccount(project);
+        ServiceAccount sa = serviceAccount(team);
 
         // (a) usable: EXTERNAL_API reach + USE grant.
-        UUID usable = publishedAssistant(project, profile, "Usable", true);
+        UUID usable = publishedAssistant(team, profile, "Usable", true);
         grantUse(usable, sa);
         // (b) USE grant but WEB_UI-only reach -> excluded by reach gate.
-        UUID webOnly = publishedAssistant(project, profile, "WebOnly", false);
+        UUID webOnly = publishedAssistant(team, profile, "WebOnly", false);
         grantUse(webOnly, sa);
         // (c) EXTERNAL_API reach but no grant -> excluded by grant gate.
-        publishedAssistant(project, profile, "Ungranted", true);
+        publishedAssistant(team, profile, "Ungranted", true);
 
         List<ExternalAssistantService.UsableAssistant> result =
-                externalAssistantService.listUsable(sa.getId(), project.getId());
+                externalAssistantService.listUsable(sa.getId(), team.getId());
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).assistant().getId()).isEqualTo(usable);
@@ -77,26 +77,26 @@ class ExternalApiServiceIT extends IntegrationTestBase {
 
     @Test
     void requireUsableRejectsUngrantedAssistantAs404() {
-        Project project = data.project().named("ext-gate").create();
+        team team = data.team().named("ext-gate").create();
         AgentProfile profile = data.agentProfile().named("ext-gate-profile").create();
-        ServiceAccount sa = serviceAccount(project);
-        UUID ungranted = publishedAssistant(project, profile, "NoGrant", true);
+        ServiceAccount sa = serviceAccount(team);
+        UUID ungranted = publishedAssistant(team, profile, "NoGrant", true);
 
         assertThatThrownBy(() -> externalAssistantService.requireUsable(
-                sa.getId(), project.getId(), ungranted))
+                sa.getId(), team.getId(), ungranted))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 
     @Test
     void requireUsableRejectsWebOnlyReachAs404() {
-        Project project = data.project().named("ext-reach").create();
+        team team = data.team().named("ext-reach").create();
         AgentProfile profile = data.agentProfile().named("ext-reach-profile").create();
-        ServiceAccount sa = serviceAccount(project);
-        UUID webOnly = publishedAssistant(project, profile, "WebOnly", false);
+        ServiceAccount sa = serviceAccount(team);
+        UUID webOnly = publishedAssistant(team, profile, "WebOnly", false);
         grantUse(webOnly, sa);
 
         assertThatThrownBy(() -> externalAssistantService.requireUsable(
-                sa.getId(), project.getId(), webOnly))
+                sa.getId(), team.getId(), webOnly))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 
@@ -104,11 +104,11 @@ class ExternalApiServiceIT extends IntegrationTestBase {
 
     @Test
     void startConversationCreatesExternalConversationWithProvenance() {
-        Project project = data.project().named("ext-start").create();
+        team team = data.team().named("ext-start").create();
         AgentProfile profile = data.agentProfile().named("ext-start-profile").create();
-        ServiceAccount sa = serviceAccount(project);
-        ServiceAccountPrincipal principal = principal(sa, project);
-        UUID assistantId = publishedAssistant(project, profile, "Starter", true);
+        ServiceAccount sa = serviceAccount(team);
+        ServiceAccountPrincipal principal = principal(sa, team);
+        UUID assistantId = publishedAssistant(team, profile, "Starter", true);
         grantUse(assistantId, sa);
 
         Conversation conversation = externalConversationService.startConversation(
@@ -128,11 +128,11 @@ class ExternalApiServiceIT extends IntegrationTestBase {
 
     @Test
     void startConversationRequiresEndUserRef() {
-        Project project = data.project().named("ext-noref").create();
+        team team = data.team().named("ext-noref").create();
         AgentProfile profile = data.agentProfile().named("ext-noref-profile").create();
-        ServiceAccount sa = serviceAccount(project);
-        ServiceAccountPrincipal principal = principal(sa, project);
-        UUID assistantId = publishedAssistant(project, profile, "NoRef", true);
+        ServiceAccount sa = serviceAccount(team);
+        ServiceAccountPrincipal principal = principal(sa, team);
+        UUID assistantId = publishedAssistant(team, profile, "NoRef", true);
         grantUse(assistantId, sa);
 
         assertThatThrownBy(() -> externalConversationService.startConversation(
@@ -142,11 +142,11 @@ class ExternalApiServiceIT extends IntegrationTestBase {
 
     @Test
     void startConversationRejectsUngrantedAssistant() {
-        Project project = data.project().named("ext-start-gate").create();
+        team team = data.team().named("ext-start-gate").create();
         AgentProfile profile = data.agentProfile().named("ext-start-gate-profile").create();
-        ServiceAccount sa = serviceAccount(project);
-        ServiceAccountPrincipal principal = principal(sa, project);
-        UUID assistantId = publishedAssistant(project, profile, "Locked", true);
+        ServiceAccount sa = serviceAccount(team);
+        ServiceAccountPrincipal principal = principal(sa, team);
+        UUID assistantId = publishedAssistant(team, profile, "Locked", true);
         // no USE grant
 
         assertThatThrownBy(() -> externalConversationService.startConversation(
@@ -156,11 +156,11 @@ class ExternalApiServiceIT extends IntegrationTestBase {
 
     @Test
     void postAndListMessagesHonourSinceCursor() {
-        Project project = data.project().named("ext-msgs").create();
+        team team = data.team().named("ext-msgs").create();
         AgentProfile profile = data.agentProfile().named("ext-msgs-profile").create();
-        ServiceAccount sa = serviceAccount(project);
-        ServiceAccountPrincipal principal = principal(sa, project);
-        UUID assistantId = publishedAssistant(project, profile, "Chatter", true);
+        ServiceAccount sa = serviceAccount(team);
+        ServiceAccountPrincipal principal = principal(sa, team);
+        UUID assistantId = publishedAssistant(team, profile, "Chatter", true);
         grantUse(assistantId, sa);
 
         Conversation conversation = externalConversationService.startConversation(
@@ -180,11 +180,11 @@ class ExternalApiServiceIT extends IntegrationTestBase {
 
     @Test
     void closeConversationArchivesAndBlocksFurtherMessages() {
-        Project project = data.project().named("ext-close").create();
+        team team = data.team().named("ext-close").create();
         AgentProfile profile = data.agentProfile().named("ext-close-profile").create();
-        ServiceAccount sa = serviceAccount(project);
-        ServiceAccountPrincipal principal = principal(sa, project);
-        UUID assistantId = publishedAssistant(project, profile, "Closer", true);
+        ServiceAccount sa = serviceAccount(team);
+        ServiceAccountPrincipal principal = principal(sa, team);
+        UUID assistantId = publishedAssistant(team, profile, "Closer", true);
         grantUse(assistantId, sa);
 
         Conversation conversation = externalConversationService.startConversation(
@@ -200,13 +200,13 @@ class ExternalApiServiceIT extends IntegrationTestBase {
 
     @Test
     void crossServiceAccountCannotAccessConversation() {
-        Project project = data.project().named("ext-cross").create();
+        team team = data.team().named("ext-cross").create();
         AgentProfile profile = data.agentProfile().named("ext-cross-profile").create();
-        ServiceAccount owner = serviceAccount(project);
-        ServiceAccount intruder = serviceAccount(project);
-        ServiceAccountPrincipal ownerPrincipal = principal(owner, project);
-        ServiceAccountPrincipal intruderPrincipal = principal(intruder, project);
-        UUID assistantId = publishedAssistant(project, profile, "Private", true);
+        ServiceAccount owner = serviceAccount(team);
+        ServiceAccount intruder = serviceAccount(team);
+        ServiceAccountPrincipal ownerPrincipal = principal(owner, team);
+        ServiceAccountPrincipal intruderPrincipal = principal(intruder, team);
+        UUID assistantId = publishedAssistant(team, profile, "Private", true);
         grantUse(assistantId, owner);
 
         Conversation conversation = externalConversationService.startConversation(
@@ -224,11 +224,11 @@ class ExternalApiServiceIT extends IntegrationTestBase {
 
     @Test
     void listConversationsFiltersByExternalUserRef() {
-        Project project = data.project().named("ext-list").create();
+        team team = data.team().named("ext-list").create();
         AgentProfile profile = data.agentProfile().named("ext-list-profile").create();
-        ServiceAccount sa = serviceAccount(project);
-        ServiceAccountPrincipal principal = principal(sa, project);
-        UUID assistantId = publishedAssistant(project, profile, "Lister", true);
+        ServiceAccount sa = serviceAccount(team);
+        ServiceAccountPrincipal principal = principal(sa, team);
+        UUID assistantId = publishedAssistant(team, profile, "Lister", true);
         grantUse(assistantId, sa);
 
         externalConversationService.startConversation(principal, assistantId, "alice", null);
@@ -246,10 +246,10 @@ class ExternalApiServiceIT extends IntegrationTestBase {
      * Create + publish an assistant, optionally opening its reach to
      * {@code EXTERNAL_API}. Returns the assistant id.
      */
-    private UUID publishedAssistant(Project project, AgentProfile profile,
+    private UUID publishedAssistant(team team, AgentProfile profile,
                                     String name, boolean externalApi) {
         Assistant assistant = assistantService.createAssistant(
-                project.getId(), name, "desc", profile.getId(), TEST_ADMIN_ID);
+                team.getId(), name, "desc", profile.getId(), TEST_ADMIN_ID);
         if (externalApi) {
             AssistantVersion draft = versionService.getOpenDraft(assistant.getId());
             draft.setUsableVia(new java.util.ArrayList<>(List.of("WEB_UI", "EXTERNAL_API")));
@@ -264,17 +264,17 @@ class ExternalApiServiceIT extends IntegrationTestBase {
                 sa.getId().toString(), AssistantGrant.Permission.USE, TEST_ADMIN_ID);
     }
 
-    private ServiceAccount serviceAccount(Project project) {
+    private ServiceAccount serviceAccount(team team) {
         ServiceAccount sa = new ServiceAccount();
-        sa.setProjectId(project.getId());
+        sa.setTeamId(team.getId());
         sa.setName("ext-sa-" + UUID.randomUUID());
         sa.setKeycloakClientId("client-" + UUID.randomUUID());
         sa.setEnabled(true);
         return serviceAccountRepository.save(sa);
     }
 
-    private ServiceAccountPrincipal principal(ServiceAccount sa, Project project) {
+    private ServiceAccountPrincipal principal(ServiceAccount sa, team team) {
         return new ServiceAccountPrincipal(
-                sa.getId(), project.getId(), sa.getKeycloakClientId(), sa.getName());
+                sa.getId(), team.getId(), sa.getKeycloakClientId(), sa.getName());
     }
 }

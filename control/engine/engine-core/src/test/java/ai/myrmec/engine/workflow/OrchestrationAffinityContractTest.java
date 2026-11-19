@@ -7,7 +7,7 @@ import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionAllocator;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.user.User;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -51,14 +51,14 @@ class OrchestrationAffinityContractTest extends WorkflowDispatchSupport {
     @Autowired private ExecutionEventRepository eventRepository;
     @Autowired private ai.myrmec.engine.inference.SessionRepository sessionRepository;
 
-    private Project project;
+    private team team;
     private AgentProfile profile;
     private User admin;
 
     @BeforeEach
     void setUp() throws Exception {
         // The assembler resolves the source base with a REAL git ls-remote —
-        // the project repo must be a seeded local bare origin.
+        // the team repo must be a seeded local bare origin.
         java.nio.file.Path origin = java.nio.file.Files.createTempDirectory("aff-origin-");
         origin = origin.resolve("origin.git");
         git(origin.getParent(), "init", "--bare", "-b", "main", origin.toString());
@@ -69,7 +69,7 @@ class OrchestrationAffinityContractTest extends WorkflowDispatchSupport {
         String originUrl = origin.toAbsolutePath().toString().replace('\\', '/');
         git(seed, "push", originUrl, "main");
 
-        project = data.project().named("aff").withRepo(originUrl, "main").create();
+        team = data.team().named("aff").withRepo(originUrl, "main").create();
         profile = data.agentProfile().named("aff-profile").create();
         admin = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
     }
@@ -94,8 +94,8 @@ class OrchestrationAffinityContractTest extends WorkflowDispatchSupport {
     @DisplayName("two eligible hosts: every dispatch of a PAUSED run binds to the pause-time coordinator host")
     void twoHostAffinityPinsFirstCoordinatorHost() throws Exception {
         Workflow wf = workflowWithOrchestratorStep("aff-two");
-        SocketHost hostA = openHost("aff-host-a", profile, project, 4);
-        SocketHost hostB = openHost("aff-host-b", profile, project, 4);
+        SocketHost hostA = openHost("aff-host-a", profile, team, 4);
+        SocketHost hostB = openHost("aff-host-b", profile, team, 4);
 
         // Pause-time pinning (design D11): the pin exists only after a run
         // PAUSES on a host (the SAME_HOST continuation manifest). The first
@@ -152,7 +152,7 @@ class OrchestrationAffinityContractTest extends WorkflowDispatchSupport {
     @DisplayName("a pinned-but-unavailable coordinator: throttled AGENT_UNAVAILABLE events, bounded backoff, no attempt consumed")
     void unavailableCoordinatorThrottlesWithBackoff() throws Exception {
         Workflow wf = workflowWithOrchestratorStep("aff-backoff");
-        SocketHost hostA = openHost("aff-host-c", profile, project, 4);
+        SocketHost hostA = openHost("aff-host-c", profile, team, 4);
 
         WorkflowRequest request = runningRequest(wf, "aff-backoff");
         pinRun(request);
@@ -237,7 +237,7 @@ class OrchestrationAffinityContractTest extends WorkflowDispatchSupport {
     @DisplayName("recovery-deadline expiry without reconnect: run LOST, request FAILED with engine-generated WORKSPACE_LOST")
     void recoveryExpiryIsTerminalWorkspaceLost() throws Exception {
         Workflow wf = workflowWithOrchestratorStep("aff-lost");
-        SocketHost hostA = openHost("aff-host-d", profile, project, 4);
+        SocketHost hostA = openHost("aff-host-d", profile, team, 4);
 
         WorkflowRequest request = runningRequest(wf, "aff-lost");
         pinRun(request);
@@ -313,14 +313,14 @@ class OrchestrationAffinityContractTest extends WorkflowDispatchSupport {
 
     private void pinRun(WorkflowRequest request) {
         runService.pinRun(request.getId(),
-                request.getWorkflow().getId(), project.getId(), profile.getId());
+                request.getWorkflow().getId(), team.getId(), profile.getId());
     }
 
     private Workflow workflowWithOrchestratorStep(String tag) {
         Map<String, Object> build = orchestratorStep("build");
         Map<String, Object> verify = orchestratorStep("verify");
         Workflow wf = new Workflow();
-        wf.setProject(project);
+        wf.setTeam(team);
         wf.setName(tag + "-wf-" + System.nanoTime());
         wf.setSteps(List.of(build, verify));
         wf.setVersion(1);

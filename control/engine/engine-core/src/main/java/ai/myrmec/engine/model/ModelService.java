@@ -74,6 +74,14 @@ public class ModelService {
     }
 
     /**
+     * Check whether a model has a specific capability binding.
+     */
+    @Transactional(readOnly = true)
+    public boolean hasCapability(String modelCode, String capabilityCode) {
+        return modelRepository.hasCapability(modelCode, capabilityCode);
+    }
+
+    /**
      * Create a new model.
      */
     @Transactional
@@ -106,12 +114,15 @@ public class ModelService {
             model.setApiEndpoint(providerConfig.getBaseUrl());
         }
         
-        model.setSupportsVision(request.getSupportsVision() != null && request.getSupportsVision());
         model.setInfraConfig(request.getInfraConfig());
         model.setDefaultParams(request.getDefaultParams());
         model.setInputPrice(request.getInputPrice());
         model.setOutputPrice(request.getOutputPrice());
         model.setCurrency(request.getCurrency() != null ? request.getCurrency() : "USD");
+        model.setContextWindowTokens(request.getContextWindowTokens());
+        model.setMaxOutputTokens(request.getMaxOutputTokens());
+        model.setTrainingCutoffDate(request.getTrainingCutoffDate());
+        model.setReleaseDate(request.getReleaseDate());
         model.setStatus(ModelStatus.ACTIVE);
         model.setHealthStatus(HealthStatus.UNKNOWN);
 
@@ -138,10 +149,6 @@ public class ModelService {
             model.setApiEndpoint(request.getApiEndpoint().trim().isEmpty() ? null : request.getApiEndpoint().trim());
         }
 
-        if (request.getSupportsVision() != null) {
-            model.setSupportsVision(request.getSupportsVision());
-        }
-
         if (request.getInfraConfig() != null) {
             model.setInfraConfig(request.getInfraConfig());
         }
@@ -157,6 +164,10 @@ public class ModelService {
         if (request.getInputPrice() != null) model.setInputPrice(request.getInputPrice());
         if (request.getOutputPrice() != null) model.setOutputPrice(request.getOutputPrice());
         if (request.getCurrency() != null) model.setCurrency(request.getCurrency());
+        if (request.getContextWindowTokens() != null) model.setContextWindowTokens(request.getContextWindowTokens());
+        if (request.getMaxOutputTokens() != null) model.setMaxOutputTokens(request.getMaxOutputTokens());
+        if (request.getTrainingCutoffDate() != null) model.setTrainingCutoffDate(request.getTrainingCutoffDate());
+        if (request.getReleaseDate() != null) model.setReleaseDate(request.getReleaseDate());
 
         model = modelRepository.save(model);
         log.info("Updated model: {}", code);

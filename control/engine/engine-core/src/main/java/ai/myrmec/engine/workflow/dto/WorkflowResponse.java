@@ -9,8 +9,8 @@ import java.util.UUID;
 
 public record WorkflowResponse(
         UUID id,
-        UUID projectId,
-        String projectName,
+        UUID teamId,
+        String teamName,
         String name,
         String description,
         List<WorkflowStepDto> steps,

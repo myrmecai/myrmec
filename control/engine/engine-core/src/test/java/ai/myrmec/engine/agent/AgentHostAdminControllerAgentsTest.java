@@ -4,7 +4,7 @@ package ai.myrmec.engine.agent;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.agent.dto.AgentResponse;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -85,10 +85,10 @@ class AgentHostAdminControllerAgentsTest extends IntegrationTestBase {
     }
 
     private AgentHost host() {
-        Project project = data.project().named("agents-" + UUID.randomUUID()).create();
+        team team = data.team().named("agents-" + UUID.randomUUID()).create();
         return data.agent()
                 .named("agents-host-" + UUID.randomUUID())
-                .inProject(project)
+                .inTeam(team)
                 .create()
                 .agent();
     }

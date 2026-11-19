@@ -15,7 +15,7 @@ import java.util.UUID;
  * Immutable retrieval request handed to a {@link RetrievalProvider}.
  *
  * <p>Engine builds this from the agent's {@code ctx.retrieve()} call and
- * resolves {@code sourceId} from the calling project's access scope
+ * resolves {@code sourceId} from the calling Team's access scope
  * before dispatch. Providers MUST treat the value as read-only.</p>
  *
  * @param sourceId          non-null knowledge source the query targets; resolution and ACL

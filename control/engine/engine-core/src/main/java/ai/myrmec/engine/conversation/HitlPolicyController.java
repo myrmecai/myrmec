@@ -29,17 +29,17 @@ public class HitlPolicyController {
     private final HitlPolicyService hitlPolicyService;
 
     /**
-     * Admin / UI lookup: "what would happen if project X tried to run tool Y?"
-     * Anyone with project read access can call this — it's metadata, not
+     * Admin / UI lookup: "what would happen if Team X tried to run tool Y?"
+     * Anyone with Team read access can call this — it's metadata, not
      * an action.
      */
-    @Operation(summary = "Evaluate HITL policy for a project + tool")
-    @GetMapping("/projects/{projectId}/hitl-policy")
-    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
-    public ResponseEntity<HitlPolicyService.Decision> evaluateForProject(
-            @PathVariable UUID projectId,
+    @Operation(summary = "Evaluate HITL policy for a Team + tool")
+    @GetMapping("/teams/{teamId}/hitl-policy")
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
+    public ResponseEntity<HitlPolicyService.Decision> evaluateForTeam(
+            @PathVariable UUID teamId,
             @RequestParam("toolCode") String toolCode) {
-        return ResponseEntity.ok(hitlPolicyService.evaluate(projectId, toolCode));
+        return ResponseEntity.ok(hitlPolicyService.evaluate(teamId, toolCode));
     }
 
     /**

@@ -14,18 +14,18 @@ import org.springframework.stereotype.Service;
  * <ol>
  *   <li>Read the org default code from system setting
  *       {@code governance_profile_code} (default {@code STANDARD}).</li>
- *   <li>If the scope has a project-level selection (future), it must be
+ *   <li>If the scope has a Team-level selection (future), it must be
  *       at-least-as-strict-as the org default ({@link FeatureStrictness}) —
  *       else reject at <i>write</i> time. At <i>read</i> time, resolve to
- *       the project selection if present, else the org default.</li>
+ *       the Team selection if present, else the org default.</li>
  *   <li>Return an {@link EffectivePolicy} built from the resolved
  *       {@link GovernanceProfileDefinition}.</li>
  * </ol>
  *
- * <p>For V1, project-level selection storage does not exist yet — the
+ * <p>For V1, Team-level selection storage does not exist yet — the
  * resolver returns the org default and the ratchet check is exercised by
- * the (future) project-selection write path. The scope parameter is kept
- * so no signature change is needed when project selection lands.
+ * the (future) Team-selection write path. The scope parameter is kept
+ * so no signature change is needed when Team selection lands.
  */
 @Slf4j
 @Service
@@ -44,7 +44,7 @@ public class GovernancePolicyResolver {
     /**
      * Resolve the effective policy for the given scope.
      *
-     * @param scope the scope (null projectId ⇒ org scope)
+     * @param scope the scope (null teamId ⇒ org scope)
      * @return the effective policy
      */
     public EffectivePolicy resolve(GovernanceScope scope) {
@@ -62,11 +62,11 @@ public class GovernancePolicyResolver {
     }
 
     /**
-     * Validate that a candidate project-level selection is at-least-as-strict-as
+     * Validate that a candidate Team-level selection is at-least-as-strict-as
      * the org default (ratchet check). To be called on the write path when
-     * project selection lands.
+     * Team selection lands.
      *
-     * @param projectProfileCode the candidate project profile code
+     * @param projectProfileCode the candidate Team profile code
      * @return true if the candidate is at-least-as-strict-as the org default
      */
     public boolean isRatchetValid(String projectProfileCode) {

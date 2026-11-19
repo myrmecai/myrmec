@@ -6,7 +6,7 @@ package ai.myrmec.engine.quota.dto;
 import lombok.Builder;
 import lombok.Value;
 
-/** Read-model for the unreserved shared pool of a project budget. */
+/** Read-model for the unreserved shared pool of a Team budget. */
 @Value
 @Builder
 public class SharedPool {

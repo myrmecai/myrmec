@@ -12,7 +12,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Local hosts are per-USER, not per-(user, project) (design 2026-09-11 §1.3;
+ * Local hosts are per-USER, not per-(user, team) (design 2026-09-11 §1.3;
  * protocol §4.1 local registration resolves "the user's local host"). The
  * durable host row is a placeholder (hostType=LOCAL, owner column dropped) —
  * the ONLY owner record is agent_host_instances.owner_user_id, stamped at
@@ -39,18 +39,18 @@ class LocalHostPerUserTest extends IntegrationTestBase {
         UUID user = UUID.randomUUID();
         // Real projects (fk_agent_hosts_project rejects random UUIDs); two
         // DISTINCT projects prove the lookup is user-scoped, not
-        // project-scoped — a per-(user, project) regression would create a
+        // team-scoped — a per-(user, team) regression would create a
         // second host and fail the assertion below.
-        ai.myrmec.engine.project.Project projectA = data.project().named("lh-a").create();
-        ai.myrmec.engine.project.Project projectB = data.project().named("lh-b").create();
+        ai.myrmec.engine.team.Team teamA = data.team().named("lh-a").create();
+        ai.myrmec.engine.team.Team teamB = data.team().named("lh-b").create();
 
-        AgentHost first = agentHostService.upsertLocalAgentHost(user, projectA.getId(), "laptop-a");
+        AgentHost first = agentHostService.upsertLocalAgentHost(user, teamA.getId(), "laptop-a");
         // host.open stamps the live instance with the owner (the ONLY owner
         // record; the host row is a placeholder).
         agentHostInstanceRepository.saveAndFlush(AgentHostInstance.open(
                 agentHostRepository.findById(first.getId()).orElseThrow(),
                 user, UUID.randomUUID().toString(), "laptop-a", 1, null, "node-a"));
-        AgentHost second = agentHostService.upsertLocalAgentHost(user, projectB.getId(), "laptop-b");
+        AgentHost second = agentHostService.upsertLocalAgentHost(user, teamB.getId(), "laptop-b");
 
         assertThat(second.getId()).isEqualTo(first.getId());
         assertThat(first.getHostType()).isEqualTo(AgentHostType.LOCAL);

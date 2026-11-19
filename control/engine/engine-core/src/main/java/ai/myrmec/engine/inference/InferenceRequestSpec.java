@@ -23,7 +23,7 @@ public class InferenceRequestSpec {
     private final String serviceType;      // "WORKFLOW" or "CONVERSATION"
     private final UUID sessionId;
     private final UUID requestId;
-    private final UUID projectId;
+    private final UUID teamId;
     private final UUID assistantVersionId;
     private final long sequenceNo;          // assistant sequence no (conversation) / step index (workflow)
     private final String stepId;           // workflow step id (nullable for conversation turns)

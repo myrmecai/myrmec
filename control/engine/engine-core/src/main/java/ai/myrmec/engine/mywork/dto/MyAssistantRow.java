@@ -18,8 +18,8 @@ import java.util.UUID;
  */
 public record MyAssistantRow(
         UUID id,
-        UUID projectId,
-        String projectName,
+        UUID teamId,
+        String teamName,
         String name,
         String description,
         UUID agentProfileId,
@@ -34,11 +34,11 @@ public record MyAssistantRow(
         return a.getCurrentVersionId() != null ? "PUBLISHED" : "DRAFT";
     }
 
-    public static MyAssistantRow of(Assistant a, String projectName, UUID agentProfileId, long activeSessions, Instant lastSessionAt) {
+    public static MyAssistantRow of(Assistant a, String teamName, UUID agentProfileId, long activeSessions, Instant lastSessionAt) {
         return new MyAssistantRow(
                 a.getId(),
-                a.getProjectId(),
-                projectName,
+                a.getTeamId(),
+                teamName,
                 a.getName(),
                 a.getDescription(),
                 agentProfileId,

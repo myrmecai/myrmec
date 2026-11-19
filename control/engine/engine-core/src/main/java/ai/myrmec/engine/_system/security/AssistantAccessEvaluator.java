@@ -11,9 +11,9 @@ import java.util.UUID;
 /**
  * SpEL access evaluator for assistant-scoped endpoints (#92).
  *
- * <p>V1 resolves the assistant's parent project and delegates to
- * {@link ProjectAccessEvaluator}: project VIEWER reads, project EDITOR authors,
- * project OWNER manages grants. Fine-grained {@code assistant_grants}
+ * <p>V1 resolves the assistant's parent Team and delegates to
+ * {@link TeamAccessEvaluator}: Team VIEWER reads, Team EDITOR authors,
+ * Team OWNER manages grants. Fine-grained {@code assistant_grants}
  * enforcement (OWNER/EDITOR/VIEWER/USE per-assistant) is a follow-up (#99) and
  * will layer on top of this baseline.</p>
  */
@@ -22,29 +22,29 @@ import java.util.UUID;
 public class AssistantAccessEvaluator {
 
     private final AssistantRepository assistantRepository;
-    private final ProjectAccessEvaluator projectAccess;
+    private final TeamAccessEvaluator teamAccess;
 
     public boolean canView(UUID assistantId, Authentication authentication) {
-        UUID projectId = projectIdOf(assistantId);
-        return projectId != null && projectAccess.canView(projectId, authentication);
+        UUID teamId = teamIdOf(assistantId);
+        return teamId != null && teamAccess.canView(teamId, authentication);
     }
 
     public boolean canEdit(UUID assistantId, Authentication authentication) {
-        UUID projectId = projectIdOf(assistantId);
-        return projectId != null && projectAccess.canEdit(projectId, authentication);
+        UUID teamId = teamIdOf(assistantId);
+        return teamId != null && teamAccess.canEdit(teamId, authentication);
     }
 
     public boolean canOwn(UUID assistantId, Authentication authentication) {
-        UUID projectId = projectIdOf(assistantId);
-        return projectId != null && projectAccess.canOwn(projectId, authentication);
+        UUID teamId = teamIdOf(assistantId);
+        return teamId != null && teamAccess.canOwn(teamId, authentication);
     }
 
-    private UUID projectIdOf(UUID assistantId) {
+    private UUID teamIdOf(UUID assistantId) {
         if (assistantId == null) {
             return null;
         }
         return assistantRepository.findById(assistantId)
-                .map(Assistant::getProjectId)
+                .map(Assistant::getTeamId)
                 .orElse(null);
     }
 }

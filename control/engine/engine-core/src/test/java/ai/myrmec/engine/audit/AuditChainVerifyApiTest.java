@@ -3,8 +3,8 @@
 package ai.myrmec.engine.audit;
 
 import ai.myrmec.engine.IntegrationTestBase;
-import ai.myrmec.engine.project.ProjectSetting;
-import ai.myrmec.engine.project.ProjectSettingRepository;
+import ai.myrmec.engine.team.TeamSetting;
+import ai.myrmec.engine.team.ProjectSettingRepository;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Audit chain verify API tests — test the REST endpoint and role gating.
  *
- * <p>GET /api/v1/admin/audit-log/verify?scopeType=…&projectId=…
+ * <p>GET /api/v1/admin/audit-log/verify?scopeType=…&teamId=…
  * → { valid, checkedCount, firstBrokenId, reason }
  */
 @Tag("INV-6")
@@ -42,18 +42,18 @@ class AuditChainVerifyApiTest extends IntegrationTestBase {
     @Autowired
     private TestDataBuilder data;
 
-    private static final String SCOPE_PROJECT = "PROJECT";
+    private static final String SCOPE_PROJECT = "TEAM";
 
     @Test
     @DisplayName("verify endpoint returns valid=true for a clean chain")
     void verifyReturnsValidForCleanChain() {
-        UUID projectId = data.project().create().getId();
-        enableChaining(projectId);
-        writeProjectEvent(projectId, "CREATED", "entity-1");
-        writeProjectEvent(projectId, "UPDATED", "entity-2");
+        UUID teamId = data.team().create().getId();
+        enableChaining(teamId);
+        writeProjectEvent(teamId, "CREATED", "entity-1");
+        writeProjectEvent(teamId, "UPDATED", "entity-2");
 
         ResponseEntity<Map> response = restTemplate.exchange(
-                "/api/v1/admin/audit-log/verify?scopeType=PROJECT&projectId=" + projectId,
+                "/api/v1/admin/audit-log/verify?scopeType=TEAM&teamId=" + teamId,
                 HttpMethod.GET,
                 new HttpEntity<>(adminHeaders()),
                 Map.class);
@@ -68,18 +68,18 @@ class AuditChainVerifyApiTest extends IntegrationTestBase {
     @Test
     @DisplayName("verify endpoint returns valid=false for a tampered chain")
     void verifyReturnsInvalidForTamperedChain() {
-        UUID projectId = data.project().create().getId();
-        enableChaining(projectId);
-        writeProjectEvent(projectId, "CREATED", "entity-1");
-        writeProjectEvent(projectId, "UPDATED", "entity-2");
+        UUID teamId = data.team().create().getId();
+        enableChaining(teamId);
+        writeProjectEvent(teamId, "CREATED", "entity-1");
+        writeProjectEvent(teamId, "UPDATED", "entity-2");
 
         // Tamper with the first event's content
-        var events = auditEventRepository.findByScopeTypeAndProjectIdOrderByIdAsc(SCOPE_PROJECT, projectId);
+        var events = auditEventRepository.findByScopeTypeAndTeamIdOrderByIdAsc(SCOPE_PROJECT, teamId);
         events.get(0).setEventType("TAMPERED");
         auditEventRepository.save(events.get(0));
 
         ResponseEntity<Map> response = restTemplate.exchange(
-                "/api/v1/admin/audit-log/verify?scopeType=PROJECT&projectId=" + projectId,
+                "/api/v1/admin/audit-log/verify?scopeType=TEAM&teamId=" + teamId,
                 HttpMethod.GET,
                 new HttpEntity<>(adminHeaders()),
                 Map.class);
@@ -93,11 +93,11 @@ class AuditChainVerifyApiTest extends IntegrationTestBase {
     @Test
     @DisplayName("verify endpoint is role-gated: unauthenticated request is rejected")
     void verifyEndpointRoleGated() {
-        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
 
         // No auth headers → should be 401/403
         ResponseEntity<Map> response = restTemplate.getForEntity(
-                "/api/v1/admin/audit-log/verify?scopeType=PROJECT&projectId=" + projectId,
+                "/api/v1/admin/audit-log/verify?scopeType=TEAM&teamId=" + teamId,
                 Map.class);
 
         assertThat(response.getStatusCode().is4xxClientError()).isTrue();
@@ -105,19 +105,19 @@ class AuditChainVerifyApiTest extends IntegrationTestBase {
 
     // --- helpers ---
 
-    private void enableChaining(UUID projectId) {
-        ProjectSetting setting = new ProjectSetting();
-        setting.setProjectId(projectId);
+    private void enableChaining(UUID teamId) {
+        TeamSetting setting = new TeamSetting();
+        setting.setTeamId(teamId);
         setting.setSettingKey("audit_integrity_enabled");
         setting.setValueType("STRING");
         setting.setSettingValue("true");
         projectSettingRepository.save(setting);
     }
 
-    private void writeProjectEvent(UUID projectId, String eventType, String entityName) {
+    private void writeProjectEvent(UUID teamId, String eventType, String entityName) {
         auditEventService.recordEvent(
                 "test_entity", UUID.randomUUID(), eventType,
-                SCOPE_PROJECT, projectId,
+                SCOPE_PROJECT, teamId,
                 null, "Verify API Test", null, null,
                 null, Map.of("name", entityName), null);
     }

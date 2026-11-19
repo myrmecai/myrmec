@@ -26,7 +26,7 @@ import java.util.concurrent.TimeUnit;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/v1/projects/{projectId}/workflows/{workflowId}/requests/{requestId}/events")
+@RequestMapping("/api/v1/teams/{teamId}/workflows/{workflowId}/requests/{requestId}/events")
 @RequiredArgsConstructor
 @Slf4j
 public class ExecutionEventController {
@@ -39,17 +39,17 @@ public class ExecutionEventController {
      * Get all events for a request.
      */
     @GetMapping
-    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
     public List<ExecutionEventResponse> getEvents(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID workflowId,
             @PathVariable UUID requestId,
             @RequestParam(required = false) String after) {
         
-        // Verify workflow belongs to project
+        // Verify workflow belongs to Team
         var workflow = workflowService.findById(workflowId);
-        if (!workflow.projectId().equals(projectId)) {
-            throw new IllegalArgumentException("Workflow does not belong to this project");
+        if (!workflow.teamId().equals(teamId)) {
+            throw new IllegalArgumentException("Workflow does not belong to this Team");
         }
 
         List<ExecutionEvent> events;
@@ -69,18 +69,18 @@ public class ExecutionEventController {
      * Get events for a specific task.
      */
     @GetMapping("/tasks/{taskId}")
-    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
     public List<ExecutionEventResponse> getTaskEvents(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID workflowId,
             @PathVariable UUID requestId,
             @PathVariable UUID taskId,
             @RequestParam(required = false) String after) {
         
-        // Verify workflow belongs to project
+        // Verify workflow belongs to Team
         var workflow = workflowService.findById(workflowId);
-        if (!workflow.projectId().equals(projectId)) {
-            throw new IllegalArgumentException("Workflow does not belong to this project");
+        if (!workflow.teamId().equals(teamId)) {
+            throw new IllegalArgumentException("Workflow does not belong to this Team");
         }
 
         List<ExecutionEvent> events;
@@ -103,16 +103,16 @@ public class ExecutionEventController {
      * The connection remains open until the request completes or client disconnects.
      */
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
     public SseEmitter streamEvents(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID workflowId,
             @PathVariable UUID requestId) {
         
-        // Verify workflow belongs to project
+        // Verify workflow belongs to Team
         var workflow = workflowService.findById(workflowId);
-        if (!workflow.projectId().equals(projectId)) {
-            throw new IllegalArgumentException("Workflow does not belong to this project");
+        if (!workflow.teamId().equals(teamId)) {
+            throw new IllegalArgumentException("Workflow does not belong to this Team");
         }
 
         log.info("SSE client connected for request {}", requestId);

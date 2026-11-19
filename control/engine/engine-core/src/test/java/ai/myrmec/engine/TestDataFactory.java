@@ -2,8 +2,8 @@ package ai.myrmec.engine;
 
 import ai.myrmec.engine.model.Model;
 import ai.myrmec.engine.model.ModelStatus;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectStatus;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamStatus;
 
 import java.time.Instant;
 import java.util.List;
@@ -16,49 +16,49 @@ import java.util.UUID;
  */
 public class TestDataFactory {
 
-    // ==================== Project Builders ====================
+    // ==================== Team Builders ====================
 
     /**
-     * Fluent builder for Project entity.
+     * Fluent builder for team entity.
      */
     public static class ProjectBuilder {
-        private final Project project;
+        private final team team;
 
         private ProjectBuilder(String name) {
-            this.project = new Project();
-            this.project.setName(name);
-            this.project.setGroupId(ai.myrmec.engine.group.Group.DEFAULT_GROUP_ID);
-            this.project.setStatus(ProjectStatus.ACTIVE);
-            this.project.setCreatedAt(Instant.now());
+            this.team = new team();
+            this.team.setName(name);
+            this.team.setGroupId(ai.myrmec.engine.group.Group.DEFAULT_GROUP_ID);
+            this.team.setStatus(TeamStatus.ACTIVE);
+            this.team.setCreatedAt(Instant.now());
         }
 
         public ProjectBuilder description(String description) {
-            project.setDescription(description);
+            team.setDescription(description);
             return this;
         }
 
-        public ProjectBuilder status(ProjectStatus status) {
-            project.setStatus(status);
+        public ProjectBuilder status(TeamStatus status) {
+            team.setStatus(status);
             return this;
         }
 
         public ProjectBuilder workspaceRepoUrl(String repoUrl) {
-            project.setWorkspaceRepoUrl(repoUrl);
+            team.setWorkspaceRepoUrl(repoUrl);
             return this;
         }
 
         public ProjectBuilder workspaceRepoBranch(String branch) {
-            project.setWorkspaceRepoBranch(branch);
+            team.setWorkspaceRepoBranch(branch);
             return this;
         }
 
-        public Project build() {
-            return project;
+        public Team Build() {
+            return team;
         }
     }
 
     /**
-     * Create a project builder with name.
+     * Create a Team Builder with name.
      */
     public static ProjectBuilder projectBuilder(String name) {
         return new ProjectBuilder(name);

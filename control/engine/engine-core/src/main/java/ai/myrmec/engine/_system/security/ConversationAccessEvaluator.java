@@ -19,8 +19,8 @@ import java.util.UUID;
  * <p>Resolution order:
  * <ol>
  *   <li>Direct participant grant on this conversation (OWNER/EDITOR/VIEWER).</li>
- *   <li>Fall back to {@link ProjectAccessEvaluator} on the parent project — so
- *       project owners and editors can always see/post into conversations under
+ *   <li>Fall back to {@link TeamAccessEvaluator} on the parent Team — so
+ *       Team owners and editors can always see/post into conversations under
  *       their projects even if no explicit participant row exists.</li>
  * </ol>
  *
@@ -41,7 +41,7 @@ public class ConversationAccessEvaluator {
 
     private final ConversationRepository conversationRepository;
     private final ConversationParticipantRepository participantRepository;
-    private final ProjectAccessEvaluator projectAccess;
+    private final TeamAccessEvaluator teamAccess;
 
     public boolean canView(UUID conversationId, Authentication authentication) {
         return hasAccess(conversationId, authentication, VIEWER_ROLES, true);
@@ -79,13 +79,13 @@ public class ConversationAccessEvaluator {
             return true;
         }
 
-        // 2. Fall back to project ACL on the parent.
+        // 2. Fall back to Team ACL on the parent.
         Optional<Conversation> conv = conversationRepository.findById(conversationId);
         if (conv.isEmpty()) return false;
-        UUID projectId = conv.get().getProjectId();
+        UUID teamId = conv.get().getTeamId();
         return allowProjectViewer
-                ? projectAccess.canView(projectId, authentication)
-                : projectAccess.canEdit(projectId, authentication);
+                ? teamAccess.canView(teamId, authentication)
+                : teamAccess.canEdit(teamId, authentication);
     }
 
     private static UserPrincipal principalOf(Authentication authentication) {

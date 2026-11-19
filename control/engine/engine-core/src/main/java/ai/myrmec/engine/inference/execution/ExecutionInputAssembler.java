@@ -96,12 +96,12 @@ public class ExecutionInputAssembler {
      * ready for ExecutionStartPayload conversion.
      */
     public java.util.Map<String, Object> assembleConversationInput(UUID conversationId, UUID sessionId,
-                                                                    UUID projectId, long sequenceNo) {
+                                                                    UUID teamId, long sequenceNo) {
         // Build the legacy spec exactly as ConversationTurnDispatcher does
         // (sliding window + system prompt + tools + attachments), then
-        // project it into the §8.1 shape. The assembler's composed output
+        // Team it into the §8.1 shape. The assembler's composed output
         // is the single source of transcript truth.
-        InferenceRequestSpec spec = buildLegacySpec(conversationId, sessionId, projectId, sequenceNo);
+        InferenceRequestSpec spec = buildLegacySpec(conversationId, sessionId, teamId, sequenceNo);
         InferenceRequestAssembler.AssembledInference assign = inferenceRequestAssembler.assemble(spec);
 
         java.util.Map<String, Object> input = new java.util.LinkedHashMap<>();
@@ -131,7 +131,7 @@ public class ExecutionInputAssembler {
     public java.util.Map<String, Object> assembleWorkflowInput(
             WorkflowTask task, UUID sessionId, long stepIndex) {
         InferenceRequestSpec spec = buildWorkflowSpec(task, sessionId,
-                task.getRequest().getWorkflow().getProject().getId(), stepIndex);
+                task.getRequest().getWorkflow().getTeam().getId(), stepIndex);
         InferenceRequestAssembler.AssembledInference assign = inferenceRequestAssembler.assemble(spec);
 
         java.util.Map<String, Object> input = new java.util.LinkedHashMap<>();
@@ -148,7 +148,7 @@ public class ExecutionInputAssembler {
     }
 
     private InferenceRequestSpec buildWorkflowSpec(WorkflowTask task, UUID sessionId,
-                                                   UUID projectId, long stepIndex) {
+                                                   UUID teamId, long stepIndex) {
         WorkflowRequest request = task.getRequest();
         Workflow workflow = request.getWorkflow();
         AgentProfile profile = task.getAgentProfile();
@@ -156,7 +156,7 @@ public class ExecutionInputAssembler {
         AgentProfileVersion publishedVersion = agentProfileVersionService
                 .findPublished(profile.getId()).orElse(null);
 
-        TaskContext context = contextResolver.resolve(projectId, task.getStepId(), null);
+        TaskContext context = contextResolver.resolve(teamId, task.getStepId(), null);
         if (request.getBranch() != null && context.getWorkspace() != null) {
             context.getWorkspace().setBranch(request.getBranch());
         }
@@ -177,7 +177,7 @@ public class ExecutionInputAssembler {
                 .serviceType("WORKFLOW")
                 .sessionId(sessionId)
                 .requestId(task.getId())
-                .projectId(projectId)
+                .teamId(teamId)
                 .sequenceNo(stepIndex)
                 .stepId(task.getStepId())
                 .governanceProfileCode(governancePolicyResolver.resolveOrgDefault().code())
@@ -204,7 +204,7 @@ public class ExecutionInputAssembler {
     }
 
     private InferenceRequestSpec buildLegacySpec(UUID conversationId, UUID sessionId,
-                                                 UUID projectId, long sequenceNo) {
+                                                 UUID teamId, long sequenceNo) {
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Conversation not found: " + conversationId));
@@ -223,7 +223,7 @@ public class ExecutionInputAssembler {
         // with a pin but no bound host still assembles valid input.
         // Assemble session.open to extract the active tool names.
         SessionOpenPayload sessionOpen = sessionContextAssembler.assemble(
-                "CONVERSATION", conversationId, projectId, profileVersion.getProfileId());
+                "CONVERSATION", conversationId, teamId, profileVersion.getProfileId());
 
         List<ConversationMessage> all = conversationService.listMessages(conversationId);
         List<ConversationMessage> active = all.stream()
@@ -262,7 +262,7 @@ public class ExecutionInputAssembler {
                 .serviceType("CONVERSATION")
                 .sessionId(sessionId)
                 .requestId(conversationId)
-                .projectId(projectId)
+                .teamId(teamId)
                 .sequenceNo(assistantSequenceNo)
                 .governanceProfileCode(governancePolicyResolver.resolveOrgDefault().code())
                 .contextSnapshot(conversation.getContextSnapshot())
@@ -467,13 +467,13 @@ public class ExecutionInputAssembler {
                 + "/attachments/" + attachmentId + "/content";
     }
 
-    /** Whether the version's default model is flagged vision-capable. */
+    /** Whether the version's default model advertises the VISION capability. */
     private boolean resolveSupportsVision(AgentProfileVersion version) {
         if (version == null || version.getDefaultModel() == null) {
             return false;
         }
         try {
-            return modelService.findByCode(version.getDefaultModel()).isSupportsVision();
+            return modelService.hasCapability(version.getDefaultModel(), "VISION");
         } catch (Exception e) {
             return false;
         }

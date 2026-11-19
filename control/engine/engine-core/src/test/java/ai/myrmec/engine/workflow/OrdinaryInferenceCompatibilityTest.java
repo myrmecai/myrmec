@@ -3,7 +3,7 @@
 package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine.agent.AgentProfile;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.user.User;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,13 +43,13 @@ class OrdinaryInferenceCompatibilityTest extends WorkflowDispatchSupport {
     @Autowired private WorkflowTaskRepository taskRepository;
     @Autowired private TaskAttemptRepository attemptRepository;
 
-    private Project project;
+    private team team;
     private AgentProfile profile;
     private User admin;
 
     @BeforeEach
     void setUp() {
-        project = data.project().named("compat").withRepo("https://x.git", "main").create();
+        team = data.team().named("compat").withRepo("https://x.git", "main").create();
         profile = data.agentProfile().named("compat-profile").create();
         admin = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
     }
@@ -57,7 +57,7 @@ class OrdinaryInferenceCompatibilityTest extends WorkflowDispatchSupport {
     @Test
     @DisplayName("an INFERENCE task dispatches session.offer → session.open → execution.start with NO assignment, run rows or dispatch rows")
     void ordinaryInferenceDispatchUnchanged() throws Exception {
-        SocketHost host = openHost("compat-host", profile, project, 4);
+        SocketHost host = openHost("compat-host", profile, team, 4);
 
         Workflow wf = plainInferenceWorkflow("compat");
         WorkflowRequest request = runningRequest(wf, "compat");
@@ -151,7 +151,7 @@ class OrdinaryInferenceCompatibilityTest extends WorkflowDispatchSupport {
         step.put("pauseMode", "NONE");
 
         Workflow wf = new Workflow();
-        wf.setProject(project);
+        wf.setTeam(team);
         wf.setName(tag + "-wf-" + System.nanoTime());
         wf.setSteps(List.of(step));
         wf.setVersion(1);

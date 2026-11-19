@@ -6,7 +6,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** host.open payload (§6.1). */
+/** host.open payload (§6.1). Owner identity is NOT here: the engine stamps
+ * agent_host_instances.owner_user_id from the HOST token's ownerUserId claim
+ * (resolved at the handshake) — ownership is token-verified, never
+ * payload-asserted. */
 public record HostOpenPayload(
         UUID instanceNonce,
         String hostname,
@@ -14,15 +17,7 @@ public record HostOpenPayload(
         List<Integer> supportedProtocolVersions,
         int poolSize,
         Map<String, Object> capabilities,
-        Map<String, Object> reportedCapacity,
-        /**
-         * Local-owner model (§3.7/§4.1, additive): the id of the user logged
-         * into the VS Code plugin whose local workspace opened the instance.
-         * REQUIRED (non-null) for LOCAL hosts, MUST be absent (null) for
-         * MANAGED hosts — the HOST_JWT carries no user identity (§18 token
-         * isolation), so this payload field is the only owner channel.
-         */
-        UUID ownerUserId) {
+        Map<String, Object> reportedCapacity) {
 
     /**
      * section 22.2: parse the typed session-interaction capability out of the

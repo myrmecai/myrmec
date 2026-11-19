@@ -12,13 +12,13 @@ import java.util.UUID;
  */
 public interface ConnectionConfigRepository extends JpaRepository<ConnectionConfig, UUID> {
 
-    List<ConnectionConfig> findByScopeAndProjectIdIsNull(String scope);
+    List<ConnectionConfig> findByScopeAndTeamIdIsNull(String scope);
 
-    List<ConnectionConfig> findByScopeAndProjectId(String scope, UUID projectId);
+    List<ConnectionConfig> findByScopeAndTeamId(String scope, UUID teamId);
 
-    boolean existsByScopeAndProjectIdIsNullAndName(String scope, String name);
+    boolean existsByScopeAndTeamIdIsNullAndName(String scope, String name);
 
-    boolean existsByScopeAndProjectIdAndName(String scope, UUID projectId, String name);
+    boolean existsByScopeAndTeamIdAndName(String scope, UUID teamId, String name);
 
     List<ConnectionConfig> findByCredentialSecretId(UUID credentialSecretId);
 }

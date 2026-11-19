@@ -50,7 +50,7 @@ public enum BuiltInGovernanceProfile implements GovernanceProfileDefinition {
                     entry(ProductFeature.MANIFEST_RETENTION, Set.of("90_DAYS")),
                     entry(ProductFeature.MANIFEST_FREQUENCY, Set.of("FULL")),
                     entry(ProductFeature.CONTEXT_PINNING, Set.of("ON")),
-                    entry(ProductFeature.ACTIVATION_RULES, Set.of("REQUIRED_ORG_PROJECT")),
+                    entry(ProductFeature.ACTIVATION_RULES, Set.of("REQUIRED_ORG_TEAM")),
                     entry(ProductFeature.BUDGET_ENFORCEMENT, Set.of("ON")),
                     entry(ProductFeature.BUDGET_OVERRIDE, Set.of("PER_SERVICE")),
                     entry(ProductFeature.AUDIT_INTEGRITY, Set.of("OFF")),

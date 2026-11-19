@@ -37,7 +37,7 @@
             <column name="scope_id" type="uuid">
                 <constraints nullable="true"/>
             </column>
-            <column name="project_id" type="uuid">
+            <column name="team_id" type="uuid">
                 <constraints nullable="true"/>
             </column>
             <column name="resource_type" type="varchar(20)">
@@ -84,23 +84,23 @@
         </createIndex>
     </changeSet>
 
-    <changeSet id="010-quotas-idx-project-id" author="myrmec">
+    <changeSet id="010-quotas-idx-team-id" author="myrmec">
         <preConditions onFail="MARK_RAN">
-            <indexExists indexName="idx_quotas_project_id"/>
+            <indexExists indexName="idx_quotas_team_id"/>
         </preConditions>
-        <createIndex tableName="quotas" indexName="idx_quotas_project_id">
-            <column name="project_id"/>
+        <createIndex tableName="quotas" indexName="idx_quotas_team_id">
+            <column name="team_id"/>
         </createIndex>
     </changeSet>
 
-    <changeSet id="010-quotas-unique-scope-project-resource-period" author="myrmec">
+    <changeSet id="010-quotas-unique-scope-team-resource-period" author="myrmec">
         <preConditions onFail="MARK_RAN">
-            <uniqueConstraintExists tableName="quotas" constraintName="uq_quotas_scope_project_resource_period"/>
+            <uniqueConstraintExists tableName="quotas" constraintName="uq_quotas_scope_team_resource_period"/>
         </preConditions>
         <addUniqueConstraint
             tableName="quotas"
-            columnNames="scope_type, scope_id, project_id, resource_type, period"
-            constraintName="uq_quotas_scope_project_resource_period"/>
+            columnNames="scope_type, scope_id, team_id, resource_type, period"
+            constraintName="uq_quotas_scope_team_resource_period"/>
     </changeSet>
 
     <!-- ================================================================ -->

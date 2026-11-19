@@ -1,6 +1,7 @@
 package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine.workflow.dto.StartWorkflowRequest;
+import ai.myrmec.engine.workflow.dto.WorkflowRequestExecutionResponse;
 import ai.myrmec.engine.workflow.dto.WorkflowRequestResponse;
 import ai.myrmec.engine.workflow.dto.WorkflowTaskResponse;
 import jakarta.validation.Valid;
@@ -19,59 +20,60 @@ import java.util.UUID;
  * REST endpoints for managing workflow execution requests.
  */
 @RestController
-@RequestMapping("/api/v1/projects/{projectId}/workflows/{workflowId}/requests")
+@RequestMapping("/api/v1/teams/{teamId}/workflows/{workflowId}/requests")
 @RequiredArgsConstructor
 public class WorkflowRequestController {
 
     private final WorkflowRequestService requestService;
     private final WorkflowTaskService taskService;
+    private final WorkflowRequestExecutionService executionService;
     private final WorkflowService workflowService;
 
     @GetMapping
-    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
     public List<WorkflowRequestResponse> findByWorkflow(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID workflowId) {
-        // Verify workflow belongs to project
+        // Verify workflow belongs to Team
         var workflow = workflowService.findById(workflowId);
-        if (!workflow.projectId().equals(projectId)) {
-            throw new IllegalArgumentException("Workflow does not belong to this project");
+        if (!workflow.teamId().equals(teamId)) {
+            throw new IllegalArgumentException("Workflow does not belong to this Team");
         }
         return requestService.findByWorkflow(workflowId);
     }
 
     @GetMapping("/{requestId}")
-    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
     public WorkflowRequestResponse findById(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID workflowId,
             @PathVariable UUID requestId) {
-        // Verify workflow belongs to project
+        // Verify workflow belongs to Team
         var workflow = workflowService.findById(workflowId);
-        if (!workflow.projectId().equals(projectId)) {
-            throw new IllegalArgumentException("Workflow does not belong to this project");
+        if (!workflow.teamId().equals(teamId)) {
+            throw new IllegalArgumentException("Workflow does not belong to this Team");
         }
         return requestService.findById(requestId);
     }
 
     @GetMapping("/{requestId}/tasks")
-    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
     public List<WorkflowTaskResponse> findTasks(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID workflowId,
             @PathVariable UUID requestId) {
-        // Verify workflow belongs to project
+        // Verify workflow belongs to Team
         var workflow = workflowService.findById(workflowId);
-        if (!workflow.projectId().equals(projectId)) {
-            throw new IllegalArgumentException("Workflow does not belong to this project");
+        if (!workflow.teamId().equals(teamId)) {
+            throw new IllegalArgumentException("Workflow does not belong to this Team");
         }
         return taskService.findByRequest(requestId);
     }
 
     @PostMapping
-    @PreAuthorize("@projectAccess.canEdit(#projectId, authentication)")
+    @PreAuthorize("@teamAccess.canEdit(#teamId, authentication)")
     public ResponseEntity<WorkflowRequestResponse> start(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID workflowId,
             @Valid @RequestBody StartWorkflowRequest request,
             @AuthenticationPrincipal UserPrincipal principal) {
@@ -80,10 +82,10 @@ public class WorkflowRequestController {
             return ResponseEntity.badRequest().build();
         }
 
-        // Verify workflow belongs to project
+        // Verify workflow belongs to Team
         var workflow = workflowService.findById(workflowId);
-        if (!workflow.projectId().equals(projectId)) {
-            throw new IllegalArgumentException("Workflow does not belong to this project");
+        if (!workflow.teamId().equals(teamId)) {
+            throw new IllegalArgumentException("Workflow does not belong to this Team");
         }
 
         UUID userId = principal.getUserId();
@@ -93,14 +95,33 @@ public class WorkflowRequestController {
 
     @PostMapping("/{requestId}/cancel")
     public WorkflowRequestResponse cancel(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID workflowId,
             @PathVariable UUID requestId) {
-        // Verify workflow belongs to project
+        // Verify workflow belongs to Team
         var workflow = workflowService.findById(workflowId);
-        if (!workflow.projectId().equals(projectId)) {
-            throw new IllegalArgumentException("Workflow does not belong to this project");
+        if (!workflow.teamId().equals(teamId)) {
+            throw new IllegalArgumentException("Workflow does not belong to this Team");
         }
         return requestService.cancel(requestId);
+    }
+
+    /**
+     * Resolve a run to the active task/attempt/execution chain. The VS Code
+     * plugin uses this to discover the §22 interaction endpoints.
+     */
+    @GetMapping("/{requestId}/executions/current")
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
+    public ResponseEntity<WorkflowRequestExecutionResponse> getCurrentExecution(
+            @PathVariable UUID teamId,
+            @PathVariable UUID workflowId,
+            @PathVariable UUID requestId) {
+        var workflow = workflowService.findById(workflowId);
+        if (!workflow.teamId().equals(teamId)) {
+            throw new IllegalArgumentException("Workflow does not belong to this Team");
+        }
+        return executionService.findCurrentExecution(teamId, workflowId, requestId)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
     }
 }

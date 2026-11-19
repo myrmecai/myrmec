@@ -3,7 +3,7 @@ package ai.myrmec.engine.workflow;
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine.user.UserRole;
 import ai.myrmec.engine.user.UserRoleRepository;
-import ai.myrmec.engine.workflow.dto.AccessibleProjectResponse;
+import ai.myrmec.engine.workflow.dto.AccessibleTeamResponse;
 import ai.myrmec.engine.workflow.dto.PagedResponse;
 import ai.myrmec.engine.workflow.dto.WorkflowListItemResponse;
 import jakarta.persistence.EntityManager;
@@ -24,7 +24,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * Read-only service backing the cross-project workflow list view.
+ * Read-only service backing the cross-Team workflow list view.
  *
  * <p>Computes the set of projects the calling user can access, then performs a
  * filtered, sorted, paged query joining the most recent {@link WorkflowRequest}
@@ -38,7 +38,7 @@ public class WorkflowListService {
     private static final Map<String, String> SORT_FIELDS = Map.of(
             "name", "w.name",
             "status", "w.status",
-            "projectName", "p.name",
+            "teamName", "p.name",
             "createdAt", "w.createdAt",
             "updatedAt", "w.updatedAt",
             "lastRunAt", "lr.createdAt"
@@ -54,7 +54,7 @@ public class WorkflowListService {
     @Transactional(readOnly = true)
     public PagedResponse<WorkflowListItemResponse> list(UUID userId, Filter filter, Pageable pageable) {
         AccessScope scope = resolveAccessScope(userId);
-        if (!scope.unrestricted && scope.projectIds.isEmpty()) {
+        if (!scope.unrestricted && scope.teamIds.isEmpty()) {
             return PagedResponse.of(List.of(), pageable.page(), pageable.size(), 0L);
         }
 
@@ -68,13 +68,13 @@ public class WorkflowListService {
         Map<String, Object> params = new HashMap<>();
 
         if (!scope.unrestricted) {
-            where.append(" AND p.id IN :scopeProjectIds ");
-            params.put("scopeProjectIds", scope.projectIds);
+            where.append(" AND p.id IN :scopeteamIds ");
+            params.put("scopeteamIds", scope.teamIds);
         }
 
-        if (filter.projectIds != null && !filter.projectIds.isEmpty()) {
-            where.append(" AND p.id IN :filterProjectIds ");
-            params.put("filterProjectIds", filter.projectIds);
+        if (filter.teamIds != null && !filter.teamIds.isEmpty()) {
+            where.append(" AND p.id IN :filterteamIds ");
+            params.put("filterteamIds", filter.teamIds);
         }
 
         if (filter.statuses != null && !filter.statuses.isEmpty()) {
@@ -119,7 +119,7 @@ public class WorkflowListService {
 
         String joinClause = """
                 FROM Workflow w
-                JOIN w.project p
+                JOIN w.team p
                 JOIN w.createdBy cb
                 LEFT JOIN WorkflowRequest lr ON lr.workflow.id = w.id
                     AND lr.createdAt = (
@@ -155,23 +155,23 @@ public class WorkflowListService {
     }
 
     @Transactional(readOnly = true)
-    public List<AccessibleProjectResponse> accessibleProjects(UUID userId) {
+    public List<AccessibleTeamResponse> accessibleTeams(UUID userId) {
         AccessScope scope = resolveAccessScope(userId);
 
         String jpql;
         Map<String, Object> params = new HashMap<>();
         if (scope.unrestricted) {
-            jpql = "SELECT new ai.myrmec.engine.workflow.dto.AccessibleProjectResponse(p.id, p.name) "
-                    + "FROM Project p ORDER BY LOWER(p.name) ASC";
+            jpql = "SELECT new ai.myrmec.engine.workflow.dto.AccessibleTeamResponse(p.id, p.name) "
+                    + "FROM Team p ORDER BY LOWER(p.name) ASC";
         } else {
-            if (scope.projectIds.isEmpty()) {
+            if (scope.teamIds.isEmpty()) {
                 return List.of();
             }
-            jpql = "SELECT new ai.myrmec.engine.workflow.dto.AccessibleProjectResponse(p.id, p.name) "
-                    + "FROM Project p WHERE p.id IN :ids ORDER BY LOWER(p.name) ASC";
-            params.put("ids", scope.projectIds);
+            jpql = "SELECT new ai.myrmec.engine.workflow.dto.AccessibleTeamResponse(p.id, p.name) "
+                    + "FROM Team p WHERE p.id IN :ids ORDER BY LOWER(p.name) ASC";
+            params.put("ids", scope.teamIds);
         }
-        TypedQuery<AccessibleProjectResponse> q = entityManager.createQuery(jpql, AccessibleProjectResponse.class);
+        TypedQuery<AccessibleTeamResponse> q = entityManager.createQuery(jpql, AccessibleTeamResponse.class);
         params.forEach(q::setParameter);
         return q.getResultList();
     }
@@ -179,22 +179,22 @@ public class WorkflowListService {
     private AccessScope resolveAccessScope(UUID userId) {
         List<UserRole> roles = userRoleRepository.findByUserId(userId);
         boolean unrestricted = roles.stream()
-                .anyMatch(r -> r.getProjectId() == null);
-        Set<UUID> projectIds = roles.stream()
-                .map(UserRole::getProjectId)
+                .anyMatch(r -> r.getTeamId() == null);
+        Set<UUID> teamIds = roles.stream()
+                .map(UserRole::getTeamId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
-        return new AccessScope(unrestricted, projectIds);
+        return new AccessScope(unrestricted, teamIds);
     }
 
-    private record AccessScope(boolean unrestricted, Set<UUID> projectIds) {}
+    private record AccessScope(boolean unrestricted, Set<UUID> teamIds) {}
 
     /**
      * Filter parameters for the list query. All fields are optional.
      */
     public record Filter(
             Set<WorkflowStatus> statuses,
-            Set<UUID> projectIds,
+            Set<UUID> teamIds,
             String search,
             Set<RequestStatus> lastRunStatuses,
             boolean includeNeverRun,

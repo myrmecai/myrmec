@@ -8,13 +8,13 @@ import java.time.Instant;
 import java.util.UUID;
 
 public record KnowledgeProviderResponse(
-        UUID id, String scope, UUID projectId, String name, String description,
+        UUID id, String scope, UUID teamId, String name, String description,
         String type, String status, UUID currentVersionId,
         Instant publishedAt, UUID publishedBy, UUID createdBy,
         Instant createdAt, Instant updatedAt, UUID updatedBy) {
 
     public static KnowledgeProviderResponse from(KnowledgeProvider p) {
-        return new KnowledgeProviderResponse(p.getId(), p.getScope(), p.getProjectId(),
+        return new KnowledgeProviderResponse(p.getId(), p.getScope(), p.getTeamId(),
                 p.getName(), p.getDescription(), p.getType(), p.getStatus(),
                 p.getCurrentVersionId(), p.getPublishedAt(), p.getPublishedBy(),
                 p.getCreatedBy(), p.getCreatedAt(), p.getUpdatedAt(), p.getUpdatedBy());

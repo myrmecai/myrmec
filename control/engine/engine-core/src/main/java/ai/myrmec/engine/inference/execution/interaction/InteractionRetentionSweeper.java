@@ -222,7 +222,7 @@ public class InteractionRetentionSweeper {
     }
 
     /** The session policy's transcript retention (§3.5: default 30 days,
-     * tightened by session/project policy; the execution snapshot is the
+     * tightened by session/Team policy; the execution snapshot is the
      * effective immutable source). */
     private long retentionDaysOf(SessionExecution execution) {
         Map<String, Object> policy = execution.getInteractionPolicy();

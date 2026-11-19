@@ -37,8 +37,8 @@ public class Assistant {
     @Column(name = "id", nullable = false, updatable = false)
     private UUID id;
 
-    @Column(name = "project_id", nullable = false, updatable = false)
-    private UUID projectId;
+    @Column(name = "team_id", nullable = false, updatable = false)
+    private UUID teamId;
 
     @Column(name = "name", nullable = false, length = 120)
     private String name;

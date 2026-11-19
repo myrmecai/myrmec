@@ -87,7 +87,7 @@ public class AuthService {
     /**
      * Register a local agent instance from an authenticated user's
      * IDE/extension host. The caller (the engine auth controller) must have
-     * already verified the user's access token and project access rights.
+     * already verified the user's access token and Team access rights.
      *
      * <p>This mints a fresh {@link AgentHost} bound to the user and a single
      * agent instance, then returns the short-lived AGENT credential pair the
@@ -97,7 +97,7 @@ public class AuthService {
     public LocalAgentRegisterResponse registerLocalAgent(UUID userId, LocalAgentRegisterRequest request,
                                                          String hostname) {
         AgentHost host = agentService.upsertLocalAgentHost(
-                userId, request.getProjectId(), hostname);
+                userId, request.getTeamId(), hostname);
 
         Agent instance = agentService.createInstance(
                 host.getId(),
@@ -110,8 +110,8 @@ public class AuthService {
         String accessToken = jwtTokenProvider.generateAgentAccessToken(instance.getId(), host.getName());
         String refreshToken = jwtTokenProvider.generateAgentRefreshToken(instance.getId());
 
-        log.info("Local agent registered: instance {} for host {} (user {}, project {})",
-                instance.getId(), host.getId(), userId, request.getProjectId());
+        log.info("Local agent registered: instance {} for host {} (user {}, Team {})",
+                instance.getId(), host.getId(), userId, request.getTeamId());
 
         return LocalAgentRegisterResponse.builder()
                 .agentId(host.getId())

@@ -13,10 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Unit tests for {@link UserPrincipal} JWT claim resolution and implicit-role expansion.
  *
  * <p>These tests guard the role contract documented in
- * {@code .github/instructions/myrmec-project.instructions.md}:
+ * {@code .github/instructions/myrmec-team.instructions.md}:
  * <ul>
  *   <li>Claim format: {@code sys:ROLE}, {@code grp:&lt;uuid&gt;:ROLE}, {@code proj:&lt;uuid&gt;:ROLE}</li>
- *   <li>Implicit-role expansion: PROJECT_OWNER ⇒ EDITOR ⇒ VIEWER, APPROVER ⇒ VIEWER, AUDITOR ⇒ VIEWER, ORG_ADMIN ⇒ AUDITOR ⇒ VIEWER</li>
+ *   <li>Implicit-role expansion: TEAM_OWNER ⇒ EDITOR ⇒ VIEWER, APPROVER ⇒ VIEWER, AUDITOR ⇒ VIEWER, ORG_ADMIN ⇒ AUDITOR ⇒ VIEWER</li>
  *   <li>PLATFORM_ADMIN does <strong>not</strong> imply data-access (separation of duties).</li>
  * </ul>
  */
@@ -33,12 +33,12 @@ class UserPrincipalTest {
     @Test
     void projectOwnerImpliesEditorAndViewer() {
         UUID p = UUID.randomUUID();
-        UserPrincipal up = principal("proj:" + p + ":PROJECT_OWNER");
+        UserPrincipal up = principal("proj:" + p + ":TEAM_OWNER");
 
-        assertTrue(up.hasProjectRoleDirect(p, UserRole.Role.PROJECT_OWNER));
-        assertTrue(up.hasProjectRoleDirect(p, UserRole.Role.EDITOR));
-        assertTrue(up.hasProjectRoleDirect(p, UserRole.Role.VIEWER));
-        assertFalse(up.hasProjectRoleDirect(p, UserRole.Role.APPROVER));
+        assertTrue(up.hasTeamRoleDirect(p, UserRole.Role.TEAM_OWNER));
+        assertTrue(up.hasTeamRoleDirect(p, UserRole.Role.EDITOR));
+        assertTrue(up.hasTeamRoleDirect(p, UserRole.Role.VIEWER));
+        assertFalse(up.hasTeamRoleDirect(p, UserRole.Role.APPROVER));
     }
 
     @Test
@@ -48,7 +48,7 @@ class UserPrincipalTest {
 
         assertTrue(up.hasGroupRoleDirect(g, UserRole.Role.EDITOR));
         assertTrue(up.hasGroupRoleDirect(g, UserRole.Role.VIEWER));
-        assertFalse(up.hasGroupRoleDirect(g, UserRole.Role.PROJECT_OWNER));
+        assertFalse(up.hasGroupRoleDirect(g, UserRole.Role.TEAM_OWNER));
     }
 
     @Test
@@ -56,9 +56,9 @@ class UserPrincipalTest {
         UUID p = UUID.randomUUID();
         UserPrincipal up = principal("proj:" + p + ":APPROVER");
 
-        assertTrue(up.hasProjectRoleDirect(p, UserRole.Role.APPROVER));
-        assertTrue(up.hasProjectRoleDirect(p, UserRole.Role.VIEWER));
-        assertFalse(up.hasProjectRoleDirect(p, UserRole.Role.EDITOR));
+        assertTrue(up.hasTeamRoleDirect(p, UserRole.Role.APPROVER));
+        assertTrue(up.hasTeamRoleDirect(p, UserRole.Role.VIEWER));
+        assertFalse(up.hasTeamRoleDirect(p, UserRole.Role.EDITOR));
     }
 
     @Test
@@ -128,7 +128,7 @@ class UserPrincipalTest {
     void malformedScopedClaimIsIgnored() {
         UserPrincipal up = principal("proj:not-a-uuid:EDITOR", "grp::EDITOR");
 
-        assertTrue(up.projectIdsWithAnyRole().isEmpty());
+        assertTrue(up.teamIdsWithAnyRole().isEmpty());
         assertTrue(up.groupIdsWithAnyRole().isEmpty());
     }
 
@@ -137,7 +137,7 @@ class UserPrincipalTest {
         UUID p = UUID.randomUUID();
         UserPrincipal up = principal("proj:" + p + ":WIZARD", "proj:" + p + ":EDITOR");
 
-        assertTrue(up.hasProjectRoleDirect(p, UserRole.Role.EDITOR));
+        assertTrue(up.hasTeamRoleDirect(p, UserRole.Role.EDITOR));
         // Only EDITOR (+ VIEWER from implicit) — WIZARD ignored.
         assertEquals(2, up.getEffectiveProjectRoles().get(p).size());
     }
@@ -149,8 +149,8 @@ class UserPrincipalTest {
                 "proj:" + p + ":APPROVER",
                 "proj:" + p + ":BUDGET_OWNER");
 
-        assertTrue(up.hasProjectRoleDirect(p, UserRole.Role.APPROVER));
-        assertTrue(up.hasProjectRoleDirect(p, UserRole.Role.BUDGET_OWNER));
-        assertTrue(up.hasProjectRoleDirect(p, UserRole.Role.VIEWER)); // from APPROVER
+        assertTrue(up.hasTeamRoleDirect(p, UserRole.Role.APPROVER));
+        assertTrue(up.hasTeamRoleDirect(p, UserRole.Role.BUDGET_OWNER));
+        assertTrue(up.hasTeamRoleDirect(p, UserRole.Role.VIEWER)); // from APPROVER
     }
 }

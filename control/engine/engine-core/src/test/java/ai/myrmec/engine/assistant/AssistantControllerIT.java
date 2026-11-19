@@ -5,7 +5,7 @@ import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.assistant.dto.AssistantResponse;
 import ai.myrmec.engine.assistant.dto.AssistantVersionResponse;
 import ai.myrmec.engine.assistant.dto.CreateAssistantRequest;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -24,7 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * HTTP smoke test for {@link AssistantController} (#92) — validates bean wiring,
- * {@code assistantAccess} / {@code projectAccess} SpEL gates, JSON
+ * {@code assistantAccess} / {@code teamAccess} SpEL gates, JSON
  * serialization, and the create → publish path end-to-end over the REST surface.
  * Lifecycle edge cases are covered at the service tier by {@code AssistantLifecycleIT}.
  */
@@ -56,13 +56,13 @@ class AssistantControllerIT extends IntegrationTestBase {
 
     @Test
     void createListAndPublishOverHttp() {
-        Project project = data.project().named("assistant-http").create();
+        team team = data.team().named("assistant-http").create();
         AgentProfile profile = data.agentProfile().named("assistant-http-profile").create();
-        HttpHeaders headers = ownerHeaders(TEST_ADMIN_ID, project.getId());
+        HttpHeaders headers = ownerHeaders(TEST_ADMIN_ID, team.getId());
 
         // Create
         CreateAssistantRequest createReq = new CreateAssistantRequest(
-                project.getId(), "HTTP Assistant", "via REST", profile.getId());
+                team.getId(), "HTTP Assistant", "via REST", profile.getId());
         ResponseEntity<AssistantResponse> created = restTemplate.exchange(
                 "/api/v1/assistants", HttpMethod.POST,
                 new HttpEntity<>(createReq, headers), AssistantResponse.class);
@@ -73,7 +73,7 @@ class AssistantControllerIT extends IntegrationTestBase {
 
         // List
         ResponseEntity<List<AssistantResponse>> listed = restTemplate.exchange(
-                "/api/v1/assistants?projectId=" + project.getId(), HttpMethod.GET,
+                "/api/v1/assistants?teamId=" + team.getId(), HttpMethod.GET,
                 new HttpEntity<>(headers), new ParameterizedTypeReference<>() {
                 });
         assertThat(listed.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -91,13 +91,13 @@ class AssistantControllerIT extends IntegrationTestBase {
 
     @Test
     void readRejectedWithoutProjectAccess() {
-        Project project = data.project().named("assistant-http-deny").create();
+        team team = data.team().named("assistant-http-deny").create();
         AgentProfile profile = data.agentProfile().named("assistant-http-deny-profile").create();
         Assistant assistant = assistantService.createAssistant(
-                project.getId(), "Seed " + UUID.randomUUID(), "desc", profile.getId(), TEST_ADMIN_ID);
+                team.getId(), "Seed " + UUID.randomUUID(), "desc", profile.getId(), TEST_ADMIN_ID);
 
         // A real, active user whose token only grants access to a different
-        // project must not read this assistant (authorization denial, 403).
+        // team must not read this assistant (authorization denial, 403).
         UUID strangerId = createActiveUser("stranger-" + UUID.randomUUID() + "@test.local");
         HttpHeaders strangerHeaders = ownerHeaders(strangerId, UUID.randomUUID());
         ResponseEntity<String> resp = restTemplate.exchange(
@@ -124,10 +124,10 @@ class AssistantControllerIT extends IntegrationTestBase {
         return userRepository.save(user).getId();
     }
 
-    private HttpHeaders ownerHeaders(UUID userId, UUID projectId) {
+    private HttpHeaders ownerHeaders(UUID userId, UUID teamId) {
         String token = jwtTokenProvider.generateUserAccessToken(
                 userId, "Owner User", "owner@test.local",
-                List.of("proj:" + projectId + ":PROJECT_OWNER"));
+                List.of("proj:" + teamId + ":TEAM_OWNER"));
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(token);
         headers.set("Content-Type", "application/json");

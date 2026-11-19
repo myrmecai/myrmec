@@ -9,7 +9,7 @@ import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.quota.EnforcementMode;
 import ai.myrmec.engine.quota.Quota;
 import ai.myrmec.engine.quota.QuotaConsumptionRepository;
@@ -71,7 +71,7 @@ class InteractionUsageServiceTest extends IntegrationTestBase {
     @Autowired ai.myrmec.engine.inference.execution.SessionPolicyService policyService;
     @Autowired PlatformTransactionManager transactionManager;
 
-    private Project project;
+    private team team;
     private Workflow workflow;
     private WorkflowRequest request;
     private WorkflowTask task;
@@ -81,8 +81,8 @@ class InteractionUsageServiceTest extends IntegrationTestBase {
 
     @BeforeEach
     void seed() {
-        project = data.project().named("usg-proj").create();
-        workflow = workflowOf(project);
+        team = data.team().named("usg-proj").create();
+        workflow = workflowOf(team);
         var admin = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
 
         WorkflowRequest req = new WorkflowRequest();
@@ -114,7 +114,7 @@ class InteractionUsageServiceTest extends IntegrationTestBase {
         session = new Session();
         session.setServiceType("WORKFLOW");
         session.setRefId(request.getId());
-        session.setProjectId(project.getId());
+        session.setTeamId(team.getId());
         session.setKind("ORCHESTRATION_TASK");
         session.setStatus("ACTIVE");
         session.setAllocationState("ACTIVE");
@@ -372,8 +372,8 @@ class InteractionUsageServiceTest extends IntegrationTestBase {
 
     private void usageQuota(long limit) {
         Quota quota = new Quota();
-        quota.setScopeType(Quota.Scope.PROJECT);
-        quota.setScopeId(project.getId());
+        quota.setScopeType(Quota.Scope.TEAM);
+        quota.setScopeId(team.getId());
         quota.setResourceType(Quota.ResourceType.TOKENS);
         quota.setPeriod(Quota.Period.DAILY);
         quota.setLimitAmount(limit);
@@ -382,10 +382,10 @@ class InteractionUsageServiceTest extends IntegrationTestBase {
         quotaRepository.save(quota);
     }
 
-    /** The project's consumed TOKENS (the quota_consumption row sum). */
+    /** The team's consumed TOKENS (the quota_consumption row sum). */
     private long consumed() {
         UUID quotaId = quotaRepository.findAll().stream()
-                .filter(q -> q.getScopeId().equals(project.getId())
+                .filter(q -> q.getScopeId().equals(team.getId())
                         && q.getResourceType() == Quota.ResourceType.TOKENS)
                 .findFirst().orElseThrow().getId();
         return consumptionRepository.findAll().stream()
@@ -419,7 +419,7 @@ class InteractionUsageServiceTest extends IntegrationTestBase {
     }
 
     private QuotaDecision quotaPolicyEngineCheck(QuotaResourceType resource) {
-        return quotaCheck.check(QuotaScope.PROJECT, project.getId(), resource, 1);
+        return quotaCheck.check(QuotaScope.TEAM, team.getId(), resource, 1);
     }
 
     private void tx(Runnable body) {
@@ -427,9 +427,9 @@ class InteractionUsageServiceTest extends IntegrationTestBase {
                 .executeWithoutResult(s -> body.run());
     }
 
-    private Workflow workflowOf(Project parent) {
+    private Workflow workflowOf(team parent) {
         Workflow wf = new Workflow();
-        wf.setProject(parent);
+        wf.setTeam(parent);
         wf.setName("usg-wf-" + System.nanoTime());
         wf.setSteps(List.of());
         wf.setVersion(1);

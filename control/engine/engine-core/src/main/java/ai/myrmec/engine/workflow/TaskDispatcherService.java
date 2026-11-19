@@ -169,7 +169,7 @@ public class TaskDispatcherService {
      * The single dispatch path for both task families.
      *
      * <ol>
-     *   <li><b>Select a host.</b> §3.7: capacity-based and project-preferring,
+     *   <li><b>Select a host.</b> §3.7: capacity-based and Team-preferring,
      *       never profile-keyed. For an orchestration run the §16.4 coordinator
      *       binding is honoured: a pinned coordinator's host is the only
      *       eligible one (no substitute), and its absence throttles with bounded
@@ -191,10 +191,10 @@ public class TaskDispatcherService {
     private void dispatchWorkflowTask(WorkflowTask task, boolean orchestrator) {
         Workflow workflow = task.getRequest().getWorkflow();
         UUID requestId = task.getRequest().getId();
-        UUID projectId = workflow.getProject().getId();
+        UUID teamId = workflow.getTeam().getId();
         UUID profileId = task.getAgentProfile().getId();
 
-        List<AgentHost> candidates = hostSelectionService.selectCandidatesForProject(projectId);
+        List<AgentHost> candidates = hostSelectionService.selectCandidatesForTeam(teamId);
 
         HostPick pick = orchestrator
                 ? selectOrchestrationHost(task, requestId, candidates)
@@ -213,7 +213,7 @@ public class TaskDispatcherService {
         // within one host (16.4's effective-coordinator rule).
 
         UUID sessionId = sessionAllocator.offer(
-                SESSION_KIND_TASK, requestId, SERVICE_TYPE_WORKFLOW, projectId, host.getId())
+                SESSION_KIND_TASK, requestId, SERVICE_TYPE_WORKFLOW, teamId, host.getId())
                 .orElse(null);
         if (sessionId == null) {
             log.debug("No allocation capacity on host {} for task {}", host.getId(), task.getId());
@@ -224,8 +224,8 @@ public class TaskDispatcherService {
         TaskDispatchContext context;
         try {
             context = orchestrator
-                    ? assembleOrchestrationContext(task, requestId, projectId, profileId, attempt)
-                    : assembleOrdinaryContext(task, requestId, projectId, profileId, attempt);
+                    ? assembleOrchestrationContext(task, requestId, teamId, profileId, attempt)
+                    : assembleOrdinaryContext(task, requestId, teamId, profileId, attempt);
         } catch (Exception e) {
             log.error("Dispatch assembly for task {} failed: {}", task.getId(), e.getMessage(), e);
             taskAttemptService.markAbandoned(attempt.getId(),
@@ -298,8 +298,8 @@ public class TaskDispatcherService {
         }
 
         if (candidates.isEmpty()) {
-            log.debug("No live hosts available for orchestration run {} (project {})",
-                    requestId, task.getRequest().getWorkflow().getProject().getId());
+            log.debug("No live hosts available for orchestration run {} (Team {})",
+                    requestId, task.getRequest().getWorkflow().getTeam().getId());
             return null;
         }
 
@@ -381,10 +381,10 @@ public class TaskDispatcherService {
 
     /** Assemble the §8.1 ordinary-inference dispatch context. */
     private TaskDispatchContext assembleOrdinaryContext(WorkflowTask task, UUID requestId,
-                                                        UUID projectId, UUID profileId,
+                                                        UUID teamId, UUID profileId,
                                                         TaskAttempt attempt) {
         return new TaskDispatchContext(
-                task.getId(), attempt.getId(), requestId, projectId, profileId,
+                task.getId(), attempt.getId(), requestId, teamId, profileId,
                 task.getStepId(), false, null, null,
                 findStepIndex(task.getRequest().getWorkflow(), task.getStepId()),
                 timeoutSecondsOf(task), null);
@@ -397,7 +397,7 @@ public class TaskDispatcherService {
      * any send (§16.3).
      */
     private TaskDispatchContext assembleOrchestrationContext(WorkflowTask task, UUID requestId,
-                                                             UUID projectId, UUID profileId,
+                                                             UUID teamId, UUID profileId,
                                                              TaskAttempt attempt) {
         var pinnedVersion = orchestrationRunService.pinnedVersionOf(requestId);
         var continuation = continuationOf(task);
@@ -412,7 +412,7 @@ public class TaskDispatcherService {
                 .sendCount(0)
                 .build());
         return new TaskDispatchContext(
-                task.getId(), attempt.getId(), requestId, projectId, profileId,
+                task.getId(), attempt.getId(), requestId, teamId, profileId,
                 task.getStepId(), true, assembled.assignment(),
                 assembled.assignmentDigest(),
                 findStepIndex(task.getRequest().getWorkflow(), task.getStepId()),

@@ -113,7 +113,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      * <p>Claims use the scope-prefixed format: {@code sys:ROLE},
      * {@code grp:<id>:ROLE}, {@code proj:<id>:ROLE}. System-scoped roles map to
      * {@code ROLE_<role>} authorities for use with {@code hasRole(...)}.
-     * Group- and project-scoped roles are surfaced via {@link UserPrincipal}
+     * Group- and Team-scoped roles are surfaced via {@link UserPrincipal}
      * helpers and the access evaluators rather than as authorities.
      */
     private List<SimpleGrantedAuthority> buildAuthorities(List<String> roles) {
@@ -128,7 +128,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         authorities.add(new SimpleGrantedAuthority("ROLE_" + roleName));
                     }
                 }
-                // Group- and project-scoped claims are not exposed as authorities;
+                // Group- and Team-scoped claims are not exposed as authorities;
                 // controllers use the access evaluators instead.
             }
         }

@@ -22,7 +22,7 @@ public interface QuotaPolicyEngine {
      * Pre-flight check &mdash; tells the caller whether to proceed and
      * how much headroom remains.
      *
-     * @param scope    {@code ORG} / {@code GROUP} / {@code PROJECT} / {@code USER}
+     * @param scope    {@code ORG} / {@code GROUP} / {@code Team} / {@code USER}
      * @param scopeId  the entity id of that scope
      * @param resource {@code TOKENS} / {@code COST_USD_CENTS}
      * @param amount   the expected amount the caller is about to spend

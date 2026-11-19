@@ -44,7 +44,8 @@ public class AgentProfileController {
         return ResponseEntity.ok(profiles.stream()
                 .map(p -> AgentProfileResponse.fromPublic(
                         p,
-                        versionService.findPublishedWithTools(p.getId()).orElse(null)))
+                        versionService.findPublishedWithTools(p.getId()).orElse(null),
+                        versionService))
                 .collect(Collectors.toList()));
     }
 }

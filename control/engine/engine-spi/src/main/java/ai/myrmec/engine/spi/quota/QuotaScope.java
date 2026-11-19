@@ -3,10 +3,10 @@
 
 package ai.myrmec.engine.spi.quota;
 
-/** Quota scope tiers: ORG &rarr; GROUP &rarr; PROJECT &rarr; SERVICE. */
+/** Quota scope tiers: org &rarr; group &rarr; Team &rarr; service. */
 public enum QuotaScope {
     ORG,
     GROUP,
-    PROJECT,
+    TEAM,
     SERVICE
 }

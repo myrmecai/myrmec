@@ -1,0 +1,146 @@
+[
+  {
+    "code": "openai",
+    "name": "OpenAI",
+    "baseUrl": "https://api.openai.com/v1",
+    "deploymentType": "CLOUD",
+    "requiresAuth": true,
+    "docsUrl": "https://platform.openai.com/docs/api-reference",
+    "description": "OpenAI API - GPT-4 GPT-3.5 DALL-E Whisper"
+  },
+  {
+    "code": "anthropic",
+    "name": "Anthropic",
+    "baseUrl": "https://api.anthropic.com/v1",
+    "deploymentType": "CLOUD",
+    "requiresAuth": true,
+    "docsUrl": "https://docs.anthropic.com/claude/reference",
+    "description": "Anthropic API - Claude 3.5 Claude 3 Opus/Sonnet/Haiku"
+  },
+  {
+    "code": "azure_openai",
+    "name": "Azure OpenAI",
+    "baseUrl": null,
+    "deploymentType": "CLOUD",
+    "requiresAuth": true,
+    "docsUrl": "https://learn.microsoft.com/en-us/azure/ai-services/openai/reference",
+    "description": "Azure OpenAI Service - GPT models via Azure (endpoint varies per deployment)"
+  },
+  {
+    "code": "google_ai",
+    "name": "Google AI",
+    "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+    "deploymentType": "CLOUD",
+    "requiresAuth": true,
+    "docsUrl": "https://ai.google.dev/api/rest",
+    "description": "Google AI Studio - Gemini models"
+  },
+  {
+    "code": "mistral",
+    "name": "Mistral AI",
+    "baseUrl": "https://api.mistral.ai/v1",
+    "deploymentType": "CLOUD",
+    "requiresAuth": true,
+    "docsUrl": "https://docs.mistral.ai/api/",
+    "description": "Mistral AI - Mistral Mixtral Codestral models"
+  },
+  {
+    "code": "github_models",
+    "name": "GitHub Models",
+    "baseUrl": "https://models.inference.ai.azure.com",
+    "deploymentType": "CLOUD",
+    "requiresAuth": true,
+    "docsUrl": "https://docs.github.com/en/github-models",
+    "description": "GitHub Models - Access GPT-4o Llama Mistral via GitHub token"
+  },
+  {
+    "code": "openrouter",
+    "name": "OpenRouter",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "deploymentType": "CLOUD",
+    "requiresAuth": true,
+    "docsUrl": "https://openrouter.ai/docs",
+    "description": "OpenRouter - Unified access to 100+ models (GPT Claude Llama Gemini)"
+  },
+  {
+    "code": "together_ai",
+    "name": "Together AI",
+    "baseUrl": "https://api.together.xyz/v1",
+    "deploymentType": "CLOUD",
+    "requiresAuth": true,
+    "docsUrl": "https://docs.together.ai/reference",
+    "description": "Together AI - Fast inference for open source models (Llama Mixtral etc.)"
+  },
+  {
+    "code": "groq",
+    "name": "Groq",
+    "baseUrl": "https://api.groq.com/openai/v1",
+    "deploymentType": "CLOUD",
+    "requiresAuth": true,
+    "docsUrl": "https://console.groq.com/docs/quickstart",
+    "description": "Groq - Ultra-fast inference with custom LPU hardware (Llama Mixtral Gemma)"
+  },
+  {
+    "code": "fireworks",
+    "name": "Fireworks AI",
+    "baseUrl": "https://api.fireworks.ai/inference/v1",
+    "deploymentType": "CLOUD",
+    "requiresAuth": true,
+    "docsUrl": "https://docs.fireworks.ai/api-reference",
+    "description": "Fireworks AI - Fast inference with function calling support"
+  },
+  {
+    "code": "deepinfra",
+    "name": "DeepInfra",
+    "baseUrl": "https://api.deepinfra.com/v1/openai",
+    "deploymentType": "CLOUD",
+    "requiresAuth": true,
+    "docsUrl": "https://deepinfra.com/docs",
+    "description": "DeepInfra - Pay-per-token inference for open source models"
+  },
+  {
+    "code": "perplexity",
+    "name": "Perplexity",
+    "baseUrl": "https://api.perplexity.ai",
+    "deploymentType": "CLOUD",
+    "requiresAuth": true,
+    "docsUrl": "https://docs.perplexity.ai/reference",
+    "description": "Perplexity - Search-augmented Sonar models"
+  },
+  {
+    "code": "ollama",
+    "name": "Ollama",
+    "baseUrl": "http://localhost:11434/v1",
+    "deploymentType": "ON_PREMISE",
+    "requiresAuth": false,
+    "docsUrl": "https://ollama.com",
+    "description": "Ollama - Run Llama Mistral and other models locally"
+  },
+  {
+    "code": "lm_studio",
+    "name": "LM Studio",
+    "baseUrl": "http://localhost:1234/v1",
+    "deploymentType": "ON_PREMISE",
+    "requiresAuth": false,
+    "docsUrl": "https://lmstudio.ai",
+    "description": "LM Studio - Local GUI for running LLMs with OpenAI-compatible server"
+  },
+  {
+    "code": "localai",
+    "name": "LocalAI",
+    "baseUrl": "http://localhost:8080/v1",
+    "deploymentType": "ON_PREMISE",
+    "requiresAuth": false,
+    "docsUrl": "https://localai.io/docs/",
+    "description": "LocalAI - Multi-modal OpenAI-compatible server (text images audio)"
+  },
+  {
+    "code": "generic",
+    "name": "Generic (OpenAI-compatible)",
+    "baseUrl": null,
+    "deploymentType": "CLOUD",
+    "requiresAuth": true,
+    "docsUrl": "https://platform.openai.com/docs/api-reference",
+    "description": "Generic OpenAI-compatible endpoint - For any provider following the OpenAI API format"
+  }
+]

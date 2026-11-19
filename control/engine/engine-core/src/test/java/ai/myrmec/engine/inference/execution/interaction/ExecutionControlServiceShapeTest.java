@@ -50,7 +50,7 @@ class ExecutionControlServiceShapeTest {
         Class<?> scope = Class.forName(
                 "ai.myrmec.engine.inference.execution.interaction.ExecutionScope");
         List<String> fields = fieldsOf(scope);
-        for (String member : List.of("projectId", "workflowId", "requestId",
+        for (String member : List.of("teamId", "workflowId", "requestId",
                 "taskId", "attemptId", "executionId")) {
             assertThat(fields).contains(member);
         }

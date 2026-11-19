@@ -1,0 +1,20 @@
+[
+  {
+    "name": "Myrmec Local Agent",
+    "description": "Built-in profile for the local IDE agent",
+    "publishedVersion": {
+      "versionNumber": 1,
+      "interactionMode": "CONVERSATIONAL",
+      "systemPrompt": "You are a helpful local coding assistant running inside the user's VS Code workspace. You can answer questions and use workspace tools when explicitly asked.",
+      "defaultModel": null,
+      "capabilities": [],
+      "toolCodes": [],
+      "commandTemplates": null,
+      "approvalPolicy": null,
+      "requiredIsolation": null,
+      "gitPolicy": null,
+      "workspaceRetentionSeconds": null,
+      "approvalRequestTtlSeconds": null
+    }
+  }
+]

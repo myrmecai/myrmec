@@ -22,7 +22,7 @@ import java.util.UUID;
 /**
  * Per-scope chain state for the tamper-evident audit log.
  *
- * <p>One row per (scopeType, projectId) pair. Holds the current head hash
+ * <p>One row per (scopeType, teamId) pair. Holds the current head hash
  * and serves as the {@code FOR UPDATE} lock point to prevent
  * fork-on-concurrent-insert (design decision D8).
  *
@@ -42,13 +42,13 @@ public class AuditChainHead {
     @Column(name = "id", nullable = false, updatable = false)
     private Long id;
 
-    /** Scope type: "ORGANIZATION" or "PROJECT". */
+    /** Scope type: "ORGANIZATION" or "TEAM". */
     @Column(name = "scope_type", nullable = false, length = 20)
     private String scopeType;
 
-    /** Project ID (null for ORG scope). */
-    @Column(name = "project_id")
-    private UUID projectId;
+    /** Team ID (null for ORG scope). */
+    @Column(name = "team_id")
+    private UUID teamId;
 
     /** Current head hash (the last event's {@code event_hash}). */
     @Column(name = "head_hash", length = 64)

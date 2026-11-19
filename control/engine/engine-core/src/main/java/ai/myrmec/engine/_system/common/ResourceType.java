@@ -31,11 +31,11 @@ public final class ResourceType {
     public static final String MODEL = "model";
     /** Secret (vault credential). */
     public static final String SECRET = "secret";
-    /** Project (organisational unit for agents and conversations). */
-    public static final String PROJECT = "project";
+    /** Team (organisational unit for agents and conversations). */
+    public static final String TEAM = "team";
     /** Agent (registered machine agent). */
     public static final String AGENT = "agent";
-    /** Conversation (chat session within a project). */
+    /** Conversation (chat session within a Team). */
     public static final String CONVERSATION = "conversation";
     /** Conversation message attachment (file upload). */
     public static final String CONVERSATION_ATTACHMENT = "conversation_attachment";
@@ -43,8 +43,8 @@ public final class ResourceType {
     public static final String GOVERNANCE_PROFILE = "governance_profile";
     /** System setting (platform-level configuration). */
     public static final String SYSTEM_SETTING = "system_setting";
-    /** Project setting (project-level configuration). */
-    public static final String PROJECT_SETTING = "project_setting";
+    /** Team setting (team-level configuration). */
+    public static final String TEAM_SETTING = "team_setting";
     /** Quota (budget / spending limit). */
     public static final String QUOTA = "quota";
     /** User (human operator). */

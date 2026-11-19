@@ -1,6 +1,6 @@
 package ai.myrmec.engine.mywork;
 
-import ai.myrmec.engine._system.security.ProjectAccessEvaluator;
+import ai.myrmec.engine._system.security.TeamAccessEvaluator;
 import ai.myrmec.engine.assistant.Assistant;
 import ai.myrmec.engine.assistant.AssistantRepository;
 import ai.myrmec.engine.assistant.AssistantVersionRepository;
@@ -14,8 +14,8 @@ import ai.myrmec.engine.mywork.dto.MyAssistantRow;
 import ai.myrmec.engine.mywork.dto.MyContinueRow;
 import ai.myrmec.engine.mywork.dto.MyWorkSummaryResponse;
 import ai.myrmec.engine.mywork.dto.MyWorkflowRow;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamRepository;
 import ai.myrmec.engine.service.ServiceType;
 import ai.myrmec.engine.workflow.RequestStatus;
 import ai.myrmec.engine.workflow.Workflow;
@@ -43,27 +43,27 @@ import java.util.UUID;
 /**
  * Read-only aggregator behind the unified "My Work" landing surface (UC-013).
  *
- * <p>My Work is a personal, cross-project view: it never owns data and never
+ * <p>My Work is a personal, cross-Team view: it never owns data and never
  * writes. Every query starts from the set of projects the caller can
- * {@code VIEW} (resolved here, because {@code GET /api/v1/projects} is
- * unscoped), optionally narrowed by a {@code projectIds} chip filter, and then
+ * {@code VIEW} (resolved here, because {@code GET /api/v1/teams} is
+ * unscoped), optionally narrowed by a {@code teamIds} chip filter, and then
  * rolls up the four tabs — Workflows, Conversations (Assistants), Approvals,
  * and Archived. Approval and archive <em>actions</em> are deliberately absent;
  * the UI drives those through the existing per-resource write endpoints so
  * there is exactly one authorization path per mutation.</p>
  *
  * <p>Scale assumption is admin-grade (the same one the Service-Type registry
- * makes): the project set is small enough to filter in memory. The heavier
+ * makes): the Team set is small enough to filter in memory. The heavier
  * fan-outs (per-workflow executions, per-assistant sessions) are bounded by the
- * scoped project set.</p>
+ * scoped Team set.</p>
  */
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class MyWorkService {
 
-    private final ProjectRepository projectRepository;
-    private final ProjectAccessEvaluator projectAccessEvaluator;
+    private final TeamRepository teamRepository;
+    private final TeamAccessEvaluator teamAccessEvaluator;
     private final WorkflowRepository workflowRepository;
     private final WorkflowRequestRepository workflowRequestRepository;
     private final WorkflowTaskRepository workflowTaskRepository;
@@ -74,8 +74,8 @@ public class MyWorkService {
 
     // ------------------------------------------------------------------ summary
 
-    public MyWorkSummaryResponse summary(Authentication authentication, List<UUID> projectIds) {
-        Scope scope = resolveScope(authentication, projectIds);
+    public MyWorkSummaryResponse summary(Authentication authentication, List<UUID> teamIds) {
+        Scope scope = resolveScope(authentication, teamIds);
 
         long workflowsCreated = 0;
         long workflowsActive = 0;
@@ -126,8 +126,8 @@ public class MyWorkService {
     // ---------------------------------------------------------------- workflows
 
     public List<MyWorkflowRow> workflows(
-            Authentication authentication, List<UUID> projectIds, WorkflowStatus status, String q) {
-        Scope scope = resolveScope(authentication, projectIds);
+            Authentication authentication, List<UUID> teamIds, WorkflowStatus status, String q) {
+        Scope scope = resolveScope(authentication, teamIds);
         String needle = normalize(q);
         List<MyWorkflowRow> rows = new ArrayList<>();
         for (Workflow w : scope.workflows()) {
@@ -140,8 +140,8 @@ public class MyWorkService {
             if (!matches(needle, w.getName(), w.getDescription())) {
                 continue;
             }
-            String projectName = scope.projectName(w.getProject().getId());
-            rows.add(MyWorkflowRow.of(w, projectName, workflowRequestRepository.findByWorkflowId(w.getId())));
+            String teamName = scope.teamName(w.getTeam().getId());
+            rows.add(MyWorkflowRow.of(w, teamName, workflowRequestRepository.findByWorkflowId(w.getId())));
         }
         rows.sort(Comparator.comparing(MyWorkflowRow::name, String.CASE_INSENSITIVE_ORDER));
         return rows;
@@ -149,8 +149,8 @@ public class MyWorkService {
 
     // ------------------------------------------------------------ conversations
 
-    public List<MyAssistantRow> conversations(Authentication authentication, List<UUID> projectIds, String q) {
-        Scope scope = resolveScope(authentication, projectIds);
+    public List<MyAssistantRow> conversations(Authentication authentication, List<UUID> teamIds, String q) {
+        Scope scope = resolveScope(authentication, teamIds);
         Map<UUID, List<Conversation>> activeByAssistant = activeSessionsByAssistant(scope);
         Map<UUID, UUID> profileByAssistant = assistantProfileIds(scope.assistants());
         String needle = normalize(q);
@@ -167,19 +167,19 @@ public class MyWorkService {
                     .map(MyWorkService::sessionTimestamp)
                     .max(Comparator.naturalOrder())
                     .orElse(null);
-            rows.add(MyAssistantRow.of(a, scope.projectName(a.getProjectId()), profileByAssistant.get(a.getId()), sessions.size(), lastSessionAt));
+            rows.add(MyAssistantRow.of(a, scope.teamName(a.getTeamId()), profileByAssistant.get(a.getId()), sessions.size(), lastSessionAt));
         }
         rows.sort(Comparator.comparing(MyAssistantRow::name, String.CASE_INSENSITIVE_ORDER));
         return rows;
     }
 
     /** The signed-in user's own recently-active sessions, for the Continue rail (newest first, capped). */
-    public List<MyContinueRow> continueRail(Authentication authentication, UUID userId, List<UUID> projectIds, int limit) {
-        Scope scope = resolveScope(authentication, projectIds);
+    public List<MyContinueRow> continueRail(Authentication authentication, UUID userId, List<UUID> teamIds, int limit) {
+        Scope scope = resolveScope(authentication, teamIds);
         Map<UUID, String> assistantNames = new HashMap<>();
         return conversationRepository.findByCreatedByOrderByUpdatedAtDesc(userId).stream()
                 .filter(c -> c.getStatus() == Conversation.Status.ACTIVE)
-                .filter(c -> scope.contains(c.getProjectId()))
+                .filter(c -> scope.contains(c.getTeamId()))
                 .limit(Math.max(0, limit))
                 .map(c -> MyContinueRow.of(c, assistantName(c.getAssistantId(), assistantNames)))
                 .toList();
@@ -187,11 +187,11 @@ public class MyWorkService {
 
     // ------------------------------------------------------------------ approvals
 
-    public List<MyApprovalRow> approvals(Authentication authentication, List<UUID> projectIds, String q) {
-        Scope scope = resolveScope(authentication, projectIds);
+    public List<MyApprovalRow> approvals(Authentication authentication, List<UUID> teamIds, String q) {
+        Scope scope = resolveScope(authentication, teamIds);
         String needle = normalize(q);
         return pendingApprovalRows(scope, callerIdOf(authentication)).stream()
-                .filter(r -> matches(needle, r.summary(), r.projectName()))
+                .filter(r -> matches(needle, r.summary(), r.teamName()))
                 // Soonest-expiring first; rows without an expiry sort last.
                 .sorted(Comparator.comparing(
                         MyApprovalRow::expiresAt, Comparator.nullsLast(Comparator.naturalOrder())))
@@ -201,21 +201,21 @@ public class MyWorkService {
     // ------------------------------------------------------------------ archived
 
     public List<MyArchivedRow> archived(
-            Authentication authentication, List<UUID> projectIds, MyArchivedRow.Type type, String q) {
-        Scope scope = resolveScope(authentication, projectIds);
+            Authentication authentication, List<UUID> teamIds, MyArchivedRow.Type type, String q) {
+        Scope scope = resolveScope(authentication, teamIds);
         String needle = normalize(q);
         List<MyArchivedRow> rows = new ArrayList<>();
         if (type == null || type == MyArchivedRow.Type.WORKFLOW) {
             for (Workflow w : scope.workflows()) {
                 if (w.getStatus() == WorkflowStatus.ARCHIVED && matches(needle, w.getName(), w.getDescription())) {
-                    rows.add(MyArchivedRow.ofWorkflow(w, scope.projectName(w.getProject().getId())));
+                    rows.add(MyArchivedRow.ofWorkflow(w, scope.teamName(w.getTeam().getId())));
                 }
             }
         }
         if (type == null || type == MyArchivedRow.Type.ASSISTANT) {
             for (Assistant a : scope.assistants()) {
                 if (a.getArchivedAt() != null && matches(needle, a.getName(), a.getDescription())) {
-                    rows.add(MyArchivedRow.ofAssistant(a, scope.projectName(a.getProjectId())));
+                    rows.add(MyArchivedRow.ofAssistant(a, scope.teamName(a.getTeamId())));
                 }
             }
         }
@@ -227,13 +227,13 @@ public class MyWorkService {
 
     // -------------------------------------------------------------- internals
 
-    /** All still-PENDING approval requests (conversation + execution sources) whose project is in scope, as rows.
+    /** All still-PENDING approval requests (conversation + execution sources) whose Team is in scope, as rows.
      *
      * <p>§17.4 approver targeting (workflows only): an orchestration /
      * workflow-execution approval is decided by exactly one human — the
      * triggering user ({@code WorkflowRequest.createdBy}). The tab narrows
      * those rows to {@code createdBy = caller}; conversation approvals
-     * keep their interactive-session model (any project member sees the
+     * keep their interactive-session model (any Team member sees the
      * request — the second-person review semantic).</p> */
     private List<MyApprovalRow> pendingApprovalRows(Scope scope, UUID callerId) {
         List<MyApprovalRow> rows = new ArrayList<>();
@@ -247,10 +247,10 @@ public class MyWorkService {
                 Conversation conversation = conversations.computeIfAbsent(
                         msg.getConversationId(),
                         id -> conversationRepository.findById(id).orElse(null));
-                if (conversation == null || !scope.contains(conversation.getProjectId())) {
+                if (conversation == null || !scope.contains(conversation.getTeamId())) {
                     continue;
                 }
-                rows.add(MyApprovalRow.fromConversation(msg, conversation, scope.projectName(conversation.getProjectId())));
+                rows.add(MyApprovalRow.fromConversation(msg, conversation, scope.teamName(conversation.getTeamId())));
             }
         }
         
@@ -261,13 +261,13 @@ public class MyWorkService {
         List<WorkflowTask> pendingExecutions = workflowTaskRepository.findByApprovalStatus("PENDING");
         if (!pendingExecutions.isEmpty()) {
             for (WorkflowTask task : pendingExecutions) {
-                // Navigate to project via request → workflow → project
+                // Navigate to Team via request → workflow → Team
                 WorkflowRequest request = task.getRequest();
                 if (request == null) continue;
                 Workflow workflow = request.getWorkflow();
                 if (workflow == null) continue;
-                UUID projectId = workflow.getProject().getId();
-                if (!scope.contains(projectId)) {
+                UUID teamId = workflow.getTeam().getId();
+                if (!scope.contains(teamId)) {
                     continue;
                 }
                 UUID triggerer = request.getCreatedBy() != null
@@ -275,7 +275,7 @@ public class MyWorkService {
                 if (callerId == null || triggerer == null || !triggerer.equals(callerId)) {
                     continue;
                 }
-                rows.add(MyApprovalRow.fromExecution(task, scope.projectName(projectId)));
+                rows.add(MyApprovalRow.fromExecution(task, scope.teamName(teamId)));
             }
         }
         
@@ -298,8 +298,8 @@ public class MyWorkService {
     /** Index of currently-ACTIVE conversations across the scope, keyed by assistantId (skips standalone sessions). */
     private Map<UUID, List<Conversation>> activeSessionsByAssistant(Scope scope) {
         Map<UUID, List<Conversation>> byAssistant = new HashMap<>();
-        for (Project p : scope.projectValues()) {
-            for (Conversation c : conversationRepository.findByProjectIdOrderByUpdatedAtDesc(p.getId())) {
+        for (Team t : scope.teamValues()) {
+            for (Conversation c : conversationRepository.findByTeamIdOrderByUpdatedAtDesc(t.getId())) {
                 if (c.getStatus() != Conversation.Status.ACTIVE || c.getAssistantId() == null) {
                     continue;
                 }
@@ -310,9 +310,9 @@ public class MyWorkService {
     }
 
     private boolean canCreateServiceOfType(Authentication authentication, Scope scope, ServiceType type) {
-        for (Project p : scope.projectValues()) {
-            if (projectAccessEvaluator.canEdit(p.getId(), authentication)
-                    && projectAccessEvaluator.allowsServiceType(p.getId(), type.name())) {
+        for (Team t : scope.teamValues()) {
+            if (teamAccessEvaluator.canEdit(t.getId(), authentication)
+                    && teamAccessEvaluator.allowsServiceType(t.getId(), type.name())) {
                 return true;
             }
         }
@@ -347,26 +347,26 @@ public class MyWorkService {
 
     /**
      * Resolve the caller's accessible projects (intersected with the optional
-     * {@code projectIds} filter) and eagerly load each project's workflows and
-     * assistants once, so the per-tab roll-ups never re-query the project set.
+     * {@code teamIds} filter) and eagerly load each Team's workflows and
+     * assistants once, so the per-tab roll-ups never re-query the Team set.
      */
-    private Scope resolveScope(Authentication authentication, List<UUID> projectIds) {
-        boolean filtered = projectIds != null && !projectIds.isEmpty();
-        Map<UUID, Project> projects = new LinkedHashMap<>();
+    private Scope resolveScope(Authentication authentication, List<UUID> teamIds) {
+        boolean filtered = teamIds != null && !teamIds.isEmpty();
+        Map<UUID, Team> teams = new LinkedHashMap<>();
         List<Workflow> workflows = new ArrayList<>();
         List<Assistant> assistants = new ArrayList<>();
-        for (Project p : projectRepository.findAll()) {
-            if (filtered && !projectIds.contains(p.getId())) {
+        for (Team t : teamRepository.findAll()) {
+            if (filtered && !teamIds.contains(t.getId())) {
                 continue;
             }
-            if (!projectAccessEvaluator.canView(p.getId(), authentication)) {
+            if (!teamAccessEvaluator.canView(t.getId(), authentication)) {
                 continue;
             }
-            projects.put(p.getId(), p);
-            workflows.addAll(workflowRepository.findByProjectId(p.getId()));
-            assistants.addAll(assistantRepository.findByProjectIdOrderByNameAsc(p.getId()));
+            teams.put(t.getId(), t);
+            workflows.addAll(workflowRepository.findByTeamId(t.getId()));
+            assistants.addAll(assistantRepository.findByTeamIdOrderByNameAsc(t.getId()));
         }
-        return new Scope(projects, workflows, assistants);
+        return new Scope(teams, workflows, assistants);
     }
 
     private static boolean isActive(WorkflowRequest r) {
@@ -397,20 +397,20 @@ public class MyWorkService {
         return false;
     }
 
-    /** Immutable per-request snapshot of the caller's project scope and its services. */
-    private record Scope(Map<UUID, Project> projects, List<Workflow> workflows, List<Assistant> assistants) {
+    /** Immutable per-request snapshot of the caller's Team scope and its services. */
+    private record Scope(Map<UUID, Team> teams, List<Workflow> workflows, List<Assistant> assistants) {
 
-        boolean contains(UUID projectId) {
-            return projects.containsKey(projectId);
+        boolean contains(UUID teamId) {
+            return teams.containsKey(teamId);
         }
 
-        String projectName(UUID projectId) {
-            Project p = projects.get(projectId);
-            return p == null ? null : p.getName();
+        String teamName(UUID teamId) {
+            Team t = teams.get(teamId);
+            return t == null ? null : t.getName();
         }
 
-        Collection<Project> projectValues() {
-            return projects.values();
+        Collection<Team> teamValues() {
+            return teams.values();
         }
     }
 }

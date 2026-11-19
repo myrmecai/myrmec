@@ -1,7 +1,7 @@
 package ai.myrmec.engine.service;
 
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamRepository;
 import ai.myrmec.engine.service.dto.ServiceTypeResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -26,7 +26,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ServiceTypeRegistry {
 
-    private final ProjectRepository projectRepository;
+    private final TeamRepository teamRepository;
 
     /**
      * Returns one descriptor per shipped {@link ServiceType}, ordered by the
@@ -34,7 +34,7 @@ public class ServiceTypeRegistry {
      * the type.
      */
     public List<ServiceTypeResponse> list() {
-        Map<String, Long> counts = projectEnabledCounts();
+        Map<String, Long> counts = teamEnabledCounts();
         return Arrays.stream(ServiceType.values())
                 .map(type -> ServiceTypeResponse.builder()
                         .code(type.name())
@@ -48,15 +48,15 @@ public class ServiceTypeRegistry {
     }
 
     /**
-     * Counts, per canonical service-type code, how many projects list the type
+     * Counts, per canonical service-type code, how many teams list the type
      * in their {@code allowed_service_types}. Computed in-memory because the
      * list is stored as a JSON-text column (H2/Postgres parity) rather than a
-     * queryable native array, and the project count is admin-scale.
+     * queryable native array, and the team count is admin-scale.
      */
-    private Map<String, Long> projectEnabledCounts() {
+    private Map<String, Long> teamEnabledCounts() {
         Map<String, Long> counts = new HashMap<>();
-        for (Project project : projectRepository.findAll()) {
-            List<String> allowed = project.getAllowedServiceTypes();
+        for (Team team : teamRepository.findAll()) {
+            List<String> allowed = team.getAllowedServiceTypes();
             if (allowed == null) {
                 continue;
             }

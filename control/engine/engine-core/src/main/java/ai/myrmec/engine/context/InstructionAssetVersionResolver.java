@@ -9,8 +9,8 @@ import ai.myrmec.engine.instruction.InstructionAsset;
 import ai.myrmec.engine.instruction.InstructionAssetRepository;
 import ai.myrmec.engine.instruction.InstructionAssetVersion;
 import ai.myrmec.engine.instruction.InstructionAssetVersionRepository;
-import ai.myrmec.engine.project.ProjectInstructionBinding;
-import ai.myrmec.engine.project.ProjectInstructionBindingRepository;
+import ai.myrmec.engine.team.TeamInstructionBinding;
+import ai.myrmec.engine.team.TeamInstructionBindingRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -22,7 +22,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * Resolves the instruction asset version IDs that are active for a project scope
+ * Resolves the instruction asset version IDs that are active for a Team scope
  * at this point in time.
  *
  * <p>Mirrors the live-resolution rules in {@link ContextBuilder#collectInstructions}
@@ -33,8 +33,8 @@ import java.util.stream.Collectors;
  * <ul>
  *   <li>All org-scoped ACTIVE assets whose published version has availability REQUIRED.</li>
  *   <li>Org-scoped ACTIVE assets whose published version has availability OPTIONAL,
- *       only if the project has an enabled binding for that asset.</li>
- *   <li>All project-scoped ACTIVE assets for the given project with a PUBLISHED version.</li>
+ *       only if the Team has an enabled binding for that asset.</li>
+ *   <li>All Team-scoped ACTIVE assets for the given Team with a PUBLISHED version.</li>
  * </ul></p>
  */
 @Slf4j
@@ -44,23 +44,23 @@ public class InstructionAssetVersionResolver {
 
     private final InstructionAssetRepository instructionAssetRepository;
     private final InstructionAssetVersionRepository instructionAssetVersionRepository;
-    private final ProjectInstructionBindingRepository projectInstructionBindingRepository;
+    private final TeamInstructionBindingRepository teamInstructionBindingRepository;
 
     /**
      * Return the published version IDs for all instruction assets that would be
-     * included when assembling context for the given project at the current time.
+     * included when assembling context for the given Team at the current time.
      */
-    public List<UUID> resolveActiveVersionIdsForProject(UUID projectId) {
+    public List<UUID> resolveActiveVersionIdsForTeam(UUID teamId) {
         List<UUID> versionIds = new ArrayList<>();
 
         // Org-scoped ACTIVE assets
         List<InstructionAsset> orgAssets = instructionAssetRepository
-                .findByScopeAndProjectIdIsNull(Scope.ORGANIZATION);
+                .findByScopeAndTeamIdIsNull(Scope.ORGANIZATION);
 
-        // Enabled project bindings (for OPTIONAL org assets)
-        Set<UUID> enabledAssetIds = projectInstructionBindingRepository
-                .findByProjectIdAndEnabledTrue(projectId).stream()
-                .map(ProjectInstructionBinding::getInstructionAssetId)
+        // Enabled team bindings (for OPTIONAL org assets)
+        Set<UUID> enabledAssetIds = teamInstructionBindingRepository
+                .findByTeamIdAndEnabledTrue(teamId).stream()
+                .map(TeamInstructionBinding::getInstructionAssetId)
                 .collect(Collectors.toSet());
 
         for (InstructionAsset asset : orgAssets) {
@@ -79,9 +79,9 @@ public class InstructionAssetVersionResolver {
             }
         }
 
-        // Project-scoped ACTIVE assets
+        // Team-scoped ACTIVE assets
         List<InstructionAsset> projectAssets = instructionAssetRepository
-                .findByScopeAndProjectId(Scope.PROJECT, projectId);
+                .findByScopeAndTeamId(Scope.TEAM, teamId);
 
         for (InstructionAsset asset : projectAssets) {
             if (!EntityStatus.ACTIVE.equals(asset.getStatus())) continue;
@@ -94,8 +94,8 @@ public class InstructionAssetVersionResolver {
             versionIds.add(version.getId());
         }
 
-        log.debug("Resolved {} instruction asset version IDs for project {}",
-                versionIds.size(), projectId);
+        log.debug("Resolved {} instruction asset version IDs for Team {}",
+                versionIds.size(), teamId);
         return versionIds;
     }
 }

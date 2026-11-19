@@ -12,7 +12,7 @@ import ai.myrmec.engine.conversation.ConversationMessageRepository;
 import ai.myrmec.engine.conversation.ConversationService;
 import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
 import ai.myrmec.engine.conversation.stream.ConversationSubscriber;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.User;
 import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
@@ -111,18 +111,18 @@ class ExecutionBridgeTest extends IntegrationTestBase {
 
     @Test
     void conversationCompletePersistsAssistantRowBroadcastsAndRecordsQuota() {
-        Project project = data.project().named("bridge-quota").create();
+        team team = data.team().named("bridge-quota").create();
         AgentHostCreationResult hostResult = data.agent().named("bridge-host").withMaxAgents(10).create();
         AgentHost host = hostResult.agent();
-        Conversation conversation = data.conversation().inProject(project).create();
+        Conversation conversation = data.conversation().inTeam(team).create();
         conversation.setAgentId(host.getId());
         conversationRepository.save(conversation);
 
         conversationService.appendMessage(conversation.getId(), ConversationMessage.Role.USER, "hi", TEST_ADMIN_ID, null);
 
-        // Project quota so we can observe consumption.
+        // team quota so we can observe consumption.
         quotaService.create(
-                ai.myrmec.engine.quota.Quota.Scope.PROJECT, project.getId(),
+                ai.myrmec.engine.quota.Quota.Scope.TEAM, team.getId(),
                 ai.myrmec.engine.quota.Quota.ResourceType.TOKENS, ai.myrmec.engine.quota.Quota.Period.DAILY,
                 10_000L, ai.myrmec.engine.quota.EnforcementMode.BLOCK, ai.myrmec.engine.quota.QuotaType.CEILING,
                 null, null, null, TEST_ADMIN_ID);
@@ -133,7 +133,7 @@ class ExecutionBridgeTest extends IntegrationTestBase {
         ExecutionCompletePayload.Usage usage = new ExecutionCompletePayload.Usage("m1", 3L, 5L, 100L);
         ExecutionCompletePayload.Result result = new ExecutionCompletePayload.Result("assistant reply", Map.of(), List.of());
         executionBridge.onConversationComplete(
-                conversation.getId(), project.getId(), host.getId(),
+                conversation.getId(), team.getId(), host.getId(),
                 new ExecutionCompletePayload(UUID.randomUUID(), Instant.now(), result, usage));
 
         List<ConversationMessage> messages = conversationMessageRepository
@@ -151,20 +151,20 @@ class ExecutionBridgeTest extends IntegrationTestBase {
         assertThat(captured.get(0)).contains("message.complete");
         assertThat(captured.get(0)).contains(assistant.getId().toString());
 
-        // Consumption recorded at PROJECT scope (conversation has no assistant pinned) —
+        // Consumption recorded at team scope (conversation has no assistant pinned) —
         // assert through the policy engine's own view, like BasicQuotaPolicyEngineTest.
         var decision = quotaPolicyEngine.check(
-                ai.myrmec.engine.spi.quota.QuotaScope.PROJECT, project.getId(),
+                ai.myrmec.engine.spi.quota.QuotaScope.TEAM, team.getId(),
                 ai.myrmec.engine.spi.quota.QuotaResourceType.TOKENS, 0);
         assertThat(decision.getConsumedAmount()).isEqualTo(8L);
     }
 
     @Test
     void conversationPausedPersistsApprovalAndPendingAction() {
-        Project project = data.project().named("bridge-pause").create();
+        team team = data.team().named("bridge-pause").create();
         AgentHostCreationResult hostResult = data.agent().named("bridge-pause-host").withMaxAgents(10).create();
         AgentHost host = hostResult.agent();
-        Conversation conversation = data.conversation().inProject(project).create();
+        Conversation conversation = data.conversation().inTeam(team).create();
         conversation.setAgentId(host.getId());
         conversationRepository.save(conversation);
 
@@ -209,10 +209,10 @@ class ExecutionBridgeTest extends IntegrationTestBase {
 
     @Test
     void conversationPauseStampsExpiryFromProfileTtl() {
-        Project project = data.project().named("bridge-pause-ttl").create();
+        team team = data.team().named("bridge-pause-ttl").create();
         AgentHostCreationResult hostResult = data.agent().named("bridge-ttl-host").withMaxAgents(10).create();
         AgentHost host = hostResult.agent();
-        Conversation conversation = data.conversation().inProject(project).create();
+        Conversation conversation = data.conversation().inTeam(team).create();
         conversation.setAgentId(host.getId());
         // Pin a published profile version carrying an explicit TTL (§8.7).
         ai.myrmec.engine.agent.AgentProfile profile = data.agentProfile().named("ttl-profile").create();
@@ -255,10 +255,10 @@ class ExecutionBridgeTest extends IntegrationTestBase {
 
     @Test
     void conversationPauseWithoutProfileUsesDefaultTtl() {
-        Project project = data.project().named("bridge-pause-default").create();
+        team team = data.team().named("bridge-pause-default").create();
         AgentHostCreationResult hostResult = data.agent().named("bridge-def-host").withMaxAgents(10).create();
         AgentHost host = hostResult.agent();
-        Conversation conversation = data.conversation().inProject(project).create();
+        Conversation conversation = data.conversation().inTeam(team).create();
         conversation.setAgentId(host.getId());
         conversationRepository.save(conversation);
 
@@ -288,10 +288,10 @@ class ExecutionBridgeTest extends IntegrationTestBase {
 
     @Test
     void conversationPauseWithSuspensionKeepsHostExpiry() {
-        Project project = data.project().named("bridge-pause-susp").create();
+        team team = data.team().named("bridge-pause-susp").create();
         AgentHostCreationResult hostResult = data.agent().named("bridge-susp-host").withMaxAgents(10).create();
         AgentHost host = hostResult.agent();
-        Conversation conversation = data.conversation().inProject(project).create();
+        Conversation conversation = data.conversation().inTeam(team).create();
         conversation.setAgentId(host.getId());
         conversation.setAgentProfileVersionId(UUID.randomUUID()); // would resolve nothing
         conversationRepository.save(conversation);
@@ -321,10 +321,10 @@ class ExecutionBridgeTest extends IntegrationTestBase {
 
     @Test
     void conversationFailurePersistsSystemRowAndBroadcastsEnvelope() {
-        Project project = data.project().named("bridge-fail").create();
+        team team = data.team().named("bridge-fail").create();
         AgentHostCreationResult hostResult = data.agent().named("bridge-fail-host").withMaxAgents(10).create();
         AgentHost host = hostResult.agent();
-        Conversation conversation = data.conversation().inProject(project).create();
+        Conversation conversation = data.conversation().inTeam(team).create();
         conversation.setAgentId(host.getId());
         conversationRepository.save(conversation);
         conversationService.appendMessage(conversation.getId(), ConversationMessage.Role.USER, "hi", TEST_ADMIN_ID, null);
@@ -339,7 +339,7 @@ class ExecutionBridgeTest extends IntegrationTestBase {
                 null);
 
         executionBridge.onConversationFailure(
-                conversation.getId(), project.getId(), host.getId(), payload);
+                conversation.getId(), team.getId(), host.getId(), payload);
 
         // (1) Durable SYSTEM transcript row carrying the error envelope.
         List<ConversationMessage> messages = conversationMessageRepository
@@ -366,14 +366,14 @@ class ExecutionBridgeTest extends IntegrationTestBase {
 
     @Test
     void conversationFailureWithoutPayloadPersistsGenericNotice() {
-        Project project = data.project().named("bridge-fail-null").create();
-        Conversation conversation = data.conversation().inProject(project).create();
+        team team = data.team().named("bridge-fail-null").create();
+        Conversation conversation = data.conversation().inTeam(team).create();
         conversationService.appendMessage(conversation.getId(), ConversationMessage.Role.USER, "hi", TEST_ADMIN_ID, null);
 
         List<String> captured = new ArrayList<>();
         conversationStreamBroker.subscribe(conversation.getId(), new CapturingSubscriber(captured));
 
-        executionBridge.onConversationFailure(conversation.getId(), project.getId(), null, null);
+        executionBridge.onConversationFailure(conversation.getId(), team.getId(), null, null);
 
         List<ConversationMessage> messages = conversationMessageRepository
                 .findByConversationIdOrderBySequenceNoAsc(conversation.getId());
@@ -425,14 +425,14 @@ class ExecutionBridgeTest extends IntegrationTestBase {
     @Test
     void orchestrationTerminalSettlesAggregateUsageOnceReplayDoesNotDoubleCharge() {
         OrchestrationFixture f = new OrchestrationFixture();
-        Project project = data.project().named("bridge-usage").create();
+        team team = data.team().named("bridge-usage").create();
 
         // A REAL execution row carrying the interaction policy (THIS
-        // feature's orchestration family) + a project quota to observe.
+        // feature's orchestration family) + a team quota to observe.
         ai.myrmec.engine.inference.Session session = session();
         session.setServiceType("WORKFLOW");
         session.setRefId(f.request.getId());
-        session.setProjectId(project.getId());
+        session.setTeamId(team.getId());
         sessionRepository.save(session);
         SessionExecution execution = new SessionExecution();
         execution.setSessionId(session.getId());
@@ -446,7 +446,7 @@ class ExecutionBridgeTest extends IntegrationTestBase {
                                 .InteractionProperties.defaults()));
         execution = sessionExecutionRepository.save(execution);
         quotaService.create(
-                ai.myrmec.engine.quota.Quota.Scope.PROJECT, project.getId(),
+                ai.myrmec.engine.quota.Quota.Scope.TEAM, team.getId(),
                 ai.myrmec.engine.quota.Quota.ResourceType.TOKENS, ai.myrmec.engine.quota.Quota.Period.DAILY,
                 10_000L, ai.myrmec.engine.quota.EnforcementMode.BLOCK, ai.myrmec.engine.quota.QuotaType.CEILING,
                 null, null, null, TEST_ADMIN_ID);
@@ -465,7 +465,7 @@ class ExecutionBridgeTest extends IntegrationTestBase {
                 .getInteractionUsage();
         assertThat(((Number) accounting.get("accountedTokens")).longValue()).isEqualTo(650L);
         var decision = quotaPolicyEngine.check(
-                ai.myrmec.engine.spi.quota.QuotaScope.PROJECT, project.getId(),
+                ai.myrmec.engine.spi.quota.QuotaScope.TEAM, team.getId(),
                 ai.myrmec.engine.spi.quota.QuotaResourceType.TOKENS, 0);
         assertThat(decision.getConsumedAmount()).isEqualTo(650L);
 
@@ -475,7 +475,7 @@ class ExecutionBridgeTest extends IntegrationTestBase {
                 f.attempt.getId(), resultExecutionId, SessionExecution.State.COMPLETED, payload);
 
         var decisionAfterReplay = quotaPolicyEngine.check(
-                ai.myrmec.engine.spi.quota.QuotaScope.PROJECT, project.getId(),
+                ai.myrmec.engine.spi.quota.QuotaScope.TEAM, team.getId(),
                 ai.myrmec.engine.spi.quota.QuotaResourceType.TOKENS, 0);
         assertThat(decisionAfterReplay.getConsumedAmount())
                 .as("a replayed terminal outcome never double-charges")
@@ -492,7 +492,7 @@ class ExecutionBridgeTest extends IntegrationTestBase {
         ai.myrmec.engine.inference.Session session = session();
         session.setServiceType("WORKFLOW");
         session.setRefId(f.request.getId());
-        session.setProjectId(data.project().named("bridge-usage-np").create().getId());
+        session.setTeamId(data.team().named("bridge-usage-np").create().getId());
         sessionRepository.save(session);
         SessionExecution execution = new SessionExecution();
         execution.setSessionId(session.getId());
@@ -598,17 +598,17 @@ class ExecutionBridgeTest extends IntegrationTestBase {
 
     @Test
     void conversationApprovalRequestedPersistsThroughTheTranscriptSeam() {
-        Project project = data.project().named("bridge-appr").create();
+        team team = data.team().named("bridge-appr").create();
         AgentHostCreationResult hostResult = data.agent().named("bridge-appr-host").withMaxAgents(10).create();
         AgentHost host = hostResult.agent();
-        Conversation conversation = data.conversation().inProject(project).create();
+        Conversation conversation = data.conversation().inTeam(team).create();
         conversation.setAgentId(host.getId());
         conversationRepository.save(conversation);
 
         ai.myrmec.engine.inference.Session session = session();
         session.setServiceType("CONVERSATION");
         session.setRefId(conversation.getId());
-        session.setProjectId(project.getId());
+        session.setTeamId(team.getId());
         sessionRepository.save(session);
 
         Instant expiresAt = Instant.now().plusSeconds(600)
@@ -636,17 +636,17 @@ class ExecutionBridgeTest extends IntegrationTestBase {
 
     @Test
     void conversationApprovalRequestedWithoutExpiryStampsProfileDefault() {
-        Project project = data.project().named("bridge-apr-def").create();
+        team team = data.team().named("bridge-apr-def").create();
         AgentHostCreationResult hostResult = data.agent().named("bridge-apr-host").withMaxAgents(10).create();
         AgentHost host = hostResult.agent();
-        Conversation conversation = data.conversation().inProject(project).create();
+        Conversation conversation = data.conversation().inTeam(team).create();
         conversation.setAgentId(host.getId());
         conversationRepository.save(conversation);
 
         ai.myrmec.engine.inference.Session session = session();
         session.setServiceType("CONVERSATION");
         session.setRefId(conversation.getId());
-        session.setProjectId(project.getId());
+        session.setTeamId(team.getId());
         sessionRepository.save(session);
 
         Instant before = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
@@ -683,12 +683,12 @@ class ExecutionBridgeTest extends IntegrationTestBase {
         final TaskAttempt attempt;
 
         OrchestrationFixture() {
-            Project project = data.project().named("orch-" + System.nanoTime()).withRepo("https://x.git", "main").create();
+            team team = data.team().named("orch-" + System.nanoTime()).withRepo("https://x.git", "main").create();
             AgentProfile profile = data.agentProfile().named("orch-profile").create();
             User admin = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
 
             Workflow wf = new Workflow();
-            wf.setProject(project);
+            wf.setTeam(team);
             wf.setName("orch-wf-" + System.nanoTime());
             wf.setSteps(List.of());
             wf.setVersion(1);

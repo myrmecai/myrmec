@@ -10,8 +10,8 @@ import ai.myrmec.engine.agent.dto.CreateAgentHostRequest;
 import ai.myrmec.engine.agent.dto.SetModelAccessModeRequest;
 import ai.myrmec.engine.agent.dto.UpdateAgentHostRequest;
 import ai.myrmec.engine._system.exception.ErrorResponse;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -42,7 +42,7 @@ import java.util.stream.Collectors;
 public class AgentHostAdminController {
 
     private final AgentHostService agentHostService;
-    private final ProjectRepository projectRepository;
+    private final TeamRepository teamRepository;
 
     @Operation(summary = "List all agent hosts")
     @ApiResponses({
@@ -54,14 +54,14 @@ public class AgentHostAdminController {
     public ResponseEntity<List<AgentHostResponse>> listAgentHosts() {
         List<AgentHost> agentHosts = agentHostService.findAll();
 
-        // Fetch project names
-        Map<UUID, String> projectNames = projectRepository.findAll().stream()
-                .collect(Collectors.toMap(Project::getId, Project::getName));
+        // Fetch Team names
+        Map<UUID, String> teamNames = teamRepository.findAll().stream()
+                .collect(Collectors.toMap(Team::getId, Team::getName));
 
         List<AgentHostResponse> responses = agentHosts.stream()
                 .map(agentHost -> AgentHostResponse.from(
                         agentHost,
-                        agentHost.getProjectId() != null ? projectNames.get(agentHost.getProjectId()) : null,
+                        agentHost.getTeamId() != null ? teamNames.get(agentHost.getTeamId()) : null,
                         agentHostService.countOnlineInstances(agentHost.getId())
                 ))
                 .toList();
@@ -78,15 +78,15 @@ public class AgentHostAdminController {
     @GetMapping("/{id}")
     public ResponseEntity<AgentHostResponse> getAgentHost(@PathVariable UUID id) {
         AgentHost agentHost = agentHostService.getAgent(id);
-        String projectName = null;
-        if (agentHost.getProjectId() != null) {
-            projectName = projectRepository.findById(agentHost.getProjectId())
-                    .map(Project::getName)
+        String teamName = null;
+        if (agentHost.getTeamId() != null) {
+            teamName = teamRepository.findById(agentHost.getTeamId())
+                    .map(Team::getName)
                     .orElse(null);
         }
         return ResponseEntity.ok(AgentHostResponse.from(
                 agentHost,
-                projectName,
+                teamName,
                 agentHostService.countOnlineInstances(agentHost.getId())
         ));
     }
@@ -129,7 +129,7 @@ public class AgentHostAdminController {
         AgentHostCreationResult result = agentHostService.createAgent(
                 request.getName(),
                 request.getDescription(),
-                request.getProjectId(),
+                request.getTeamId(),
                 request.getMaxAgents(),
                 mode,
                 // Local-owner model (§3.7): MANAGED default; LOCAL allowed to
@@ -138,14 +138,14 @@ public class AgentHostAdminController {
                 request.getHostType()
         );
 
-        String projectName = null;
-        if (result.agent().getProjectId() != null) {
-            projectName = projectRepository.findById(result.agent().getProjectId())
-                    .map(Project::getName)
+        String teamName = null;
+        if (result.agent().getTeamId() != null) {
+            teamName = teamRepository.findById(result.agent().getTeamId())
+                    .map(Team::getName)
                     .orElse(null);
         }
 
-        AgentHostResponse agentHostResponse = AgentHostResponse.from(result.agent(), projectName, 0);
+        AgentHostResponse agentHostResponse = AgentHostResponse.from(result.agent(), teamName, 0);
 
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(AgentHostWithKeyResponse.builder()
@@ -178,22 +178,22 @@ public class AgentHostAdminController {
                 id,
                 request.getName(),
                 request.getDescription(),
-                request.getProjectId(),
+                request.getTeamId(),
                 request.getMaxAgents(),
                 request.getStatus(),
                 mode
         );
 
-        String projectName = null;
-        if (agentHost.getProjectId() != null) {
-            projectName = projectRepository.findById(agentHost.getProjectId())
-                    .map(Project::getName)
+        String teamName = null;
+        if (agentHost.getTeamId() != null) {
+            teamName = teamRepository.findById(agentHost.getTeamId())
+                    .map(Team::getName)
                     .orElse(null);
         }
 
         return ResponseEntity.ok(AgentHostResponse.from(
                 agentHost,
-                projectName,
+                teamName,
                 agentHostService.countOnlineInstances(agentHost.getId())
         ));
     }
@@ -245,15 +245,15 @@ public class AgentHostAdminController {
         AgentHost agentHost = agentHostService.updateAgent(
                 id, null, null, null, null, null, request.getModelAccessMode());
 
-        String projectName = null;
-        if (agentHost.getProjectId() != null) {
-            projectName = projectRepository.findById(agentHost.getProjectId())
-                    .map(Project::getName)
+        String teamName = null;
+        if (agentHost.getTeamId() != null) {
+            teamName = teamRepository.findById(agentHost.getTeamId())
+                    .map(Team::getName)
                     .orElse(null);
         }
         return ResponseEntity.ok(AgentHostResponse.from(
                 agentHost,
-                projectName,
+                teamName,
                 agentHostService.countOnlineInstances(agentHost.getId())
         ));
     }

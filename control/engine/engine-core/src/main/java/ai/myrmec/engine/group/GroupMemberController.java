@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
  * <p>Roles meaningful at GROUP scope:
  * {@code EDITOR}, {@code VIEWER}, {@code BUDGET_OWNER}, {@code APPROVER},
  * {@code AUDITOR}. {@code PLATFORM_ADMIN}, {@code ORG_ADMIN} and
- * {@code PROJECT_OWNER} are rejected at group scope.
+ * {@code TEAM_OWNER} are rejected at group scope.
  */
 @RestController
 @RequestMapping("/api/v1/admin/groups/{groupId}/members")

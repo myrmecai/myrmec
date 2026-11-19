@@ -4,10 +4,10 @@ import java.util.Arrays;
 import java.util.Optional;
 
 /**
- * The kinds of automated business work a project can host (#76 vocabulary
+ * The kinds of automated business work a Team can host (#76 vocabulary
  * lock). The set is intentionally small today — {@code WORKFLOW} and
  * {@code CONVERSATIONAL} are the two shipped types — but the enum is the single
- * source of truth that the per-project {@code allowed_service_types} gate (#77)
+ * source of truth that the per-Team {@code allowed_service_types} gate (#77)
  * and the platform Service-Type registry (#78) both build on.
  *
  * <p>Each constant carries presentation metadata (display name, description,

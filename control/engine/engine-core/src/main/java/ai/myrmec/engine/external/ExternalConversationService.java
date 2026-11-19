@@ -25,7 +25,7 @@ import java.util.UUID;
  * boundary: conversations are created as {@link Conversation.Source#EXTERNAL_API},
  * tagged with the opening service account and the caller's opaque
  * {@code externalUserRef}, and every read/write re-asserts that the conversation
- * belongs to the calling service account (and its project) so one integration
+ * belongs to the calling service account (and its Team) so one integration
  * can never touch another's threads. Assistant access is gated up front by
  * {@link ExternalAssistantService#requireUsable}.</p>
  */
@@ -52,10 +52,10 @@ public class ExternalConversationService {
                                           String firstMessage) {
         String endUserRef = normaliseRequiredRef(externalUserRef);
         externalAssistantService.requireUsable(
-                principal.getServiceAccountId(), principal.getProjectId(), assistantId);
+                principal.getServiceAccountId(), principal.getTeamId(), assistantId);
 
         Conversation conversation = conversationService.createConversation(
-                principal.getProjectId(), null, null, null, null, assistantId);
+                principal.getTeamId(), null, null, null, null, assistantId);
         conversation.setSource(Conversation.Source.EXTERNAL_API);
         conversation.setExternalUserRef(endUserRef);
         conversation.setServiceAccountId(principal.getServiceAccountId());
@@ -135,7 +135,7 @@ public class ExternalConversationService {
 
     /**
      * Resolve a conversation and assert it belongs to the calling service account
-     * (external provenance + same service account + same project). Any mismatch
+     * (external provenance + same service account + same Team). Any mismatch
      * is reported as 404 so a caller cannot probe other accounts' conversations.
      */
     private Conversation requireOwnedConversation(ServiceAccountPrincipal principal, UUID conversationId) {
@@ -145,7 +145,7 @@ public class ExternalConversationService {
         if (conversation == null
                 || conversation.getSource() != Conversation.Source.EXTERNAL_API
                 || !Objects.equals(conversation.getServiceAccountId(), principal.getServiceAccountId())
-                || !Objects.equals(conversation.getProjectId(), principal.getProjectId())) {
+                || !Objects.equals(conversation.getTeamId(), principal.getTeamId())) {
             throw ResourceNotFoundException.of("Conversation", String.valueOf(conversationId));
         }
         return conversation;

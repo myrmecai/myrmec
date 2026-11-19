@@ -418,7 +418,7 @@ public class ExecutionViewService {
                         scope.executionId()));
         Session session = sessionRepository.findById(execution.getSessionId())
                 .orElseThrow(() -> chainNotFound(scope));
-        if (!scope.projectId().equals(session.getProjectId())) {
+        if (!scope.teamId().equals(session.getTeamId())) {
             throw chainNotFound(scope);
         }
         if (!"WORKFLOW".equals(session.getServiceType())

@@ -41,7 +41,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * sends clear the snapshot so the next accounting batch retries.</p>
  *
  * <p>Allowance source: {@link QuotaPolicyEngine#check} against the session's
- * project scope (the quota walk resolves the org→group→project chain);
+ * Team scope (the quota walk resolves the org→group→Team chain);
  * {@code allowance.maxTokens} = the most restrictive remaining headroom, or
  * null when no quota row constrains the session (Community policy: no quota
  * row, no limit — the host's allowance stays unset). The engine never
@@ -137,14 +137,14 @@ public class SessionPolicyService {
 
     /**
      * The session's current token allowance: the most restrictive remaining
-     * headroom across the project's quota chain (the same walk the quota
+     * headroom across the Team's quota chain (the same walk the quota
      * engine performs pre-flight). No constraining row → null (the host's
      * allowance stays unset — no host-side token limit).
      */
     private ExecutionPolicyUpdatePayload.Allowance allowanceOf(Session session) {
         try {
             QuotaDecision decision = quotaPolicyEngine.check(
-                    QuotaScope.PROJECT, session.getProjectId(), QuotaResourceType.TOKENS, 1);
+                    QuotaScope.TEAM, session.getTeamId(), QuotaResourceType.TOKENS, 1);
             if (decision.isBlocked() || decision.getLimitAmount() == Long.MAX_VALUE
                     || decision.getLimitAmount() <= 0) {
                 return null;

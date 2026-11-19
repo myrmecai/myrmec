@@ -75,7 +75,7 @@ public class ExecutionBridge {
      * Secret scan → persist ASSISTANT row → quota recording → enriched message.complete broadcast.
      */
     @Transactional
-    public void onConversationComplete(UUID conversationId, UUID projectId, UUID agentId,
+    public void onConversationComplete(UUID conversationId, UUID teamId, UUID agentId,
                                        ExecutionCompletePayload payload) {
         if (payload == null || payload.result() == null) {
             return;
@@ -109,7 +109,7 @@ public class ExecutionBridge {
         Long totalTokens = payload.usage() == null ? null
                 : longTokenCount(payload.usage().outputTokens()) + longTokenCount(payload.usage().inputTokens());
         if (totalTokens != null && totalTokens > 0) {
-            recordTokenConsumption(conversationId, projectId, totalTokens);
+            recordTokenConsumption(conversationId, teamId, totalTokens);
         }
 
         if (saved != null) {
@@ -629,7 +629,7 @@ public class ExecutionBridge {
      * persist a SYSTEM error row → broadcast an enriched {@code message.complete}-
      * shaped envelope (NOT the raw host frame).
      */
-    public void onConversationFailure(UUID conversationId, UUID projectId, UUID agentId,
+    public void onConversationFailure(UUID conversationId, UUID teamId, UUID agentId,
                                       ExecutionFailedPayload payload) {
         if (conversationId == null) {
             return;
@@ -677,7 +677,7 @@ public class ExecutionBridge {
         } catch (Exception ex) {
             log.warn("Failed to build message.complete bridge for conv {}: {}", conversationId, ex.getMessage());
         }
-        log.debug("Conversation failure surface (projectId={}, agentId={})", projectId, agentId);
+        log.debug("Conversation failure surface (teamId={}, agentId={})", teamId, agentId);
     }
 
     private Long longTokenCount(Long value) {
@@ -688,7 +688,7 @@ public class ExecutionBridge {
         return value == null ? 0 : value.intValue();
     }
 
-    private void recordTokenConsumption(UUID conversationId, UUID projectId, long totalTokens) {
+    private void recordTokenConsumption(UUID conversationId, UUID teamId, long totalTokens) {
         try {
             UUID assistantId = conversationRepository.findById(conversationId)
                     .map(Conversation::getAssistantId).orElse(null);
@@ -697,11 +697,11 @@ public class ExecutionBridge {
                         QuotaScope.SERVICE, assistantId, QuotaResourceType.TOKENS, totalTokens);
                 log.debug("Recorded {} token consumption for assistant {} (conv {})",
                         totalTokens, assistantId, conversationId);
-            } else if (projectId != null) {
+            } else if (teamId != null) {
                 quotaPolicyEngine.recordConsumption(
-                        QuotaScope.PROJECT, projectId, QuotaResourceType.TOKENS, totalTokens);
-                log.debug("Recorded {} token consumption for project {} (conv {})",
-                        totalTokens, projectId, conversationId);
+                        QuotaScope.TEAM, teamId, QuotaResourceType.TOKENS, totalTokens);
+                log.debug("Recorded {} token consumption for Team {} (conv {})",
+                        totalTokens, teamId, conversationId);
             }
         } catch (Exception e) {
             log.warn("Failed to record token consumption for conv {}: {}", conversationId, e.getMessage());

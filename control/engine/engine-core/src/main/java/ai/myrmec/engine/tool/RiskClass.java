@@ -9,12 +9,12 @@ package ai.myrmec.engine.tool;
  *       {@code postgres.select}). Never triggers approval.</li>
  *   <li>{@link #WRITE} — creates or mutates state but cleanly reversible
  *       within seconds (e.g. open a PR, create a JIRA). Triggers
- *       approval only when project policy is set to maximum strictness
+ *       approval only when Team policy is set to maximum strictness
  *       (future).</li>
  *   <li>{@link #DESTRUCTIVE} — deletes / overwrites / merges. Triggers
  *       approval whenever {@code projects.auto_hitl_on_destructive=true}.</li>
  *   <li>{@link #IRREVERSIBLE} — production deploys, schema migrations,
- *       payments. ALWAYS triggers approval when the project policy is
+ *       payments. ALWAYS triggers approval when the Team policy is
  *       on, regardless of other settings.</li>
  * </ul>
  *

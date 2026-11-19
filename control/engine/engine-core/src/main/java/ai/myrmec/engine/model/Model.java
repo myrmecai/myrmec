@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.math.BigDecimal;
 import java.util.Map;
 
@@ -58,14 +59,6 @@ public class Model {
     private String apiEndpoint;
 
     /**
-     * Whether the model accepts image inputs (vision / multimodal). Gates
-     * whether image attachments may be conveyed to an agent backed by this
-     * model (#103/#104). Defaults to false (text-only).
-     */
-    @Column(name = "supports_vision", nullable = false)
-    private boolean supportsVision = false;
-
-    /**
      * Infrastructure configuration for on-premise deployments.
      * Contains GPU type, memory, quantization, health endpoint, etc.
      */
@@ -115,6 +108,18 @@ public class Model {
      */
     @Column(name = "currency", nullable = false, length = 3)
     private String currency = "USD";
+
+    @Column(name = "context_window_tokens")
+    private Integer contextWindowTokens;
+
+    @Column(name = "max_output_tokens")
+    private Integer maxOutputTokens;
+
+    @Column(name = "training_cutoff_date")
+    private LocalDate trainingCutoffDate;
+
+    @Column(name = "release_date")
+    private LocalDate releaseDate;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

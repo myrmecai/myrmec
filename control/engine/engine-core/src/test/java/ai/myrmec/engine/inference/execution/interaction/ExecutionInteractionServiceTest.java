@@ -13,7 +13,7 @@ import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.User;
 import ai.myrmec.engine.user.UserPrincipal;
@@ -88,7 +88,7 @@ class ExecutionInteractionServiceTest extends IntegrationTestBase {
     @Autowired UserRoleRepository userRoleRepository;
     @Autowired PlatformTransactionManager transactionManager;
 
-    private Project project;
+    private team team;
     private Workflow workflow;
     private WorkflowRequest request;
     private WorkflowTask task;
@@ -100,8 +100,8 @@ class ExecutionInteractionServiceTest extends IntegrationTestBase {
 
     @BeforeEach
     void seed() {
-        project = data.project().named("adm-proj").create();
-        workflow = workflowOf(project);
+        team = data.team().named("adm-proj").create();
+        workflow = workflowOf(team);
         User admin = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
 
         WorkflowRequest req = new WorkflowRequest();
@@ -133,7 +133,7 @@ class ExecutionInteractionServiceTest extends IntegrationTestBase {
         session = new Session();
         session.setServiceType("WORKFLOW");
         session.setRefId(request.getId());
-        session.setProjectId(project.getId());
+        session.setTeamId(team.getId());
         session.setKind("ORCHESTRATION_TASK");
         session.setStatus("ACTIVE");
         session.setAllocationState("ACTIVE");
@@ -154,8 +154,8 @@ class ExecutionInteractionServiceTest extends IntegrationTestBase {
 
         editorUser = seedUser("editor");
         viewerUser = seedUser("viewer");
-        grant(editorUser.getId(), UserRole.Role.EDITOR, project.getId());
-        grant(viewerUser.getId(), UserRole.Role.VIEWER, project.getId());
+        grant(editorUser.getId(), UserRole.Role.EDITOR, team.getId());
+        grant(viewerUser.getId(), UserRole.Role.VIEWER, team.getId());
     }
 
     // ------------------------------------------------------------------
@@ -300,7 +300,7 @@ class ExecutionInteractionServiceTest extends IntegrationTestBase {
     @DisplayName("admit: VIEWER-equivalent denied (403); EDITOR-equivalent allowed")
     void viewerDenied() {
         var viewer = principal(viewerUser.getId(),
-                List.of("proj:" + project.getId() + ":VIEWER"));
+                List.of("proj:" + team.getId() + ":VIEWER"));
         assertThatThrownBy(() -> service.admit(scope(), viewer, UUID.randomUUID(), "read-only chat"))
                 .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
         assertThat(interactions.findByExecutionIdOrderByOrdinalAsc(execution.getId()))
@@ -339,7 +339,7 @@ class ExecutionInteractionServiceTest extends IntegrationTestBase {
     @Test
     @DisplayName("admit: foreign attempt (ownership-chain mismatch) → 404 before any host lookup")
     void foreignAttemptFails404() {
-        ExecutionScope bad = new ExecutionScope(project.getId(), workflow.getId(),
+        ExecutionScope bad = new ExecutionScope(team.getId(), workflow.getId(),
                 request.getId(), task.getId(), UUID.randomUUID(), execution.getId());
         assertThatThrownBy(() -> service.admit(bad, editor(), UUID.randomUUID(), "hi"))
                 .isInstanceOf(ResourceNotFoundException.class);
@@ -921,7 +921,7 @@ class ExecutionInteractionServiceTest extends IntegrationTestBase {
 
     private UserPrincipal editor() {
         return principal(editorUser.getId(),
-                List.of("proj:" + project.getId() + ":EDITOR"));
+                List.of("proj:" + team.getId() + ":EDITOR"));
     }
 
     private UserPrincipal principal(UUID userId, List<String> roles) {
@@ -944,7 +944,7 @@ class ExecutionInteractionServiceTest extends IntegrationTestBase {
     }
 
     private ExecutionScope scope() {
-        return new ExecutionScope(project.getId(), workflow.getId(), request.getId(),
+        return new ExecutionScope(team.getId(), workflow.getId(), request.getId(),
                 task.getId(), attempt.getId(), execution.getId());
     }
 
@@ -967,19 +967,19 @@ class ExecutionInteractionServiceTest extends IntegrationTestBase {
         return userRepository.save(user);
     }
 
-    private void grant(UUID userId, UserRole.Role role, UUID projectId) {
+    private void grant(UUID userId, UserRole.Role role, UUID teamId) {
         UserRole row = new UserRole();
         row.setUserId(userId);
         row.setRole(role);
-        row.setScopeType(UserRole.ScopeType.PROJECT);
-        row.setProjectId(projectId);
+        row.setScopeType(UserRole.ScopeType.TEAM);
+        row.setTeamId(teamId);
         row.setGrantedByUserId(TEST_ADMIN_ID);
         userRoleRepository.save(row);
     }
 
-    private Workflow workflowOf(Project parent) {
+    private Workflow workflowOf(team parent) {
         Workflow wf = new Workflow();
-        wf.setProject(parent);
+        wf.setTeam(parent);
         wf.setName("adm-wf-" + System.nanoTime());
         wf.setSteps(List.of());
         wf.setVersion(1);

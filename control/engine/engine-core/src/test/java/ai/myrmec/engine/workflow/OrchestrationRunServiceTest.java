@@ -51,12 +51,12 @@ class OrchestrationRunServiceTest extends IntegrationTestBase {
     @Test
     @DisplayName("pinRun persists the run row with the published version + content digest")
     void pinRunPersistsPublishedPin() {
-        var project = data.project().named("pin-proj").create();
+        var team = data.team().named("pin-proj").create();
         var profile = data.agentProfile().named("pin-profile").create();
         var admin = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
 
         Workflow wf = new Workflow();
-        wf.setProject(project);
+        wf.setTeam(team);
         wf.setName("pin-wf-" + System.nanoTime());
         wf.setSteps(List.of());
         wf.setVersion(1);
@@ -74,7 +74,7 @@ class OrchestrationRunServiceTest extends IntegrationTestBase {
         req = requestRepository.save(req);
 
         var pinned = orchestrationRunService.pinRun(
-                req.getId(), wf.getId(), project.getId(), profile.getId());
+                req.getId(), wf.getId(), team.getId(), profile.getId());
 
         // The pinned version is the currently published one.
         assertThat(pinned.getId()).isEqualTo(publishedVersionIdOf(profile.getId()));
@@ -82,9 +82,9 @@ class OrchestrationRunServiceTest extends IntegrationTestBase {
         var run = runRepository.findById(req.getId()).orElseThrow();
         assertThat(run.getProfileVersionId()).isEqualTo(pinned.getId());
         assertThat(run.getProfileVersionDigest())
-                .isEqualTo(OrchestrationRunService.contentDigestOf(pinned));
+                .isEqualTo(OrchestrationRunService.contentDigestOf(pinned, orchestrationRunService));
         assertThat(run.getWorkflowId()).isEqualTo(wf.getId());
-        assertThat(run.getProjectId()).isEqualTo(project.getId());
+        assertThat(run.getTeamId()).isEqualTo(team.getId());
 
         // pinnedVersionOf resolves the immutable row through the FK pin.
         var resolved = orchestrationRunService.pinnedVersionOf(req.getId());
@@ -106,7 +106,7 @@ class OrchestrationRunServiceTest extends IntegrationTestBase {
         String originUrl = origin.toAbsolutePath().toString().replace('\\', '/');
         git(seed, "push", originUrl, "main");
 
-        var project = data.project().named("proj-proj")
+        var team = data.team().named("proj-proj")
                 .withRepo(originUrl, "main").create();
         var profile = data.agentProfile().named("proj-profile").create();
         var admin = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
@@ -130,7 +130,7 @@ class OrchestrationRunServiceTest extends IntegrationTestBase {
                 "maxRetries", 1, "initialBackoffSeconds", 2, "maxBackoffSeconds", 30));
 
         Workflow wf = new Workflow();
-        wf.setProject(project);
+        wf.setTeam(team);
         wf.setName("proj-wf-" + System.nanoTime());
         wf.setSteps(List.of(step));
         wf.setVersion(1);

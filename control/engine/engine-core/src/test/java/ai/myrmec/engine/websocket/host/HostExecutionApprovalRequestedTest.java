@@ -15,7 +15,7 @@ import ai.myrmec.engine.inference.SessionAllocator;
 import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.workflow.TaskAttempt;
 import ai.myrmec.engine.workflow.TaskAttemptRepository;
@@ -68,7 +68,7 @@ class HostExecutionApprovalRequestedTest extends IntegrationTestBase {
     private final com.fasterxml.jackson.databind.ObjectMapper mapper =
             new com.fasterxml.jackson.databind.ObjectMapper().registerModule(new JavaTimeModule());
 
-    private record Setup(WebSocketSession session, UUID instanceId, Project project) {}
+    private record Setup(WebSocketSession session, UUID instanceId, team team) {}
 
     private Setup openedHost(String name) throws Exception {
         AgentHostCreationResult created =
@@ -91,7 +91,7 @@ class HostExecutionApprovalRequestedTest extends IntegrationTestBase {
         ((WebSocketHandler) handler).handleMessage(session, new TextMessage(open));
         return new Setup(session,
                 (UUID) session.getAttributes().get(HostControlWebSocketHandler.ATTR_HOST_INSTANCE_ID),
-                data.project().named(name + "-proj").create());
+                data.team().named(name + "-proj").create());
     }
 
     private List<JsonNode> replies(WebSocketSession session) {
@@ -111,12 +111,12 @@ class HostExecutionApprovalRequestedTest extends IntegrationTestBase {
     private record ConvFixture(UUID sessionId, UUID executionId, Conversation conversation) {}
 
     private ConvFixture conversationSession(Setup setup) {
-        Conversation conversation = data.conversation().inProject(setup.project()).create();
+        Conversation conversation = data.conversation().inTeam(setup.team()).create();
 
         Session session = new Session();
         session.setServiceType("CONVERSATION");
         session.setRefId(conversation.getId());
-        session.setProjectId(setup.project().getId());
+        session.setTeamId(setup.team().getId());
         session.setHostInstanceId(setup.instanceId());
         session.setAllocationState(SessionAllocator.ALLOC_STATE_ACTIVE);
         session = sessionRepository.save(session);
@@ -234,7 +234,7 @@ class HostExecutionApprovalRequestedTest extends IntegrationTestBase {
 
     /** A WORKFLOW session + running execution bound to an orchestration attempt. */
     private OrchFixture orchestrationSession(Setup setup) {
-        ai.myrmec.engine.workflow.WorkflowRequest request = orchestrationRequest(setup.project());
+        ai.myrmec.engine.workflow.WorkflowRequest request = orchestrationRequest(setup.team());
         ai.myrmec.engine.agent.AgentProfile profile = data.agentProfile().named("appr-profile").create();
         ai.myrmec.engine.workflow.WorkflowTask task = new ai.myrmec.engine.workflow.WorkflowTask();
         task.setRequest(request);
@@ -250,7 +250,7 @@ class HostExecutionApprovalRequestedTest extends IntegrationTestBase {
         Session session = new Session();
         session.setServiceType("WORKFLOW");
         session.setRefId(request.getId());
-        session.setProjectId(setup.project().getId());
+        session.setTeamId(setup.team().getId());
         session.setHostInstanceId(setup.instanceId());
         session.setAllocationState(SessionAllocator.ALLOC_STATE_ACTIVE);
         session = sessionRepository.save(session);
@@ -266,9 +266,9 @@ class HostExecutionApprovalRequestedTest extends IntegrationTestBase {
     }
 
     /** The minimal request/workflow chain the orchestration approval arm needs. */
-    private ai.myrmec.engine.workflow.WorkflowRequest orchestrationRequest(Project project) {
+    private ai.myrmec.engine.workflow.WorkflowRequest orchestrationRequest(team team) {
         ai.myrmec.engine.workflow.Workflow wf = new ai.myrmec.engine.workflow.Workflow();
-        wf.setProject(project);
+        wf.setTeam(team);
         wf.setName("appr-wf-" + System.nanoTime());
         wf.setSteps(List.of());
         wf.setVersion(1);

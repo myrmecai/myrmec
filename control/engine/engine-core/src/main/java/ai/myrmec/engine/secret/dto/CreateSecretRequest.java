@@ -9,7 +9,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 /**
- * Create payload accepted by both the project-scoped and global secret endpoints.
+ * Create payload accepted by both the Team-scoped and global secret endpoints.
  *
  * <p>{@code payload} is polymorphic — Jackson selects the right
  * {@link SecretPayload} subtype based on its {@code type} field, which must

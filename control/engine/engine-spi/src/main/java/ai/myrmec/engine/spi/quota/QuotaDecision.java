@@ -17,7 +17,7 @@ import lombok.Value;
  * 12,345 tokens over the 100,000 daily limit").</p>
  *
  * <p>{@link #scopeHit} identifies which level of the
- * org&rarr;group&rarr;project&rarr;user chain caused the decision.
+ * org&rarr;group&rarr;Team&rarr;user chain caused the decision.
  * Tells the UI which knob to tweak.</p>
  */
 @Value

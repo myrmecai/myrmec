@@ -1,0 +1,92 @@
+[
+  {
+    "key": "history_limit",
+    "valueType": "INT",
+    "value": "20",
+    "description": "Sliding-window size: most-recent messages sent verbatim to the model each turn."
+  },
+  {
+    "key": "bind_wait_timeout_seconds",
+    "valueType": "INT",
+    "value": "30",
+    "description": "How long a PENDING conversation waits for agent capacity before failing with BIND_TIMEOUT_NO_CAPACITY."
+  },
+  {
+    "key": "turn_timeout_seconds",
+    "valueType": "INT",
+    "value": "120",
+    "description": "Hard cap on a single turn's generation before TURN_FAILED (timeout)."
+  },
+  {
+    "key": "summary_trigger_ratio",
+    "valueType": "RATIO",
+    "value": "0.75",
+    "description": "Fold the tail of the conversation into a CONTEXT_SUMMARY when context usage crosses this fraction of the model window."
+  },
+  {
+    "key": "max_pinned",
+    "valueType": "INT",
+    "value": "20",
+    "description": "Maximum pinned messages per conversation; further pins are rejected."
+  },
+  {
+    "key": "summarizer_model_code",
+    "valueType": "MODEL_REF",
+    "value": "",
+    "description": "Utility model code for context summaries and conversation auto-titles. Empty = fall back to the session model."
+  },
+  {
+    "key": "host_heartbeat_interval_seconds",
+    "valueType": "INT",
+    "value": "10",
+    "description": "Interval at which an Agent Host supervisor emits heartbeats to the engine."
+  },
+  {
+    "key": "host_heartbeat_soft_grace_seconds",
+    "valueType": "INT",
+    "value": "30",
+    "description": "Heartbeat soft grace before ONLINE -> DEGRADED (HEARTBEAT_LATE)."
+  },
+  {
+    "key": "host_heartbeat_hard_threshold_seconds",
+    "valueType": "INT",
+    "value": "90",
+    "description": "Heartbeat hard threshold before DEGRADED -> OFFLINE (HEARTBEAT_LOST)."
+  },
+  {
+    "key": "host_drain_deadline_seconds",
+    "valueType": "INT",
+    "value": "300",
+    "description": "Drain deadline before DRAINING -> OFFLINE forces a soft release (DRAIN_TIMEOUT)."
+  },
+  {
+    "key": "secret_leak_mode",
+    "valueType": "STRING",
+    "value": "REDACT",
+    "description": "Secret leak enforcement mode: BLOCK REDACT or WARN."
+  },
+  {
+    "key": "modelGateway.enabled",
+    "valueType": "BOOL",
+    "value": "false",
+    "description": "Whether the org model gateway is deployed and reachable. GATEWAY host mode requires this (credential-envelope design §5.1)."
+  },
+  {
+    "key": "modelGateway.endpoint",
+    "valueType": "STRING",
+    "value": "",
+    "description": "The model gateway's OpenAI-compatible base endpoint. Required when modelGateway.enabled is true."
+  },
+  {
+    "key": "governance_profile_code",
+    "valueType": "STRING",
+    "value": "STANDARD",
+    "description": "The org-level governance profile code (STRICT STANDARD or FLEXIBLE)."
+  },
+  {
+    "key": "attachment_inline_ratio_max",
+    "valueType": "RATIO",
+    "value": "0.5",
+    "description": "Maximum fraction of the resolved per-turn context token budget that inline attachment text may occupy in aggregate."
+  }
+]

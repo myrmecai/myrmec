@@ -45,8 +45,8 @@ public class Session {
     @Column(name = "ref_id", nullable = false)
     private UUID refId;  // conversation_id or workflow_request_id
 
-    @Column(name = "project_id", nullable = false)
-    private UUID projectId;
+    @Column(name = "team_id", nullable = false)
+    private UUID teamId;
 
     @org.hibernate.annotations.JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "context_pins", columnDefinition = "jsonb")

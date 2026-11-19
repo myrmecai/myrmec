@@ -75,11 +75,11 @@ public class AgentAttachmentController {
             throw new AccessDeniedException("Agent is not bound to this conversation");
         }
 
-        UUID agentProjectId = agentHostRepository.findById(agentHostId)
-                .map(AgentHost::getProjectId)
+        UUID agentteamId = agentHostRepository.findById(agentHostId)
+                .map(AgentHost::getTeamId)
                 .orElse(null);
-        if (!Objects.equals(agentProjectId, conversation.getProjectId())) {
-            throw new AccessDeniedException("Agent project scope does not match conversation project");
+        if (!Objects.equals(agentteamId, conversation.getTeamId())) {
+            throw new AccessDeniedException("Agent Team scope does not match conversation Team");
         }
     }
 }

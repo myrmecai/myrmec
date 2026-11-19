@@ -68,7 +68,7 @@ class HostControlHandshakeTest extends IntegrationTestBase {
     @Test
     void hostTokenIsAcceptedAndPinsHostAttributes() {
         AgentHost host = activeHost();
-        String token = jwtTokenProvider.generateHostAccessToken(host.getId(), host.getName());
+        String token = jwtTokenProvider.generateHostAccessToken(host.getId(), host.getName(), null);
 
         Handshake result = attempt(
                 "/api/v1/agent/host/ws?token=" + token);
@@ -78,6 +78,22 @@ class HostControlHandshakeTest extends IntegrationTestBase {
                 .isEqualTo(host.getId());
         assertThat(result.attrs().get(HostControlHandshakeInterceptor.ATTR_HOST_NAME))
                 .isEqualTo(host.getName());
+        // MANAGED tokens carry no owner — the owner attribute stays null.
+        assertThat(result.attrs().get(HostControlHandshakeInterceptor.ATTR_OWNER_USER_ID))
+                .isNull();
+    }
+
+    @Test
+    void localOwnerTokenPinsTheOwnerAttribute() {
+        AgentHost host = activeHost();
+        UUID owner = UUID.randomUUID();
+        String token = jwtTokenProvider.generateHostAccessToken(host.getId(), host.getName(), owner);
+
+        Handshake result = attempt("/api/v1/agent/host/ws?token=" + token);
+
+        assertThat(result.accepted()).isTrue();
+        assertThat(result.attrs().get(HostControlHandshakeInterceptor.ATTR_OWNER_USER_ID))
+                .isEqualTo(owner);
     }
 
     @Test
@@ -112,14 +128,14 @@ class HostControlHandshakeTest extends IntegrationTestBase {
             AgentHost managed = agentHostRepository.findById(hostId).orElseThrow();
             managed.setStatus(AgentHost.Status.INACTIVE);
         });
-        String token = jwtTokenProvider.generateHostAccessToken(hostId, host.getName());
+        String token = jwtTokenProvider.generateHostAccessToken(hostId, host.getName(), null);
 
         assertThat(attempt("/api/v1/agent/host/ws?token=" + token).accepted()).isFalse();
     }
 
     @Test
     void tokenForUnknownHostIsRejected() {
-        String token = jwtTokenProvider.generateHostAccessToken(UUID.randomUUID(), "ghost");
+        String token = jwtTokenProvider.generateHostAccessToken(UUID.randomUUID(), "ghost", null);
 
         assertThat(attempt("/api/v1/agent/host/ws?token=" + token).accepted()).isFalse();
     }

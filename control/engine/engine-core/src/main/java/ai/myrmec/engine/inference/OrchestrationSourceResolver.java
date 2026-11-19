@@ -14,7 +14,7 @@ import java.util.Map;
 /**
  * Resolves the orchestration source for one run (design §16.2 step 4;
  * plan Feature 10): the workflow's artifacts repository with fallback to the
- * project workspace configuration when the workflow omits it, the
+ * Team workspace configuration when the workflow omits it, the
  * {@code sourceBranch} resolved to an immutable base commit, and the run's
  * unique execution target branch.
  *
@@ -46,7 +46,7 @@ public class OrchestrationSourceResolver {
 
     /**
      * Resolve the source for the run. The workflow artifacts repo wins;
-     * the project workspace configuration is the fallback. The target
+     * the Team workspace configuration is the fallback. The target
      * branch is the request's execution branch (already unique per run).
      */
     public ResolvedSource resolve(Workflow workflow, WorkflowRequest request) {
@@ -63,19 +63,19 @@ public class OrchestrationSourceResolver {
             credentialSecretId = artifactsRepo.get("credentialSecretId") != null
                     ? String.valueOf(artifactsRepo.get("credentialSecretId")) : null;
         } else {
-            // Project workspace fallback.
-            var project = workflow.getProject();
-            repoUrl = project.getWorkspaceRepoUrl();
-            sourceBranch = project.getWorkspaceRepoBranch() != null
-                    ? project.getWorkspaceRepoBranch() : "main";
-            credentialSecretId = project.getWorkspaceCredentialSecretId() != null
-                    ? project.getWorkspaceCredentialSecretId().toString() : null;
+            // Team workspace fallback.
+            var team = workflow.getTeam();
+            repoUrl = team.getWorkspaceRepoUrl();
+            sourceBranch = team.getWorkspaceRepoBranch() != null
+                    ? team.getWorkspaceRepoBranch() : "main";
+            credentialSecretId = team.getWorkspaceCredentialSecretId() != null
+                    ? team.getWorkspaceCredentialSecretId().toString() : null;
         }
 
         if (repoUrl == null || repoUrl.isBlank()) {
             throw new IllegalStateException(
                     "No source repository configured for workflow " + workflow.getId()
-                            + " (neither artifacts repo nor project workspace).");
+                            + " (neither artifacts repo nor Team workspace).");
         }
 
         // Unified session execution (design D10 part 2): a predecessor's

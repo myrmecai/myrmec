@@ -6,7 +6,7 @@ import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.DuplicateResourceException;
 import ai.myrmec.engine._system.exception.ResourceInUseException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
-import ai.myrmec.engine._system.security.ProjectAccessEvaluator;
+import ai.myrmec.engine._system.security.TeamAccessEvaluator;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.inference.execution.SessionExecution;
@@ -72,7 +72,7 @@ public class ExecutionInteractionService {
     private final SessionRepository sessionRepository;
     private final ExecutionInteractionRepository interactionRepository;
     private final ExecutionCommandOutboxRepository outboxRepository;
-    private final ProjectAccessEvaluator projectAccess;
+    private final TeamAccessEvaluator teamAccess;
     private final TaskAttemptRepository taskAttemptRepository;
     private final SecretLeakService secretLeakService;
     private final InteractionUsageService usageService;
@@ -86,7 +86,7 @@ public class ExecutionInteractionService {
             SessionRepository sessionRepository,
             ExecutionInteractionRepository interactionRepository,
             ExecutionCommandOutboxRepository outboxRepository,
-            ProjectAccessEvaluator projectAccess,
+            TeamAccessEvaluator teamAccess,
             TaskAttemptRepository taskAttemptRepository,
             SecretLeakService secretLeakService,
             InteractionUsageService usageService,
@@ -97,7 +97,7 @@ public class ExecutionInteractionService {
         this.sessionRepository = sessionRepository;
         this.interactionRepository = interactionRepository;
         this.outboxRepository = outboxRepository;
-        this.projectAccess = projectAccess;
+        this.teamAccess = teamAccess;
         this.taskAttemptRepository = taskAttemptRepository;
         this.secretLeakService = secretLeakService;
         this.usageService = usageService;
@@ -113,7 +113,7 @@ public class ExecutionInteractionService {
     @Transactional
     public InteractionAdmission admit(ExecutionScope scope, UserPrincipal principal,
                                       UUID clientRequestId, String text) {
-        assertCanEdit(principal, scope.projectId());
+        assertCanEdit(principal, scope.teamId());
         HeldChain chain = resolveChain(scope);
         // The session is the admission's dispatch identity (the outbox
         // envelope's hostInstanceId/sessionId).
@@ -545,7 +545,7 @@ public class ExecutionInteractionService {
      * admission/outcome byte.
      */
     private static final List<Pattern> INTERACTION_SECRET_PATTERNS = List.of(
-            Pattern.compile("myr_[A-Za-z0-9+/=_-]{8,}"),          // registration/project keys
+            Pattern.compile("myr_[A-Za-z0-9+/=_-]{8,}"),          // registration/Team keys
             Pattern.compile("sk-[A-Za-z0-9_-]{8,}"),              // API keys (OpenAI-style)
             Pattern.compile("-----BEGIN [A-Z ]*PRIVATE KEY-----"),// key material
             Pattern.compile("eyJ[A-Za-z0-9_-]{6,}\\.[A-Za-z0-9_-]{6,}\\.[A-Za-z0-9_-]{6,}") // JWT shape
@@ -581,7 +581,7 @@ public class ExecutionInteractionService {
         }
         // §22.2: the session's EFFECTIVE input bound (UTF-8 bytes) —
         // the immutable interaction policy on the execution row, tightened
-        // by project policy, floored at the platform default when absent.
+        // by Team policy, floored at the platform default when absent.
         int maxInputBytes = effectiveMaxInputBytes(execution);
         int bytes = text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
         if (bytes > maxInputBytes) {
@@ -732,7 +732,7 @@ public class ExecutionInteractionService {
         Session session = sessionRepository.findById(execution.getSessionId())
                 .orElseThrow(() -> ResourceNotFoundException.of("Session",
                         execution.getSessionId()));
-        if (!scope.projectId().equals(session.getProjectId())) {
+        if (!scope.teamId().equals(session.getTeamId())) {
             throw chainNotFound(scope);
         }
         if (!"WORKFLOW".equals(session.getServiceType())
@@ -760,7 +760,7 @@ public class ExecutionInteractionService {
 
     private record HeldChain(Session session, SessionExecution execution) {}
 
-    private void assertCanEdit(UserPrincipal principal, UUID projectId) {
+    private void assertCanEdit(UserPrincipal principal, UUID teamId) {
         if (principal == null) {
             throw new AccessDeniedException("Chat admission requires a USER principal");
         }
@@ -770,9 +770,9 @@ public class ExecutionInteractionService {
         org.springframework.security.core.Authentication previous = holder.getAuthentication();
         try {
             holder.setAuthentication(authentication);
-            if (!projectAccess.canEdit(projectId, authentication)) {
+            if (!teamAccess.canEdit(teamId, authentication)) {
                 throw new AccessDeniedException(
-                        "EDITOR-equivalent project access is required for chat admission");
+                        "EDITOR-equivalent Team access is required for chat admission");
             }
         } finally {
             holder.setAuthentication(previous);

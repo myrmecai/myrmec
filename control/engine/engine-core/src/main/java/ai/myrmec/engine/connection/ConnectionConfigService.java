@@ -48,12 +48,12 @@ public class ConnectionConfigService {
 
     @Transactional(readOnly = true)
     public List<ConnectionConfig> findAllOrgScoped() {
-        return repository.findByScopeAndProjectIdIsNull(Scope.ORGANIZATION);
+        return repository.findByScopeAndTeamIdIsNull(Scope.ORGANIZATION);
     }
 
     @Transactional(readOnly = true)
-    public List<ConnectionConfig> findAllProjectScoped(UUID projectId) {
-        return repository.findByScopeAndProjectId(Scope.PROJECT, projectId);
+    public List<ConnectionConfig> findAllTeamScoped(UUID teamId) {
+        return repository.findByScopeAndTeamId(Scope.TEAM, teamId);
     }
 
     @Transactional(readOnly = true)
@@ -78,13 +78,13 @@ public class ConnectionConfigService {
     // ---- create ------------------------------------------------------
 
     @Transactional
-    public ConnectionConfig create(String scope, UUID projectId, String name, String description,
+    public ConnectionConfig create(String scope, UUID teamId, String name, String description,
                                    String type, UUID credentialSecretId, UUID actorId,
                                    String actorDisplayName) {
         // Validate name uniqueness
-        boolean exists = projectId == null
-                ? repository.existsByScopeAndProjectIdIsNullAndName(scope, name)
-                : repository.existsByScopeAndProjectIdAndName(scope, projectId, name);
+        boolean exists = teamId == null
+                ? repository.existsByScopeAndTeamIdIsNullAndName(scope, name)
+                : repository.existsByScopeAndTeamIdAndName(scope, teamId, name);
         if (exists) {
             throw BadRequestException.forField("name", "DUPLICATE_CODE",
                     "A connection config with this name already exists in this scope.");
@@ -92,7 +92,7 @@ public class ConnectionConfigService {
 
         ConnectionConfig config = new ConnectionConfig();
         config.setScope(scope);
-        config.setProjectId(projectId);
+        config.setTeamId(teamId);
         config.setName(name);
         config.setDescription(description);
         config.setType(type);
@@ -105,7 +105,7 @@ public class ConnectionConfigService {
 
         auditEventService.recordEvent(
                 ResourceType.CONNECTION_CONFIG, saved.getId(), AuditAction.CREATED,
-                scope, projectId, actorId, actorDisplayName,
+                scope, teamId, actorId, actorDisplayName,
                 null, null, null, Map.of("name", name, "type", type), null);
 
         return saved;
@@ -122,9 +122,9 @@ public class ConnectionConfigService {
         if (name != null && !name.isBlank()) {
             // Validate name uniqueness if name is changing
             if (!name.equals(config.getName())) {
-                boolean exists = config.getProjectId() == null
-                        ? repository.existsByScopeAndProjectIdIsNullAndName(config.getScope(), name)
-                        : repository.existsByScopeAndProjectIdAndName(config.getScope(), config.getProjectId(), name);
+                boolean exists = config.getTeamId() == null
+                        ? repository.existsByScopeAndTeamIdIsNullAndName(config.getScope(), name)
+                        : repository.existsByScopeAndTeamIdAndName(config.getScope(), config.getTeamId(), name);
                 if (exists) {
                     throw BadRequestException.forField("name", "DUPLICATE_CODE",
                             "A connection config with this name already exists in this scope.");
@@ -146,7 +146,7 @@ public class ConnectionConfigService {
 
         auditEventService.recordEvent(
                 ResourceType.CONNECTION_CONFIG, configId, AuditAction.UPDATED,
-                config.getScope(), config.getProjectId(), actorId, actorDisplayName,
+                config.getScope(), config.getTeamId(), actorId, actorDisplayName,
                 null, null, null,
                 Map.of("name", saved.getName()), null);
 
@@ -189,7 +189,7 @@ public class ConnectionConfigService {
 
         auditEventService.recordEvent(
                 ResourceType.CONNECTION_CONFIG, configId, AuditAction.DRAFT_CREATED,
-                config.getScope(), config.getProjectId(), actorId, actorDisplayName,
+                config.getScope(), config.getTeamId(), actorId, actorDisplayName,
                 saved.getId(), null, null, Map.of("version_number", versionNumber), null);
 
         return saved;
@@ -265,7 +265,7 @@ public class ConnectionConfigService {
 
         auditEventService.recordEvent(
                 ResourceType.CONNECTION_CONFIG, configId, EntityStatus.PUBLISHED,
-                config.getScope(), config.getProjectId(), actorId, actorDisplayName,
+                config.getScope(), config.getTeamId(), actorId, actorDisplayName,
                 saved.getId(), null, null, Map.of("version_number", draft.getVersionNumber()), null);
 
         return saved;
@@ -285,7 +285,7 @@ public class ConnectionConfigService {
 
         auditEventService.recordEvent(
                 ResourceType.CONNECTION_CONFIG, configId, AuditAction.DRAFT_DISCARDED,
-                config.getScope(), config.getProjectId(), actorId, actorDisplayName,
+                config.getScope(), config.getTeamId(), actorId, actorDisplayName,
                 draft.getId(), null, null, null, null);
     }
 
@@ -300,7 +300,7 @@ public class ConnectionConfigService {
 
         auditEventService.recordEvent(
                 ResourceType.CONNECTION_CONFIG, configId, EntityStatus.DISABLED,
-                config.getScope(), config.getProjectId(), actorId, actorDisplayName,
+                config.getScope(), config.getTeamId(), actorId, actorDisplayName,
                 null, AuditReason.ADMIN_DISABLED, null, null, null);
 
         return saved;
@@ -315,7 +315,7 @@ public class ConnectionConfigService {
 
         auditEventService.recordEvent(
                 ResourceType.CONNECTION_CONFIG, configId, AuditAction.REENABLED,
-                config.getScope(), config.getProjectId(), actorId, actorDisplayName,
+                config.getScope(), config.getTeamId(), actorId, actorDisplayName,
                 null, AuditReason.ADMIN_REENABLED, null, null, null);
 
         return saved;
@@ -330,7 +330,7 @@ public class ConnectionConfigService {
 
         auditEventService.recordEvent(
                 ResourceType.CONNECTION_CONFIG, configId, EntityStatus.ARCHIVED,
-                config.getScope(), config.getProjectId(), actorId, actorDisplayName,
+                config.getScope(), config.getTeamId(), actorId, actorDisplayName,
                 null, AuditReason.ADMIN_ARCHIVED, null, null, null);
 
         return saved;
@@ -532,7 +532,7 @@ public class ConnectionConfigService {
 
         auditEventService.recordEvent(
                 ResourceType.CONNECTION_CONFIG, configId, AuditAction.DELETED,
-                config.getScope(), config.getProjectId(), actorId, actorDisplayName,
+                config.getScope(), config.getTeamId(), actorId, actorDisplayName,
                 null, null, null, Map.of("name", config.getName()), null);
     }
 }

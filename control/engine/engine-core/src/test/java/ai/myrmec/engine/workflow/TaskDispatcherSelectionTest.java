@@ -3,7 +3,7 @@
 package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine.agent.AgentProfile;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.user.User;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -38,13 +38,13 @@ class TaskDispatcherSelectionTest extends WorkflowDispatchSupport {
     @Autowired private TaskAttemptRepository attemptRepository;
     @Autowired private ai.myrmec.engine.inference.SessionRepository sessionRepository;
 
-    private Project project;
+    private team team;
     private AgentProfile taskProfile;
     private User admin;
 
     @BeforeEach
     void setUp() {
-        project = data.project().named("sel").withRepo("https://x.git", "main").create();
+        team = data.team().named("sel").withRepo("https://x.git", "main").create();
         taskProfile = data.agentProfile().named("sel-task-profile").create();
         admin = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
     }
@@ -57,8 +57,8 @@ class TaskDispatcherSelectionTest extends WorkflowDispatchSupport {
         AgentProfile unrelatedR = data.agentProfile().named("sel-host-r").create();
 
         // Two live hosts storing Q and R (neither P).
-        SocketHost hostQ = openHost("sel-host-a", unrelatedQ, project, 4);
-        SocketHost hostR = openHost("sel-host-b", unrelatedR, project, 4);
+        SocketHost hostQ = openHost("sel-host-a", unrelatedQ, team, 4);
+        SocketHost hostR = openHost("sel-host-b", unrelatedR, team, 4);
 
         // A PENDING INFERENCE task pinned to profile P.
         Workflow wf = plainWorkflow("sel");
@@ -90,7 +90,7 @@ class TaskDispatcherSelectionTest extends WorkflowDispatchSupport {
 
     private Workflow plainWorkflow(String tag) {
         Workflow wf = new Workflow();
-        wf.setProject(project);
+        wf.setTeam(team);
         wf.setName("sel-wf-" + tag);
         wf.setSteps(java.util.List.<java.util.Map<String, Object>>of(
                 java.util.Map.of("id", "analyze", "name", "Analyze")));

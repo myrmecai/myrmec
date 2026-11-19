@@ -1,0 +1,2 @@
+﻿id,name,description,parent_group_id,created_at,updated_at
+00000000-0000-0000-0000-000000000001,Default,Default group for teams without explicit group assignment.,NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP

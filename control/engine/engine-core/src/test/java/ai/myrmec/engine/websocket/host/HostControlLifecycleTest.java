@@ -191,7 +191,7 @@ class HostControlLifecycleTest extends IntegrationTestBase {
      */
     @Test
     void closeAllOnHostInstanceAndSweepReconcileHostLostSessions() {
-        var project = data.project().named("host-lost-recon").create();
+        var team = data.team().named("host-lost-recon").create();
         AgentHostCreationResult created =
                 data.agent().named("host-lost-host").withMaxAgents(5).create();
         AgentHost host = created.agent();
@@ -204,7 +204,7 @@ class HostControlLifecycleTest extends IntegrationTestBase {
         Session activeOnLive = new Session();
         activeOnLive.setServiceType("CONVERSATION");
         activeOnLive.setRefId(UUID.randomUUID());
-        activeOnLive.setProjectId(project.getId());
+        activeOnLive.setTeamId(team.getId());
         activeOnLive.setKind("CONVERSATION");
         activeOnLive.setHostInstanceId(live.getId());
         activeOnLive.setAllocationState(ai.myrmec.engine.inference.SessionAllocator.ALLOC_STATE_ACTIVE);
@@ -220,7 +220,7 @@ class HostControlLifecycleTest extends IntegrationTestBase {
         Session orphan = new Session();
         orphan.setServiceType("CONVERSATION");
         orphan.setRefId(UUID.randomUUID());
-        orphan.setProjectId(project.getId());
+        orphan.setTeamId(team.getId());
         orphan.setKind("CONVERSATION");
         orphan.setHostInstanceId(dead.getId());
         orphan.setAllocationState(ai.myrmec.engine.inference.SessionAllocator.ALLOC_STATE_ACTIVE);

@@ -38,7 +38,7 @@ public record AssembledContext(
      * @param assetId      the instruction asset id
      * @param versionId    the published version id
      * @param name         the asset name
-     * @param scope        ORGANIZATION or PROJECT
+     * @param scope        ORGANIZATION or Team
      * @param category     the instruction category
      * @param sourceType    INLINE or GIT
      * @param content       the instruction content (for INLINE) or null (for GIT)
@@ -79,7 +79,7 @@ public record AssembledContext(
      * @param providerVersionId  the pinned provider version id
      * @param providerType       MANAGED or EXTERNAL
      * @param datasetName        the dataset name for retrieval
-     * @param availability       GLOBAL or PROJECT_SCOPED
+     * @param availability       GLOBAL or TEAM_SCOPED
      */
     public record KnowledgeSourceRef(
             UUID sourceId,

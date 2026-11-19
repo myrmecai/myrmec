@@ -15,7 +15,7 @@ import java.util.UUID;
 /**
  * Repository for {@link AuditChainHead} — per-scope chain state.
  *
- * <p>The {@link #findByScopeTypeAndProjectIdForUpdate} method acquires a
+ * <p>The {@link #findByScopeTypeAndTeamIdForUpdate} method acquires a
  * pessimistic write lock ({@code SELECT … FOR UPDATE}) to serialize
  * concurrent chain writes within one scope, preventing fork-on-insert.
  */
@@ -26,7 +26,7 @@ public interface AuditChainHeadRepository extends JpaRepository<AuditChainHead, 
      * Find the chain head for a scope (no lock). Used by verification and
      * non-locking reads.
      */
-    Optional<AuditChainHead> findByScopeTypeAndProjectId(String scopeType, UUID projectId);
+    Optional<AuditChainHead> findByScopeTypeAndTeamId(String scopeType, UUID teamId);
 
     /**
      * Find the chain head for a scope with a pessimistic write lock.
@@ -36,13 +36,13 @@ public interface AuditChainHeadRepository extends JpaRepository<AuditChainHead, 
      * Concurrent writers on the same scope will block here.
      *
      * <p>Note: JPQL doesn't support {@code IS :param} for NULL comparisons,
-     * so we use two branches: one for ORG scope (projectId IS NULL) and
-     * one for PROJECT scope (projectId = :projectId).
+     * so we use two branches: one for ORG scope (teamId IS NULL) and
+     * one for Team scope (teamId = :teamId).
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT h FROM AuditChainHead h WHERE h.scopeType = :scopeType AND " +
-            "(h.projectId IS NULL AND :projectId IS NULL OR h.projectId = :projectId)")
-    Optional<AuditChainHead> findByScopeTypeAndProjectIdForUpdate(
+            "(h.teamId IS NULL AND :teamId IS NULL OR h.teamId = :teamId)")
+    Optional<AuditChainHead> findByScopeTypeAndTeamIdForUpdate(
             @Param("scopeType") String scopeType,
-            @Param("projectId") UUID projectId);
+            @Param("teamId") UUID teamId);
 }

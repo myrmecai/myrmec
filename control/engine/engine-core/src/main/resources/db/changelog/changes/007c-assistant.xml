@@ -1,0 +1,284 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- ================================================================
+         assistants
+         ================================================================ -->
+    <changeSet id="007c-assistant-create-assistants" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="assistants"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="assistants">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="team_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="name" type="varchar(120)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="current_version_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="disabled" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="archived_at" type="timestamp with time zone"/>
+            <column name="created_by" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="assistants"
+            baseColumnNames="team_id"
+            constraintName="fk_assistants_team"
+            referencedTableName="teams"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+    </changeSet>
+
+    <!-- ================================================================
+         assistant_version  (singular table name)
+         ================================================================ -->
+    <changeSet id="007c-assistant-create-assistant-version" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="assistant_version"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="assistant_version">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="assistant_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="version_number" type="varchar(20)"/>
+            <column name="bump_type" type="varchar(10)"/>
+            <column name="status" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="parent_version_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="draft_owner_id" type="uuid"/>
+            <column name="agent_profile_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="agent_profile_version_id" type="uuid"/>
+            <column name="addendum" type="text"/>
+            <column name="greeting_message" type="text">
+                <constraints nullable="false"/>
+            </column>
+            <column name="max_idle_minutes" type="int" defaultValueNumeric="30">
+                <constraints nullable="false"/>
+            </column>
+            <column name="max_session_age_hours" type="int"/>
+            <column name="kb_bindings" type="text"/>
+            <column name="disabled_tools" type="text"/>
+            <column name="hitl_override_mode" type="varchar(20)" defaultValue="STRICT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="usable_via" type="text"/>
+            <column name="attachments_enabled" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="attachment_retention_ttl" type="int"/>
+            <column name="attachment_max_file_size" type="int"/>
+            <column name="attachment_type_allowlist" type="text"/>
+            <column name="published_at" type="timestamp with time zone"/>
+            <column name="published_by" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint
+            baseTableName="assistant_version"
+            baseColumnNames="assistant_id"
+            constraintName="fk_assistant_version_assistant"
+            referencedTableName="assistants"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <addForeignKeyConstraint
+            baseTableName="assistant_version"
+            baseColumnNames="parent_version_id"
+            constraintName="fk_assistant_version_parent"
+            referencedTableName="assistant_version"
+            referencedColumnNames="id"
+            onDelete="SET NULL"/>
+
+        <addForeignKeyConstraint
+            baseTableName="assistant_version"
+            baseColumnNames="agent_profile_id"
+            constraintName="fk_assistant_version_agent_profile"
+            referencedTableName="agent_profiles"
+            referencedColumnNames="id"
+            onDelete="SET NULL"/>
+
+        <addForeignKeyConstraint
+            baseTableName="assistants"
+            baseColumnNames="current_version_id"
+            constraintName="fk_assistants_current_version"
+            referencedTableName="assistant_version"
+            referencedColumnNames="id"
+            onDelete="SET NULL"/>
+    </changeSet>
+
+    <!-- ================================================================
+         assistant_grants
+         ================================================================ -->
+    <changeSet id="007c-assistant-create-assistant-grants" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="assistant_grants"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="assistant_grants">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="assistant_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="principal_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="principal_id" type="varchar(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="permission" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="granted_at" type="timestamp with time zone">
+                <constraints nullable="false"/>
+            </column>
+            <column name="granted_by" type="uuid"/>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="assistant_grants"
+            baseColumnNames="assistant_id"
+            constraintName="fk_assistant_grant_assistant"
+            referencedTableName="assistants"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <addUniqueConstraint
+            tableName="assistant_grants"
+            constraintName="uq_assistant_grant_principal_permission"
+            columnNames="assistant_id, principal_type, principal_id, permission"/>
+    </changeSet>
+
+    <!-- ================================================================
+         assistant_context_bindings
+         ================================================================ -->
+    <changeSet id="007c-assistant-create-assistant-context-bindings" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="assistant_context_bindings"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="assistant_context_bindings">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="assistant_version_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="binding_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="target_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="enabled" type="boolean">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="assistant_context_bindings"
+            baseColumnNames="assistant_version_id"
+            constraintName="fk_acb_assistant_version"
+            referencedTableName="assistant_version"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <createIndex indexName="uq_acb_version_type_target" tableName="assistant_context_bindings" unique="true">
+            <column name="assistant_version_id"/>
+            <column name="binding_type"/>
+            <column name="target_id"/>
+        </createIndex>
+    </changeSet>
+<!-- ================================================================
+         4. MULTI-MODEL ROLE BINDINGS (Assistant & Workflow Participants)
+         ================================================================ -->
+    <changeSet id="assistant-agents-create-role-bindings" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not><tableExists tableName="assistant_agent_bindings"/></not>
+        </preConditions>
+
+        <!-- Binds profiles and models to an assistant for multi-model orchestration -->
+        <createTable tableName="assistant_agent_bindings">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="assistant_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_binding_assistant" referencedTableName="assistants" referencedColumnNames="id"/>
+            </column>
+            <!-- Pins to an immutable version for deterministic execution -->
+            <column name="profile_version_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_binding_profile_version" referencedTableName="agent_profile_versions" referencedColumnNames="id"/>
+            </column>
+            <!-- Specific LLM engine assigned to this role -->
+            <column name="model_code" type="varchar(50)">
+                <constraints nullable="true" foreignKeyName="fk_binding_model" referencedTableName="models" referencedColumnNames="code"/>
+            </column>
+            <!-- Role type: e.g., 'PRIMARY_ORCHESTRATOR', 'SUB_AGENT_CODER', 'REVIEWER' -->
+            <column name="role_type" type="varchar(40)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Logical identifier for router/sub-agent invocation (e.g., "code_writer") -->
+            <column name="agent_alias" type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Optional localized prompt addendum (only permitted if agent_profiles.addendum_allowed = true) -->
+            <column name="prompt_addendum" type="text"/>
+        </createTable>
+
+        <createIndex tableName="assistant_agent_bindings" indexName="idx_assistant_bindings_lookup">
+            <column name="assistant_id"/>
+            <column name="role_type"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

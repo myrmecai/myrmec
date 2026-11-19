@@ -44,7 +44,7 @@
             <column name="id" type="uuid">
                 <constraints primaryKey="true" nullable="false"/>
             </column>
-            <column name="project_id" type="uuid">
+            <column name="team_id" type="uuid">
                 <constraints nullable="false"/>
             </column>
             <column name="name" type="varchar(100)">
@@ -74,29 +74,29 @@
         </createTable>
     </changeSet>
 
-    <!-- Unique constraint: workflow name per project -->
-    <changeSet id="007-workflows-uk-project-name" author="myrmec">
+    <!-- Unique constraint: workflow name per team -->
+    <changeSet id="007-workflows-uk-team-name" author="myrmec">
         <preConditions onFail="MARK_RAN">
             <tableExists tableName="workflows"/>
-            <not><uniqueConstraintExists tableName="workflows" constraintName="uk_workflows_project_name"/></not>
+            <not><uniqueConstraintExists tableName="workflows" constraintName="uk_workflows_team_name"/></not>
         </preConditions>
         <addUniqueConstraint tableName="workflows"
-                             columnNames="project_id, name"
-                             constraintName="uk_workflows_project_name"/>
+                             columnNames="team_id, name"
+                             constraintName="uk_workflows_team_name"/>
     </changeSet>
 
-    <!-- Foreign key to projects -->
-    <changeSet id="007-workflows-fk-project" author="myrmec">
+    <!-- Foreign key to teams -->
+    <changeSet id="007-workflows-fk-team" author="myrmec">
         <preConditions onFail="MARK_RAN">
             <tableExists tableName="workflows"/>
-            <not><foreignKeyConstraintExists foreignKeyName="fk_workflows_project"/></not>
+            <not><foreignKeyConstraintExists foreignKeyName="fk_workflows_team"/></not>
         </preConditions>
         <addForeignKeyConstraint
             baseTableName="workflows"
-            baseColumnNames="project_id"
-            referencedTableName="projects"
+            baseColumnNames="team_id"
+            referencedTableName="teams"
             referencedColumnNames="id"
-            constraintName="fk_workflows_project"
+            constraintName="fk_workflows_team"
             onDelete="CASCADE"/>
     </changeSet>
 
@@ -115,14 +115,14 @@
             onDelete="SET NULL"/>
     </changeSet>
 
-    <!-- Index for looking up workflows by project -->
-    <changeSet id="007-workflows-idx-project-id" author="myrmec">
+    <!-- Index for looking up workflows by team -->
+    <changeSet id="007-workflows-idx-team-id" author="myrmec">
         <preConditions onFail="MARK_RAN">
             <tableExists tableName="workflows"/>
-            <not><indexExists indexName="idx_workflows_project_id"/></not>
+            <not><indexExists indexName="idx_workflows_team_id"/></not>
         </preConditions>
-        <createIndex tableName="workflows" indexName="idx_workflows_project_id">
-            <column name="project_id"/>
+        <createIndex tableName="workflows" indexName="idx_workflows_team_id">
+            <column name="team_id"/>
         </createIndex>
     </changeSet>
 
@@ -623,7 +623,7 @@
             <column name="id" type="uuid" defaultValueComputed="gen_random_uuid()">
                 <constraints primaryKey="true" nullable="false"/>
             </column>
-            <column name="project_id" type="uuid">
+            <column name="team_id" type="uuid">
                 <constraints nullable="false"/>
             </column>
             <column name="agent_id" type="uuid"/>
@@ -657,18 +657,18 @@
         </createTable>
     </changeSet>
 
-    <!-- FK to projects -->
-    <changeSet id="007-workflows-snap-fk-project" author="myrmec">
+    <!-- FK to teams -->
+    <changeSet id="007-workflows-snap-fk-team" author="myrmec">
         <preConditions onFail="MARK_RAN">
             <tableExists tableName="execution_snapshots"/>
-            <not><foreignKeyConstraintExists foreignKeyName="fk_exec_snap_project"/></not>
+            <not><foreignKeyConstraintExists foreignKeyName="fk_exec_snap_team"/></not>
         </preConditions>
         <addForeignKeyConstraint
             baseTableName="execution_snapshots"
-            baseColumnNames="project_id"
-            referencedTableName="projects"
+            baseColumnNames="team_id"
+            referencedTableName="teams"
             referencedColumnNames="id"
-            constraintName="fk_exec_snap_project"/>
+            constraintName="fk_exec_snap_team"/>
     </changeSet>
 
     <!-- FK to agent_hosts -->
@@ -689,15 +689,15 @@
          AFTER 007). The FK is added in 008-conversations-add-snapshot-fk changeSet
          in 008-conversations.xml instead. -->
 
-    <!-- Index for project + created_at -->
-    <changeSet id="007-workflows-snap-idx-project-created" author="myrmec">
+    <!-- Index for team + created_at -->
+    <changeSet id="007-workflows-snap-idx-team-created" author="myrmec">
         <preConditions onFail="MARK_RAN">
             <tableExists tableName="execution_snapshots"/>
-            <not><indexExists indexName="idx_exec_snap_project_created"/></not>
+            <not><indexExists indexName="idx_exec_snap_team_created"/></not>
         </preConditions>
-        <createIndex indexName="idx_exec_snap_project_created"
+        <createIndex indexName="idx_exec_snap_team_created"
                      tableName="execution_snapshots">
-            <column name="project_id"/>
+            <column name="team_id"/>
             <column name="created_at"/>
         </createIndex>
     </changeSet>
@@ -763,7 +763,7 @@
             <column name="workflow_id" type="uuid">
                 <constraints nullable="false"/>
             </column>
-            <column name="project_id" type="uuid">
+            <column name="team_id" type="uuid">
                 <constraints nullable="false"/>
             </column>
             <!-- §16.1 pin: the published version at request creation -->

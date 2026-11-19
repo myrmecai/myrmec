@@ -12,7 +12,7 @@ package ai.myrmec.engine._system.common;
  *
  * <h2>Categories</h2>
  * <ul>
- *   <li>{@link Scope} — entity scoping (org-wide vs project-scoped)</li>
+ *   <li>{@link Scope} — entity scoping (org-wide vs Team-scoped)</li>
  *   <li>{@link EntityStatus} — versioned-entity lifecycle status</li>
  *   <li>{@link ConnectionType} — connection config protocol types</li>
  *   <li>{@link TestStatus} — test-connection outcome</li>
@@ -31,21 +31,21 @@ public final class DomainConstants {
     private DomainConstants() {}
 
     /**
-     * Entity scope — determines visibility across the org/project hierarchy.
+     * Entity scope — determines visibility across the org/Team hierarchy.
      *
      * <p>Used by: connection_configs, instruction_assets, knowledge_providers,
      * knowledge_sources, data_feeds. The {@code scope} column stores these
      * values as varchar(20).</p>
      *
      * <p><strong>Note:</strong> {@code UserRole.ScopeType} uses a different
-     * vocabulary ({@code SYSTEM}/{@code GROUP}/{@code PROJECT}) for user-role
+     * vocabulary ({@code SYSTEM}/{@code GROUP}/{@code Team}) for user-role
      * scoping — that is a separate concern and is not shared here.</p>
      */
     public static final class Scope {
-        /** Organisation-wide scope (visible to all projects). */
+        /** Organisation-wide scope (visible to all teams). */
         public static final String ORGANIZATION = "ORGANIZATION";
-        /** Project-scoped (visible only within the owning project). */
-        public static final String PROJECT = "PROJECT";
+        /** Team-scoped (visible only within the owning team). */
+        public static final String TEAM = "TEAM";
 
         private Scope() {}
     }
@@ -190,7 +190,7 @@ public final class DomainConstants {
     /**
      * Instruction asset / knowledge source availability — determines whether
      * the asset is automatically included in the context or requires explicit
-     * opt-in per project.
+     * opt-in per Team.
      *
      * <p>Stored in the {@code availability} column on
      * {@code instruction_asset_versions} and {@code knowledge_sources}.</p>
@@ -198,7 +198,7 @@ public final class DomainConstants {
     public static final class Availability {
         /** Always included in the context (no opt-in needed). */
         public static final String REQUIRED = "REQUIRED";
-        /** Included only when explicitly enabled via a project binding. */
+        /** Included only when explicitly enabled via a Team binding. */
         public static final String OPTIONAL = "OPTIONAL";
 
         private Availability() {}

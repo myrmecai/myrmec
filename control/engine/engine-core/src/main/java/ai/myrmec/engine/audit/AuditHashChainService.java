@@ -55,8 +55,8 @@ public class AuditHashChainService {
 
         // Lock the head row for this scope (prevents concurrent fork)
         AuditChainHead head = chainHeadRepository
-                .findByScopeTypeAndProjectIdForUpdate(event.getScopeType(), event.getProjectId())
-                .orElseGet(() -> createHead(event.getScopeType(), event.getProjectId()));
+                .findByScopeTypeAndTeamIdForUpdate(event.getScopeType(), event.getTeamId())
+                .orElseGet(() -> createHead(event.getScopeType(), event.getTeamId()));
 
         // Determine prev hash
         String prevHash = head.isChainingActive() && head.getHeadHash() != null
@@ -79,7 +79,7 @@ public class AuditHashChainService {
         chainHeadRepository.save(head);
 
         log.debug("Chained audit event id={} scope={}/{} hash={}",
-                event.getId(), event.getScopeType(), event.getProjectId(), eventHash);
+                event.getId(), event.getScopeType(), event.getTeamId(), eventHash);
 
         return eventHash;
     }
@@ -88,15 +88,15 @@ public class AuditHashChainService {
      * Verify the integrity of a scope's audit chain by recomputing all
      * hashes from {@code audit_events} only.
      *
-     * @param scopeType the scope type ("ORGANIZATION" or "PROJECT")
-     * @param projectId the project ID (null for ORG scope)
+     * @param scopeType the scope type ("ORGANIZATION" or "TEAM")
+     * @param teamId the Team ID (null for ORG scope)
      * @return verification result
      */
     @Transactional(readOnly = true)
-    public VerifyResult verifyScope(String scopeType, UUID projectId) {
+    public VerifyResult verifyScope(String scopeType, UUID teamId) {
         byte[] hmacKey = resolveHmacKey();
         List<AuditEvent> events = auditEventRepository
-                .findByScopeTypeAndProjectIdOrderByIdAsc(scopeType, projectId);
+                .findByScopeTypeAndTeamIdOrderByIdAsc(scopeType, teamId);
 
         int checkedCount = 0;
         String prevHash = AuditChainCanonicalizer.GENESIS_PREV_HASH;
@@ -136,10 +136,10 @@ public class AuditHashChainService {
         return hmacKeyBootstrap.getHmacKey();
     }
 
-    private AuditChainHead createHead(String scopeType, UUID projectId) {
+    private AuditChainHead createHead(String scopeType, UUID teamId) {
         AuditChainHead head = new AuditChainHead();
         head.setScopeType(scopeType);
-        head.setProjectId(projectId);
+        head.setTeamId(teamId);
         head.setChainingActive(false);
         head.setHeadHash(null);
         return chainHeadRepository.save(head);

@@ -2,7 +2,7 @@ package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine._system.common.JsonListMapConverter;
 import ai.myrmec.engine._system.common.JsonMapConverter;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.user.User;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -30,8 +30,8 @@ public class Workflow {
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "project_id", nullable = false)
-    private Project project;
+    @JoinColumn(name = "team_id", nullable = false)
+    private Team team;
 
     @Column(name = "name", nullable = false, length = 100)
     private String name;

@@ -1,8 +1,8 @@
 package ai.myrmec.engine.conversation;
 
 import ai.myrmec.engine.IntegrationTestBase;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamRepository;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.tool.RiskClass;
 import ai.myrmec.engine.tool.Tool;
@@ -24,7 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Phase 7b — checks that the HITL policy decision is the simple
- * AND of <em>project opted-in</em> and <em>tool flagged destructive</em>.
+ * AND of <em>team opted-in</em> and <em>tool flagged destructive</em>.
  *
  * <p>The matrix matters because every later phase (UI badge, agent SDK
  * gate, scheduled sweeper) reuses the exact same boolean.</p>
@@ -38,12 +38,12 @@ class HitlPolicyServiceTest extends IntegrationTestBase {
     private TestDataBuilder data;
 
     @Autowired
-    private ProjectRepository projectRepository;
+    private TeamRepository TeamRepository;
 
     @Autowired
     private ToolRepository toolRepository;
 
-    @ParameterizedTest(name = "[{index}] project.autoHitl={0}, tool.risk={1} -> approvalRequired={2}")
+    @ParameterizedTest(name = "[{index}] team.autoHitl={0}, tool.risk={1} -> approvalRequired={2}")
     @CsvSource({
             "false, SAFE,         false",
             "false, WRITE,        false",
@@ -57,18 +57,18 @@ class HitlPolicyServiceTest extends IntegrationTestBase {
     void evaluateReturnsTheExpectedDecisionForEveryCombination(
             boolean autoHitl, RiskClass riskClass, boolean expected) {
 
-        Project project = data.project()
+        team team = data.team()
                 .named("hitl-policy-" + UUID.randomUUID())
                 .create();
-        project.setAutoHitlOnDestructive(autoHitl);
-        projectRepository.saveAndFlush(project);
+        team.setAutoHitlOnDestructive(autoHitl);
+        TeamRepository.saveAndFlush(team);
 
         Tool tool = createTool("t-" + shortId(), riskClass);
 
         HitlPolicyService.Decision decision =
-                hitlPolicyService.evaluate(project.getId(), tool.getCode());
+                hitlPolicyService.evaluate(team.getId(), tool.getCode());
 
-        assertThat(decision.projectId()).isEqualTo(project.getId());
+        assertThat(decision.teamId()).isEqualTo(team.getId());
         assertThat(decision.toolCode()).isEqualTo(tool.getCode());
         assertThat(decision.riskClass()).isEqualTo(riskClass);
         assertThat(decision.autoHitlOnDestructive()).isEqualTo(autoHitl);
@@ -77,16 +77,16 @@ class HitlPolicyServiceTest extends IntegrationTestBase {
 
     @Test
     void projectEndpointHonoursAclAndRoundTripsTheDecision() {
-        Project project = data.project()
+        team team = data.team()
                 .named("hitl-policy-rest-" + UUID.randomUUID())
                 .create();
-        project.setAutoHitlOnDestructive(true);
-        projectRepository.saveAndFlush(project);
+        team.setAutoHitlOnDestructive(true);
+        TeamRepository.saveAndFlush(team);
 
         Tool tool = createTool("t-rest-" + shortId(), RiskClass.DESTRUCTIVE);
 
         ResponseEntity<HitlPolicyService.Decision> resp = restTemplate.exchange(
-                "/api/v1/projects/" + project.getId() + "/hitl-policy?toolCode=" + tool.getCode(),
+                "/api/v1/teams/" + team.getId() + "/hitl-policy?toolCode=" + tool.getCode(),
                 HttpMethod.GET,
                 new HttpEntity<>(adminHeaders()),
                 HitlPolicyService.Decision.class);

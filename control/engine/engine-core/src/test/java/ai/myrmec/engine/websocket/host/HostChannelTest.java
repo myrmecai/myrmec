@@ -14,7 +14,7 @@ import ai.myrmec.engine.inference.SessionAllocator;
 import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -123,12 +123,12 @@ class HostChannelTest extends IntegrationTestBase {
     @Test
     void workflowSessionFrameRidesTheBoundChannelOnly() throws Exception {
         ControlSocket host = openedHost();
-        var project = data.project().named("ch-proj-frag").create();
+        var team = data.team().named("ch-proj-frag").create();
         var profile = data.agentProfile().named("ch-prof-frame").create();
 
         enableChannelFeature(() -> {
             UUID sessionId = allocator.offer("ORCHESTRATION_TASK", UUID.randomUUID(), "WORKFLOW",
-                    project.getId(), agentIdOf(host.instanceId())).orElseThrow();
+                    team.getId(), agentIdOf(host.instanceId())).orElseThrow();
             acceptAndOpen(host, sessionId);
 
             // session.open (engine→host) — with no bound channel this ride the
@@ -170,10 +170,10 @@ class HostChannelTest extends IntegrationTestBase {
     @Test
     void conversationSessionFrameDeliversOnTheControlSocketWithoutAChannel() throws Exception {
         ControlSocket host = openedHost();
-        var project = data.project().named("ch-proj-frh").create();
+        var team = data.team().named("ch-proj-frh").create();
         var profile = data.agentProfile().named("ch-prof-frh").create();
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), agentIdOf(host.instanceId())).orElseThrow();
+                team.getId(), agentIdOf(host.instanceId())).orElseThrow();
         acceptAndOpen(host, sessionId);
 
         handler.sendSessionOpen(sessionId, profile.getId());
@@ -233,10 +233,10 @@ class HostChannelTest extends IntegrationTestBase {
     @Test
     void sessionOpenCarriesChannelEndpointAndTokenWhenEnabled() throws Exception {
         ControlSocket host = openedHost();
-        var project = data.project().named("ch-proj").create();
+        var team = data.team().named("ch-proj").create();
         var profile = data.agentProfile().named("ch-prof").create();
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), agentIdOf(host.instanceId())).orElseThrow();
+                team.getId(), agentIdOf(host.instanceId())).orElseThrow();
         acceptAndOpen(host, sessionId);
 
         // Enable the channel feature, assemble, capture the session.open frame.
@@ -266,9 +266,9 @@ class HostChannelTest extends IntegrationTestBase {
     @Test
     void channelOpenWithValidTokenBindsAndTokenIsSingleUse() throws Exception {
         ControlSocket host = openedHost();
-        var project = data.project().named("ch-proj2").create();
+        var team = data.team().named("ch-proj2").create();
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), agentIdOf(host.instanceId())).orElseThrow();
+                team.getId(), agentIdOf(host.instanceId())).orElseThrow();
         acceptAndOpen(host, sessionId);
 
         String token = channelTokenService.mint(sessionId, host.instanceId());
@@ -303,9 +303,9 @@ class HostChannelTest extends IntegrationTestBase {
     @Test
     void expiredAndWrongSessionTokensAreRejected() throws Exception {
         ControlSocket host = openedHost();
-        var project = data.project().named("ch-proj3").create();
+        var team = data.team().named("ch-proj3").create();
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), agentIdOf(host.instanceId())).orElseThrow();
+                team.getId(), agentIdOf(host.instanceId())).orElseThrow();
 
         // Expired: mint, then force expiry via the TTL property.
         String token = channelTokenService.mint(sessionId, host.instanceId());
@@ -338,9 +338,9 @@ class HostChannelTest extends IntegrationTestBase {
     @Test
     void tokenFromAnotherHostIsRejected() throws Exception {
         ControlSocket hostA = openedHost();
-        var project = data.project().named("ch-proj4").create();
+        var team = data.team().named("ch-proj4").create();
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), agentIdOf(hostA.instanceId())).orElseThrow();
+                team.getId(), agentIdOf(hostA.instanceId())).orElseThrow();
 
         ControlSocket hostB = openedHost(); // a different durable host
         String token = channelTokenService.mint(sessionId, hostA.instanceId());
@@ -357,12 +357,12 @@ class HostChannelTest extends IntegrationTestBase {
     @Test
     void executionDeltaOnChannelRidesSameInboundArmAndSessionOpenIsRefused() throws Exception {
         ControlSocket host = openedHost();
-        var project = data.project().named("ch-proj5").create();
+        var team = data.team().named("ch-proj5").create();
         var profile = data.agentProfile().named("ch-prof5").create();
-        var conversation = data.conversation().inProject(project).create();
+        var conversation = data.conversation().inTeam(team).create();
 
         UUID sessionId = allocator.offer("CONVERSATION", conversation.getId(), "CONVERSATION",
-                project.getId(), agentIdOf(host.instanceId())).orElseThrow();
+                team.getId(), agentIdOf(host.instanceId())).orElseThrow();
         acceptAndOpen(host, sessionId);
 
         // A RUNNING conversation execution the delta references.
@@ -423,9 +423,9 @@ class HostChannelTest extends IntegrationTestBase {
     @Test
     void engineToHostSendPrefersChannelSocket() throws Exception {
         ControlSocket host = openedHost();
-        var project = data.project().named("ch-proj6").create();
+        var team = data.team().named("ch-proj6").create();
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), agentIdOf(host.instanceId())).orElseThrow();
+                team.getId(), agentIdOf(host.instanceId())).orElseThrow();
         acceptAndOpen(host, sessionId);
 
         // Bind a channel.
@@ -450,9 +450,9 @@ class HostChannelTest extends IntegrationTestBase {
     @Test
     void boundChannelCloseIsFatalAndClosesTheSessionViaTheExistingClosePath() throws Exception {
         ControlSocket host = openedHost();
-        var project = data.project().named("ch-proj7").create();
+        var team = data.team().named("ch-proj7").create();
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), agentIdOf(host.instanceId())).orElseThrow();
+                team.getId(), agentIdOf(host.instanceId())).orElseThrow();
         acceptAndOpen(host, sessionId);
 
         String token = channelTokenService.mint(sessionId, host.instanceId());
@@ -477,15 +477,15 @@ class HostChannelTest extends IntegrationTestBase {
 
         // Capacity exactly once: the released slot accepts a new reservation.
         assertThat(allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), agentIdOf(host.instanceId()))).isPresent();
+                team.getId(), agentIdOf(host.instanceId()))).isPresent();
     }
 
     @Test
     void workflowChannelCloseIsFatalTheSameWayAndReleasesTheSlot() throws Exception {
         ControlSocket host = openedHost();
-        var project = data.project().named("ch-proj8").create();
+        var team = data.team().named("ch-proj8").create();
         UUID sessionId = allocator.offer("ORCHESTRATION_TASK", UUID.randomUUID(), "WORKFLOW",
-                project.getId(), agentIdOf(host.instanceId())).orElseThrow();
+                team.getId(), agentIdOf(host.instanceId())).orElseThrow();
         acceptAndOpen(host, sessionId);
 
         String token = channelTokenService.mint(sessionId, host.instanceId());
@@ -506,6 +506,6 @@ class HostChannelTest extends IntegrationTestBase {
 
         // A one-shot WORKFLOW session: the slot returns for the next task.
         assertThat(allocator.offer("ORCHESTRATION_TASK", UUID.randomUUID(), "WORKFLOW",
-                project.getId(), agentIdOf(host.instanceId()))).isPresent();
+                team.getId(), agentIdOf(host.instanceId()))).isPresent();
     }
 }

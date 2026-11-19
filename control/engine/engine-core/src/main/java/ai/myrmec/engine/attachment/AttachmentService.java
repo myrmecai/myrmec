@@ -8,8 +8,8 @@ import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine.audit.AuditEventService;
 import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.conversation.ConversationRepository;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamRepository;
 import ai.myrmec.engine.setting.SystemSettingService;
 import ai.myrmec.engine.spi.scan.ContentScanProvider;
 import ai.myrmec.engine.spi.scan.ScanResult;
@@ -66,7 +66,7 @@ public class AttachmentService {
 
     private final ConversationMessageAttachmentRepository attachmentRepository;
     private final ConversationRepository conversationRepository;
-    private final ProjectRepository projectRepository;
+    private final TeamRepository teamRepository;
     private final BlobStore blobStore;
     private final ContentScanProvider scanProvider;
     private final SystemSettingService systemSettingService;
@@ -86,19 +86,19 @@ public class AttachmentService {
             UUID conversationId, MultipartFile file, UUID actorUserId) {
         Conversation conversation = conversationRepository.findById(conversationId)
             .orElseThrow(() -> new ResourceNotFoundException("Conversation", conversationId));
-        Project project = projectRepository.findById(conversation.getProjectId())
+        Team team = teamRepository.findById(conversation.getTeamId())
             .orElseThrow(() -> ResourceNotFoundException.of(
-                "Project", "id", String.valueOf(conversation.getProjectId())));
-        if (!project.isAttachmentsEnabled()) {
+                "team", "id", String.valueOf(conversation.getTeamId())));
+        if (!team.isAttachmentsEnabled()) {
             throw BadRequestException.forField("file", "ATTACHMENTS_DISABLED",
-                "Attachments are disabled for this project.");
+                "Attachments are disabled for this team.");
         }
         if (file == null || file.isEmpty()) {
             throw new BadRequestException("Attachment file must not be empty");
         }
 
-        long maxSize = project.getAttachmentMaxFileSizeBytes() != null
-            ? project.getAttachmentMaxFileSizeBytes()
+        long maxSize = team.getAttachmentMaxFileSizeBytes() != null
+            ? team.getAttachmentMaxFileSizeBytes()
             : systemSettingService.getInt(MAX_SIZE_KEY, MAX_SIZE_DEFAULT);
         if (file.getSize() > maxSize) {
             throw BadRequestException.forField("file", "TOO_LARGE",
@@ -110,9 +110,9 @@ public class AttachmentService {
             throw BadRequestException.forField("file", "UNSUPPORTED_MEDIA_TYPE",
                     "Attachment type '" + mediaType + "' is not allowed.");
         }
-        if (!isAllowedByProjectAllowlist(project.getAttachmentTypeAllowlist(), mediaType)) {
+        if (!isAllowedByTeamAllowlist(team.getAttachmentTypeAllowlist(), mediaType)) {
             throw BadRequestException.forField("file", "UNSUPPORTED_MEDIA_TYPE",
-                "Attachment type '" + mediaType + "' is not allowed by this project's allowlist.");
+                "Attachment type '" + mediaType + "' is not allowed by this team's allowlist.");
         }
 
         byte[] bytes;
@@ -275,7 +275,7 @@ public class AttachmentService {
         return base.isEmpty() ? "attachment" : base;
     }
 
-    private static boolean isAllowedByProjectAllowlist(String allowlist, String mediaType) {
+    private static boolean isAllowedByTeamAllowlist(String allowlist, String mediaType) {
         if (allowlist == null || allowlist.isBlank()) {
             return true;
         }

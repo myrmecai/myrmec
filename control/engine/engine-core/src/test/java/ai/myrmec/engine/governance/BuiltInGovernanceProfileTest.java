@@ -58,7 +58,7 @@ class BuiltInGovernanceProfileTest {
         assertThat(v.get(ProductFeature.MANIFEST_RETENTION)).containsExactly("90_DAYS");
         assertThat(v.get(ProductFeature.MANIFEST_FREQUENCY)).containsExactly("FULL");
         assertThat(v.get(ProductFeature.CONTEXT_PINNING)).containsExactly("ON");
-        assertThat(v.get(ProductFeature.ACTIVATION_RULES)).containsExactly("REQUIRED_ORG_PROJECT");
+        assertThat(v.get(ProductFeature.ACTIVATION_RULES)).containsExactly("REQUIRED_ORG_TEAM");
         assertThat(v.get(ProductFeature.BUDGET_ENFORCEMENT)).containsExactly("ON");
         assertThat(v.get(ProductFeature.BUDGET_OVERRIDE)).containsExactly("PER_SERVICE");
     }

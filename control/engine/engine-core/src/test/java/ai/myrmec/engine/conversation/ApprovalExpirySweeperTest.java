@@ -4,7 +4,7 @@ import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
 import ai.myrmec.engine.conversation.stream.ConversationSubscriber;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -42,12 +42,12 @@ class ApprovalExpirySweeperTest extends IntegrationTestBase {
 
     @Test
     void sweepFlipsExpiredRowsToExpiredAndBroadcastsDecisionFrame() throws Exception {
-        Project project = data.project().named("expiry-sweep").create();
+        team team = data.team().named("expiry-sweep").create();
         AgentHost agent = data.agent()
-                .named("expiry-agent").inProject(project)
+                .named("expiry-agent").inTeam(team)
                 .create().agent();
         Conversation conv = conversationService.createConversation(
-                project.getId(), TEST_ADMIN_ID, "expiry-conv", agent.getId(), null);
+                team.getId(), TEST_ADMIN_ID, "expiry-conv", agent.getId(), null);
 
         UUID clientReqId = UUID.randomUUID();
         Instant past = Instant.now().minus(5, ChronoUnit.MINUTES);
@@ -95,12 +95,12 @@ class ApprovalExpirySweeperTest extends IntegrationTestBase {
 
     @Test
     void sweepIgnoresPendingRowsWithFutureExpiry() {
-        Project project = data.project().named("expiry-future").create();
+        team team = data.team().named("expiry-future").create();
         AgentHost agent = data.agent()
-                .named("expiry-future-agent").inProject(project)
+                .named("expiry-future-agent").inTeam(team)
                 .create().agent();
         Conversation conv = conversationService.createConversation(
-                project.getId(), TEST_ADMIN_ID, "future-conv", agent.getId(), null);
+                team.getId(), TEST_ADMIN_ID, "future-conv", agent.getId(), null);
         ConversationMessage row = conversationService.appendApprovalRequest(
                 conv.getId(), agent.getId(), "fine", "{}",
                 Instant.now().plus(1, ChronoUnit.HOURS));
@@ -154,14 +154,14 @@ class ApprovalExpirySweeperTest extends IntegrationTestBase {
 
     /** Seed one ORCH_REVIEW workflow task at the given expiry. */
     private SeededTask seedOrchestrationReviewTask(Instant approvalExpiresAt) {
-        ai.myrmec.engine.project.Project project =
-                data.project().named("orch-sweep-" + System.nanoTime()).withRepo("https://x.git", "main").create();
+        ai.myrmec.engine.team.Team team =
+                data.team().named("orch-sweep-" + System.nanoTime()).withRepo("https://x.git", "main").create();
         ai.myrmec.engine.agent.AgentProfile profile =
                 data.agentProfile().named("orch-sweep-profile").create();
         var user = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
 
         var wf = new ai.myrmec.engine.workflow.Workflow();
-        wf.setProject(project);
+        wf.setTeam(team);
         wf.setName("orch-sweep-wf-" + System.nanoTime());
         wf.setSteps(java.util.List.<java.util.Map<String, Object>>of());
         wf.setVersion(1);

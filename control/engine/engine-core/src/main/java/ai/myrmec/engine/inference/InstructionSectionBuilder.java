@@ -27,16 +27,16 @@ public class InstructionSectionBuilder {
     /**
      * Build the instruction/knowledge entries for the given scope.
      *
-     * <p>Today: delegates to {@code TaskContextResolver.resolve(projectId)} and
+     * <p>Today: delegates to {@code TaskContextResolver.resolve(teamId)} and
      * maps the result to {@link InferenceRequestSpec.KnowledgeEntry}.</p>
      *
-     * @param projectId the project scope (nullable for org-only scope)
+     * @param teamId the Team scope (nullable for org-only scope)
      * @return knowledge entries grouped by category
      */
     public List<InferenceRequestSpec.KnowledgeEntry> build(
-            java.util.UUID projectId,
+            java.util.UUID teamId,
             String serviceType) {
-        // Today: TaskContextResolver.resolve(projectId) → KnowledgeEntry list
+        // Today: TaskContextResolver.resolve(teamId) → KnowledgeEntry list
         // Tomorrow: ContextBuilder.assemble(...) with governed assembly + budget
         //
         // This method is intentionally a single seam — callers don't care

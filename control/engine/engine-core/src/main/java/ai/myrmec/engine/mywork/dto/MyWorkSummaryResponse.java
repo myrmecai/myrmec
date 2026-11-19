@@ -2,7 +2,7 @@ package ai.myrmec.engine.mywork.dto;
 
 /**
  * Aggregated counters for the "My Work" landing surface (UC-013), scoped to the
- * caller's accessible projects (optionally narrowed by a {@code projectIds}
+ * caller's accessible projects (optionally narrowed by a {@code teamIds}
  * filter). Backs a single {@code GET /api/v1/my-work/summary} call so the page
  * header can render every tab counter plus the first-run banner and the
  * get-started sparkle cues without four round-trips.

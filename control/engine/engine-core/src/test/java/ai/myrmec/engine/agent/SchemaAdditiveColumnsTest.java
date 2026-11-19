@@ -6,7 +6,7 @@ import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.agent.AgentHostCreationResult;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionRepository;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,8 +31,8 @@ class SchemaAdditiveColumnsTest extends IntegrationTestBase {
     @Autowired AgentHostInstanceRepository instances;
     @Autowired SessionRepository sessionRepository;
 
-    private Project project() {
-        return data.project().named("schema-additive").create();
+    private team team() {
+        return data.team().named("schema-additive").create();
     }
 
     private AgentHostCreationResult host() {
@@ -49,7 +49,7 @@ class SchemaAdditiveColumnsTest extends IntegrationTestBase {
         session.setServiceType("CONVERSATION");
         UUID refId = UUID.randomUUID();
         session.setRefId(refId);
-        session.setProjectId(project().getId());
+        session.setTeamId(team().getId());
         session.setKind("CONVERSATION");
         session.setHostInstanceId(instance.getId());
         session.setAllocationState("OFFERED");

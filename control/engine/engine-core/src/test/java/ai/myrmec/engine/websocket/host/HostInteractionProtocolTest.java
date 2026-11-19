@@ -705,8 +705,8 @@ class HostInteractionProtocolTest extends IntegrationTestBase {
         return new AgentProfileFixture(profile.getId());
     }
 
-    private ai.myrmec.engine.project.Project createProject() {
-        return data.project().named("interaction-project").create();
+    private ai.myrmec.engine.team.Team createProject() {
+        return data.team().named("interaction-team").create();
     }
 
     private WebSocketSession stubSession(AgentHost host) throws Exception {

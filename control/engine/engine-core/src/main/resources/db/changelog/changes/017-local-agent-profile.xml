@@ -19,28 +19,47 @@
         <comment>Seed the default local agent profile (system, conversational)</comment>
 
         <!-- Zone 1: identity/admin row -->
-        <insert tableName="agent_profiles">
-            <column name="id" value="6d7b8c9d-0e1f-4a2b-8c3d-9e4f5a6b7c8d"/>
-            <column name="name" value="Myrmec Local Agent"/>
-            <column name="description" value="Built-in profile for the local IDE agent"/>
-            <column name="is_system" valueBoolean="true"/>
-            <column name="addendum_allowed" valueBoolean="true"/>
-            <column name="status" value="ACTIVE"/>
-        </insert>
+        <loadData
+            tableName="agent_profiles"
+            file="db/changelog/data/agent_profiles.csv"
+            separator=","
+            encoding="UTF-8"
+            relativeToChangelogFile="false">
+            <column name="id" type="STRING"/>
+            <column name="name" type="STRING"/>
+            <column name="description" type="STRING"/>
+            <column name="is_system" type="BOOLEAN"/>
+            <column name="addendum_allowed" type="BOOLEAN"/>
+            <column name="status" type="STRING"/>
+            <column name="created_at" type="DATE"/>
+            <column name="updated_at" type="DATE"/>
+        </loadData>
 
         <!-- Zone 2: published behaviour contract v1 -->
-        <insert tableName="agent_profile_versions">
-            <column name="id" value="7e8c9d0e-1f2a-4b3c-9d4e-0f1a2b3c4d5e"/>
-            <column name="profile_id" value="6d7b8c9d-0e1f-4a2b-8c3d-9e4f5a6b7c8d"/>
-            <column name="version_number" valueNumeric="1"/>
-            <column name="status" value="PUBLISHED"/>
-            <column name="capabilities" value="[&quot;conversational&quot;]"/>
-            <column name="default_model" value="github-gpt-4o"/>
-            <column name="system_prompt" value="You are a helpful local coding assistant running inside the user's VS Code workspace. You can answer questions and use workspace tools when explicitly asked."/>
-            <column name="interaction_mode" value="CONVERSATIONAL"/>
-            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
-            <column name="published_at" valueComputed="CURRENT_TIMESTAMP"/>
-        </insert>
+        <loadData
+            tableName="agent_profile_versions"
+            file="db/changelog/data/agent_profile_versions.csv"
+            separator=","
+            encoding="UTF-8"
+            relativeToChangelogFile="false">
+            <column name="id" type="STRING"/>
+            <column name="profile_id" type="STRING"/>
+            <column name="version_number" type="NUMERIC"/>
+            <column name="status" type="STRING"/>
+            <column name="capabilities" type="STRING"/>
+            <column name="default_model" type="STRING"/>
+            <column name="system_prompt" type="STRING"/>
+            <column name="interaction_mode" type="STRING"/>
+            <column name="command_templates" type="STRING"/>
+            <column name="approval_policy" type="STRING"/>
+            <column name="required_isolation" type="STRING"/>
+            <column name="git_policy" type="STRING"/>
+            <column name="workspace_retention_seconds" type="NUMERIC"/>
+            <column name="approval_request_ttl_seconds" type="NUMERIC"/>
+            <column name="published_at" type="DATE"/>
+            <column name="published_by" type="STRING"/>
+            <column name="created_at" type="DATE"/>
+        </loadData>
     </changeSet>
 
 </databaseChangeLog>

@@ -57,7 +57,7 @@ class CapabilityMatchContractTest extends IntegrationTestBase {
 
         var published = agentProfileVersionService.findPublished(profile.getId());
         assertThat(published).isPresent();
-        assertThat(published.get().getCapabilities())
+        assertThat(agentProfileVersionService.getCapabilityKeys(published.get().getId()))
                 .containsExactly("python:>=3.11", "docker");
     }
 

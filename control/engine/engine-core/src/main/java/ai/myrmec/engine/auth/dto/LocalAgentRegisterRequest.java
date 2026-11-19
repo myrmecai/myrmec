@@ -11,14 +11,14 @@ import java.util.UUID;
 /**
  * Request to register a local agent instance from an authenticated user's
  * IDE/extension host. The user's access token provides identity; this body
- * scopes the local agent to a project or to the system if projectId is null.
+ * scopes the local agent to a Team or to the system if teamId is null.
  */
 @Data
 public class LocalAgentRegisterRequest {
 
     /**
-     * Project to bind the local agent to. If null, the agent is system-wide
-     * and can only be dispatched to assistants/workflows without project scope.
+     * Team to bind the local agent to. If null, the agent is system-wide
+     * and can only be dispatched to assistants/workflows without Team scope.
      */
-    private UUID projectId;
+    private UUID teamId;
 }

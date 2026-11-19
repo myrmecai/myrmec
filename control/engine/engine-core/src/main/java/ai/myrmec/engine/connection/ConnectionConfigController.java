@@ -85,7 +85,7 @@ public class ConnectionConfigController {
             @CurrentUser UUID userId) {
         var config = service.create(
                 request.scope(),
-                request.projectId(),
+                request.teamId(),
                 request.name(),
                 request.description(),
                 request.type(),

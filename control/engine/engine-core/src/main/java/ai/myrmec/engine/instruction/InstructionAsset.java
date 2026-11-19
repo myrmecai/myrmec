@@ -21,7 +21,7 @@ import java.util.UUID;
  * Instruction Asset — parent table. AI instructions with categories and applicability.
  *
  * <p>Two-version model: parent row + version rows. At most one PUBLISHED + one DRAFT.
- * Uses scope + project_id for org/project scoping.</p>
+ * Uses scope + team_id for org/Team scoping.</p>
  */
 @Entity
 @Table(name = "instruction_assets")
@@ -38,8 +38,8 @@ public class InstructionAsset {
     @Column(name = "scope", nullable = false, length = 20)
     private String scope;
 
-    @Column(name = "project_id")
-    private UUID projectId;
+    @Column(name = "team_id")
+    private UUID teamId;
 
     @Column(name = "name", nullable = false, length = 100)
     private String name;

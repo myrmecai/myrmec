@@ -15,11 +15,11 @@ import java.util.UUID;
 
 /**
  * Capacity-based host selection (decoupling §3.7): the engine picks a host
- * because it is ACTIVE, project-visible, and has a live OPEN instance —
+ * because it is ACTIVE, Team-visible, and has a live OPEN instance —
  * never because of a profile binding. Profiles bind at session time
  * (conversation assistant pin / workflow task), not at the host.
  *
- * <p>Preference order: a host scoped to {@code projectId} first, then a
+ * <p>Preference order: a host scoped to {@code teamId} first, then a
  * system-wide (unscoped) host. Hosts with no live OPEN instance are
  * excluded — capacity is real, not registered.</p>
  *
@@ -40,45 +40,45 @@ public class HostSelectionService {
     private final HostConnectionManager connectionManager;
 
     /**
-     * Return all active hosts able to serve {@code projectId} in
-     * selection order: project-scoped hosts with live OPEN instances first,
+     * Return all active hosts able to serve {@code teamId} in
+     * selection order: Team-scoped hosts with live OPEN instances first,
      * then unscoped live hosts. Empty when no candidate exists. Fail-closed
      * (section 22.2): a live host whose advertised capabilities lack the
      * current sessionInteraction capability is excluded — no old-host
      * fallback, no partial admission.
      */
     @Transactional(readOnly = true)
-    public List<AgentHost> selectCandidatesForProject(UUID projectId) {
+    public List<AgentHost> selectCandidatesForTeam(UUID teamId) {
         List<AgentHost> active = agentHostRepository.findByStatus(AgentHost.Status.ACTIVE);
         return active.stream()
                 .filter(this::hasLiveInstance)
                 .filter(this::hasCurrentInteractionCapability)
-                .filter(h -> projectId == null || h.getProjectId() == null
-                        || projectId.equals(h.getProjectId()))
-                .sorted(java.util.Comparator.comparingInt((AgentHost h) -> score(h, projectId)))
+                .filter(h -> teamId == null || h.getTeamId() == null
+                        || teamId.equals(h.getTeamId()))
+                .sorted(java.util.Comparator.comparingInt((AgentHost h) -> score(h, teamId)))
                 .toList();
     }
 
     /**
-     * Pick one active host able to serve {@code projectId}: live OPEN
-     * instance required, project-scoped hosts preferred, then unscoped.
+     * Pick one active host able to serve {@code teamId}: live OPEN
+     * instance required, Team-scoped hosts preferred, then unscoped.
      * Empty when no candidate exists (callers treat as "no host online").
      */
     @Transactional(readOnly = true)
-    public Optional<AgentHost> selectForProject(UUID projectId) {
-        return selectCandidatesForProject(projectId).stream().findFirst();
+    public Optional<AgentHost> selectForTeam(UUID teamId) {
+        return selectCandidatesForTeam(teamId).stream().findFirst();
     }
 
     /**
-     * Project-scoped beats unscoped when a project is given; when no project
-     * is given, system-wide (unscoped) hosts are preferred over project-scoped
+     * Team-scoped beats unscoped when a Team is given; when no Team
+     * is given, system-wide (unscoped) hosts are preferred over Team-scoped
      * ones (design §3.7).
      */
-    private int score(AgentHost host, UUID projectId) {
-        if (projectId == null) {
-            return host.getProjectId() == null ? 0 : 1;
+    private int score(AgentHost host, UUID teamId) {
+        if (teamId == null) {
+            return host.getTeamId() == null ? 0 : 1;
         }
-        return projectId.equals(host.getProjectId()) ? 0 : 1;
+        return teamId.equals(host.getTeamId()) ? 0 : 1;
     }
 
     private boolean hasLiveInstance(AgentHost host) {

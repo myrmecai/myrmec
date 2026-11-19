@@ -30,7 +30,7 @@ import java.util.UUID;
 
 /**
  * Task 6 (plan section 4 routes, base ownership chain
- * {@code /api/v1/projects/{projectId}/workflows/{workflowId}/requests/
+ * {@code /api/v1/teams/{teamId}/workflows/{workflowId}/requests/
  * {requestId}/tasks/{taskId}/attempts/{attemptId}/executions/{executionId}}):
  * the three control routes — POST /controls (HOLD/CONTINUE, 202),
  * POST /cancel (confirmed, 202), POST /control-requests/{controlRequestId}/
@@ -41,7 +41,7 @@ import java.util.UUID;
  * remain Tasks 8/9 (task-boundary NOTE).
  */
 @RestController
-@RequestMapping("/api/v1/projects/{projectId}/workflows/{workflowId}/requests"
+@RequestMapping("/api/v1/teams/{teamId}/workflows/{workflowId}/requests"
         + "/{requestId}/tasks/{taskId}/attempts/{attemptId}"
         + "/executions/{executionId}")
 @Slf4j
@@ -62,9 +62,9 @@ public class ExecutionInteractionController {
      * wrote). Requires VIEWER-equivalent read access (§4).
      */
     @GetMapping("/interactions")
-    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
     public ResponseEntity<Map<String, Object>> interactions(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID workflowId,
             @PathVariable UUID requestId,
             @PathVariable UUID taskId,
@@ -78,7 +78,7 @@ public class ExecutionInteractionController {
         // The service returns AT MOST limit+1 rows so an exact-fit page
         // reports hasMore=false honestly; trim the lookahead row off.
         List<ExecutionInteraction> rows = interactionService
-                .transcriptPage(scopeOf(projectId, workflowId, requestId, taskId,
+                .transcriptPage(scopeOf(teamId, workflowId, requestId, taskId,
                         attemptId, executionId), afterOrdinal, bounded);
         boolean hasMore = rows.size() > bounded;
         List<ExecutionInteraction> page = hasMore
@@ -100,9 +100,9 @@ public class ExecutionInteractionController {
      * receipt in the 202).
      */
     @PostMapping("/interactions")
-    @PreAuthorize("@projectAccess.canEdit(#projectId, authentication)")
+    @PreAuthorize("@teamAccess.canEdit(#teamId, authentication)")
     public ResponseEntity<InteractionAdmission> interact(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID workflowId,
             @PathVariable UUID requestId,
             @PathVariable UUID taskId,
@@ -118,7 +118,7 @@ public class ExecutionInteractionController {
             throw BadRequestException.forField("text", "REQUIRED",
                     "Text is required and may not be blank.");
         }
-        ExecutionScope scope = scopeOf(projectId, workflowId, requestId, taskId,
+        ExecutionScope scope = scopeOf(teamId, workflowId, requestId, taskId,
                 attemptId, executionId);
         InteractionAdmission admission = interactionService.admit(scope, principal,
                 request.clientRequestId(), request.text());
@@ -130,9 +130,9 @@ public class ExecutionInteractionController {
     // =================================================================
 
     @PostMapping("/controls")
-    @PreAuthorize("@projectAccess.canEdit(#projectId, authentication)")
+    @PreAuthorize("@teamAccess.canEdit(#teamId, authentication)")
     public ResponseEntity<ControlReceipt> control(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID workflowId,
             @PathVariable UUID requestId,
             @PathVariable UUID taskId,
@@ -140,16 +140,16 @@ public class ExecutionInteractionController {
             @PathVariable UUID executionId,
             @AuthenticationPrincipal ai.myrmec.engine.user.UserPrincipal principal,
             @RequestBody ControlRequest request) {
-        ExecutionScope scope = scopeOf(projectId, workflowId, requestId, taskId,
+        ExecutionScope scope = scopeOf(teamId, workflowId, requestId, taskId,
                 attemptId, executionId);
         ControlReceipt receipt = controlService.control(scope, principal, request);
         return ResponseEntity.accepted().body(receipt);
     }
 
     @PostMapping("/cancel")
-    @PreAuthorize("@projectAccess.canEdit(#projectId, authentication)")
+    @PreAuthorize("@teamAccess.canEdit(#teamId, authentication)")
     public ResponseEntity<ControlReceipt> cancel(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID workflowId,
             @PathVariable UUID requestId,
             @PathVariable UUID taskId,
@@ -157,16 +157,16 @@ public class ExecutionInteractionController {
             @PathVariable UUID executionId,
             @AuthenticationPrincipal ai.myrmec.engine.user.UserPrincipal principal,
             @RequestBody ConfirmedCancelRequest request) {
-        ExecutionScope scope = scopeOf(projectId, workflowId, requestId, taskId,
+        ExecutionScope scope = scopeOf(teamId, workflowId, requestId, taskId,
                 attemptId, executionId);
         ControlReceipt receipt = controlService.cancel(scope, principal, request);
         return ResponseEntity.accepted().body(receipt);
     }
 
     @PostMapping("/control-requests/{controlRequestId}/decision")
-    @PreAuthorize("@projectAccess.canEdit(#projectId, authentication)")
+    @PreAuthorize("@teamAccess.canEdit(#teamId, authentication)")
     public ResponseEntity<ProposalReceipt> decide(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID workflowId,
             @PathVariable UUID requestId,
             @PathVariable UUID taskId,
@@ -175,7 +175,7 @@ public class ExecutionInteractionController {
             @PathVariable UUID controlRequestId,
             @AuthenticationPrincipal ai.myrmec.engine.user.UserPrincipal principal,
             @RequestBody Decision decision) {
-        ExecutionScope scope = scopeOf(projectId, workflowId, requestId, taskId,
+        ExecutionScope scope = scopeOf(teamId, workflowId, requestId, taskId,
                 attemptId, executionId);
         ProposalReceipt receipt = controlService.decide(scope, controlRequestId,
                 principal, decision);
@@ -198,9 +198,9 @@ public class ExecutionInteractionController {
     // with details.reasonCode are control-route-specific)
     // =================================================================
 
-    private static ExecutionScope scopeOf(UUID projectId, UUID workflowId, UUID requestId,
+    private static ExecutionScope scopeOf(UUID teamId, UUID workflowId, UUID requestId,
                                           UUID taskId, UUID attemptId, UUID executionId) {
-        return new ExecutionScope(projectId, workflowId, requestId, taskId,
+        return new ExecutionScope(teamId, workflowId, requestId, taskId,
                 attemptId, executionId);
     }
 

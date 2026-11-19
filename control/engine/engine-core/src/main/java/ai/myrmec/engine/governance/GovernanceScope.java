@@ -7,27 +7,27 @@ import java.util.UUID;
 /**
  * Carries the scope for governance-policy resolution.
  *
- * <p>Null {@code projectId} ⇒ org scope (the org-level default profile).
- * A non-null {@code projectId} resolves to the project-level selection if
+ * <p>Null {@code teamId} ⇒ org scope (the org-level default profile).
+ * A non-null {@code teamId} resolves to the Team-level selection if
  * present (future), else falls back to the org default.
  *
- * @param projectId the project id (nullable — null means org scope)
+ * @param teamId the Team id (nullable — null means org scope)
  * @param groupId   the group id (nullable — reserved for future group-scoped profiles)
  */
-public record GovernanceScope(UUID projectId, UUID groupId) {
+public record GovernanceScope(UUID teamId, UUID groupId) {
 
-    /** Org-wide scope (no project, no group). */
+    /** Org-wide scope (no Team, no group). */
     public static GovernanceScope orgScope() {
         return new GovernanceScope(null, null);
     }
 
-    /** Project-scoped. */
-    public static GovernanceScope ofProject(UUID projectId) {
-        return new GovernanceScope(projectId, null);
+    /** Team-scoped. */
+    public static GovernanceScope ofTeam(UUID teamId) {
+        return new GovernanceScope(teamId, null);
     }
 
-    /** Whether this is org-wide (no project). */
+    /** Whether this is org-wide (no Team). */
     public boolean isOrgScope() {
-        return projectId == null;
+        return teamId == null;
     }
 }

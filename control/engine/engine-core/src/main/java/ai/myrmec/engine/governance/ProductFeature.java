@@ -78,7 +78,7 @@ public enum ProductFeature {
     ACTIVATION_RULES(
             "When activation rules are required",
             FeatureGroup.AI_CONTEXT, 80,
-            List.of("REQUIRED_ALL", "REQUIRED_ORG_PROJECT", "OPTIONAL"), false,
+            List.of("REQUIRED_ALL", "REQUIRED_ORG_TEAM", "OPTIONAL"), false,
             EnforcementKind.BEHAVIORAL),
     BUDGET_ENFORCEMENT(
             "Enforce token budget caps",
@@ -95,9 +95,9 @@ public enum ProductFeature {
     /**
      * Tamper-evident audit log (hash-chain).
      *
-     * <p>STRICT profile forces this ON (chaining always active, every project).
-     * STANDARD/FLEXIBLE allow each project to opt in via the
-     * {@code audit_integrity_enabled} project setting.
+     * <p>STRICT profile forces this ON (chaining always active, every Team).
+     * STANDARD/FLEXIBLE allow each Team to opt in via the
+     * {@code audit_integrity_enabled} Team setting.
      */
     AUDIT_INTEGRITY(
             "Tamper-evident audit log (hash-chained events)",
@@ -112,7 +112,7 @@ public enum ProductFeature {
      * is rejected at host create/edit with GOVERNANCE_VIOLATION — the org
      * requires untrusted endpoints to route model calls through the gateway.
      * Read at host create/edit time by {@code ModelAccessModeValidator}
-     * (org-default scope; per-project scope deferred). Default OFF until
+     * (org-default scope; per-Team scope deferred). Default OFF until
      * Phase 2 GA.
      */
     LOCAL_HOST_MODEL_GATEWAY(

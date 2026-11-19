@@ -5,9 +5,9 @@ import ai.myrmec.engine.attachment.dto.AttachmentResponse;
 import ai.myrmec.engine.conversation.dto.ConversationResponse;
 import ai.myrmec.engine.conversation.dto.ConversationMessageResponse;
 import ai.myrmec.engine.conversation.dto.CreateConversationRequest;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectService;
-import ai.myrmec.engine.project.dto.UpdateProjectRequest;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamService;
+import ai.myrmec.engine.team.dto.UpdateTeamRequest;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,12 +39,12 @@ class AttachmentControllerTest extends IntegrationTestBase {
     private TestDataBuilder data;
 
         @Autowired
-        private ProjectService projectService;
+        private TeamService TeamService;
 
     private UUID newConversation(String name) {
-        Project project = data.project().named(name).create();
+        team team = data.team().named(name).create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "Attachments", null);
+                team.getId(), null, "Attachments", null);
         return restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -219,13 +219,13 @@ class AttachmentControllerTest extends IntegrationTestBase {
 
     @Test
     void uploadRejectedWhenProjectAttachmentsAreDisabled() {
-        Project project = data.project().named("attach-disabled").create();
-        UpdateProjectRequest disable = new UpdateProjectRequest();
+        team team = data.team().named("attach-disabled").create();
+        UpdateTeamRequest disable = new UpdateTeamRequest();
         disable.setAttachmentsEnabled(false);
-        projectService.update(project.getId(), disable);
+        TeamService.update(team.getId(), disable);
 
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "Attachments disabled", null);
+                team.getId(), null, "Attachments disabled", null);
         UUID conversationId = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -244,13 +244,13 @@ class AttachmentControllerTest extends IntegrationTestBase {
 
     @Test
     void uploadUsesProjectMaxFileSizeWhenConfigured() {
-        Project project = data.project().named("attach-max-size").create();
-        UpdateProjectRequest limit = new UpdateProjectRequest();
+        team team = data.team().named("attach-max-size").create();
+        UpdateTeamRequest limit = new UpdateTeamRequest();
         limit.setAttachmentMaxFileSizeBytes(5L);
-        projectService.update(project.getId(), limit);
+        TeamService.update(team.getId(), limit);
 
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "Attachments max size", null);
+                team.getId(), null, "Attachments max size", null);
         UUID conversationId = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,

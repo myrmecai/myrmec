@@ -26,9 +26,9 @@ public class CreateAgentHostRequest {
     private String description;
 
     /**
-     * Optional project scope. Null means system-wide agent.
+     * Optional Team scope. Null means system-wide agent.
      */
-    private UUID projectId;
+    private UUID teamId;
 
     /**
      * Maximum concurrent Agents this host may run.
@@ -46,7 +46,7 @@ public class CreateAgentHostRequest {
      * Durable host type (§2.3/§3.7): MANAGED (default) for cluster/headless
      * supervisors; LOCAL pre-provisions a per-user IDE seat — the owner is
      * unknown at creation and arrives when the user's plugin connects.
-     * LOCAL hosts are per-user, never project-scoped.
+     * LOCAL hosts are per-user, never Team-scoped.
      */
     private AgentHostType hostType;
 }

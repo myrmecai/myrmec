@@ -25,7 +25,7 @@ class ConversationTranscriptComposerTest {
         InferenceRequestSpec spec = InferenceRequestSpec.builder()
                 .serviceType("CONVERSATION")
                 .conversationSystemPrompt("You are a helpful assistant.")
-                .pinnedFacts("The project uses Java 21.")
+                .pinnedFacts("The team uses Java 21.")
                 .userMessage("What is 2+2?")
                 .build();
 
@@ -33,7 +33,7 @@ class ConversationTranscriptComposerTest {
 
         assertThat(messages).hasSize(2);
         assertThat(messages.get(0).role()).isEqualTo("system");
-        assertThat(messages.get(0).content()).isEqualTo("You are a helpful assistant.\n\nThe project uses Java 21.");
+        assertThat(messages.get(0).content()).isEqualTo("You are a helpful assistant.\n\nThe team uses Java 21.");
         assertThat(messages.get(1).role()).isEqualTo("user");
         assertThat(messages.get(1).content()).isEqualTo("What is 2+2?");
     }

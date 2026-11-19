@@ -6,8 +6,8 @@ package ai.myrmec.engine.quota;
 import ai.myrmec.engine.assistant.Assistant;
 import ai.myrmec.engine.assistant.AssistantRepository;
 import ai.myrmec.engine.group.GroupRepository;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamRepository;
 import ai.myrmec.engine.spi.quota.QuotaDecision;
 import ai.myrmec.engine.spi.quota.QuotaPolicyEngine;
 import ai.myrmec.engine.spi.quota.QuotaResourceType;
@@ -37,10 +37,10 @@ import java.util.UUID;
  * <p>Algorithm:</p>
  * <ol>
  *   <li>Walk the scope chain from the requested scope upward
- *       ({@code SERVICE &rarr; PROJECT &rarr; GROUP &rarr; ORG}).</li>
+ *       ({@code SERVICE &rarr; Team &rarr; GROUP &rarr; ORG}).</li>
  *   <li>If the starting scope is {@code SERVICE}, evaluate its explicit
  *       {@code RESERVATION} first. If the reservation blocks, return
- *       immediately; otherwise continue to the project shared pool.</li>
+ *       immediately; otherwise continue to the Team shared pool.</li>
  *   <li>For each parent scope, evaluate matching {@code CEILING} quotas and
  *       keep the most restrictive decision ("blocked beats warning beats OK").</li>
  *   <li>If no quota rows exist at all, return {@link QuotaDecision#unconstrained()}
@@ -66,7 +66,7 @@ public class BasicQuotaPolicyEngine implements QuotaPolicyEngine {
 
     private final QuotaRepository quotaRepository;
     private final QuotaConsumptionRepository consumptionRepository;
-    private final ProjectRepository projectRepository;
+    private final TeamRepository teamRepository;
     private final GroupRepository groupRepository;
     private final WorkflowRepository workflowRepository;
     private final AssistantRepository assistantRepository;
@@ -145,7 +145,7 @@ public class BasicQuotaPolicyEngine implements QuotaPolicyEngine {
                 // We found at least one quota row at this level; no need to
                 // keep climbing once we've accounted for the nearest matching
                 // scope. For SERVICE requests without a reservation we still
-                // need the project ceiling, so we only break after PROJECT.
+                // need the Team ceiling, so we only break after Team.
                 if (node.scope() != Quota.Scope.SERVICE) {
                     break;
                 }
@@ -179,13 +179,13 @@ public class BasicQuotaPolicyEngine implements QuotaPolicyEngine {
             case SERVICE -> {
                 chain.add(new ScopeNode(Quota.Scope.SERVICE, startingScopeId));
                 // For SERVICE scope, scopeId is the workflow / assistant
-                // instance ID.  Resolve the project from the instance table.
-                UUID projectId = resolveProjectFromServiceInstance(startingScopeId);
-                if (projectId != null) {
-                    chain.add(new ScopeNode(Quota.Scope.PROJECT, projectId));
-                    Optional<Project> project = projectRepository.findById(projectId);
-                    if (project.isPresent()) {
-                        UUID groupId = project.get().getGroupId();
+                // instance ID.  Resolve the team from the instance table.
+                UUID teamId = resolveTeamFromServiceInstance(startingScopeId);
+                if (teamId != null) {
+                    chain.add(new ScopeNode(Quota.Scope.TEAM, teamId));
+                    Optional<Team> team = teamRepository.findById(teamId);
+                    if (team.isPresent()) {
+                        UUID groupId = team.get().getGroupId();
                         if (groupId != null) {
                             chain.add(new ScopeNode(Quota.Scope.GROUP, groupId));
                         }
@@ -194,11 +194,11 @@ public class BasicQuotaPolicyEngine implements QuotaPolicyEngine {
                 // ORG rows have no specific scopeId in Community.
                 chain.add(new ScopeNode(Quota.Scope.ORG, null));
             }
-            case PROJECT -> {
-                chain.add(new ScopeNode(Quota.Scope.PROJECT, startingScopeId));
-                projectRepository.findById(startingScopeId).ifPresent(p -> {
-                    if (p.getGroupId() != null) {
-                        chain.add(new ScopeNode(Quota.Scope.GROUP, p.getGroupId()));
+            case TEAM -> {
+                chain.add(new ScopeNode(Quota.Scope.TEAM, startingScopeId));
+                teamRepository.findById(startingScopeId).ifPresent(t -> {
+                    if (t.getGroupId() != null) {
+                        chain.add(new ScopeNode(Quota.Scope.GROUP, t.getGroupId()));
                     }
                 });
                 chain.add(new ScopeNode(Quota.Scope.ORG, null));
@@ -213,25 +213,25 @@ public class BasicQuotaPolicyEngine implements QuotaPolicyEngine {
     }
 
     /**
-     * Resolve the project ID from a service-instance UUID.
+     * Resolve the team ID from a service-instance UUID.
      * Tries workflow first, then assistant.  Returns {@code null} if
      * neither table contains the ID (e.g. legacy rows where scopeId
-     * was the project ID itself — those will be caught by the project
+     * was the team ID itself — those will be caught by the team
      * lookup returning empty, and the chain will fall through to ORG).
      */
-    private UUID resolveProjectFromServiceInstance(UUID serviceInstanceId) {
+    private UUID resolveTeamFromServiceInstance(UUID serviceInstanceId) {
         Optional<Workflow> workflow = workflowRepository.findById(serviceInstanceId);
         if (workflow.isPresent()) {
-            return workflow.get().getProject().getId();
+            return workflow.get().getTeam().getId();
         }
         Optional<Assistant> assistant = assistantRepository.findById(serviceInstanceId);
         if (assistant.isPresent()) {
-            return assistant.get().getProjectId();
+            return assistant.get().getTeamId();
         }
-        // Fallback: scopeId might be a project ID (legacy / test data).
+        // Fallback: scopeId might be a Team ID (legacy / test data).
         // This preserves backward compatibility with existing tests that
-        // call check(SERVICE, projectId, ...) without creating a workflow.
-        if (projectRepository.existsById(serviceInstanceId)) {
+        // call check(SERVICE, teamId, ...) without creating a workflow.
+        if (teamRepository.existsById(serviceInstanceId)) {
             return serviceInstanceId;
         }
         return null;

@@ -11,7 +11,7 @@ import java.util.UUID;
 public record InstructionAssetResponse(
         UUID id,
         String scope,
-        UUID projectId,
+        UUID teamId,
         String name,
         String description,
         String category,
@@ -28,14 +28,14 @@ public record InstructionAssetResponse(
 
     /**
      * Factory for the common case where only the parent asset is known
-     * (e.g. project-scoped list, backward compatibility).  Availability
+     * (e.g. Team-scoped list, backward compatibility).  Availability
      * is {@code null} because the published version is not loaded.
      */
     public static InstructionAssetResponse from(InstructionAsset a) {
         return new InstructionAssetResponse(
                 a.getId(),
                 a.getScope(),
-                a.getProjectId(),
+                a.getTeamId(),
                 a.getName(),
                 a.getDescription(),
                 a.getCategory(),
@@ -79,7 +79,7 @@ public record InstructionAssetResponse(
         return new InstructionAssetResponse(
                 a.getId(),
                 a.getScope(),
-                a.getProjectId(),
+                a.getTeamId(),
                 a.getName(),
                 a.getDescription(),
                 a.getCategory(),

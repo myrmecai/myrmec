@@ -7,4 +7,5 @@ import java.util.UUID;
 /** channel.open (§7.5): bind a dedicated transport to a session. */
 public record ChannelOpenPayload(
         UUID sessionId,
-        Long resumeFromSequence) {}
+        Long resumeFromSequence,
+        String token) {}

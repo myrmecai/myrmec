@@ -4,8 +4,8 @@ package ai.myrmec.engine.context;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.instruction.InstructionAssetService;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectInstructionBindingService;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamInstructionBindingService;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,7 +30,7 @@ class ContextBuilderTest extends IntegrationTestBase {
     private InstructionAssetService instructionAssetService;
 
     @Autowired
-    private ProjectInstructionBindingService instructionBindingService;
+    private TeamInstructionBindingService instructionBindingService;
 
     @Autowired
     private TestDataBuilder data;
@@ -42,7 +42,7 @@ class ContextBuilderTest extends IntegrationTestBase {
     private ai.myrmec.engine.governance.GovernanceProfileService governanceProfileService;
 
     @Autowired
-    private ai.myrmec.engine.project.ProjectInstructionBindingRepository projectInstructionBindingRepository;
+    private ai.myrmec.engine.team.ProjectInstructionBindingRepository projectInstructionBindingRepository;
 
     /**
      * Several tests in this class create org-scoped INLINE instruction assets,
@@ -63,10 +63,10 @@ class ContextBuilderTest extends IntegrationTestBase {
 
     @Test
     void assemble_withNoInstructions_returnsEmptyContext() {
-        Project project = data.project().named("ctx-empty-test").create();
+        team team = data.team().named("ctx-empty-test").create();
 
         var result = contextBuilder.assemble(
-                project.getId(), null, "CONVERSATION", null, null, 0);
+                team.getId(), null, "CONVERSATION", null, null, 0);
 
         assertThat(result).isNotNull();
         assertThat(result.instructions()).isEmpty();
@@ -96,9 +96,9 @@ class ContextBuilderTest extends IntegrationTestBase {
         instructionAssetService.publishDraft(asset.getId(), TEST_ADMIN_ID, "Test Admin");
 
         // Assemble context
-        var project = data.project().named("ctx-instr-test").create();
+        var team = data.team().named("ctx-instr-test").create();
         var result = contextBuilder.assemble(
-                project.getId(), null, "CONVERSATION", null, null, 0);
+                team.getId(), null, "CONVERSATION", null, null, 0);
 
         assertThat(result.instructions()).hasSize(1);
         assertThat(result.instructions().get(0).name()).isEqualTo("test-ctx-instruction");
@@ -122,10 +122,10 @@ class ContextBuilderTest extends IntegrationTestBase {
 
         instructionAssetService.publishDraft(asset.getId(), TEST_ADMIN_ID, "Test Admin");
 
-        var projectId = data.project().named("ctx-manifest-test").create().getId();
-        var conversationId = createTestConversation(projectId);
+        var teamId = data.team().named("ctx-manifest-test").create().getId();
+        var conversationId = createTestConversation(teamId);
         var result = contextBuilder.assemble(
-                projectId, null, "CONVERSATION", conversationId, null, 1);
+                teamId, null, "CONVERSATION", conversationId, null, 1);
 
         assertThat(result.manifest()).isNotNull();
         assertThat(result.manifest().getSessionId()).isEqualTo(conversationId);
@@ -162,20 +162,20 @@ class ContextBuilderTest extends IntegrationTestBase {
                 TEST_ADMIN_ID, "Test Admin");
         instructionAssetService.publishDraft(lowAsset.getId(), TEST_ADMIN_ID, "Test Admin");
 
-        var projectId = data.project().named("ctx-budget-test").create().getId();
-        // Enable the OPTIONAL low-priority asset for the project
-        var orgAssets = instructionAssetRepository.findByScopeAndProjectIdIsNull("ORGANIZATION");
+        var teamId = data.team().named("ctx-budget-test").create().getId();
+        // Enable the OPTIONAL low-priority asset for the team
+        var orgAssets = instructionAssetRepository.findByScopeAndTeamIdIsNull("ORGANIZATION");
         for (var a : orgAssets) {
             if ("low-priority-instr".equals(a.getName())) {
-                var binding = new ai.myrmec.engine.project.ProjectInstructionBinding();
-                binding.setProjectId(projectId);
+                var binding = new ai.myrmec.engine.team.TeamInstructionBinding();
+                binding.setTeamId(teamId);
                 binding.setInstructionAssetId(a.getId());
                 binding.setEnabled(true);
                 projectInstructionBindingRepository.save(binding);
             }
         }
         var result = contextBuilder.assemble(
-                projectId, null, "CONVERSATION", null, null, 0);
+                teamId, null, "CONVERSATION", null, null, 0);
 
         // High priority (REQUIRED) should be included, low priority (OPTIONAL) truncated due to budget
         assertThat(result.instructions()).hasSize(1);
@@ -184,11 +184,11 @@ class ContextBuilderTest extends IntegrationTestBase {
         assertThat(result.contextOverflow()).isFalse();
     }
 
-    // ── Availability + project binding tests ──────────────────────────
+    // ── Availability + Team Binding tests ──────────────────────────
 
     /**
      * Org REQUIRED instruction asset is always included, even without a
-     * project binding.
+     * Team Binding.
      */
     @Test
     void assemble_orgRequiredIncluded_withoutBinding() {
@@ -203,16 +203,16 @@ class ContextBuilderTest extends IntegrationTestBase {
                 TEST_ADMIN_ID, "Test Admin");
         instructionAssetService.publishDraft(asset.getId(), TEST_ADMIN_ID, "Test Admin");
 
-        var project = data.project().named("ctx-required-test").create();
+        var team = data.team().named("ctx-required-test").create();
         var result = contextBuilder.assemble(
-                project.getId(), null, "CONVERSATION", null, null, 0);
+                team.getId(), null, "CONVERSATION", null, null, 0);
 
         assertThat(result.instructions())
                 .anySatisfy(e -> assertThat(e.name()).isEqualTo("required-no-binding"));
     }
 
     /**
-     * Org OPTIONAL instruction asset is excluded when no project binding
+     * Org OPTIONAL instruction asset is excluded when no Team Binding
      * exists.
      */
     @Test
@@ -228,16 +228,16 @@ class ContextBuilderTest extends IntegrationTestBase {
                 TEST_ADMIN_ID, "Test Admin");
         instructionAssetService.publishDraft(asset.getId(), TEST_ADMIN_ID, "Test Admin");
 
-        var project = data.project().named("ctx-optional-excluded-test").create();
+        var team = data.team().named("ctx-optional-excluded-test").create();
         var result = contextBuilder.assemble(
-                project.getId(), null, "CONVERSATION", null, null, 0);
+                team.getId(), null, "CONVERSATION", null, null, 0);
 
         assertThat(result.instructions())
                 .noneSatisfy(e -> assertThat(e.name()).isEqualTo("optional-no-binding"));
     }
 
     /**
-     * Org OPTIONAL instruction asset is included when a project binding
+     * Org OPTIONAL instruction asset is included when a Team Binding
      * with enabled=true exists.
      */
     @Test
@@ -253,18 +253,18 @@ class ContextBuilderTest extends IntegrationTestBase {
                 TEST_ADMIN_ID, "Test Admin");
         instructionAssetService.publishDraft(asset.getId(), TEST_ADMIN_ID, "Test Admin");
 
-        var project = data.project().named("ctx-optional-enabled-test").create();
-        instructionBindingService.upsert(project.getId(), asset.getId(), true);
+        var team = data.team().named("ctx-optional-enabled-test").create();
+        instructionBindingService.upsert(team.getId(), asset.getId(), true);
 
         var result = contextBuilder.assemble(
-                project.getId(), null, "CONVERSATION", null, null, 0);
+                team.getId(), null, "CONVERSATION", null, null, 0);
 
         assertThat(result.instructions())
                 .anySatisfy(e -> assertThat(e.name()).isEqualTo("optional-enabled-binding"));
     }
 
     /**
-     * Org OPTIONAL instruction asset is excluded when a project binding
+     * Org OPTIONAL instruction asset is excluded when a Team Binding
      * with enabled=false exists.
      */
     @Test
@@ -280,11 +280,11 @@ class ContextBuilderTest extends IntegrationTestBase {
                 TEST_ADMIN_ID, "Test Admin");
         instructionAssetService.publishDraft(asset.getId(), TEST_ADMIN_ID, "Test Admin");
 
-        var project = data.project().named("ctx-optional-disabled-test").create();
-        instructionBindingService.upsert(project.getId(), asset.getId(), false);
+        var team = data.team().named("ctx-optional-disabled-test").create();
+        instructionBindingService.upsert(team.getId(), asset.getId(), false);
 
         var result = contextBuilder.assemble(
-                project.getId(), null, "CONVERSATION", null, null, 0);
+                team.getId(), null, "CONVERSATION", null, null, 0);
 
         assertThat(result.instructions())
                 .noneSatisfy(e -> assertThat(e.name()).isEqualTo("optional-disabled-binding"));
@@ -318,9 +318,9 @@ class ContextBuilderTest extends IntegrationTestBase {
                 TEST_ADMIN_ID, "Test Admin");
         instructionAssetService.publishDraft(highAsset.getId(), TEST_ADMIN_ID, "Test Admin");
 
-        var project = data.project().named("ctx-priority-order-test").create();
+        var team = data.team().named("ctx-priority-order-test").create();
         var result = contextBuilder.assemble(
-                project.getId(), null, "CONVERSATION", null, null, 0);
+                team.getId(), null, "CONVERSATION", null, null, 0);
 
         assertThat(result.instructions()).hasSize(2);
         // Ascending: low priority (1010) first, high priority (1500) second
@@ -353,9 +353,9 @@ class ContextBuilderTest extends IntegrationTestBase {
                 TEST_ADMIN_ID, "Test Admin");
         instructionAssetService.publishDraft(assetA.getId(), TEST_ADMIN_ID, "Test Admin");
 
-        var project = data.project().named("ctx-same-priority-test").create();
+        var team = data.team().named("ctx-same-priority-test").create();
         var result = contextBuilder.assemble(
-                project.getId(), null, "CONVERSATION", null, null, 0);
+                team.getId(), null, "CONVERSATION", null, null, 0);
 
         assertThat(result.instructions()).hasSize(2);
         // Same priority → alphabetical by name: "aaa" before "zzz"
@@ -400,10 +400,10 @@ class ContextBuilderTest extends IntegrationTestBase {
         instructionAssetService.disable(archivedAsset.getId(), TEST_ADMIN_ID, "Test Admin");
         instructionAssetService.archive(archivedAsset.getId(), TEST_ADMIN_ID, "Test Admin");
 
-        var projectId = data.project().named("ctx-exclusion-reasons-test").create().getId();
-        var conversationId = createTestConversation(projectId);
+        var teamId = data.team().named("ctx-exclusion-reasons-test").create().getId();
+        var conversationId = createTestConversation(teamId);
         var result = contextBuilder.assemble(
-                projectId, null, "CONVERSATION", conversationId, null, 1);
+                teamId, null, "CONVERSATION", conversationId, null, 1);
 
         assertThat(result.manifest()).isNotNull();
         var excluded = result.manifest().getInstructionsExcluded();
@@ -440,17 +440,17 @@ class ContextBuilderTest extends IntegrationTestBase {
                 TEST_ADMIN_ID, "Test Admin");
         instructionAssetService.publishDraft(convAsset.getId(), TEST_ADMIN_ID, "Test Admin");
 
-        var project = data.project().named("ctx-applicability-test").create();
+        var team = data.team().named("ctx-applicability-test").create();
 
         // Assemble with WORKFLOW service type → conv-only should be excluded
         var wfResult = contextBuilder.assemble(
-                project.getId(), null, "WORKFLOW", null, null, 0);
+                team.getId(), null, "WORKFLOW", null, null, 0);
         assertThat(wfResult.instructions())
                 .noneSatisfy(e -> assertThat(e.name()).isEqualTo("conv-only-asset"));
 
         // Assemble with CONVERSATION service type → conv-only should be included
         var convResult = contextBuilder.assemble(
-                project.getId(), null, "CONVERSATION", null, null, 0);
+                team.getId(), null, "CONVERSATION", null, null, 0);
         assertThat(convResult.instructions())
                 .anySatisfy(e -> assertThat(e.name()).isEqualTo("conv-only-asset"));
     }
@@ -471,31 +471,31 @@ class ContextBuilderTest extends IntegrationTestBase {
                 TEST_ADMIN_ID, "Test Admin");
         instructionAssetService.publishDraft(sqlAsset.getId(), TEST_ADMIN_ID, "Test Admin");
 
-        var project = data.project().named("ctx-activation-test").create();
+        var team = data.team().named("ctx-activation-test").create();
 
         // fileType=SQL → included
         var sqlResult = contextBuilder.assemble(
-                project.getId(), null, "CONVERSATION", null, null, 0,
+                team.getId(), null, "CONVERSATION", null, null, 0,
                 Map.of("fileType", "SQL"));
         assertThat(sqlResult.instructions())
                 .anySatisfy(e -> assertThat(e.name()).isEqualTo("sql-activation-asset"));
 
         // fileType=PYTHON → excluded with ACTIVATION_NO_MATCH
         var pyResult = contextBuilder.assemble(
-                project.getId(), null, "CONVERSATION", null, null, 0,
+                team.getId(), null, "CONVERSATION", null, null, 0,
                 Map.of("fileType", "PYTHON"));
         assertThat(pyResult.instructions())
                 .noneSatisfy(e -> assertThat(e.name()).isEqualTo("sql-activation-asset"));
 
         // No fileType in context → excluded (no match)
         var noCtxResult = contextBuilder.assemble(
-                project.getId(), null, "CONVERSATION", null, null, 0, null);
+                team.getId(), null, "CONVERSATION", null, null, 0, null);
         assertThat(noCtxResult.instructions())
                 .noneSatisfy(e -> assertThat(e.name()).isEqualTo("sql-activation-asset"));
     }
 
-    private java.util.UUID createTestConversation(java.util.UUID projectId) {
-        var conversation = conversationService.createConversation(projectId, TEST_ADMIN_ID, null);
+    private java.util.UUID createTestConversation(java.util.UUID teamId) {
+        var conversation = conversationService.createConversation(teamId, TEST_ADMIN_ID, null);
         return conversation.getId();
     }
 }

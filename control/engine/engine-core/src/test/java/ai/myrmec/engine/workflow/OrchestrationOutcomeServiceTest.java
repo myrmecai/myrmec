@@ -4,7 +4,7 @@ package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.agent.AgentProfile;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.User;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,12 +49,12 @@ class OrchestrationOutcomeServiceTest extends IntegrationTestBase {
 
     @BeforeEach
     void setUp() {
-        Project project = data.project().named("outcome").withRepo("https://x.git", "main").create();
+        team team = data.team().named("outcome").withRepo("https://x.git", "main").create();
         AgentProfile profile = data.agentProfile().named("outcome-profile").create();
         User admin = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
 
         WorkflowRequest req = new WorkflowRequest();
-        req.setWorkflow(workflowOf(project));
+        req.setWorkflow(workflowOf(team));
         req.setWorkflowVersion(1);
         req.setInput(Map.of());
         req.setStatus(RequestStatus.RUNNING);
@@ -74,9 +74,9 @@ class OrchestrationOutcomeServiceTest extends IntegrationTestBase {
         task = taskRepository.save(task);
     }
 
-    private ai.myrmec.engine.workflow.Workflow workflowOf(Project project) {
+    private ai.myrmec.engine.workflow.Workflow workflowOf(team team) {
         Workflow wf = new Workflow();
-        wf.setProject(project);
+        wf.setTeam(team);
         wf.setName("outcome-wf-" + System.nanoTime());
         wf.setSteps(java.util.List.<Map<String, Object>>of());
         wf.setVersion(1);

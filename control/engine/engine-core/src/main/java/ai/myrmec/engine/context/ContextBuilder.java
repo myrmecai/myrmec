@@ -21,11 +21,11 @@ import ai.myrmec.engine.knowledge.KnowledgeProviderVersion;
 import ai.myrmec.engine.knowledge.KnowledgeProviderVersionRepository;
 import ai.myrmec.engine.knowledge.KnowledgeSource;
 import ai.myrmec.engine.knowledge.KnowledgeSourceRepository;
-import ai.myrmec.engine.project.ProjectInstructionBinding;
-import ai.myrmec.engine.project.ProjectInstructionBindingRepository;
-import ai.myrmec.engine.project.ProjectProviderBinding;
-import ai.myrmec.engine.project.ProjectProviderBindingRepository;
-import ai.myrmec.engine.project.ProjectSettingRepository;
+import ai.myrmec.engine.team.TeamInstructionBinding;
+import ai.myrmec.engine.team.TeamInstructionBindingRepository;
+import ai.myrmec.engine.team.TeamProviderBinding;
+import ai.myrmec.engine.team.TeamProviderBindingRepository;
+import ai.myrmec.engine.team.TeamSettingRepository;
 import ai.myrmec.engine.setting.SystemSettingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,7 +46,7 @@ import java.util.UUID;
  *
  * <p>This service is called before each turn (conversation or workflow) to build
  * the complete instruction set and knowledge source references that the agent
- * will use. It enforces governance policies, applies project and assistant-level
+ * will use. It enforces governance policies, applies Team and assistant-level
  * bindings, sorts by priority, estimates tokens, applies budget truncation, and
  * writes a {@link ContextManifest} audit record.</p>
  *
@@ -70,16 +70,16 @@ public class ContextBuilder {
     private final KnowledgeSourceRepository knowledgeSourceRepository;
     private final KnowledgeProviderRepository knowledgeProviderRepository;
     private final KnowledgeProviderVersionRepository knowledgeProviderVersionRepository;
-    private final ProjectInstructionBindingRepository projectInstructionBindingRepository;
-    private final ProjectProviderBindingRepository projectProviderBindingRepository;
+    private final TeamInstructionBindingRepository teamInstructionBindingRepository;
+    private final TeamProviderBindingRepository teamProviderBindingRepository;
     private final AssistantContextBindingRepository assistantContextBindingRepository;
-    private final ProjectSettingRepository projectSettingRepository;
+    private final TeamSettingRepository teamSettingRepository;
     private final ContextManifestRepository contextManifestRepository;
 
     /**
-     * Assemble the AI context for a given project and optional assistant version.
+     * Assemble the AI context for a given Team and optional assistant version.
      *
-     * @param projectId         the project id (required)
+     * @param teamId         the Team id (required)
      * @param assistantVersionId the assistant version id (null for workflow tasks)
      * @param serviceType        the service type for applicability filtering (e.g., "CONVERSATION", "WORKFLOW")
      * @param conversationId     the conversation id (for manifest writing, null for workflows)
@@ -89,13 +89,13 @@ public class ContextBuilder {
      */
     @Transactional
     public AssembledContext assemble(
-            UUID projectId,
+            UUID teamId,
             UUID assistantVersionId,
             String serviceType,
             UUID conversationId,
             UUID messageId,
             long sequenceNo) {
-        return assemble(projectId, assistantVersionId, serviceType,
+        return assemble(teamId, assistantVersionId, serviceType,
                 conversationId, messageId, sequenceNo, null);
     }
 
@@ -109,14 +109,14 @@ public class ContextBuilder {
      */
     @Transactional
     public AssembledContext assemble(
-            UUID projectId,
+            UUID teamId,
             UUID assistantVersionId,
             String serviceType,
             UUID conversationId,
             UUID messageId,
             long sequenceNo,
             Map<String, Object> executionContext) {
-        return assemble(projectId, assistantVersionId, serviceType,
+        return assemble(teamId, assistantVersionId, serviceType,
                 conversationId, messageId, sequenceNo, executionContext, null);
     }
 
@@ -136,7 +136,7 @@ public class ContextBuilder {
      */
     @Transactional
     public AssembledContext assemble(
-            UUID projectId,
+            UUID teamId,
             UUID assistantVersionId,
             String serviceType,
             UUID conversationId,
@@ -146,7 +146,7 @@ public class ContextBuilder {
             ContextSnapshot snapshot) {
 
         // 1. Resolve governance profile
-        EffectivePolicy policy = governancePolicyResolver.resolve(GovernanceScope.ofProject(projectId));
+        EffectivePolicy policy = governancePolicyResolver.resolve(GovernanceScope.ofTeam(teamId));
         String profileCode = policy.code();
         String contextPinning = ProductFeature.CONTEXT_PINNING.runtimeName(policy.single(ProductFeature.CONTEXT_PINNING));
 
@@ -157,8 +157,8 @@ public class ContextBuilder {
             contextPinning = "PINNED_AT_START";
         }
 
-        // 2. Resolve token budget from project settings
-        int budgetTokens = getProjectIntSetting(projectId, CONTEXT_TOKEN_BUDGET_KEY, DEFAULT_TOKEN_BUDGET);
+        // 2. Resolve token budget from Team settings
+        int budgetTokens = getTeamIntSetting(teamId, CONTEXT_TOKEN_BUDGET_KEY, DEFAULT_TOKEN_BUDGET);
 
         // 3. Collect instruction entries
         List<AssembledContext.InstructionEntry> allInstructions = new ArrayList<>();
@@ -169,17 +169,17 @@ public class ContextBuilder {
             allInstructions = loadPinnedInstructions(snapshot.instructionAssetVersionIds(), excludedInstructions);
         } else {
             // IMMEDIATE_EFFECT or no snapshot: live resolution
-            // 3a. Compute project bindings and assistant exclusions BEFORE collecting
-            Set<UUID> enabledByProject = getEnabledInstructionBindings(projectId);
+            // 3a. Compute Team bindings and assistant exclusions BEFORE collecting
+            Set<UUID> enabledByTeam = getEnabledInstructionBindings(teamId);
             Set<UUID> excludedByAssistant = getExcludedByAssistant(assistantVersionId, "INSTRUCTION_ASSET");
 
             // 3b. Org-scoped published instruction assets (with availability/binding enforcement)
             collectInstructions(Scope.ORGANIZATION, null, serviceType, allInstructions,
-                    excludedInstructions, enabledByProject, excludedByAssistant,
+                    excludedInstructions, enabledByTeam, excludedByAssistant,
                     executionContext);
 
-            // 3c. Project-scoped published instruction assets (no binding check needed)
-            collectInstructions(Scope.PROJECT, projectId, serviceType, allInstructions,
+            // 3c. Team-scoped published instruction assets (no binding check needed)
+            collectInstructions(Scope.TEAM, teamId, serviceType, allInstructions,
                     excludedInstructions, Set.of(), excludedByAssistant,
                     executionContext);
         }
@@ -243,7 +243,7 @@ public class ContextBuilder {
 
         // 6. Resolve knowledge sources
         List<AssembledContext.KnowledgeSourceRef> knowledgeSources = resolveKnowledgeSources(
-                projectId, assistantVersionId);
+                teamId, assistantVersionId);
 
         // 7. Write context manifest
         ContextManifest manifest = null;
@@ -256,8 +256,8 @@ public class ContextBuilder {
                     knowledgeSources);
         }
 
-        log.info("Assembled context for project {}: {} instructions ({} tokens / {} budget), {} knowledge sources, truncated={}",
-                projectId, budgetCapped.size(), totalTokens, budgetTokens, knowledgeSources.size(), truncated);
+        log.info("Assembled context for Team {}: {} instructions ({} tokens / {} budget), {} knowledge sources, truncated={}",
+                teamId, budgetCapped.size(), totalTokens, budgetTokens, knowledgeSources.size(), truncated);
 
         return new AssembledContext(
                 budgetCapped,
@@ -273,22 +273,22 @@ public class ContextBuilder {
 
     /**
      * Collect published instruction entries for a given scope.
-     * Enforces availability (REQUIRED always included; OPTIONAL only if enabled by project binding),
+     * Enforces availability (REQUIRED always included; OPTIONAL only if enabled by Team binding),
      * assistant exclusions, applicability filtering, and activation rules during collection.
      *
      * @param executionContext optional map containing "fileType" etc. for activation-rule evaluation
      */
     private void collectInstructions(
-            String scope, UUID projectId, String serviceType,
+            String scope, UUID teamId, String serviceType,
             List<AssembledContext.InstructionEntry> entries,
             List<Map<String, Object>> excluded,
-            Set<UUID> enabledByProject,
+            Set<UUID> enabledByTeam,
             Set<UUID> excludedByAssistant,
             Map<String, Object> executionContext) {
 
-        List<InstructionAsset> assets = projectId == null
-                ? instructionAssetRepository.findByScopeAndProjectIdIsNull(scope)
-                : instructionAssetRepository.findByScopeAndProjectId(scope, projectId);
+        List<InstructionAsset> assets = teamId == null
+                ? instructionAssetRepository.findByScopeAndTeamIdIsNull(scope)
+                : instructionAssetRepository.findByScopeAndTeamId(scope, teamId);
 
         for (InstructionAsset asset : assets) {
             // --- Status filtering with proper exclusion reasons ---
@@ -346,19 +346,19 @@ public class ContextBuilder {
                 }
             }
 
-            // --- Availability and project bindings for ORG-scoped assets ---
+            // --- Availability and Team bindings for ORG-scoped assets ---
             if (Scope.ORGANIZATION.equals(scope)) {
                 String availability = version.getAvailability();
                 if (Availability.OPTIONAL.equals(availability)) {
-                    if (!enabledByProject.contains(asset.getId())) {
+                    if (!enabledByTeam.contains(asset.getId())) {
                         excluded.add(Map.of("assetId", asset.getId().toString(),
-                                "name", asset.getName(), "reason", "NOT_ENABLED_BY_PROJECT"));
+                                "name", asset.getName(), "reason", "NOT_ENABLED_BY_TEAM"));
                         continue;
                     }
                 }
             }
 
-            // --- Assistant exclusion (applies to both org and project scope) ---
+            // --- Assistant exclusion (applies to both org and Team scope) ---
             if (excludedByAssistant.contains(asset.getId())) {
                 excluded.add(Map.of("assetId", asset.getId().toString(),
                         "name", asset.getName(), "reason", "ASSISTANT_EXCLUDED"));
@@ -376,7 +376,7 @@ public class ContextBuilder {
 
             int tokenCount = estimateTokens(content);
             int priority = version.getPriority() != null ? version.getPriority() : 0;
-            // Org scope gets base priority 1000, project scope gets base 2000 (project overrides org)
+            // Org scope gets base priority 1000, Team scope gets base 2000 (Team overrides org)
             int effectivePriority = priority + (Scope.ORGANIZATION.equals(scope) ? 1000 : 2000);
 
             entries.add(new AssembledContext.InstructionEntry(
@@ -449,14 +449,14 @@ public class ContextBuilder {
     }
 
     /**
-     * Get the set of instruction asset IDs enabled by project bindings.
+     * Get the set of instruction asset IDs enabled by team bindings.
      */
-    private Set<UUID> getEnabledInstructionBindings(UUID projectId) {
-        if (projectId == null) return Set.of();
-        return projectInstructionBindingRepository
-                .findByProjectIdAndEnabledTrue(projectId)
+    private Set<UUID> getEnabledInstructionBindings(UUID teamId) {
+        if (teamId == null) return Set.of();
+        return teamInstructionBindingRepository
+                .findByTeamIdAndEnabledTrue(teamId)
                 .stream()
-                .map(ProjectInstructionBinding::getInstructionAssetId)
+                .map(TeamInstructionBinding::getInstructionAssetId)
                 .collect(java.util.stream.Collectors.toSet());
     }
 
@@ -474,22 +474,22 @@ public class ContextBuilder {
     }
 
     /**
-     * Resolve active knowledge sources for the project.
+     * Resolve active knowledge sources for the Team.
      */
     private List<AssembledContext.KnowledgeSourceRef> resolveKnowledgeSources(
-            UUID projectId, UUID assistantVersionId) {
+            UUID teamId, UUID assistantVersionId) {
 
         List<AssembledContext.KnowledgeSourceRef> result = new ArrayList<>();
 
         // Org-scoped knowledge sources
-        for (KnowledgeSource source : knowledgeSourceRepository.findByScopeAndProjectIdIsNull(Scope.ORGANIZATION)) {
+        for (KnowledgeSource source : knowledgeSourceRepository.findByScopeAndTeamIdIsNull(Scope.ORGANIZATION)) {
             if (!EntityStatus.ACTIVE.equals(source.getStatus())) continue;
             result.add(buildSourceRef(source));
         }
 
-        // Project-scoped knowledge sources
-        if (projectId != null) {
-            for (KnowledgeSource source : knowledgeSourceRepository.findByScopeAndProjectId(Scope.PROJECT, projectId)) {
+        // Team-scoped knowledge sources
+        if (teamId != null) {
+            for (KnowledgeSource source : knowledgeSourceRepository.findByScopeAndTeamId(Scope.TEAM, teamId)) {
                 if (!EntityStatus.ACTIVE.equals(source.getStatus())) continue;
                 result.add(buildSourceRef(source));
             }
@@ -611,12 +611,12 @@ public class ContextBuilder {
     }
 
     /**
-     * Get an integer setting from project_settings, falling back to system default.
+     * Get an integer setting from team_settings, falling back to system default.
      */
-    private int getProjectIntSetting(UUID projectId, String key, int defaultValue) {
-        if (projectId == null) return defaultValue;
-        return projectSettingRepository
-                .findByProjectIdAndSettingKey(projectId, key)
+    private int getTeamIntSetting(UUID teamId, String key, int defaultValue) {
+        if (teamId == null) return defaultValue;
+        return teamSettingRepository
+                .findByTeamIdAndSettingKey(teamId, key)
                 .map(setting -> {
                     String val = setting.getSettingValue();
                     if (val == null || val.isBlank()) return defaultValue;

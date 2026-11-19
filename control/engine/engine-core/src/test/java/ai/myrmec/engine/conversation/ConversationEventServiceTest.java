@@ -2,7 +2,7 @@ package ai.myrmec.engine.conversation;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.agent.Agent;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -87,9 +87,9 @@ class ConversationEventServiceTest extends IntegrationTestBase {
     }
 
     private UUID conversation() {
-        Project project = data.project().named("events-" + UUID.randomUUID()).create();
+        team team = data.team().named("events-" + UUID.randomUUID()).create();
         Conversation conversation = new Conversation();
-        conversation.setProjectId(project.getId());
+        conversation.setTeamId(team.getId());
         conversation.setTitle("events-test");
         return conversationRepository.save(conversation).getId();
     }

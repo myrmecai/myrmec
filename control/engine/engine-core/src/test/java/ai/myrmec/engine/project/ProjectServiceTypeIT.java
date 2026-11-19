@@ -1,10 +1,10 @@
-package ai.myrmec.engine.project;
+package ai.myrmec.engine.team;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine._system.exception.BadRequestException;
-import ai.myrmec.engine._system.security.ProjectAccessEvaluator;
-import ai.myrmec.engine.project.dto.CreateProjectRequest;
-import ai.myrmec.engine.project.dto.UpdateProjectRequest;
+import ai.myrmec.engine._system.security.TeamAccessEvaluator;
+import ai.myrmec.engine.team.dto.CreateTeamRequest;
+import ai.myrmec.engine.team.dto.UpdateTeamRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,114 +16,114 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * #77 — per-project {@code allowed_service_types} column, the
- * {@link ProjectAccessEvaluator#allowsServiceType} gate, and create/update
- * validation in {@link ProjectService}.
+ * #77 — per-team {@code allowed_service_types} column, the
+ * {@link TeamAccessEvaluator#allowsServiceType} gate, and create/update
+ * validation in {@link TeamService}.
  */
 @Transactional
 class ProjectServiceTypeIT extends IntegrationTestBase {
 
     @Autowired
-    private ProjectService projectService;
+    private TeamService TeamService;
 
     @Autowired
-    private ProjectAccessEvaluator projectAccess;
+    private TeamAccessEvaluator teamAccess;
 
-    private CreateProjectRequest baseRequest(String name) {
-        CreateProjectRequest r = new CreateProjectRequest();
+    private CreateTeamRequest baseRequest(String name) {
+        CreateTeamRequest r = new CreateTeamRequest();
         r.setName(name);
         return r;
     }
 
     @Test
     void defaultsToBothServiceTypesWhenOmitted() {
-        Project p = projectService.create(baseRequest("svc-default-" + UUID.randomUUID()));
+        team p = TeamService.create(baseRequest("svc-default-" + UUID.randomUUID()));
 
         assertThat(p.getAllowedServiceTypes())
                 .containsExactlyInAnyOrder("WORKFLOW", "CONVERSATIONAL");
-        assertThat(projectAccess.allowsServiceType(p.getId(), "WORKFLOW")).isTrue();
-        assertThat(projectAccess.allowsServiceType(p.getId(), "CONVERSATIONAL")).isTrue();
+        assertThat(teamAccess.allowsServiceType(p.getId(), "WORKFLOW")).isTrue();
+        assertThat(teamAccess.allowsServiceType(p.getId(), "CONVERSATIONAL")).isTrue();
     }
 
     @Test
     void narrowsToASingleTypeAndGatesTheOther() {
-        CreateProjectRequest r = baseRequest("svc-narrow-" + UUID.randomUUID());
+        CreateTeamRequest r = baseRequest("svc-narrow-" + UUID.randomUUID());
         r.setAllowedServiceTypes(List.of("workflow")); // case-insensitive
-        Project p = projectService.create(r);
+        team p = TeamService.create(r);
 
         assertThat(p.getAllowedServiceTypes()).containsExactly("WORKFLOW");
-        assertThat(projectAccess.allowsServiceType(p.getId(), "WORKFLOW")).isTrue();
-        assertThat(projectAccess.allowsServiceType(p.getId(), "CONVERSATIONAL")).isFalse();
+        assertThat(teamAccess.allowsServiceType(p.getId(), "WORKFLOW")).isTrue();
+        assertThat(teamAccess.allowsServiceType(p.getId(), "CONVERSATIONAL")).isFalse();
     }
 
     @Test
     void updateReplacesTheAllowedSet() {
-        Project p = projectService.create(baseRequest("svc-update-" + UUID.randomUUID()));
+        team p = TeamService.create(baseRequest("svc-update-" + UUID.randomUUID()));
 
-        UpdateProjectRequest u = new UpdateProjectRequest();
+        UpdateTeamRequest u = new UpdateTeamRequest();
         u.setAllowedServiceTypes(List.of("CONVERSATIONAL"));
-        Project updated = projectService.update(p.getId(), u);
+        team updated = TeamService.update(p.getId(), u);
 
         assertThat(updated.getAllowedServiceTypes()).containsExactly("CONVERSATIONAL");
-        assertThat(projectAccess.allowsServiceType(p.getId(), "WORKFLOW")).isFalse();
+        assertThat(teamAccess.allowsServiceType(p.getId(), "WORKFLOW")).isFalse();
     }
 
     @Test
     void updateWithNullPreservesExisting() {
-        CreateProjectRequest r = baseRequest("svc-preserve-" + UUID.randomUUID());
+        CreateTeamRequest r = baseRequest("svc-preserve-" + UUID.randomUUID());
         r.setAllowedServiceTypes(List.of("WORKFLOW"));
-        Project p = projectService.create(r);
+        team p = TeamService.create(r);
 
-        UpdateProjectRequest u = new UpdateProjectRequest();
+        UpdateTeamRequest u = new UpdateTeamRequest();
         u.setDescription("touch something else");
-        Project updated = projectService.update(p.getId(), u);
+        team updated = TeamService.update(p.getId(), u);
 
         assertThat(updated.getAllowedServiceTypes()).containsExactly("WORKFLOW");
     }
 
     @Test
     void rejectsUnknownServiceType() {
-        CreateProjectRequest r = baseRequest("svc-bad-" + UUID.randomUUID());
+        CreateTeamRequest r = baseRequest("svc-bad-" + UUID.randomUUID());
         r.setAllowedServiceTypes(List.of("TELEPATHY"));
 
-        assertThatThrownBy(() -> projectService.create(r))
+        assertThatThrownBy(() -> TeamService.create(r))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("Unknown service type");
     }
 
     @Test
     void rejectsEmptyServiceTypeList() {
-        CreateProjectRequest r = baseRequest("svc-empty-" + UUID.randomUUID());
+        CreateTeamRequest r = baseRequest("svc-empty-" + UUID.randomUUID());
         r.setAllowedServiceTypes(List.of());
 
-        assertThatThrownBy(() -> projectService.create(r))
+        assertThatThrownBy(() -> TeamService.create(r))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("at least one service type");
     }
 
     @Test
     void allowsServiceTypeDeniesForUnknownProject() {
-        assertThat(projectAccess.allowsServiceType(UUID.randomUUID(), "WORKFLOW")).isFalse();
+        assertThat(teamAccess.allowsServiceType(UUID.randomUUID(), "WORKFLOW")).isFalse();
     }
 
     @Test
     void projectAttachmentGovernancePersistsOnCreateAndUpdate() {
-        CreateProjectRequest create = baseRequest("attach-governance-" + UUID.randomUUID());
+        CreateTeamRequest create = baseRequest("attach-governance-" + UUID.randomUUID());
         create.setAttachmentsEnabled(false);
         create.setAttachmentRetentionTtlDays(30);
         create.setAttachmentMaxFileSizeBytes(2048L);
         create.setAttachmentTypeAllowlist("text/plain,application/pdf");
 
-        Project p = projectService.create(create);
+        team p = TeamService.create(create);
         assertThat(p.isAttachmentsEnabled()).isFalse();
         assertThat(p.getAttachmentRetentionTtlDays()).isEqualTo(30);
         assertThat(p.getAttachmentMaxFileSizeBytes()).isEqualTo(2048L);
         assertThat(p.getAttachmentTypeAllowlist()).isEqualTo("text/plain,application/pdf");
 
-        UpdateProjectRequest update = new UpdateProjectRequest();
+        UpdateTeamRequest update = new UpdateTeamRequest();
         update.setAttachmentsEnabled(true);
         update.setAttachmentMaxFileSizeBytes(4096L);
-        Project updated = projectService.update(p.getId(), update);
+        team updated = TeamService.update(p.getId(), update);
 
         assertThat(updated.isAttachmentsEnabled()).isTrue();
         assertThat(updated.getAttachmentMaxFileSizeBytes()).isEqualTo(4096L);

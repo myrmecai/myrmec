@@ -6,7 +6,7 @@ import ai.myrmec.engine.agent.AgentHostCreationResult;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileRepository;
 import ai.myrmec.engine.agent.AgentHostRepository;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * builder once and verifies the produced fixtures land in the database.
  *
  * <p>Doubles as live documentation of the TestDataBuilder usage pattern —
- * any feature-phase test that needs project/profile/agent fixtures can copy
+ * any feature-phase test that needs team/profile/agent fixtures can copy
  * this shape.</p>
  */
 @Transactional
@@ -35,12 +35,12 @@ class TestDataBuilderIT extends IntegrationTestBase {
 
     @Test
     void buildsProjectProfileAndAgentChain() {
-        Project project = data.project()
-                .named("td-build-project")
+        team team = data.team()
+                .named("td-build-team")
                 .withDescription("Built by TestDataBuilderIT")
                 .create();
-        assertThat(project.getId()).isNotNull();
-        assertThat(projectRepository.findById(project.getId())).isPresent();
+        assertThat(team.getId()).isNotNull();
+        assertThat(TeamRepository.findById(team.getId())).isPresent();
 
         AgentProfile profile = data.agentProfile()
                 .named("td-build-profile")
@@ -51,20 +51,20 @@ class TestDataBuilderIT extends IntegrationTestBase {
 
         AgentHostCreationResult result = data.agent()
                 .named("td-build-agent")
-                .inProject(project)
+                .inTeam(team)
                 .create();
 
         AgentHost agent = result.agent();
         assertThat(agent.getId()).isNotNull();
-        assertThat(agent.getProjectId()).isEqualTo(project.getId());
+        assertThat(agent.getTeamId()).isEqualTo(team.getId());
         assertThat(result.registrationKey()).startsWith("myr_agent_");
         assertThat(agentRepository.findById(agent.getId())).isPresent();
     }
 
     @Test
     void monotonicSuffixAvoidsNameCollisions() {
-        Project a = data.project().named("collision-check").create();
-        Project b = data.project().named("collision-check").create();
+        Team A = data.team().named("collision-check").create();
+        Team B = data.team().named("collision-check").create();
 
         assertThat(a.getName()).isNotEqualTo(b.getName());
         assertThat(a.getName()).startsWith("collision-check-");

@@ -7,8 +7,8 @@ import ai.myrmec.engine._system.common.ResourceType;
 import ai.myrmec.engine.audit.AuditEvent;
 import ai.myrmec.engine.audit.AuditEventRepository;
 import ai.myrmec.engine.group.Group;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -31,13 +31,13 @@ class QuotaServiceTest extends IntegrationTestBase {
     private AuditEventRepository auditEventRepository;
 
     @Autowired
-    private ProjectRepository projectRepository;
+    private TeamRepository TeamRepository;
 
     @Test
     void create_persists_andEmitsAuditRow() {
-        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
         Quota q = quotaService.create(
-                Quota.Scope.PROJECT, projectId,
+                Quota.Scope.TEAM, teamId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
                 500L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null);
 
@@ -53,9 +53,9 @@ class QuotaServiceTest extends IntegrationTestBase {
 
     @Test
     void update_changesLimit_andEmitsAuditRow() {
-        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
         Quota q = quotaService.create(
-                Quota.Scope.PROJECT, projectId,
+                Quota.Scope.TEAM, teamId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
                 500L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null);
 
@@ -72,15 +72,15 @@ class QuotaServiceTest extends IntegrationTestBase {
 
     @Test
     void delete_removesRow_andEmitsAuditRow() {
-        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
         Quota q = quotaService.create(
-                Quota.Scope.PROJECT, projectId,
+                Quota.Scope.TEAM, teamId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
                 500L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null);
 
         quotaService.delete(q.getId());
 
-        assertThat(quotaService.findByScope(Quota.Scope.PROJECT, projectId)).isEmpty();
+        assertThat(quotaService.findByScope(Quota.Scope.TEAM, teamId)).isEmpty();
         long deletedAudits = auditEventRepository.findAll().stream()
                 .filter(r -> AuditAction.DELETED.equals(r.getEventType()))
                 .count();
@@ -95,8 +95,8 @@ class QuotaServiceTest extends IntegrationTestBase {
 
     @Test
     void hierarchy_projectCannotExceedGroupCeiling() {
-        // Seed a project in the default group, and a group-scoped 500 cap.
-        Project project = projectRepository.save(
+        // Seed a team in the default group, and a group-scoped 500 cap.
+        team team = TeamRepository.save(
                 TestDataFactory.projectBuilder("hierarchy-proj").build());
         quotaService.create(
                 Quota.Scope.GROUP, Group.DEFAULT_GROUP_ID,
@@ -105,14 +105,14 @@ class QuotaServiceTest extends IntegrationTestBase {
 
         // 400 under the 500 cap — allowed.
         Quota allowed = quotaService.create(
-                Quota.Scope.PROJECT, project.getId(),
+                Quota.Scope.TEAM, team.getId(),
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
                 400L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null);
         assertThat(allowed.getLimitAmount()).isEqualTo(400L);
 
         // 600 over the 500 cap — rejected.
         assertThatThrownBy(() -> quotaService.create(
-                Quota.Scope.PROJECT, project.getId(),
+                Quota.Scope.TEAM, team.getId(),
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
                 600L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -148,9 +148,9 @@ class QuotaServiceTest extends IntegrationTestBase {
 
     @Test
     void pause_setsTimestampAndPausedBy_emitsAuditRow() {
-        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
         Quota q = quotaService.create(
-                Quota.Scope.PROJECT, projectId,
+                Quota.Scope.TEAM, teamId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
                 500L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null);
 
@@ -168,9 +168,9 @@ class QuotaServiceTest extends IntegrationTestBase {
 
     @Test
     void resume_clearsTimestamp_emitsAuditRow() {
-        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
         Quota q = quotaService.create(
-                Quota.Scope.PROJECT, projectId,
+                Quota.Scope.TEAM, teamId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
                 500L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null);
 
@@ -191,9 +191,9 @@ class QuotaServiceTest extends IntegrationTestBase {
 
     @Test
     void update_recordsQuotaChange_emitsQuotaLimitChangedAudit() {
-        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
         Quota q = quotaService.create(
-                Quota.Scope.PROJECT, projectId,
+                Quota.Scope.TEAM, teamId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
                 500L, EnforcementMode.BLOCK, QuotaType.CEILING, null, null, null, null);
 
@@ -207,9 +207,9 @@ class QuotaServiceTest extends IntegrationTestBase {
 
     @Test
     void reservationRequiresExplicitParentBudget() {
-        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
         assertThatThrownBy(() -> quotaService.create(
-                Quota.Scope.SERVICE, projectId, Quota.ResourceType.COST_USD_CENTS,
+                Quota.Scope.SERVICE, teamId, Quota.ResourceType.COST_USD_CENTS,
                 Quota.Period.MONTHLY_CALENDAR, 1_000L, EnforcementMode.BLOCK,
                 QuotaType.RESERVATION, ServiceType.WORKFLOW, null, null, null))
                 .isInstanceOf(IllegalArgumentException.class)

@@ -16,25 +16,25 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Admin endpoint for previewing the resolved context for a project without
+ * Admin endpoint for previewing the resolved context for a Team without
  * requiring a conversation.  Used by the E2E spec and the UI Effective Context
  * Preview page.
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/v1/admin/projects/{projectId}/context-preview")
+@RequestMapping("/api/v1/admin/teams/{teamId}/context-preview")
 @RequiredArgsConstructor
-@Tag(name = "Context Preview", description = "Preview the resolved AI context for a project")
+@Tag(name = "Context Preview", description = "Preview the resolved AI context for a Team")
 public class ContextPreviewController {
 
     private final ContextBuilder contextBuilder;
     private final ai.myrmec.engine.conversation.ConversationRepository conversationRepository;
 
     @GetMapping
-    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
-    @Operation(summary = "Preview the resolved context for a project and service type")
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
+    @Operation(summary = "Preview the resolved context for a Team and service type")
     public ResponseEntity<Map<String, Object>> preview(
-            @PathVariable("projectId") UUID projectId,
+            @PathVariable("teamId") UUID teamId,
             @RequestParam(defaultValue = "CONVERSATION") String serviceType,
             @RequestParam(required = false) String fileType,
             @RequestParam(required = false) UUID conversationId) {
@@ -52,7 +52,7 @@ public class ContextPreviewController {
         }
 
         AssembledContext ctx = contextBuilder.assemble(
-                projectId, null, serviceType, conversationId, null, 0, executionContext, snapshot);
+                teamId, null, serviceType, conversationId, null, 0, executionContext, snapshot);
 
         // Build a serializable response map
         Map<String, Object> response = new LinkedHashMap<>();

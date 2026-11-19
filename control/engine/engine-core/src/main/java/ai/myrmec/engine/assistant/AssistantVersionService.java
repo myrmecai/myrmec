@@ -203,17 +203,17 @@ public class AssistantVersionService {
     private List<ValidationDetail> validatePublishGate(Assistant assistant, AssistantVersion draft) {
         List<ValidationDetail> failures = new ArrayList<>();
 
-        // name: non-empty, unique per project (case-insensitive). Lives on the parent.
+        // name: non-empty, unique per Team (case-insensitive). Lives on the parent.
         String name = assistant.getName();
         if (name == null || name.isBlank()) {
             failures.add(ValidationDetail.of("name", "REQUIRED",
-                    "Name is required and must be unique in this project."));
+                    "Name is required and must be unique in this Team."));
         } else {
             assistantRepository
-                    .findByProjectIdAndNameIgnoreCaseAndArchivedAtIsNull(assistant.getProjectId(), name)
+                    .findByTeamIdAndNameIgnoreCaseAndArchivedAtIsNull(assistant.getTeamId(), name)
                     .filter(other -> !Objects.equals(other.getId(), assistant.getId()))
                     .ifPresent(other -> failures.add(ValidationDetail.of("name", "DUPLICATE",
-                            "Name is required and must be unique in this project.")));
+                            "Name is required and must be unique in this Team.")));
         }
 
         // brain: profile set, exists, ACTIVE, and has a published version

@@ -48,7 +48,7 @@ public final class AuditChainCanonicalizer {
             "entityId",
             "versionId",
             "scopeType",
-            "projectId",
+            "teamId",
             "actorId",
             "actorDisplayName",
             "timestamp",
@@ -108,7 +108,7 @@ public final class AuditChainCanonicalizer {
             case "entityId" -> appendUuid(sb, event.getEntityId());
             case "versionId" -> appendUuid(sb, event.getVersionId());
             case "scopeType" -> appendString(sb, event.getScopeType());
-            case "projectId" -> appendUuid(sb, event.getProjectId());
+            case "teamId" -> appendUuid(sb, event.getTeamId());
             case "actorId" -> appendUuid(sb, event.getActorId());
             case "actorDisplayName" -> appendString(sb, event.getActorDisplayName());
             case "timestamp" -> appendInstant(sb, event.getTimestamp());

@@ -113,7 +113,7 @@ public class SessionAllocator {
      */
     @Transactional
     public Optional<UUID> offer(String kind, UUID refId, String serviceType,
-                                  UUID projectId, UUID hostId) {
+                                  UUID teamId, UUID hostId) {
         AgentHostInstance instance = instanceRepository
                 .findByAgentHostIdAndStatus(hostId, AgentHostInstance.Status.OPEN)
                 .stream()
@@ -141,7 +141,7 @@ public class SessionAllocator {
         Session session = new Session();
         session.setServiceType(serviceType);
         session.setRefId(refId);
-        session.setProjectId(projectId);
+        session.setTeamId(teamId);
         session.setKind(kind);
         session.setHostInstanceId(locked.getId());
         session.setAllocationState(ALLOC_STATE_OFFERED);

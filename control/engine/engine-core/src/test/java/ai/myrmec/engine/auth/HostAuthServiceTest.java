@@ -10,7 +10,6 @@ import ai.myrmec.engine.agent.AgentHostRepository;
 import ai.myrmec.engine.agent.AgentHostType;
 import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.auth.dto.HostLocalRegisterRequest;
-import ai.myrmec.engine.auth.dto.HostRegisterRequest;
 import ai.myrmec.engine.auth.dto.HostRegisterResponse;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
@@ -44,16 +43,13 @@ class HostAuthServiceTest extends IntegrationTestBase {
     void managedRegistrationReturnsHostTokensWithoutCreatingAgentSlot() {
         AgentHostCreationResult result = data.agent().named("managed-host").create();
 
-        HostRegisterRequest request = new HostRegisterRequest();
-        request.setRegistrationKey(result.registrationKey());
-        request.setHostname("build-host-1");
-        request.setRuntimeVersion("1.8.0");
-
-        HostRegisterResponse response = hostAuthService.registerManaged(request);
+        HostRegisterResponse response = hostAuthService.registerManaged(result.registrationKey());
 
         assertThat(response.getHostId()).isEqualTo(result.agent().getId());
         assertThat(response.getAccessToken()).isNotBlank();
         assertThat(response.getRefreshToken()).isNotBlank();
+        assertThat(response.getHostType()).isEqualTo("MANAGED");
+        assertThat(response.getOwnerUserId()).isNull();
         // Protocol §18: "Valid registration key returns host tokens without
         // creating an Agent slot"
         assertThat(agentRepository.countByAgentHostId(response.getHostId())).isZero();
@@ -65,12 +61,7 @@ class HostAuthServiceTest extends IntegrationTestBase {
         result.agent().setStatus(AgentHost.Status.INACTIVE);
         agentHostRepository.save(result.agent());
 
-        HostRegisterRequest request = new HostRegisterRequest();
-        request.setRegistrationKey(result.registrationKey());
-        request.setHostname("build-host-2");
-        request.setRuntimeVersion("1.8.0");
-
-        assertThatThrownBy(() -> hostAuthService.registerManaged(request))
+        assertThatThrownBy(() -> hostAuthService.registerManaged(result.registrationKey()))
                 .isInstanceOf(InvalidRegistrationKeyException.class);
     }
 
@@ -86,12 +77,7 @@ class HostAuthServiceTest extends IntegrationTestBase {
         AgentHost localHost = agentHostRepository.findById(local.getHostId()).orElseThrow();
         assertThat(localHost.getHostType()).isEqualTo(AgentHostType.LOCAL);
 
-        HostRegisterRequest managedPath = new HostRegisterRequest();
-        managedPath.setRegistrationKey(localHost.getRegistrationKey());
-        managedPath.setHostname("dev-laptop");
-        managedPath.setRuntimeVersion("1.8.0");
-
-        assertThatThrownBy(() -> hostAuthService.registerManaged(managedPath))
+        assertThatThrownBy(() -> hostAuthService.registerManaged(localHost.getRegistrationKey()))
                 .isInstanceOf(InvalidRegistrationKeyException.class)
                 .hasMessageContaining("LOCAL");
     }
@@ -115,5 +101,7 @@ class HostAuthServiceTest extends IntegrationTestBase {
         assertThat(response.getHostId()).isNotNull();
         assertThat(response.getAccessToken()).isNotBlank();
         assertThat(response.getRefreshToken()).isNotBlank();
+        assertThat(response.getHostType()).isEqualTo("LOCAL");
+        assertThat(response.getOwnerUserId()).isEqualTo(TEST_ADMIN_ID);
     }
 }

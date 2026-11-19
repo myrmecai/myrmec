@@ -12,7 +12,7 @@ import ai.myrmec.engine.assistant.AssistantVersionRepository;
 import ai.myrmec.engine.assistant.AssistantVersionService;
 import ai.myrmec.engine.external.dto.ExternalAssistantResponse;
 import ai.myrmec.engine.external.dto.ExternalConversationResponse;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.serviceaccount.ServiceAccount;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.AfterEach;
@@ -78,8 +78,8 @@ class ExternalApiChainIT extends IntegrationTestBase {
      * The shared {@code cleanupTestData()} in the base class clears projects
      * but not assistant tables. Because this is a non-transactional HTTP test,
      * committed assistants would otherwise survive into the next test and
-     * collide with the base cleanup's {@code projectRepository.deleteAll()}
-     * (assistants still reference the project). Clear them after each test.
+     * collide with the base cleanup's {@code TeamRepository.deleteAll()}
+     * (assistants still reference the team). Clear them after each test.
      */
     @AfterEach
     void clearAssistantData() {
@@ -174,7 +174,7 @@ class ExternalApiChainIT extends IntegrationTestBase {
     void hidesUngrantedAssistantWith404() {
         Fixture f = fixture("chain-gate");
         // A second assistant the service account has no USE grant on.
-        UUID ungranted = publishedAssistant(f.project, f.profile, "Ungranted");
+        UUID ungranted = publishedAssistant(f.team, f.profile, "Ungranted");
 
         ResponseEntity<String> response = restTemplate.exchange(
                 "/api/v1/external/assistants/" + ungranted,
@@ -200,23 +200,23 @@ class ExternalApiChainIT extends IntegrationTestBase {
 
     // ==================== Fixtures ====================
 
-    private record Fixture(Project project, AgentProfile profile,
+    private record Fixture(team team, AgentProfile profile,
                            UUID assistantId, String clientId) {
     }
 
     private Fixture fixture(String slug) {
-        Project project = data.project().named(slug).create();
+        team team = data.team().named(slug).create();
         AgentProfile profile = data.agentProfile().named(slug + "-profile").create();
-        ServiceAccount sa = serviceAccount(project);
-        UUID assistantId = publishedAssistant(project, profile, slug + "-assistant");
+        ServiceAccount sa = serviceAccount(team);
+        UUID assistantId = publishedAssistant(team, profile, slug + "-assistant");
         assistantService.addGrant(assistantId, AssistantGrant.PrincipalType.SERVICE_ACCOUNT,
                 sa.getId().toString(), AssistantGrant.Permission.USE, TEST_ADMIN_ID);
-        return new Fixture(project, profile, assistantId, sa.getKeycloakClientId());
+        return new Fixture(team, profile, assistantId, sa.getKeycloakClientId());
     }
 
-    private UUID publishedAssistant(Project project, AgentProfile profile, String name) {
+    private UUID publishedAssistant(team team, AgentProfile profile, String name) {
         Assistant assistant = assistantService.createAssistant(
-                project.getId(), name, "desc", profile.getId(), TEST_ADMIN_ID);
+                team.getId(), name, "desc", profile.getId(), TEST_ADMIN_ID);
         AssistantVersion draft = versionService.getOpenDraft(assistant.getId());
         draft.setUsableVia(new ArrayList<>(List.of("WEB_UI", "EXTERNAL_API")));
         versionService.saveDraft(draft);
@@ -224,9 +224,9 @@ class ExternalApiChainIT extends IntegrationTestBase {
         return assistant.getId();
     }
 
-    private ServiceAccount serviceAccount(Project project) {
+    private ServiceAccount serviceAccount(team team) {
         ServiceAccount sa = new ServiceAccount();
-        sa.setProjectId(project.getId());
+        sa.setTeamId(team.getId());
         sa.setName("chain-sa-" + UUID.randomUUID());
         sa.setKeycloakClientId("client-" + UUID.randomUUID());
         sa.setEnabled(true);

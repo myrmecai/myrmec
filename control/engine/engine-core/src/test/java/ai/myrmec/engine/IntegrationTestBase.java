@@ -9,7 +9,7 @@ import ai.myrmec.engine.spi.crypto.EncryptionService;
 import ai.myrmec.engine.audit.AuditEventRepository;
 import ai.myrmec.engine.model.Model;
 import ai.myrmec.engine.model.ModelRepository;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.TeamRepository;
 import ai.myrmec.engine.user.User;
 import ai.myrmec.engine.user.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,7 +41,7 @@ public abstract class IntegrationTestBase {
     protected JwtTokenProvider jwtTokenProvider;
 
     @Autowired
-    protected ProjectRepository projectRepository;
+    protected TeamRepository TeamRepository;
 
     @Autowired
     protected AuditEventRepository auditEventRepository;
@@ -116,13 +116,13 @@ public abstract class IntegrationTestBase {
     protected ai.myrmec.engine.knowledge.DataFeedRepository dataFeedRepository;
 
     @Autowired
-    protected ai.myrmec.engine.project.ProjectSettingRepository projectSettingRepository;
+    protected ai.myrmec.engine.team.ProjectSettingRepository projectSettingRepository;
 
     @Autowired
-    protected ai.myrmec.engine.project.ProjectInstructionBindingRepository projectInstructionBindingRepository;
+    protected ai.myrmec.engine.team.ProjectInstructionBindingRepository projectInstructionBindingRepository;
 
     @Autowired
-    protected ai.myrmec.engine.project.ProjectProviderBindingRepository projectProviderBindingRepository;
+    protected ai.myrmec.engine.team.ProjectProviderBindingRepository projectProviderBindingRepository;
 
     @Autowired
     protected ai.myrmec.engine.assistant.AssistantContextBindingRepository assistantContextBindingRepository;
@@ -266,7 +266,7 @@ public abstract class IntegrationTestBase {
         auditEventRepository.deleteAllInBatch();
         // auth_codes references users(id); clear before users.
         authCodeRepository.deleteAllInBatch();
-        projectRepository.deleteAll();
+        TeamRepository.deleteAll();
 
         // Get or create the test admin user
         TEST_ADMIN_ID = userRepository.findByEmail(TEST_ADMIN_EMAIL)
@@ -326,14 +326,14 @@ public abstract class IntegrationTestBase {
     }
 
     /**
-     * Get HTTP headers with user JWT token having project-scoped EDITOR role.
+     * Get HTTP headers with user JWT token having team-scoped EDITOR role.
      */
-    protected HttpHeaders userHeaders(UUID userId, UUID projectId) {
+    protected HttpHeaders userHeaders(UUID userId, UUID teamId) {
         String token = jwtTokenProvider.generateUserAccessToken(
                 userId,
                 "Test User",
                 "user@test.local",
-                List.of("proj:" + projectId + ":EDITOR"));
+                List.of("proj:" + teamId + ":EDITOR"));
 
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(token);

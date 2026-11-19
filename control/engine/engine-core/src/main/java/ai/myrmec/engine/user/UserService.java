@@ -123,7 +123,7 @@ public class UserService {
                                UserRole.Role role,
                                UserRole.ScopeType scopeType,
                                UUID groupId,
-                               UUID projectId,
+                               UUID teamId,
                                UUID grantedByUserId) {
         findById(userId);
 
@@ -132,20 +132,20 @@ public class UserService {
         userRole.setRole(role);
         userRole.setScopeType(scopeType);
         userRole.setGroupId(groupId);
-        userRole.setProjectId(projectId);
+        userRole.setTeamId(teamId);
         userRole.setGrantedByUserId(grantedByUserId);
 
         userRole = userRoleRepository.save(userRole);
 
-        log.info("Assigned role {} ({}) to user {} (group={}, project={}, granted by={})",
-                role, scopeType, userId, groupId, projectId, grantedByUserId);
+        log.info("Assigned role {} ({}) to user {} (group={}, Team={}, granted by={})",
+                role, scopeType, userId, groupId, teamId, grantedByUserId);
         auditEventService.recordEvent(ResourceType.USER, userId, AuditAction.USER_ROLE_GRANTED, scopeType.name(),
-                scopeType == UserRole.ScopeType.PROJECT ? projectId : null,
+                scopeType == UserRole.ScopeType.TEAM ? teamId : null,
                 grantedByUserId, "USER",
                 null, null, null, null,
                 java.util.Map.of("role", role.name(), "scopeType", scopeType.name(),
                         "groupId", groupId != null ? groupId.toString() : "",
-                        "projectId", projectId != null ? projectId.toString() : ""));
+                        "teamId", teamId != null ? teamId.toString() : ""));
 
         return userRole;
     }
@@ -225,7 +225,7 @@ public class UserService {
      */
     @Transactional(readOnly = true)
     public boolean isPlatformAdmin(UUID userId) {
-        return userRoleRepository.existsByUserIdAndRoleAndProjectIdIsNull(userId, UserRole.Role.PLATFORM_ADMIN);
+        return userRoleRepository.existsByUserIdAndRoleAndTeamIdIsNull(userId, UserRole.Role.PLATFORM_ADMIN);
     }
 
     /**

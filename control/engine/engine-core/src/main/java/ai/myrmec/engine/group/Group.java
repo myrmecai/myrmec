@@ -20,7 +20,7 @@ import java.util.UUID;
  * that were not assigned an explicit group.
  */
 @Entity
-@Table(name = "groups")
+@Table(name = "org_groups")
 @Getter
 @Setter
 @NoArgsConstructor

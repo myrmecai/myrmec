@@ -9,13 +9,13 @@ import java.util.UUID;
  * call must validate before any host lookup. A mismatch anywhere fails
  * 404 RESOURCE_NOT_FOUND.
  *
- * @param projectId   the project the workflow lives in
+ * @param teamId   the Team the workflow lives in
  * @param workflowId  the workflow the request belongs to
  * @param requestId   the workflow request
  * @param taskId      the task inside the request
  * @param attemptId   the task attempt the execution serves
  * @param executionId the session_executions row (§3.1)
  */
-public record ExecutionScope(UUID projectId, UUID workflowId, UUID requestId,
+public record ExecutionScope(UUID teamId, UUID workflowId, UUID requestId,
                              UUID taskId, UUID attemptId, UUID executionId) {
 }

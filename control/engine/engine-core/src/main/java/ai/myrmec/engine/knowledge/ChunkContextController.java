@@ -15,20 +15,20 @@ import java.util.UUID;
 /**
  * UI endpoint for the chunk context side panel.
  *
- * <p>Exposes {@code GET /api/v1/projects/{projectId}/knowledge-bases/{kbId}/chunks/{chunkId}/context}
+ * <p>Exposes {@code GET /api/v1/teams/{teamId}/knowledge-bases/{kbId}/chunks/{chunkId}/context}
  * so the UI can show the passage and its neighbours for a citation.</p>
  */
 @RestController
-@RequestMapping("/api/v1/projects/{projectId}/knowledge-bases/{kbId}")
+@RequestMapping("/api/v1/teams/{teamId}/knowledge-bases/{kbId}")
 @RequiredArgsConstructor
 public class ChunkContextController {
 
     private final ChunkContextService chunkContextService;
 
     @GetMapping("/chunks/{chunkId}/context")
-    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
     public ResponseEntity<ChunkContext> getContext(
-            @PathVariable UUID projectId,
+            @PathVariable UUID teamId,
             @PathVariable UUID kbId,
             @PathVariable UUID chunkId) {
         return ResponseEntity.ok(chunkContextService.getContext(chunkId, kbId));

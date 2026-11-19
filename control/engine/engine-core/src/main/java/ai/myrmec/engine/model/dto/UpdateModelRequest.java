@@ -4,6 +4,7 @@ import ai.myrmec.engine.model.ModelStatus;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.util.Map;
 
 /**
@@ -19,8 +20,6 @@ public class UpdateModelRequest {
     @Size(max = 500, message = "API endpoint cannot exceed 500 characters")
     private String apiEndpoint;
 
-    private Boolean supportsVision;
-
     private Map<String, Object> infraConfig;
 
     private Map<String, Object> defaultParams;
@@ -31,4 +30,9 @@ public class UpdateModelRequest {
     private java.math.BigDecimal outputPrice;
     @Size(max = 3)
     private String currency;
+
+    private Integer contextWindowTokens;
+    private Integer maxOutputTokens;
+    private LocalDate trainingCutoffDate;
+    private LocalDate releaseDate;
 }

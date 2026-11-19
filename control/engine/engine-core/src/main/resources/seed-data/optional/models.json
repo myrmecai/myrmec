@@ -1,0 +1,26 @@
+[
+  {
+    "code": "github-gpt-4o",
+    "name": "GPT-4o (GitHub Models)",
+    "provider": "github_models",
+    "modelId": "gpt-4o",
+    "apiEndpoint": "https://models.inference.ai.azure.com",
+    "infraConfig": null,
+    "defaultParams": { "temperature": 0.7 },
+    "inputPrice": 5.000000,
+    "outputPrice": 15.000000,
+    "currency": "USD",
+    "contextWindowTokens": 128000,
+    "maxOutputTokens": 16384,
+    "trainingCutoffDate": "2023-10-01",
+    "releaseDate": "2024-05-01",
+    "capabilities": [
+      { "code": "VISION", "parameters": { "maxImages": 8 } },
+      { "code": "INPUT_TEXT" },
+      { "code": "INPUT_IMAGE" },
+      { "code": "OUTPUT_TEXT" },
+      { "code": "STREAMING" },
+      { "code": "TOOL_USE" }
+    ]
+  }
+]

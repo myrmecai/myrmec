@@ -9,8 +9,8 @@ import java.util.UUID;
 
 @Data
 public class HostLocalRegisterRequest {
-    /** Project scope, or null for a system-wide local host. */
-    private UUID projectId;
+    /** Team scope, or null for a system-wide local host. */
+    private UUID teamId;
     private String hostname;
     private String runtimeVersion;
     private Map<String, Object> metadata;

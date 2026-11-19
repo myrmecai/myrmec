@@ -30,7 +30,7 @@ import java.util.UUID;
  *   <li>{@code dispatchId} = the attempt UUID (V1).</li>
  *   <li>Complete {@code DispatchIdentity} tuple: workflow ID, runId, selected
  *       step ID, task ID, attempt ID, immutable attempt ordinal, dispatchId.</li>
- *   <li>Source resolved from the workflow artifacts repo (project workspace
+ *   <li>Source resolved from the workflow artifacts repo (Team workspace
  *       fallback), {@code sourceBranch} resolved to an immutable base commit
  *       via {@link OrchestrationSourceResolver}, unique target branch.</li>
  *   <li>Secret IDs replaced with session-scoped credential references.</li>
@@ -74,7 +74,7 @@ public class OrchestrationAssignmentAssembler {
                                         ContinuationDirective continuation) {
         try {
             // Re-attach the graph inside this transaction: task → request →
-            // workflow → project may be detached proxies when called from
+            // workflow → Team may be detached proxies when called from
             // outside a persistence context.
             task = workflowTaskRepository.findById(task.getId())
                     .orElse(task);
@@ -298,7 +298,7 @@ public class OrchestrationAssignmentAssembler {
     }
 
     /**
-     * Project one stored step map to the §7 {@code OrchestrationStepAuthoring}
+     * Team one stored step map to the §7 {@code OrchestrationStepAuthoring}
      * shape the Agent's strict runtime schema accepts: id, name, taskType,
      * agentProfileCode, dependsOn, retryPolicy, orchestration — and the
      * orchestration sub-map WITHOUT the engine-local agentProfileCode alias.

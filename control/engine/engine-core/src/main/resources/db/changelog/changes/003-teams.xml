@@ -1,0 +1,354 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+
+    <!-- ================================================================
+         teams
+         ================================================================ -->
+    <changeSet id="002-teams-create-teams" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="teams" />
+            </not>
+        </preConditions>
+
+        <createTable tableName="teams">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="name" type="varchar(200)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uk_teams_name" />
+            </column>
+            <column name="group_id" type="uuid">
+                <constraints nullable="false" />
+            </column>
+            <column name="description" type="text" />
+            <column name="allowed_service_types" type="text"
+                defaultValue='["WORKFLOW","CONVERSATIONAL"]'>
+                <constraints nullable="false" />
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="ACTIVE">
+                <constraints nullable="false" />
+            </column>
+            <column name="workspace_repo_url" type="varchar(500)" />
+            <column name="workspace_repo_branch" type="varchar(100)" defaultValue="main" />
+            <column name="workspace_credential_secret_id" type="uuid" />
+            <column name="auto_hitl_on_destructive" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false" />
+            </column>
+            <column name="snapshot_retention_days" type="int" defaultValueNumeric="90">
+                <constraints nullable="false" />
+            </column>
+            <column name="snapshot_sampling_rate" type="numeric(4,3)" defaultValueNumeric="1.000">
+                <constraints nullable="false" />
+            </column>
+            <column name="attachments_enabled" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false" />
+            </column>
+            <column name="attachment_retention_ttl_days" type="int" />
+            <column name="attachment_max_file_size_bytes" type="bigint" />
+            <column name="attachment_type_allowlist" type="text" />
+            <column name="created_at" type="timestamp with time zone"
+                defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false" />
+            </column>
+            <column name="updated_at" type="timestamp with time zone" />
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="teams"
+            baseColumnNames="group_id"
+            constraintName="fk_teams_group"
+            referencedTableName="org_groups"
+            referencedColumnNames="id"
+            onDelete="RESTRICT" />
+
+        <createIndex indexName="idx_teams_status" tableName="teams">
+            <column name="status" />
+        </createIndex>
+
+        <createIndex indexName="idx_teams_group_id" tableName="teams">
+            <column name="group_id" />
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         team_settings
+         ================================================================ -->
+    <changeSet id="002-teams-create-team-settings" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="team_settings" />
+            </not>
+        </preConditions>
+
+        <createTable tableName="team_settings">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="team_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_ts_team"
+                    references="teams(id)" />
+            </column>
+            <column name="setting_key" type="varchar(120)">
+                <constraints nullable="false" />
+            </column>
+            <column name="value_type" type="varchar(20)">
+                <constraints nullable="false" />
+            </column>
+            <column name="setting_value" type="text" />
+            <column name="description" type="varchar(500)" />
+            <column name="updated_by" type="uuid" />
+            <column name="created_at" type="timestamp with time zone"
+                defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false" />
+            </column>
+            <column name="updated_at" type="timestamp with time zone"
+                defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false" />
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="002-teams-team-settings-unique" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="uq_ts_team_key" />
+            </not>
+        </preConditions>
+        <createIndex indexName="uq_ts_team_key"
+            tableName="team_settings" unique="true">
+            <column name="team_id" />
+            <column name="setting_key" />
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         team_instruction_bindings
+         ================================================================ -->
+    <changeSet id="002-teams-create-team-instruction-bindings" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="team_instruction_bindings" />
+            </not>
+        </preConditions>
+
+        <createTable tableName="team_instruction_bindings">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="team_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_tib_team"
+                    references="teams(id)" />
+            </column>
+            <column name="instruction_asset_id" type="uuid">
+                <constraints nullable="false" />
+            </column>
+            <column name="enabled" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false" />
+            </column>
+            <column name="created_at" type="timestamp with time zone"
+                defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false" />
+            </column>
+            <column name="updated_at" type="timestamp with time zone"
+                defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false" />
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="002-teams-team-instruction-bindings-unique" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="uq_tib_team_asset" />
+            </not>
+        </preConditions>
+        <createIndex indexName="uq_tib_team_asset"
+            tableName="team_instruction_bindings" unique="true">
+            <column name="team_id" />
+            <column name="instruction_asset_id" />
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         team_provider_bindings
+         ================================================================ -->
+    <changeSet id="002-teams-create-team-provider-bindings" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="team_provider_bindings" />
+            </not>
+        </preConditions>
+
+        <createTable tableName="team_provider_bindings">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="team_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_tpb_team"
+                    references="teams(id)" />
+            </column>
+            <column name="provider_id" type="uuid">
+                <constraints nullable="false" />
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="INACTIVE">
+                <constraints nullable="false" />
+            </column>
+            <column name="created_at" type="timestamp with time zone"
+                defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false" />
+            </column>
+            <column name="updated_at" type="timestamp with time zone"
+                defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false" />
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="002-teams-team-provider-bindings-unique" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <indexExists indexName="uq_tpb_team_provider" />
+            </not>
+        </preConditions>
+        <createIndex indexName="uq_tpb_team_provider"
+            tableName="team_provider_bindings" unique="true">
+            <column name="team_id" />
+            <column name="provider_id" />
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         Cross-file FKs: tables created in earlier files that reference
+         teams(id) or tables created in later files that are referenced
+         by team_* tables created in this file.
+         Added here so the constraint is valid at creation time.
+         ================================================================ -->
+
+    <!-- service_accounts.team_id → teams(id) — table created in 001-core-security.xml -->
+    <changeSet id="002-teams-add-service-account-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_service_account_team" />
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="service_accounts"
+            baseColumnNames="team_id"
+            referencedTableName="teams"
+            referencedColumnNames="id"
+            constraintName="fk_service_account_team" />
+    </changeSet>
+
+    <changeSet id="004-models-add-agent-profiles-model-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_agent_profiles_model" />
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="agent_profile_versions"
+            baseColumnNames="default_model"
+            referencedTableName="models"
+            referencedColumnNames="code"
+            constraintName="fk_agent_profiles_model"
+            onDelete="SET NULL" />
+        <addForeignKeyConstraint
+            baseTableName="connection_configs"
+            baseColumnNames="team_id"
+            constraintName="fk_conn_config_team"
+            referencedTableName="teams"
+            referencedColumnNames="id"
+            onDelete="CASCADE" />
+    </changeSet>
+    <!-- Foreign key to teams (nullable: NULL = global secret) -->
+    <changeSet id="006-secrets-fk-team" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="secrets" />
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_secrets_team" />
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="secrets"
+            baseColumnNames="team_id"
+            referencedTableName="teams"
+            referencedColumnNames="id"
+            constraintName="fk_secrets_team"
+            onDelete="CASCADE" />
+        <addForeignKeyConstraint
+            baseTableName="instruction_assets"
+            baseColumnNames="team_id"
+            constraintName="fk_instr_asset_team"
+            referencedTableName="teams"
+            referencedColumnNames="id"
+            onDelete="CASCADE" />
+
+        <addForeignKeyConstraint
+            baseTableName="knowledge_providers"
+            baseColumnNames="team_id"
+            constraintName="fk_kp_team"
+            referencedTableName="teams"
+            referencedColumnNames="id"
+            onDelete="CASCADE" />
+        <addForeignKeyConstraint
+            baseTableName="knowledge_sources"
+            baseColumnNames="team_id"
+            constraintName="fk_ks_team"
+            referencedTableName="teams"
+            referencedColumnNames="id"
+            onDelete="CASCADE" />
+        <addForeignKeyConstraint
+            baseTableName="data_feeds"
+            baseColumnNames="team_id"
+            constraintName="fk_df_team"
+            referencedTableName="teams"
+            referencedColumnNames="id"
+            onDelete="CASCADE" />
+    </changeSet>
+    <!-- team_instruction_bindings.instruction_asset_id → instruction_assets(id)
+         — instruction_assets created in 007b-ai-context.xml -->
+    <changeSet id="002-teams-add-tib-instruction-asset-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_tib_instruction_asset" />
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="team_instruction_bindings"
+            baseColumnNames="instruction_asset_id"
+            referencedTableName="instruction_assets"
+            referencedColumnNames="id"
+            constraintName="fk_tib_instruction_asset" />
+    </changeSet>
+
+    <!-- team_provider_bindings.provider_id → knowledge_providers(id)
+         — knowledge_providers created in 007b-ai-context.xml -->
+    <changeSet id="002-teams-add-tpb-provider-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_tpb_provider" />
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="team_provider_bindings"
+            baseColumnNames="provider_id"
+            referencedTableName="knowledge_providers"
+            referencedColumnNames="id"
+            constraintName="fk_tpb_provider" />
+
+        <addForeignKeyConstraint
+            baseTableName="agent_hosts"
+            baseColumnNames="team_id"
+            referencedTableName="teams"
+            referencedColumnNames="id"
+            constraintName="fk_agent_hosts_team"
+            onDelete="SET NULL" />
+    </changeSet>
+</databaseChangeLog>

@@ -47,7 +47,7 @@ public class InstructionAssetService {
 
     @Transactional(readOnly = true)
     public List<InstructionAsset> findAllOrgScoped() {
-        return repository.findByScopeAndProjectIdIsNull(Scope.ORGANIZATION);
+        return repository.findByScopeAndTeamIdIsNull(Scope.ORGANIZATION);
     }
 
     /**
@@ -57,14 +57,14 @@ public class InstructionAssetService {
      */
     @Transactional(readOnly = true)
     public List<InstructionAssetResponse> findAllOrgScopedWithAvailability() {
-        return repository.findByScopeAndProjectIdIsNull(Scope.ORGANIZATION).stream()
+        return repository.findByScopeAndTeamIdIsNull(Scope.ORGANIZATION).stream()
                 .map(a -> InstructionAssetResponse.from(a, getPublishedVersionOrNull(a.getId()), getDraftVersion(a.getId())))
                 .toList();
     }
 
     @Transactional(readOnly = true)
-    public List<InstructionAsset> findAllProjectScoped(UUID projectId) {
-        return repository.findByScopeAndProjectId(Scope.PROJECT, projectId);
+    public List<InstructionAsset> findAllTeamScoped(UUID teamId) {
+        return repository.findByScopeAndTeamId(Scope.TEAM, teamId);
     }
 
     @Transactional(readOnly = true)
@@ -98,11 +98,11 @@ public class InstructionAssetService {
     // ---- create ------------------------------------------------------
 
     @Transactional
-    public InstructionAsset create(String scope, UUID projectId, String name, String description,
+    public InstructionAsset create(String scope, UUID teamId, String name, String description,
                                    String category, UUID actorId, String actorDisplayName) {
-        boolean exists = projectId == null
-                ? repository.existsByScopeAndProjectIdIsNullAndName(scope, name)
-                : repository.existsByScopeAndProjectIdAndName(scope, projectId, name);
+        boolean exists = teamId == null
+                ? repository.existsByScopeAndTeamIdIsNullAndName(scope, name)
+                : repository.existsByScopeAndTeamIdAndName(scope, teamId, name);
         if (exists) {
             throw BadRequestException.forField("name", "DUPLICATE_CODE",
                     "An instruction asset with this name already exists in this scope.");
@@ -110,7 +110,7 @@ public class InstructionAssetService {
 
         InstructionAsset asset = new InstructionAsset();
         asset.setScope(scope);
-        asset.setProjectId(projectId);
+        asset.setTeamId(teamId);
         asset.setName(name);
         asset.setDescription(description);
         asset.setCategory(category);
@@ -123,7 +123,7 @@ public class InstructionAssetService {
 
         auditEventService.recordEvent(
                 ResourceType.INSTRUCTION_ASSET, saved.getId(), AuditAction.CREATED,
-                scope, projectId, actorId, actorDisplayName,
+                scope, teamId, actorId, actorDisplayName,
                 null, null, null, Map.of("name", name, "category", category), null);
 
         return saved;
@@ -137,9 +137,9 @@ public class InstructionAssetService {
         InstructionAsset asset = findById(assetId);
 
         if (name != null && !name.isBlank() && !name.equals(asset.getName())) {
-            boolean exists = asset.getProjectId() == null
-                    ? repository.existsByScopeAndProjectIdIsNullAndName(asset.getScope(), name)
-                    : repository.existsByScopeAndProjectIdAndName(asset.getScope(), asset.getProjectId(), name);
+            boolean exists = asset.getTeamId() == null
+                    ? repository.existsByScopeAndTeamIdIsNullAndName(asset.getScope(), name)
+                    : repository.existsByScopeAndTeamIdAndName(asset.getScope(), asset.getTeamId(), name);
             if (exists) {
                 throw BadRequestException.forField("name", "DUPLICATE_CODE",
                         "An instruction asset with this name already exists in this scope.");
@@ -161,7 +161,7 @@ public class InstructionAssetService {
 
         auditEventService.recordEvent(
                 ResourceType.INSTRUCTION_ASSET, assetId, AuditAction.UPDATED,
-                asset.getScope(), asset.getProjectId(), actorId, actorDisplayName,
+                asset.getScope(), asset.getTeamId(), actorId, actorDisplayName,
                 null, null, null, Map.of("name", saved.getName()), null);
 
         return saved;
@@ -181,8 +181,8 @@ public class InstructionAssetService {
 
         // Governance: INSTRUCTION_SOURCES
         governanceEnforcer.assertAllowed(
-            asset.getProjectId() != null
-                ? GovernanceScope.ofProject(asset.getProjectId())
+            asset.getTeamId() != null
+                ? GovernanceScope.ofTeam(asset.getTeamId())
                 : GovernanceScope.orgScope(),
             ProductFeature.INSTRUCTION_SOURCES,
             sourceType);
@@ -193,11 +193,11 @@ public class InstructionAssetService {
         // assertPermitted, not assertAllowed — ALL permits PROJECT_SERVICE.
         if ("INLINE".equals(sourceType)) {
             governanceEnforcer.assertPermitted(
-                asset.getProjectId() != null
-                    ? GovernanceScope.ofProject(asset.getProjectId())
+                asset.getTeamId() != null
+                    ? GovernanceScope.ofTeam(asset.getTeamId())
                     : GovernanceScope.orgScope(),
                 ProductFeature.INLINE_INSTRUCTIONS_SCOPE,
-                asset.getProjectId() != null ? "PROJECT_SERVICE" : "ALL");
+                asset.getTeamId() != null ? "PROJECT_SERVICE" : "ALL");
         }
 
         // Check if a draft already exists
@@ -230,7 +230,7 @@ public class InstructionAssetService {
 
         auditEventService.recordEvent(
                 ResourceType.INSTRUCTION_ASSET, assetId, AuditAction.DRAFT_CREATED,
-                asset.getScope(), asset.getProjectId(), actorId, actorDisplayName,
+                asset.getScope(), asset.getTeamId(), actorId, actorDisplayName,
                 saved.getId(), null, null, Map.of("version_number", versionNumber), null);
 
         return saved;
@@ -272,7 +272,7 @@ public class InstructionAssetService {
 
         auditEventService.recordEvent(
                 ResourceType.INSTRUCTION_ASSET, assetId, EntityStatus.PUBLISHED,
-                asset.getScope(), asset.getProjectId(), actorId, actorDisplayName,
+                asset.getScope(), asset.getTeamId(), actorId, actorDisplayName,
                 saved.getId(), null, null, Map.of("version_number", draft.getVersionNumber()), null);
 
         return saved;
@@ -292,7 +292,7 @@ public class InstructionAssetService {
 
         auditEventService.recordEvent(
                 ResourceType.INSTRUCTION_ASSET, assetId, AuditAction.DRAFT_DISCARDED,
-                asset.getScope(), asset.getProjectId(), actorId, actorDisplayName,
+                asset.getScope(), asset.getTeamId(), actorId, actorDisplayName,
                 draft.getId(), null, null, null, null);
     }
 
@@ -333,7 +333,7 @@ public class InstructionAssetService {
 
         auditEventService.recordEvent(
                 ResourceType.INSTRUCTION_ASSET, assetId, EntityStatus.DISABLED,
-                asset.getScope(), asset.getProjectId(), actorId, actorDisplayName,
+                asset.getScope(), asset.getTeamId(), actorId, actorDisplayName,
                 null, AuditReason.ADMIN_DISABLED, null, null, null);
 
         return saved;
@@ -349,7 +349,7 @@ public class InstructionAssetService {
 
         auditEventService.recordEvent(
                 ResourceType.INSTRUCTION_ASSET, assetId, AuditAction.REENABLED,
-                asset.getScope(), asset.getProjectId(), actorId, actorDisplayName,
+                asset.getScope(), asset.getTeamId(), actorId, actorDisplayName,
                 null, AuditReason.ADMIN_REENABLED, null, null, null);
 
         return saved;
@@ -365,7 +365,7 @@ public class InstructionAssetService {
 
         auditEventService.recordEvent(
                 ResourceType.INSTRUCTION_ASSET, assetId, EntityStatus.ARCHIVED,
-                asset.getScope(), asset.getProjectId(), actorId, actorDisplayName,
+                asset.getScope(), asset.getTeamId(), actorId, actorDisplayName,
                 null, AuditReason.ADMIN_ARCHIVED, null, null, null);
 
         return saved;

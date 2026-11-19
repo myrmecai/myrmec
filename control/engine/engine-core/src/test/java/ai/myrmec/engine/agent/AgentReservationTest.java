@@ -168,10 +168,10 @@ class AgentReservationTest extends IntegrationTestBase {
     }
 
     private Agent idleWorker() {
-        var project = data.project().named("reservation-" + UUID.randomUUID()).create();
+        var team = data.team().named("reservation-" + UUID.randomUUID()).create();
         AgentHost host = data.agent()
                 .named("reservation-host-" + UUID.randomUUID())
-                .inProject(project)
+                .inTeam(team)
                 .create()
                 .agent();
 

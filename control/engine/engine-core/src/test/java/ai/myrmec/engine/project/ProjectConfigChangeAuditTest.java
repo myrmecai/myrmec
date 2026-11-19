@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
 
-package ai.myrmec.engine.project;
+package ai.myrmec.engine.team;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.TestDataFactory;
 import ai.myrmec.engine._system.common.DomainConstants.AuditAction;
 import ai.myrmec.engine._system.common.ResourceType;
 import ai.myrmec.engine.audit.AuditEvent;
-import ai.myrmec.engine.project.dto.UpdateProjectRequest;
+import ai.myrmec.engine.team.dto.UpdateTeamRequest;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,9 +20,9 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * #121 — Project configuration change audit (field-level change history).
+ * #121 — team configuration change audit (field-level change history).
  *
- * <p>Every change to a project's runtime-affecting settings is recorded in
+ * <p>Every change to a team's runtime-affecting settings is recorded in
  * {@code audit_events} with per-field old/new values, answering "who changed
  * the governance posture / HITL toggle / workspace config, and when".</p>
  */
@@ -30,22 +30,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ProjectConfigChangeAuditTest extends IntegrationTestBase {
 
     @Autowired
-    private ProjectService projectService;
+    private TeamService TeamService;
 
     @Autowired
-    private ProjectSettingService projectSettingService;
+    private TeamSettingService TeamSettingService;
 
     @Test
     void projectUpdateRecordsChangedFieldsWithOldAndNew() {
-        Project p = projectRepository.save(TestDataFactory.projectBuilder("cfg-audit-" + UUID.randomUUID()).build());
+        team p = TeamRepository.save(TestDataFactory.projectBuilder("cfg-audit-" + UUID.randomUUID()).build());
 
-        UpdateProjectRequest req = new UpdateProjectRequest();
+        UpdateTeamRequest req = new UpdateTeamRequest();
         req.setAutoHitlOnDestructive(true);
         req.setAttachmentsEnabled(false);
-        projectService.update(p.getId(), req);
+        TeamService.update(p.getId(), req);
 
         List<AuditEvent> events = auditEventRepository
-                .findByEntityTypeAndEntityIdOrderByTimestampDesc(ResourceType.PROJECT, p.getId());
+                .findByEntityTypeAndEntityIdOrderByTimestampDesc(ResourceType.team, p.getId());
         assertThat(events).isNotEmpty();
 
         AuditEvent change = events.stream()
@@ -64,13 +64,13 @@ class ProjectConfigChangeAuditTest extends IntegrationTestBase {
 
     @Test
     void noOpUpdateRecordsNothing() {
-        Project p = projectRepository.save(TestDataFactory.projectBuilder("cfg-noop-" + UUID.randomUUID()).build());
+        team p = TeamRepository.save(TestDataFactory.projectBuilder("cfg-noop-" + UUID.randomUUID()).build());
 
         // Update with no field set → no change → no audit event.
-        projectService.update(p.getId(), new UpdateProjectRequest());
+        TeamService.update(p.getId(), new UpdateTeamRequest());
 
         boolean any = auditEventRepository
-                .findByEntityTypeAndEntityIdOrderByTimestampDesc(ResourceType.PROJECT, p.getId())
+                .findByEntityTypeAndEntityIdOrderByTimestampDesc(ResourceType.team, p.getId())
                 .stream()
                 .anyMatch(e -> AuditAction.CONFIG_CHANGED.equals(e.getEventType()));
         assertThat(any).as("a no-op update must not record a config-change event").isFalse();
@@ -78,15 +78,15 @@ class ProjectConfigChangeAuditTest extends IntegrationTestBase {
 
     @Test
     void settingChangeRecordsKeyOldAndNew() {
-        // audit_events.project_id has an FK to projects(id) — the setting must
-        // belong to a real project, as it always does in production.
-        Project p = projectRepository.save(TestDataFactory.projectBuilder("cfg-set-" + UUID.randomUUID()).build());
-        UUID projectId = p.getId();
+        // audit_events.team_id has an FK to projects(id) — the setting must
+        // belong to a real team, as it always does in production.
+        team p = TeamRepository.save(TestDataFactory.projectBuilder("cfg-set-" + UUID.randomUUID()).build());
+        UUID teamId = p.getId();
 
-        projectSettingService.update(projectId, "attachment_inline_ratio_max", "0.5", TEST_ADMIN_ID);
+        TeamSettingService.update(teamId, "attachment_inline_ratio_max", "0.5", TEST_ADMIN_ID);
 
         List<AuditEvent> events = auditEventRepository
-                .findByScopeTypeAndProjectIdOrderByTimestampDesc("PROJECT", projectId);
+                .findByScopeTypeAndTeamIdOrderByTimestampDesc("TEAM", teamId);
         assertThat(events).isNotEmpty();
 
         AuditEvent change = events.stream()

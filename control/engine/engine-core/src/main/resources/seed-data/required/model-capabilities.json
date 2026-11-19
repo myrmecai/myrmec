@@ -1,0 +1,121 @@
+[
+  {
+    "code": "VISION",
+    "name": "Vision",
+    "description": "Accepts image inputs and can reason over visual content",
+    "isSystem": true,
+    "status": "ACTIVE"
+  },
+  {
+    "code": "EMBEDDING",
+    "name": "Embedding",
+    "description": "Produces vector embeddings for text or multimodal content",
+    "isSystem": true,
+    "status": "ACTIVE"
+  },
+  {
+    "code": "THINKING",
+    "name": "Thinking",
+    "description": "Exposes reasoning / chain-of-thought output (e.g. OpenAI o1/o3)",
+    "isSystem": true,
+    "status": "ACTIVE"
+  },
+  {
+    "code": "DECISION",
+    "name": "Decision",
+    "description": "Supports structured decision / choice output for HITL or policy gates",
+    "isSystem": true,
+    "status": "ACTIVE"
+  },
+  {
+    "code": "TOOL_USE",
+    "name": "Tool Use",
+    "description": "Native function/tool calling support",
+    "isSystem": true,
+    "status": "ACTIVE"
+  },
+  {
+    "code": "FUNCTION_CALLING",
+    "name": "Function Calling",
+    "description": "Legacy parallel function calling support",
+    "isSystem": true,
+    "status": "ACTIVE"
+  },
+  {
+    "code": "JSON_MODE",
+    "name": "JSON Mode",
+    "description": "Reliable structured JSON output mode or mode support",
+    "isSystem": true,
+    "status": "ACTIVE"
+  },
+  {
+    "code": "LONG_CONTEXT",
+    "name": "Long Context",
+    "description": "Supports an above-average context window (>128k tokens)",
+    "isSystem": true,
+    "status": "ACTIVE"
+  },
+  {
+    "code": "INPUT_TEXT",
+    "name": "Input Text",
+    "description": "Accepts text prompts",
+    "isSystem": true,
+    "status": "ACTIVE"
+  },
+  {
+    "code": "INPUT_IMAGE",
+    "name": "Input Image",
+    "description": "Accepts image inputs",
+    "isSystem": true,
+    "status": "ACTIVE"
+  },
+  {
+    "code": "INPUT_AUDIO",
+    "name": "Input Audio",
+    "description": "Accepts audio inputs",
+    "isSystem": true,
+    "status": "ACTIVE"
+  },
+  {
+    "code": "INPUT_VIDEO",
+    "name": "Input Video",
+    "description": "Accepts video inputs",
+    "isSystem": true,
+    "status": "ACTIVE"
+  },
+  {
+    "code": "OUTPUT_TEXT",
+    "name": "Output Text",
+    "description": "Produces text output",
+    "isSystem": true,
+    "status": "ACTIVE"
+  },
+  {
+    "code": "OUTPUT_IMAGE",
+    "name": "Output Image",
+    "description": "Produces image output",
+    "isSystem": true,
+    "status": "ACTIVE"
+  },
+  {
+    "code": "OUTPUT_AUDIO",
+    "name": "Output Audio",
+    "description": "Produces audio output",
+    "isSystem": true,
+    "status": "ACTIVE"
+  },
+  {
+    "code": "OUTPUT_VIDEO",
+    "name": "Output Video",
+    "description": "Produces video output",
+    "isSystem": true,
+    "status": "ACTIVE"
+  },
+  {
+    "code": "STREAMING",
+    "name": "Streaming",
+    "description": "Supports streaming response generation",
+    "isSystem": true,
+    "status": "ACTIVE"
+  }
+]

@@ -3,9 +3,12 @@
 
 package ai.myrmec.engine.agent.dto;
 
+import ai.myrmec.engine.agent.AgentProfileVersionService;
 import ai.myrmec.engine.agent.AgentProfileVersion;
+import ai.myrmec.engine.agent.dto.AgentProfileCapabilityInfo;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -24,7 +27,7 @@ public record AgentProfileVersionResponse(
         UUID profileId,
         Integer versionNumber,
         String status,
-        java.util.List<String> capabilities,
+        List<AgentProfileCapabilityInfo> capabilities,
         Set<String> toolCodes,
         String systemPrompt,
         String defaultModel,
@@ -33,13 +36,13 @@ public record AgentProfileVersionResponse(
         UUID publishedBy,
         Instant createdAt) {
 
-    public static AgentProfileVersionResponse from(AgentProfileVersion version) {
+    public static AgentProfileVersionResponse from(AgentProfileVersion version, AgentProfileVersionService versionService) {
         return new AgentProfileVersionResponse(
                 version.getId(),
                 version.getProfileId(),
                 version.getVersionNumber(),
                 version.getStatus() != null ? version.getStatus().name() : null,
-                version.getCapabilities() != null ? version.getCapabilities() : java.util.List.of(),
+                versionService.getCapabilities(version.getId()),
                 version.getTools() != null
                         ? version.getTools().stream()
                             .map(ai.myrmec.engine.tool.Tool::getCode)

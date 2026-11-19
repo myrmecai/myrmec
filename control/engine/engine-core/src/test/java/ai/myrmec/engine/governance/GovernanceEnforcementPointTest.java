@@ -41,7 +41,7 @@ class GovernanceEnforcementPointTest extends IntegrationTestBase {
     @Autowired
     private QuotaAdminController quotaAdminController;
     @Autowired
-    private ai.myrmec.engine.project.ProjectService projectService;
+    private ai.myrmec.engine.team.TeamService TeamService;
 
     @BeforeEach
     void setStrict() {
@@ -53,12 +53,12 @@ class GovernanceEnforcementPointTest extends IntegrationTestBase {
         profileService.setDefaultProfile("STANDARD", null);
     }
 
-    /** Create a real project so the FK constraint on instruction_assets.project_id passes. */
+    /** Create a real team so the FK constraint on instruction_assets.team_id passes. */
     private UUID createProject() {
-        var req = new ai.myrmec.engine.project.dto.CreateProjectRequest();
-        req.setName("test-project-" + UUID.randomUUID());
-        req.setDescription("Test project for governance enforcement");
-        return projectService.create(req).getId();
+        var req = new ai.myrmec.engine.team.dto.CreateTeamRequest();
+        req.setName("test-team-" + UUID.randomUUID());
+        req.setDescription("Test team for governance enforcement");
+        return TeamService.create(req).getId();
     }
 
     // ── INSTRUCTION_SOURCES ─────────────────────────────────────────
@@ -159,20 +159,20 @@ class GovernanceEnforcementPointTest extends IntegrationTestBase {
     // ── THRESHOLD FEATURES (INLINE_INSTRUCTIONS_SCOPE) ────────────
     // These tests verify the threshold/ordinal enforcement for
     // INLINE_INSTRUCTIONS_SCOPE (NONE < PROJECT_SERVICE < ALL) across
-    // different profiles. Under FLEXIBLE (ALL), a project-scoped INLINE
+    // different profiles. Under FLEXIBLE (ALL), a team-scoped INLINE
     // draft must be allowed (ALL permits PROJECT_SERVICE).
 
     @Test
     void underFlexible_projectScopedInlineInstructionIsAllowed() {
         profileService.setDefaultProfile("FLEXIBLE", null);
         try {
-            UUID projectId = createProject();
+            UUID teamId = createProject();
             InstructionAsset asset = instructionAssetService.create(
-                    "PROJECT", projectId, "test-flex-asset-" + UUID.randomUUID(),
+                    "TEAM", teamId, "test-flex-asset-" + UUID.randomUUID(),
                     "desc", "SYSTEM", null, "tester");
 
             // FLEXIBLE has INLINE_INSTRUCTIONS_SCOPE=ALL, which should permit
-            // project-scoped INLINE (ALL >= PROJECT_SERVICE).
+            // team-scoped INLINE (ALL >= PROJECT_SERVICE).
             InstructionAssetVersion draft = instructionAssetService.createDraft(
                     asset.getId(), "INLINE", Map.of(), null,
                     Map.of(), "OPTIONAL", 0, null, null, "tester");
@@ -186,13 +186,13 @@ class GovernanceEnforcementPointTest extends IntegrationTestBase {
     void underStandard_projectScopedInlineInstructionIsAllowed() {
         profileService.setDefaultProfile("STANDARD", null);
         try {
-            UUID projectId = createProject();
+            UUID teamId = createProject();
             InstructionAsset asset = instructionAssetService.create(
-                    "PROJECT", projectId, "test-std-asset-" + UUID.randomUUID(),
+                    "TEAM", teamId, "test-std-asset-" + UUID.randomUUID(),
                     "desc", "SYSTEM", null, "tester");
 
             // STANDARD has INLINE_INSTRUCTIONS_SCOPE=PROJECT_SERVICE, which
-            // should permit project-scoped INLINE (PROJECT_SERVICE >= PROJECT_SERVICE).
+            // should permit team-scoped INLINE (PROJECT_SERVICE >= PROJECT_SERVICE).
             InstructionAssetVersion draft = instructionAssetService.createDraft(
                     asset.getId(), "INLINE", Map.of(), null,
                     Map.of(), "OPTIONAL", 0, null, null, "tester");

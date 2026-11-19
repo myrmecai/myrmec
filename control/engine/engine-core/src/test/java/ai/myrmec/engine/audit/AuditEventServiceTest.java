@@ -24,7 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code recordEvent} was previously {@code REQUIRES_NEW}, which caused FK
  * violations when callers created entities and audited them in the same
  * transaction (e.g. {@code SecretService.create()} → {@code SECRET_CREATED}
- * referencing a project created in the same test transaction).
+ * referencing a team created in the same test transaction).
  */
 class AuditEventServiceTest extends IntegrationTestBase {
 
@@ -72,16 +72,16 @@ class AuditEventServiceTest extends IntegrationTestBase {
 
     @Test
     void recordFailureEvent_canReferenceAlreadyCommittedProject() {
-        // Create a project (committed), then record a failure event referencing it.
-        // This should not hit a FK violation because the project is already committed.
-        var project = data.project().named("audit-fk-test").create();
+        // Create a team (committed), then record a failure event referencing it.
+        // This should not hit a FK violation because the team is already committed.
+        var team = data.team().named("audit-fk-test").create();
 
         String eventType = "TEST_FAILURE_FK_" + System.currentTimeMillis();
 
         try {
-            auditEventService.recordFailureEvent("TestEntity", project.getId(), eventType,
-                    "PROJECT", project.getId(), TEST_ADMIN_ID, "test-admin",
-                    null, null, null, null, Map.of("projectId", project.getId().toString()));
+            auditEventService.recordFailureEvent("TestEntity", team.getId(), eventType,
+                    "TEAM", team.getId(), TEST_ADMIN_ID, "test-admin",
+                    null, null, null, null, Map.of("teamId", team.getId().toString()));
             throw new RuntimeException("Simulated failure");
         } catch (RuntimeException ignored) {
             // Expected
@@ -89,6 +89,6 @@ class AuditEventServiceTest extends IntegrationTestBase {
 
         List<AuditEvent> events = auditEventService.findByEventType(eventType);
         assertThat(events).hasSize(1);
-        assertThat(events.get(0).getProjectId()).isEqualTo(project.getId());
+        assertThat(events.get(0).getTeamId()).isEqualTo(team.getId());
     }
 }

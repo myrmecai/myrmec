@@ -66,11 +66,11 @@ public class AgentHostService {
      *                 LOCAL pre-provisions a per-user IDE seat — the owner
      *                 is unknown at creation and arrives when the user's
      *                 plugin connects (host.open stamps the instance).
-     *                 LOCAL hosts are per-user, never project-scoped.
+     *                 LOCAL hosts are per-user, never Team-scoped.
      */
     @Transactional
     public AgentHostCreationResult createAgent(String name, String description,
-                                           UUID projectId, Integer maxAgents,
+                                           UUID teamId, Integer maxAgents,
                                            ModelAccessMode modelAccessMode,
                                            AgentHostType hostType) {
         // Validate name uniqueness
@@ -79,8 +79,8 @@ public class AgentHostService {
         }
 
         AgentHostType type = hostType != null ? hostType : AgentHostType.MANAGED;
-        if (type == AgentHostType.LOCAL && projectId != null) {
-            throw new BadRequestException("A LOCAL agent host cannot be project-scoped");
+        if (type == AgentHostType.LOCAL && teamId != null) {
+            throw new BadRequestException("A LOCAL agent host cannot be Team-scoped");
         }
 
         // Credential-envelope design §5.2: validate the requested mode against
@@ -94,7 +94,7 @@ public class AgentHostService {
         AgentHost agentHost = new AgentHost();
         agentHost.setName(name);
         agentHost.setDescription(description);
-        agentHost.setProjectId(projectId);
+        agentHost.setTeamId(teamId);
         agentHost.setRegistrationKey(registrationKey);
         agentHost.setMaxAgents(maxAgents != null ? maxAgents : 1);
         agentHost.setStatus(AgentHost.Status.ACTIVE);
@@ -112,7 +112,7 @@ public class AgentHostService {
      */
     @Transactional
     public AgentHost updateAgent(UUID agentHostId, String name, String description,
-                             UUID projectId, Integer maxAgents, AgentHost.Status status,
+                             UUID teamId, Integer maxAgents, AgentHost.Status status,
                              ModelAccessMode modelAccessMode) {
         AgentHost agentHost = agentHostRepository.findById(agentHostId)
                 .orElseThrow(() -> ResourceNotFoundException.agent(agentHostId));
@@ -128,8 +128,8 @@ public class AgentHostService {
             agentHost.setDescription(description);
         }
 
-        if (projectId != null) {
-            agentHost.setProjectId(projectId);
+        if (teamId != null) {
+            agentHost.setTeamId(teamId);
         }
 
         if (maxAgents != null) {
@@ -227,7 +227,7 @@ public class AgentHostService {
      * agent JWTs minted against the returned host/instance.</p>
      *
      * @param userId    the authenticated user who owns the local agent
-     * @param projectId project scope recorded at creation for governance
+     * @param teamId Team scope recorded at creation for governance
      *                  display only; reuse is per-user, so it is not updated
      *                  on later registrations
      * @param hostname  host identity reported by the IDE extension (e.g. the
@@ -235,7 +235,7 @@ public class AgentHostService {
      * @return the local agent host definition (existing or newly created)
      */
     @Transactional
-    public AgentHost upsertLocalAgentHost(UUID userId, UUID projectId, String hostname) {
+    public AgentHost upsertLocalAgentHost(UUID userId, UUID teamId, String hostname) {
         if (userId == null) {
             throw new BadRequestException("userId is required for a local agent host");
         }
@@ -254,8 +254,8 @@ public class AgentHostService {
                 host.setName(buildLocalHostName(userId, hostname));
             }
             host.setStatus(AgentHost.Status.ACTIVE);
-            log.info("Reused local agent host {} for user {} (project {})",
-                    host.getId(), userId, projectId);
+            log.info("Reused local agent host {} for user {} (Team {})",
+                    host.getId(), userId, teamId);
             return agentHostRepository.save(host);
         }
 
@@ -271,18 +271,18 @@ public class AgentHostService {
         }
         host.setName(name);
         host.setDescription("Local IDE agent for user " + userId);
-        // Project scope recorded at creation for governance display only;
+        // Team scope recorded at creation for governance display only;
         // reuse is per-user, so it is not updated on later registrations.
-        host.setProjectId(projectId);
+        host.setTeamId(teamId);
         host.setRegistrationKey(generateRegistrationKey());
         host.setMaxAgents(1);
         host.setStatus(AgentHost.Status.ACTIVE);
         host.setHostType(AgentHostType.LOCAL);
 
         host = agentHostRepository.save(host);
-        log.info("Created local agent host {} for user {} (project {}) — owner stamps "
+        log.info("Created local agent host {} for user {} (Team {}) — owner stamps "
                         + "the instance at host.open",
-                host.getId(), userId, projectId);
+                host.getId(), userId, teamId);
         return host;
     }
 

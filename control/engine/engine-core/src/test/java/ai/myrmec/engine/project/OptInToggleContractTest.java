@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Myrmec Authors
-package ai.myrmec.engine.project;
+package ai.myrmec.engine.team;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import org.junit.jupiter.api.DisplayName;
@@ -15,8 +15,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Verifies the binding infrastructure exists:
  * <ul>
- *   <li>{@link ProjectInstructionBinding} — enables/disables org OPTIONAL instruction assets</li>
- *   <li>{@link ProjectProviderBinding} — ACTIVE/INACTIVE opt-in for knowledge providers</li>
+ *   <li>{@link TeamInstructionBinding} — enables/disables org OPTIONAL instruction assets</li>
+ *   <li>{@link TeamProviderBinding} — ACTIVE/INACTIVE opt-in for knowledge providers</li>
  * </ul>
  *
  * <p>Known gap: provider binding is stored but not yet enforced in
@@ -35,16 +35,16 @@ class OptInToggleContractTest extends IntegrationTestBase {
     private ProjectProviderBindingRepository providerBindingRepository;
 
     @Test
-    @DisplayName("ProjectInstructionBindingRepository has findByProjectIdAndEnabledTrue query")
+    @DisplayName("ProjectInstructionBindingRepository has findByTeamIdAndEnabledTrue query")
     void instructionBindingRepoHasEnabledQuery() {
         assertThat(instructionBindingRepository).isNotNull();
-        // The method exists — verify by calling with a random project ID
-        var results = instructionBindingRepository.findByProjectIdAndEnabledTrue(java.util.UUID.randomUUID());
+        // The method exists — verify by calling with a random Team ID
+        var results = instructionBindingRepository.findByTeamIdAndEnabledTrue(java.util.UUID.randomUUID());
         assertThat(results).isEmpty();
     }
 
     @Test
-    @DisplayName("ProjectProviderBindingRepository has findByProjectId query")
+    @DisplayName("ProjectProviderBindingRepository has findByTeamId query")
     void providerBindingRepoExists() {
         assertThat(providerBindingRepository).isNotNull();
     }

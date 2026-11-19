@@ -27,7 +27,7 @@ import java.util.UUID;
  * have no entity to reference). For SERVICE scope, {@code scopeId} is
  * the workflow / assistant instance UUID and {@code serviceType}
  * distinguishes which table to look up. The service layer resolves
- * the {@code projectId} from the instance.</p>
+ * the {@code teamId} from the instance.</p>
  */
 @Value
 @Builder
@@ -37,7 +37,7 @@ public class CreateQuotaRequest {
     @NotNull
     String scopeType;
 
-    /** Null for ORG scope; group/project/instance UUID otherwise. */
+    /** Null for ORG scope; group/Team/instance UUID otherwise. */
     UUID scopeId;
 
     @NotNull

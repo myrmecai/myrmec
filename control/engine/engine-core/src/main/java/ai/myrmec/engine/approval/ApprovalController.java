@@ -44,8 +44,8 @@ public class ApprovalController {
     private final WorkflowTaskRepository workflowTaskRepository;
     /** HITL (§17.4): the orchestration-aware decide path. */
     private final ai.myrmec.engine.workflow.OrchestrationApprovalService orchestrationApprovalService;
-    /** Conversation approvals: the decider's project view access. */
-    private final ai.myrmec.engine._system.security.ProjectAccessEvaluator projectAccess;
+    /** Conversation approvals: the decider's Team view access. */
+    private final ai.myrmec.engine._system.security.TeamAccessEvaluator teamAccess;
 
     /**
      * Submit a human decision (APPROVED / REJECTED) for an APPROVAL_REQUEST.
@@ -63,9 +63,9 @@ public class ApprovalController {
     @Operation(summary = "Submit a human decision for an approval request (conversation or execution)")
     // §17.4: the orchestration decide path carries its OWN authorization —
     // the triggering-user gate inside OrchestrationApprovalService (a
-    // project-scoped PROJECT_OWNER/EDITOR who created the request). The
+    // Team-scoped TEAM_OWNER/EDITOR who created the request). The
     // conversation path keeps the interactive-session model; a system
-    // APPROVER/PROJECT_OWNER/ORG_ADMIN also satisfies the static check.
+    // APPROVER/TEAM_OWNER/ORG_ADMIN also satisfies the static check.
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApprovalDecisionResponse> submitDecision(
             @PathVariable UUID approvalId,
@@ -129,15 +129,15 @@ public class ApprovalController {
 
         // Conversation approvals keep the interactive-session model: the
         // decider must hold at least VIEW access on the conversation's
-        // project (the original method-level role gate did not cover
-        // project-scoped roles).
-        UUID projectId = conversationService
-                .findById(conversationId).getProjectId();
+        // Team (the original method-level role gate did not cover
+        // Team-scoped roles).
+        UUID teamId = conversationService
+                .findById(conversationId).getTeamId();
         var auth = org.springframework.security.core.context.SecurityContextHolder
                 .getContext().getAuthentication();
-        if (!projectAccess.canView(projectId, auth)) {
+        if (!teamAccess.canView(teamId, auth)) {
             throw new org.springframework.security.access.AccessDeniedException(
-                    "No view access on the approval's project");
+                    "No view access on the approval's Team");
         }
 
         ConversationService.ApprovalDecisionResult result =

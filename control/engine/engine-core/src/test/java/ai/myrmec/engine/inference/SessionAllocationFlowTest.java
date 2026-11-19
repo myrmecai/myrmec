@@ -8,7 +8,7 @@ import ai.myrmec.engine.agent.AgentHostCreationResult;
 import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentProfile;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.websocket.host.HostControlHandshakeInterceptor;
 import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
@@ -94,11 +94,11 @@ class SessionAllocationFlowTest extends IntegrationTestBase {
         Host hostSetup = openedHost();
         UUID instanceId = (UUID) hostSetup.session().getAttributes()
                 .get(HostControlWebSocketHandler.ATTR_HOST_INSTANCE_ID);
-        var project = data.project().named("f-proj").create();
+        var team = data.team().named("f-proj").create();
 
         // ---- Engine reserves + offers ----
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), hostSetup.host().getId()).orElseThrow();
+                team.getId(), hostSetup.host().getId()).orElseThrow();
 
         // ---- Host accepts ----
         String accept = """
@@ -142,7 +142,7 @@ class SessionAllocationFlowTest extends IntegrationTestBase {
         assertThat(closed.getClosedAt()).isNotNull();
         // Capacity returned: a second offer succeeds on the same instance.
         assertThat(allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), hostSetup.host().getId())).isPresent();
+                team.getId(), hostSetup.host().getId())).isPresent();
     }
 
     @Test
@@ -150,10 +150,10 @@ class SessionAllocationFlowTest extends IntegrationTestBase {
         Host hostSetup = openedHost();
         UUID instanceId = (UUID) hostSetup.session().getAttributes()
                 .get(HostControlWebSocketHandler.ATTR_HOST_INSTANCE_ID);
-        var project = data.project().named("f-proj2").create();
+        var team = data.team().named("f-proj2").create();
 
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), hostSetup.host().getId()).orElseThrow();
+                team.getId(), hostSetup.host().getId()).orElseThrow();
         allocator.accept(sessionId);
 
         // Engine-initiated session.open: captured from the wire.
@@ -179,10 +179,10 @@ class SessionAllocationFlowTest extends IntegrationTestBase {
         Host hostSetup = openedHost();
         UUID instanceId = (UUID) hostSetup.session().getAttributes()
                 .get(HostControlWebSocketHandler.ATTR_HOST_INSTANCE_ID);
-        var project = data.project().named("f-proj3").create();
+        var team = data.team().named("f-proj3").create();
 
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), hostSetup.host().getId()).orElseThrow();
+                team.getId(), hostSetup.host().getId()).orElseThrow();
         String reject = """
                 { "protocolVersion": 1, "messageId": "m-rej", "type": "session.reject",
                   "sentAt": "%s", "hostInstanceId": "%s", "sessionId": "%s",
@@ -216,7 +216,7 @@ class SessionAllocationFlowTest extends IntegrationTestBase {
         Host hostSetup = openedHost();
         UUID instanceId = (UUID) hostSetup.session().getAttributes()
                 .get(HostControlWebSocketHandler.ATTR_HOST_INSTANCE_ID);
-        var project = data.project().named("f-proj4").create();
+        var team = data.team().named("f-proj4").create();
 
         // §22.3/D7: the offer no longer consults the channel feature flag for
         // orchestration — only the endpoint + serving instance must resolve.
@@ -226,7 +226,7 @@ class SessionAllocationFlowTest extends IntegrationTestBase {
         try {
             UUID sessionId = allocator.offer(TaskDispatcherService.SESSION_KIND_TASK,
                     UUID.randomUUID(), TaskDispatcherService.SERVICE_TYPE_WORKFLOW,
-                    project.getId(), hostSetup.host().getId()).orElseThrow();
+                    team.getId(), hostSetup.host().getId()).orElseThrow();
             allocator.accept(sessionId);
 
             handler.sendSessionOpen(sessionId, hostSetup.profile().getId());
@@ -251,10 +251,10 @@ class SessionAllocationFlowTest extends IntegrationTestBase {
         Host hostSetup = openedHost();
         UUID instanceId = (UUID) hostSetup.session().getAttributes()
                 .get(HostControlWebSocketHandler.ATTR_HOST_INSTANCE_ID);
-        var project = data.project().named("f-proj5").create();
+        var team = data.team().named("f-proj5").create();
 
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), hostSetup.host().getId()).orElseThrow();
+                team.getId(), hostSetup.host().getId()).orElseThrow();
         allocator.accept(sessionId);
 
         handler.sendSessionOpen(sessionId, hostSetup.profile().getId());

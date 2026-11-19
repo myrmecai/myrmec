@@ -8,10 +8,10 @@ import java.util.UUID;
 
 /**
  * Start-dialog create (#92, §8): a new assistant plus its initial Draft seeded
- * with the chosen brain. {@code name} is unique per project (case-insensitive).
+ * with the chosen brain. {@code name} is unique per Team (case-insensitive).
  */
 public record CreateAssistantRequest(
-        @NotNull UUID projectId,
+        @NotNull UUID teamId,
         @NotBlank @Size(max = 120) String name,
         @Size(max = 4000) String description,
         @NotNull UUID agentProfileId

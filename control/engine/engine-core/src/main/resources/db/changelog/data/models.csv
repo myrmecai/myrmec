@@ -1,0 +1,2 @@
+code,name,provider,model_id,api_endpoint,infra_config,default_params,status,health_status,last_health_check,last_tested_at,last_test_status,input_price,output_price,currency,context_window_tokens,max_output_tokens,training_cutoff_date,release_date,created_at,updated_at
+github-gpt-4o,GPT-4o (GitHub Models),github_models,gpt-4o,https://models.inference.ai.azure.com,,{"temperature":0.7},ACTIVE,UNKNOWN,,,,5.000000,15.000000,USD,128000,16384,2023-10-01,2024-05-01,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP

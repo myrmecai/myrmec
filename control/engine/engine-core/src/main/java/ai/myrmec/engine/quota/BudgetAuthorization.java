@@ -4,12 +4,12 @@
 package ai.myrmec.engine.quota;
 
 import ai.myrmec.engine._system.security.GroupAccessEvaluator;
-import ai.myrmec.engine._system.security.ProjectAccessEvaluator;
+import ai.myrmec.engine._system.security.TeamAccessEvaluator;
 import ai.myrmec.engine.assistant.Assistant;
 import ai.myrmec.engine.assistant.AssistantRepository;
 import ai.myrmec.engine.group.GroupRepository;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamRepository;
 import ai.myrmec.engine.quota.dto.BudgetPermissions;
 import ai.myrmec.engine.user.UserPrincipal;
 import ai.myrmec.engine.user.UserRole;
@@ -34,16 +34,16 @@ import java.util.UUID;
  *       ceilings at any scope and view every budget.</li>
  *   <li>Group-scoped {@code BUDGET_OWNER} can manage budgets for that group
  *       and its descendant projects / services.</li>
- *   <li>Project-scoped {@code BUDGET_OWNER} can manage budgets for that
- *       project and its services.</li>
- *   <li>{@code PROJECT_OWNER} / {@code EDITOR} can carve service budgets
- *       (pause / resume / delete them) but cannot set project/group/org ceilings.</li>
+ *   <li>Team-scoped {@code BUDGET_OWNER} can manage budgets for that
+ *       Team and its services.</li>
+ *   <li>{@code TEAM_OWNER} / {@code EDITOR} can carve service budgets
+ *       (pause / resume / delete them) but cannot set Team/group/org ceilings.</li>
  *   <li>{@code ORG_ADMIN} and data-access roles can view budgets in their
  *       scope; they cannot create or mutate budgets.</li>
  * </ul>
  *
- * <p>The helper intentionally does <b>not</b> walk the project/group ancestry
- * itself; it reuses the existing {@link ProjectAccessEvaluator} and
+ * <p>The helper intentionally does <b>not</b> walk the Team/group ancestry
+ * itself; it reuses the existing {@link TeamAccessEvaluator} and
  * {@link GroupAccessEvaluator} for data-access view checks, and adds the
  * budget-specific role grants on top.</p>
  */
@@ -51,32 +51,32 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class BudgetAuthorization {
 
-    private final ProjectAccessEvaluator projectAccess;
+    private final TeamAccessEvaluator teamAccess;
     private final GroupAccessEvaluator groupAccess;
-    private final ProjectRepository projectRepository;
+    private final TeamRepository teamRepository;
     private final GroupRepository groupRepository;
     private final WorkflowRepository workflowRepository;
     private final AssistantRepository assistantRepository;
 
     /**
-     * Resolve the project ID from a SERVICE-scope scopeId (workflow / assistant
-     * instance UUID).  Falls back to treating scopeId as a project ID for
+     * Resolve the Team ID from a SERVICE-scope scopeId (workflow / assistant
+     * instance UUID).  Falls back to treating scopeId as a Team ID for
      * backward compatibility with legacy data.
      */
-    private UUID resolveProjectIdForService(UUID scopeId) {
+    private UUID resolveTeamIdForService(UUID scopeId) {
         if (scopeId == null) {
             return null;
         }
         Optional<Workflow> wf = workflowRepository.findById(scopeId);
         if (wf.isPresent()) {
-            return wf.get().getProject().getId();
+            return wf.get().getTeam().getId();
         }
         Optional<Assistant> asst = assistantRepository.findById(scopeId);
         if (asst.isPresent()) {
-            return asst.get().getProjectId();
+            return asst.get().getTeamId();
         }
-        // Legacy: scopeId might be the project ID itself.
-        if (projectRepository.existsById(scopeId)) {
+        // Legacy: scopeId might be the Team ID itself.
+        if (teamRepository.existsById(scopeId)) {
             return scopeId;
         }
         return null;
@@ -86,7 +86,7 @@ public class BudgetAuthorization {
      * Permission snapshot for the given scope.
      *
      * @param scopeType quota scope tier; {@code ORG} ignores {@code scopeId}
-     * @param scopeId   the group, project, or service id; null for {@code ORG}
+     * @param scopeId   the group, Team, or service id; null for {@code ORG}
      */
     public BudgetPermissions permissionsFor(Quota.Scope scopeType, UUID scopeId, Authentication authentication) {
         UserPrincipal user = principalOf(authentication);
@@ -94,21 +94,21 @@ public class BudgetAuthorization {
             return BudgetPermissions.none();
         }
 
-        // For SERVICE scope, resolve the project ID from the instance.
-        UUID effectiveProjectId = scopeType == Quota.Scope.SERVICE
-                ? resolveProjectIdForService(scopeId) : scopeId;
+        // For SERVICE scope, resolve the Team ID from the instance.
+        UUID effectiveteamId = scopeType == Quota.Scope.SERVICE
+                ? resolveTeamIdForService(scopeId) : scopeId;
 
         boolean platformAdmin = user.hasSystemRole(UserRole.Role.PLATFORM_ADMIN);
         boolean systemBudgetOwner = user.hasSystemRole(UserRole.Role.BUDGET_OWNER);
         boolean orgAdmin = user.isOrgAdmin();
         boolean systemCanManage = platformAdmin || systemBudgetOwner;
 
-        boolean canView = canView(scopeType, effectiveProjectId, user, authentication, platformAdmin, orgAdmin, systemBudgetOwner);
-        boolean canDefineCeiling = canDefineCeiling(scopeType, effectiveProjectId, user, systemCanManage);
+        boolean canView = canView(scopeType, effectiveteamId, user, authentication, platformAdmin, orgAdmin, systemBudgetOwner);
+        boolean canDefineCeiling = canDefineCeiling(scopeType, effectiveteamId, user, systemCanManage);
         boolean canDefineReservation = canDefineCeiling && scopeType != Quota.Scope.ORG;
-        boolean canDefineService = canDefineServiceBudget(scopeType, effectiveProjectId, user, systemCanManage);
+        boolean canDefineService = canDefineServiceBudget(scopeType, effectiveteamId, user, systemCanManage);
         boolean canMutateServiceBudget = scopeType == Quota.Scope.SERVICE
-                && (canDefineService || hasProjectOwnerOrEditor(user, effectiveProjectId));
+                && (canDefineService || hasProjectOwnerOrEditor(user, effectiveteamId));
 
         return new BudgetPermissions(
                 canView,
@@ -134,12 +134,12 @@ public class BudgetAuthorization {
             case ORG -> false;
             case GROUP -> hasGroupBudgetOwnerOnGroup(user, scopeId)
                     || groupAccess.canView(scopeId, authentication);
-            case PROJECT -> user.hasProjectRoleDirect(scopeId, UserRole.Role.BUDGET_OWNER)
+            case TEAM -> user.hasTeamRoleDirect(scopeId, UserRole.Role.BUDGET_OWNER)
                     || hasProjectOwnerOrEditor(user, scopeId)
-                    || user.hasProjectRoleDirect(scopeId, UserRole.Role.VIEWER)
-                    || hasGroupBudgetOwnerOnProject(user, scopeId)
-                    || projectAccess.canView(scopeId, authentication);
-            case SERVICE -> canView(Quota.Scope.PROJECT, scopeId, user, authentication,
+                    || user.hasTeamRoleDirect(scopeId, UserRole.Role.VIEWER)
+                    || hasGroupBudgetOwnerOnTeam(user, scopeId)
+                    || teamAccess.canView(scopeId, authentication);
+            case SERVICE -> canView(Quota.Scope.TEAM, scopeId, user, authentication,
                     platformAdmin, orgAdmin, systemBudgetOwner);
         };
     }
@@ -163,7 +163,7 @@ public class BudgetAuthorization {
                                      UUID scopeId,
                                      UserPrincipal user,
                                      boolean systemCanManage) {
-        // Ceilings and reservations only exist at ORG / GROUP / PROJECT scope.
+        // Ceilings and reservations only exist at ORG / GROUP / Team scope.
         if (scopeType == Quota.Scope.SERVICE) {
             return false;
         }
@@ -174,8 +174,8 @@ public class BudgetAuthorization {
         return switch (scopeType) {
             case ORG -> false;
             case GROUP -> user.hasGroupRoleDirect(scopeId, UserRole.Role.BUDGET_OWNER);
-            case PROJECT -> user.hasProjectRoleDirect(scopeId, UserRole.Role.BUDGET_OWNER)
-                    || hasGroupBudgetOwnerOnProject(user, scopeId);
+            case TEAM -> user.hasTeamRoleDirect(scopeId, UserRole.Role.BUDGET_OWNER)
+                    || hasGroupBudgetOwnerOnTeam(user, scopeId);
             case SERVICE -> false;
         };
     }
@@ -190,25 +190,25 @@ public class BudgetAuthorization {
         if (systemCanManage) {
             return true;
         }
-        return user.hasProjectRoleDirect(scopeId, UserRole.Role.BUDGET_OWNER)
-                || hasGroupBudgetOwnerOnProject(user, scopeId)
+        return user.hasTeamRoleDirect(scopeId, UserRole.Role.BUDGET_OWNER)
+                || hasGroupBudgetOwnerOnTeam(user, scopeId)
                 || hasProjectOwnerOrEditor(user, scopeId);
     }
 
-    private boolean hasProjectOwnerOrEditor(UserPrincipal user, UUID projectId) {
-        return user.hasProjectRoleDirect(projectId, UserRole.Role.PROJECT_OWNER)
-                || user.hasProjectRoleDirect(projectId, UserRole.Role.EDITOR);
+    private boolean hasProjectOwnerOrEditor(UserPrincipal user, UUID teamId) {
+        return user.hasTeamRoleDirect(teamId, UserRole.Role.TEAM_OWNER)
+                || user.hasTeamRoleDirect(teamId, UserRole.Role.EDITOR);
     }
 
-    private boolean hasGroupBudgetOwnerOnProject(UserPrincipal user, UUID projectId) {
-        if (projectId == null) {
+    private boolean hasGroupBudgetOwnerOnTeam(UserPrincipal user, UUID teamId) {
+        if (teamId == null) {
             return false;
         }
-        Optional<Project> project = projectRepository.findById(projectId);
-        if (project.isEmpty() || project.get().getGroupId() == null) {
+        Optional<Team> team = teamRepository.findById(teamId);
+        if (team.isEmpty() || team.get().getGroupId() == null) {
             return false;
         }
-        UUID groupId = project.get().getGroupId();
+        UUID groupId = team.get().getGroupId();
         List<UUID> ancestorIds = groupRepository.findAncestorIds(groupId);
         Set<UUID> chain = new HashSet<>(ancestorIds);
         chain.add(groupId);

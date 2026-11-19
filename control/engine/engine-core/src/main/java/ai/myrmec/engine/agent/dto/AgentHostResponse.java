@@ -20,8 +20,8 @@ public class AgentHostResponse {
     private UUID id;
     private String name;
     private String description;
-    private UUID projectId;
-    private String projectName;
+    private UUID teamId;
+    private String teamName;
     private Integer maxAgents;
     private AgentHost.Status status;
     private ai.myrmec.engine.agent.AgentHostType hostType;
@@ -38,15 +38,15 @@ public class AgentHostResponse {
     }
 
     /**
-     * Convert entity to response DTO with project name.
+     * Convert entity to response DTO with Team name.
      */
-    public static AgentHostResponse from(AgentHost agentHost, String projectName, int activeInstanceCount) {
+    public static AgentHostResponse from(AgentHost agentHost, String teamName, int activeInstanceCount) {
         return AgentHostResponse.builder()
                 .id(agentHost.getId())
                 .name(agentHost.getName())
                 .description(agentHost.getDescription())
-                .projectId(agentHost.getProjectId())
-                .projectName(projectName)
+                .teamId(agentHost.getTeamId())
+                .teamName(teamName)
                 .maxAgents(agentHost.getMaxAgents())
                 .status(agentHost.getStatus())
                 .hostType(agentHost.getHostType())

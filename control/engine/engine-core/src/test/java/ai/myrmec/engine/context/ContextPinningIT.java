@@ -6,7 +6,7 @@ import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.instruction.InstructionAsset;
 import ai.myrmec.engine.instruction.InstructionAssetVersion;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,7 +33,7 @@ class ContextPinningIT extends IntegrationTestBase {
     @Autowired
     private ContextBuilder contextBuilder;
 
-    private Project project;
+    private team team;
     private InstructionAsset orgAsset;
     private InstructionAssetVersion orgV1;
 
@@ -41,7 +41,7 @@ class ContextPinningIT extends IntegrationTestBase {
     void setUp() {
         // Use FLEXIBLE during setup so org-scoped INLINE instructions are allowed
         data.setDefaultGovernanceProfile("FLEXIBLE");
-        project = data.project().named("pinning").create();
+        team = data.team().named("pinning").create();
         orgAsset = data.instructionAsset()
                 .named("org-rule")
                 .scope("ORGANIZATION")
@@ -65,7 +65,7 @@ class ContextPinningIT extends IntegrationTestBase {
         data.setDefaultGovernanceProfile("STANDARD");
 
         Conversation conversation = data.conversation()
-                .inProject(project.getId())
+                .inTeam(team.getId())
                 .create();
 
         ContextSnapshot snapshot = conversation.getContextSnapshot();
@@ -80,7 +80,7 @@ class ContextPinningIT extends IntegrationTestBase {
         data.setDefaultGovernanceProfile("STANDARD");
 
         Conversation conversation = data.conversation()
-                .inProject(project.getId())
+                .inTeam(team.getId())
                 .create();
         ContextSnapshot snapshot = conversation.getContextSnapshot();
         assertThat(snapshot).isNotNull();
@@ -97,7 +97,7 @@ class ContextPinningIT extends IntegrationTestBase {
 
         // Assemble context with the pinned snapshot — should still use v1
         AssembledContext context = contextBuilder.assemble(
-                project.getId(), null, "CONVERSATION",
+                team.getId(), null, "CONVERSATION",
                 conversation.getId(), null, 1L, Map.of(), snapshot);
 
         assertThat(context.contextPinning()).isEqualTo("PINNED_AT_START");
@@ -112,7 +112,7 @@ class ContextPinningIT extends IntegrationTestBase {
         data.setDefaultGovernanceProfile("FLEXIBLE");
 
         Conversation conversation = data.conversation()
-                .inProject(project.getId())
+                .inTeam(team.getId())
                 .create();
 
         assertThat(conversation.getContextSnapshot()).isNull();

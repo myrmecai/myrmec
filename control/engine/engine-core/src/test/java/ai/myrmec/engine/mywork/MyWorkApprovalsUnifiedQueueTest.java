@@ -9,7 +9,7 @@ import ai.myrmec.engine.conversation.ConversationMessage;
 import ai.myrmec.engine.conversation.ConversationMessageRepository;
 import ai.myrmec.engine.conversation.ConversationService;
 import ai.myrmec.engine.mywork.dto.MyApprovalRow;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.UserPrincipal;
 import org.junit.jupiter.api.Test;
@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>Exit criteria:
  * <ol>
  *   <li>✓ Conversation approval row appears in unified queue</li>
- *   <li>✓ Rows respect project scope filtering</li>
+ *   <li>✓ Rows respect team scope filtering</li>
  *   <li>✓ Row structure has all required fields populated</li>
  * </ol>
  *
@@ -60,17 +60,17 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
     @Test
     void conversationApprovalAppearsInMyWorkQueue() throws Exception {
         // ---------- Arrange ----------
-        Project project = data.project().named("conv-approval-test").create();
+        team team = data.team().named("conv-approval-test").create();
         Authentication auth = adminAuth();
 
         // Create conversation with PENDING approval request (CONVERSATION source)
         var agent = data.agent()
                 .named("test-agent")
-                .inProject(project)
+                .inTeam(team)
                 .create();
 
         Conversation conv = conversationService.createConversation(
-                project.getId(), TEST_ADMIN_ID,
+                team.getId(), TEST_ADMIN_ID,
                 "test-conv", agent.agent().getId(), null);
 
         // Create and persist conversation approval message directly
@@ -85,7 +85,7 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
         conversationMessageRepository.save(approvalMsg);
 
         // ---------- Act ----------
-        List<MyApprovalRow> approvals = myWorkService.approvals(auth, List.of(project.getId()), null);
+        List<MyApprovalRow> approvals = myWorkService.approvals(auth, List.of(team.getId()), null);
 
         // ---------- Assert ----------
         // Conversation approval row should appear in queue
@@ -93,7 +93,7 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
                 .as("My Work approvals should include conversation-source approval")
                 .anyMatch(r -> r.source() == MyApprovalRow.Source.CONVERSATION
                         && r.conversationId().equals(conv.getId())
-                        && r.projectId().equals(project.getId()));
+                        && r.teamId().equals(team.getId()));
         
         MyApprovalRow convRow = approvals.stream()
                 .filter(r -> r.source() == MyApprovalRow.Source.CONVERSATION
@@ -104,7 +104,7 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
         // Verify required fields are populated
         assertThat(convRow.messageId()).isNotNull();
         assertThat(convRow.conversationId()).isEqualTo(conv.getId());
-        assertThat(convRow.projectId()).isEqualTo(project.getId());
+        assertThat(convRow.teamId()).isEqualTo(team.getId());
         assertThat(convRow.summary()).isNotNull();
         assertThat(convRow.requestedAt()).isNotNull();
         assertThat(convRow.expiresAt()).isNotNull();
@@ -113,14 +113,14 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
     @Test
     void myWorkApprovalsRespectProjectScope() throws Exception {
         // ---------- Arrange ----------
-        Project project1 = data.project().named("scope-test-1").create();
-        Project project2 = data.project().named("scope-test-2").create();
+        team project1 = data.team().named("scope-test-1").create();
+        team project2 = data.team().named("scope-test-2").create();
         Authentication auth = adminAuth();
 
         // Create approval in project1
         var agent1 = data.agent()
                 .named("test-agent-p1")
-                .inProject(project1)
+                .inTeam(project1)
                 .create();
 
         Conversation conv1 = conversationService.createConversation(
@@ -140,7 +140,7 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
         // Create approval in project2
         var agent2 = data.agent()
                 .named("test-agent-p2")
-                .inProject(project2)
+                .inTeam(project2)
                 .create();
 
         Conversation conv2 = conversationService.createConversation(
@@ -163,7 +163,7 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
         // ---------- Assert ----------
         assertThat(rows)
                 .as("Scoped approvals should only include project1")
-                .extracting(MyApprovalRow::projectId)
+                .extracting(MyApprovalRow::teamId)
                 .containsOnly(project1.getId());
         
         assertThat(rows)
@@ -175,16 +175,16 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
     @Test
     void myWorkApprovalRowStructureIsCorrect() throws Exception {
         // ---------- Arrange ----------
-        Project project = data.project().named("structure-test").create();
+        team team = data.team().named("structure-test").create();
         Authentication auth = adminAuth();
 
         var agent = data.agent()
                 .named("test-agent-struct")
-                .inProject(project)
+                .inTeam(team)
                 .create();
 
         Conversation conv = conversationService.createConversation(
-                project.getId(), TEST_ADMIN_ID,
+                team.getId(), TEST_ADMIN_ID,
                 "test-conv-struct", agent.agent().getId(), null);
 
         ConversationMessage msg = new ConversationMessage();
@@ -198,7 +198,7 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
         conversationMessageRepository.save(msg);
 
         // ---------- Act ----------
-        List<MyApprovalRow> rows = myWorkService.approvals(auth, List.of(project.getId()), null);
+        List<MyApprovalRow> rows = myWorkService.approvals(auth, List.of(team.getId()), null);
 
         // ---------- Assert ----------
         assertThat(rows).isNotEmpty();
@@ -206,7 +206,7 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
         MyApprovalRow row = rows.get(0);
         // Verify required fields are populated
         assertThat(row.messageId()).isNotNull();
-        assertThat(row.projectId()).isEqualTo(project.getId());
+        assertThat(row.teamId()).isEqualTo(team.getId());
         assertThat(row.source()).isNotNull();
         assertThat(row.summary()).isNotNull();
         assertThat(row.requestedAt()).isNotNull();
@@ -219,10 +219,10 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
 
     /**
      * Builds an {@link Authentication} whose principal is a real
-     * {@link UserPrincipal}. {@code ProjectAccessEvaluator} reads scope and role
+     * {@link UserPrincipal}. {@code TeamAccessEvaluator} reads scope and role
      * grants directly off the principal, so a bare token carrying only a raw id
      * resolves to no access. System {@code ORG_ADMIN} implies VIEWER on every
-     * project, which is what the read-only My Work queue requires.
+     * team, which is what the read-only My Work queue requires.
      */
     private Authentication adminAuth() {
         UserPrincipal principal = new UserPrincipal(
@@ -235,13 +235,13 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
      * §17.4 approver targeting on the read side: the My Work approvals tab
      * narrows workflow-sourced (execution/orchestration) rows to the
      * triggering user ({@code WorkflowRequest.createdBy}) — a different
-     * user with full project view access never sees the request, because
+     * user with full team view access never sees the request, because
      * the decide path would reject them under the task row lock anyway.
      */
     @Test
     void workflowApprovalsNarrowToTheTriggeringUser() throws Exception {
         // ---------- Arrange: a full workflow graph with a PENDING approval ----------
-        Project project = data.project().named("orch-visibility").create();
+        team team = data.team().named("orch-visibility").create();
         var triggerer = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
         var otherUser = new ai.myrmec.engine.user.User();
         otherUser.setEmail("orch-vis-other-" + System.nanoTime() + "@test.local");
@@ -256,7 +256,7 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
 
         var profile = data.agentProfile().named("orch-vis-profile").create();
         var wf = new ai.myrmec.engine.workflow.Workflow();
-        wf.setProject(project);
+        wf.setTeam(team);
         wf.setName("orch-vis-wf-" + System.nanoTime());
         wf.setSteps(java.util.List.<java.util.Map<String, Object>>of());
         wf.setVersion(1);
@@ -296,11 +296,11 @@ class MyWorkApprovalsUnifiedQueueTest extends IntegrationTestBase {
         // ---------- Act ----------
         // The triggerer sees the pending orchestration approval...
         List<MyApprovalRow> triggererRows =
-                myWorkService.approvals(triggererAuth(triggerer.getId()), List.of(project.getId()), null);
-        // ...a different project member (ORCH_REVIEW requests are not
+                myWorkService.approvals(triggererAuth(triggerer.getId()), List.of(team.getId()), null);
+        // ...a different team member (ORCH_REVIEW requests are not
         // decidable by them, §17.4) does not.
         List<MyApprovalRow> otherRows =
-                myWorkService.approvals(adminAuthOf(otherUser), List.of(project.getId()), null);
+                myWorkService.approvals(adminAuthOf(otherUser), List.of(team.getId()), null);
 
         // ---------- Assert ----------
         assertThat(triggererRows)

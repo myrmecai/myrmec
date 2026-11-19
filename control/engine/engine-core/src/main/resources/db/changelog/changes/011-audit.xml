@@ -46,9 +46,9 @@
             <column name="scope_type" type="varchar(20)">
                 <constraints nullable="false"/>
             </column>
-            <column name="project_id" type="uuid">
-                <constraints nullable="true" foreignKeyName="fk_ae_project"
-                             references="projects(id)"/>
+            <column name="team_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_ae_team"
+                             references="teams(id)"/>
             </column>
             <column name="actor_id" type="uuid">
                 <constraints nullable="true" foreignKeyName="fk_ae_actor"
@@ -85,14 +85,14 @@
         </createIndex>
     </changeSet>
 
-    <!-- Index: (scope_type, project_id, timestamp) — scope-based query -->
+    <!-- Index: (scope_type, team_id, timestamp) — scope-based query -->
     <changeSet id="011-audit-ae-index-scope" author="myrmec">
         <preConditions onFail="MARK_RAN">
             <indexExists indexName="idx_ae_scope"/>
         </preConditions>
         <createIndex indexName="idx_ae_scope" tableName="audit_events">
             <column name="scope_type"/>
-            <column name="project_id"/>
+            <column name="team_id"/>
             <column name="timestamp"/>
         </createIndex>
     </changeSet>
@@ -119,15 +119,15 @@
         </createIndex>
     </changeSet>
 
-    <!-- Index: (scope_type, project_id, id) — chain verification walk -->
+    <!-- Index: (scope_type, team_id, id) — chain verification walk -->
     <changeSet id="011-audit-ae-index-chain-walk" author="myrmec">
         <preConditions onFail="MARK_RAN">
             <indexExists indexName="idx_ae_chain_walk"/>
         </preConditions>
-        <comment>Index for chain verification walk (scope + project + ascending id).</comment>
+        <comment>Index for chain verification walk (scope + team + ascending id).</comment>
         <createIndex indexName="idx_ae_chain_walk" tableName="audit_events">
             <column name="scope_type"/>
-            <column name="project_id"/>
+            <column name="team_id"/>
             <column name="id"/>
         </createIndex>
     </changeSet>
@@ -151,7 +151,7 @@
             <column name="scope_type" type="varchar(20)">
                 <constraints nullable="false"/>
             </column>
-            <column name="project_id" type="uuid">
+            <column name="team_id" type="uuid">
                 <constraints nullable="true"/>
             </column>
             <column name="head_hash" type="varchar(64)">
@@ -172,13 +172,13 @@
         </createTable>
     </changeSet>
 
-    <!-- Unique constraint on (scope_type, project_id) — one head per scope -->
+    <!-- Unique constraint on (scope_type, team_id) — one head per scope -->
     <changeSet id="011-audit-audit-chain-heads-unique" author="myrmec">
         <preConditions onFail="MARK_RAN">
             <uniqueConstraintExists tableName="audit_chain_heads" constraintName="uc_ach_scope"/>
         </preConditions>
         <addUniqueConstraint tableName="audit_chain_heads" constraintName="uc_ach_scope"
-                             columnNames="scope_type, project_id"/>
+                             columnNames="scope_type, team_id"/>
     </changeSet>
 
 </databaseChangeLog>

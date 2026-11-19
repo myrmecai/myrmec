@@ -3,7 +3,7 @@ package ai.myrmec.engine.serviceaccount;
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.TestDataFactory;
 import ai.myrmec.engine._system.exception.ErrorResponse;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.serviceaccount.dto.CreateServiceAccountRequest;
 import ai.myrmec.engine.serviceaccount.dto.ServiceAccountResponse;
 import ai.myrmec.engine.serviceaccount.dto.UpdateServiceAccountRequest;
@@ -22,30 +22,30 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ServiceAccountAdminControllerIT extends IntegrationTestBase {
 
-    private UUID projectId() {
-        Project p = projectRepository.save(
-                TestDataFactory.projectBuilder("SA Test Project " + UUID.randomUUID()).build());
+    private UUID teamId() {
+        team p = TeamRepository.save(
+                TestDataFactory.projectBuilder("SA Test team " + UUID.randomUUID()).build());
         return p.getId();
     }
 
-    private CreateServiceAccountRequest request(UUID projectId, String clientId) {
-        return new CreateServiceAccountRequest(projectId, "Helpdesk Bot", "Drives the support widget", clientId, null);
+    private CreateServiceAccountRequest request(UUID teamId, String clientId) {
+        return new CreateServiceAccountRequest(teamId, "Helpdesk Bot", "Drives the support widget", clientId, null);
     }
 
     @Test
     void createsServiceAccountWithDefaults() {
-        UUID projectId = projectId();
+        UUID teamId = teamId();
 
         ResponseEntity<ServiceAccountResponse> response = restTemplate.exchange(
                 "/api/v1/admin/service-accounts", HttpMethod.POST,
-                new HttpEntity<>(request(projectId, "helpdesk-client"), adminHeaders()),
+                new HttpEntity<>(request(teamId, "helpdesk-client"), adminHeaders()),
                 ServiceAccountResponse.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         ServiceAccountResponse body = response.getBody();
         assertThat(body).isNotNull();
         assertThat(body.id()).isNotNull();
-        assertThat(body.projectId()).isEqualTo(projectId);
+        assertThat(body.teamId()).isEqualTo(teamId);
         assertThat(body.keycloakClientId()).isEqualTo("helpdesk-client");
         assertThat(body.enabled()).isTrue();
         assertThat(body.rateLimitPerMin()).isEqualTo(60);
@@ -57,14 +57,14 @@ class ServiceAccountAdminControllerIT extends IntegrationTestBase {
 
     @Test
     void rejectsDuplicateKeycloakClientId() {
-        UUID projectId = projectId();
+        UUID teamId = teamId();
         restTemplate.exchange("/api/v1/admin/service-accounts", HttpMethod.POST,
-                new HttpEntity<>(request(projectId, "dupe-client"), adminHeaders()),
+                new HttpEntity<>(request(teamId, "dupe-client"), adminHeaders()),
                 ServiceAccountResponse.class);
 
         ResponseEntity<ErrorResponse> response = restTemplate.exchange(
                 "/api/v1/admin/service-accounts", HttpMethod.POST,
-                new HttpEntity<>(request(projectId, "dupe-client"), adminHeaders()),
+                new HttpEntity<>(request(teamId, "dupe-client"), adminHeaders()),
                 ErrorResponse.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
@@ -86,10 +86,10 @@ class ServiceAccountAdminControllerIT extends IntegrationTestBase {
 
     @Test
     void getsAndUpdatesServiceAccount() {
-        UUID projectId = projectId();
+        UUID teamId = teamId();
         ServiceAccountResponse created = restTemplate.exchange(
                 "/api/v1/admin/service-accounts", HttpMethod.POST,
-                new HttpEntity<>(request(projectId, "tune-client"), adminHeaders()),
+                new HttpEntity<>(request(teamId, "tune-client"), adminHeaders()),
                 ServiceAccountResponse.class).getBody();
         assertThat(created).isNotNull();
 
@@ -125,15 +125,15 @@ class ServiceAccountAdminControllerIT extends IntegrationTestBase {
 
     @Test
     void listsFilteredByProject() {
-        UUID projectA = projectId();
-        UUID projectB = projectId();
+        UUID teamA = teamId();
+        UUID teamB = teamId();
         restTemplate.exchange("/api/v1/admin/service-accounts", HttpMethod.POST,
-                new HttpEntity<>(request(projectA, "list-a-1"), adminHeaders()), ServiceAccountResponse.class);
+                new HttpEntity<>(request(teamA, "list-a-1"), adminHeaders()), ServiceAccountResponse.class);
         restTemplate.exchange("/api/v1/admin/service-accounts", HttpMethod.POST,
-                new HttpEntity<>(request(projectB, "list-b-1"), adminHeaders()), ServiceAccountResponse.class);
+                new HttpEntity<>(request(teamB, "list-b-1"), adminHeaders()), ServiceAccountResponse.class);
 
         ResponseEntity<ServiceAccountResponse[]> filtered = restTemplate.exchange(
-                "/api/v1/admin/service-accounts?projectId=" + projectA, HttpMethod.GET,
+                "/api/v1/admin/service-accounts?teamId=" + teamA, HttpMethod.GET,
                 new HttpEntity<>(adminHeaders()), ServiceAccountResponse[].class);
 
         assertThat(filtered.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -144,10 +144,10 @@ class ServiceAccountAdminControllerIT extends IntegrationTestBase {
 
     @Test
     void forbidsNonAdminCallers() {
-        UUID projectId = projectId();
+        UUID teamId = teamId();
         ResponseEntity<ErrorResponse> response = restTemplate.exchange(
                 "/api/v1/admin/service-accounts", HttpMethod.POST,
-                new HttpEntity<>(request(projectId, "sneaky-client"), userHeaders(TEST_ADMIN_ID, projectId)),
+                new HttpEntity<>(request(teamId, "sneaky-client"), userHeaders(TEST_ADMIN_ID, teamId)),
                 ErrorResponse.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);

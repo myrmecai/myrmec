@@ -36,11 +36,11 @@ public class InstructionAssetController {
 
     @GetMapping("/api/v1/admin/instruction-assets")
     @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasRole('ORG_ADMIN')")
-    @Operation(summary = "List instruction assets (optional project filter)")
+    @Operation(summary = "List instruction assets (optional Team filter)")
     public ResponseEntity<List<InstructionAssetResponse>> list(
-            @RequestParam(required = false) UUID projectId) {
-        if (projectId != null) {
-            return ResponseEntity.ok(service.findAllProjectScoped(projectId).stream()
+            @RequestParam(required = false) UUID teamId) {
+        if (teamId != null) {
+            return ResponseEntity.ok(service.findAllTeamScoped(teamId).stream()
                     .map(InstructionAssetResponse::from)
                     .toList());
         }
@@ -82,7 +82,7 @@ public class InstructionAssetController {
             @CurrentUser UUID userId) {
         var asset = service.create(
                 request.scope(),
-                request.projectId(),
+                request.teamId(),
                 request.name(),
                 request.description(),
                 request.category(),

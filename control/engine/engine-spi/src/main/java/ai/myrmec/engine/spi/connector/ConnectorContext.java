@@ -40,7 +40,7 @@ public interface ConnectorContext {
     /**
      * Resolve a secret token (e.g. {@code "github-pat"}) to its plaintext
      * value. Returns {@code null} when the token is not registered for
-     * this source's owning project/group/system scope.
+     * this source's owning Team/group/system scope.
      */
     String resolveSecret(@NotNull String token);
 

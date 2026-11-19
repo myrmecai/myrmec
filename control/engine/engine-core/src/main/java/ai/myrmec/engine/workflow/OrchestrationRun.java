@@ -51,8 +51,8 @@ public class OrchestrationRun {
     @Column(name = "workflow_id", nullable = false, updatable = false)
     private UUID workflowId;
 
-    @Column(name = "project_id", nullable = false, updatable = false)
-    private UUID projectId;
+    @Column(name = "team_id", nullable = false, updatable = false)
+    private UUID teamId;
 
     /** §16.1 pin: the published Profile version resolved at request creation. */
     @Column(name = "profile_version_id", nullable = false, updatable = false)

@@ -181,6 +181,11 @@ public class HostChannelWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    /** Test seam: direct access to the attribute map used by bind(). */
+    java.util.Map<String, Object> getAttributesForTest(WebSocketSession socket) {
+        return socket.getAttributes();
+    }
+
     /**
      * D7 (§22.8): channel loss is FATAL for the bound session — run the
      * engine's EXISTING close path ({@link SessionAllocator#close}) so the

@@ -38,6 +38,8 @@ public class JwtTokenProvider {
     private static final String EMAIL_CLAIM = "email";
     private static final String ROLES_CLAIM = "roles";
     private static final String JTI_CLAIM = "jti";
+    private static final String OWNER_USER_ID_CLAIM = "ownerUserId";
+    private static final String ISSUER_CLAIM = "iss";
 
     private static final String ACCESS_TOKEN = "access";
     private static final String REFRESH_TOKEN = "refresh";
@@ -49,14 +51,17 @@ public class JwtTokenProvider {
     private final SecretKey secretKey;
     private final long accessTokenMinutes;
     private final long refreshTokenDays;
+    private final String issuer;
 
     public JwtTokenProvider(
             @Value("${jwt.secret}") String secret,
             @Value("${jwt.access-token-minutes:15}") long accessTokenMinutes,
-            @Value("${jwt.refresh-token-days:7}") long refreshTokenDays) {
+            @Value("${jwt.refresh-token-days:7}") long refreshTokenDays,
+            @Value("${myrmec.auth.issuer:https://myrmec.ai/engine}") String issuer) {
         this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.accessTokenMinutes = accessTokenMinutes;
         this.refreshTokenDays = refreshTokenDays;
+        this.issuer = issuer;
     }
 
     // ==================== Agent tokens ====================
@@ -66,6 +71,7 @@ public class JwtTokenProvider {
         Instant expiry = now.plus(accessTokenMinutes, ChronoUnit.MINUTES);
 
         return Jwts.builder()
+                .issuer(issuer)
                 .subject(agentId.toString())
                 .claim(TOKEN_TYPE_CLAIM, ACCESS_TOKEN)
                 .claim(PRINCIPAL_CLAIM, PRINCIPAL_AGENT)
@@ -81,6 +87,7 @@ public class JwtTokenProvider {
         Instant expiry = now.plus(refreshTokenDays, ChronoUnit.DAYS);
 
         return Jwts.builder()
+                .issuer(issuer)
                 .subject(agentId.toString())
                 .claim(TOKEN_TYPE_CLAIM, REFRESH_TOKEN)
                 .claim(PRINCIPAL_CLAIM, PRINCIPAL_AGENT)
@@ -97,16 +104,24 @@ public class JwtTokenProvider {
      * Subject is agent_hosts.id — NOT a runtime agents.id. The host-control
      * WebSocket handshake validates this principal; hostType/ownership are
      * read from the durable host record, never from claims.
+     *
+     * <p>LOCAL hosts additionally carry the {@code ownerUserId} claim: the
+     * registering user the host is bound to. The engine stamps
+     * agent_host_instances.owner_user_id from THIS claim at host.open —
+     * owner identity is token-verified, never payload-asserted. The claim
+     * is omitted for MANAGED hosts (a headless supervisor has no owner).
      */
-    public String generateHostAccessToken(UUID agentHostId, String hostName) {
+    public String generateHostAccessToken(UUID agentHostId, String hostName, UUID ownerUserId) {
         Instant now = Instant.now();
         Instant expiry = now.plus(accessTokenMinutes, ChronoUnit.MINUTES);
 
         return Jwts.builder()
+                .issuer(issuer)
                 .subject(agentHostId.toString())
                 .claim(TOKEN_TYPE_CLAIM, ACCESS_TOKEN)
                 .claim(PRINCIPAL_CLAIM, PRINCIPAL_AGENT_HOST)
                 .claim(NAME_CLAIM, hostName)
+                .claim(OWNER_USER_ID_CLAIM, ownerUserId)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiry))
                 .signWith(secretKey)
@@ -123,6 +138,7 @@ public class JwtTokenProvider {
         Instant expiry = now.plus(refreshTokenDays, ChronoUnit.DAYS);
 
         return Jwts.builder()
+                .issuer(issuer)
                 .subject(agentHostId.toString())
                 .claim(TOKEN_TYPE_CLAIM, REFRESH_TOKEN)
                 .claim(PRINCIPAL_CLAIM, PRINCIPAL_AGENT_HOST)
@@ -156,6 +172,7 @@ public class JwtTokenProvider {
         Instant expiry = now.plus(accessTokenMinutes, ChronoUnit.MINUTES);
 
         return Jwts.builder()
+                .issuer(issuer)
                 .subject(userId.toString())
                 .claim(TOKEN_TYPE_CLAIM, ACCESS_TOKEN)
                 .claim(PRINCIPAL_CLAIM, PRINCIPAL_USER)
@@ -173,6 +190,7 @@ public class JwtTokenProvider {
         Instant expiry = now.plus(refreshTokenDays, ChronoUnit.DAYS);
 
         return Jwts.builder()
+                .issuer(issuer)
                 .subject(userId.toString())
                 .claim(TOKEN_TYPE_CLAIM, REFRESH_TOKEN)
                 .claim(PRINCIPAL_CLAIM, PRINCIPAL_USER)
@@ -218,6 +236,21 @@ public class JwtTokenProvider {
     @SuppressWarnings("unchecked")
     public List<String> getRoles(String token) {
         return parseToken(token).getPayload().get(ROLES_CLAIM, List.class);
+    }
+
+    /**
+     * The ownerUserId claim of a HOST access token (LOCAL hosts): the user
+     * the host is bound to. Null when absent (MANAGED hosts, or any other
+     * principal — the claim is host-specific).
+     */
+    public UUID getOwnerUserId(String token) {
+        String claim = parseToken(token).getPayload().get(OWNER_USER_ID_CLAIM, String.class);
+        return claim != null ? UUID.fromString(claim) : null;
+    }
+
+    /** The issuer stamped into every minted token (myrmec.auth.issuer). */
+    public String getIssuer() {
+        return issuer;
     }
 
     public boolean isAgentToken(String token) {

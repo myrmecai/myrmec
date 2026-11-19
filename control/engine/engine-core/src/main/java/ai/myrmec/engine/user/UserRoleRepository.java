@@ -11,17 +11,17 @@ public interface UserRoleRepository extends JpaRepository<UserRole, UUID> {
 
     List<UserRole> findByUserId(UUID userId);
 
-    List<UserRole> findByUserIdAndProjectId(UUID userId, UUID projectId);
+    List<UserRole> findByUserIdAndTeamId(UUID userId, UUID teamId);
 
-    List<UserRole> findByUserIdAndProjectIdIsNull(UUID userId);
+    List<UserRole> findByUserIdAndTeamIdIsNull(UUID userId);
 
-    List<UserRole> findByProjectId(UUID projectId);
+    List<UserRole> findByTeamId(UUID teamId);
 
-    List<UserRole> findByProjectIdIsNull();
+    List<UserRole> findByTeamIdIsNull();
 
-    List<UserRole> findByRoleAndProjectIdIsNull(UserRole.Role role);
+    List<UserRole> findByRoleAndTeamIdIsNull(UserRole.Role role);
 
-    boolean existsByUserIdAndRoleAndProjectIdIsNull(UUID userId, UserRole.Role role);
+    boolean existsByUserIdAndRoleAndTeamIdIsNull(UUID userId, UserRole.Role role);
 
     List<UserRole> findByGroupId(UUID groupId);
 

@@ -27,10 +27,10 @@ public interface GroupRepository extends JpaRepository<Group, UUID> {
      */
     @Query(value = """
         WITH RECURSIVE ancestors(id, parent_group_id) AS (
-            SELECT id, parent_group_id FROM groups WHERE id = :groupId
+            SELECT id, parent_group_id FROM org_groups WHERE id = :groupId
             UNION ALL
             SELECT g.id, g.parent_group_id
-            FROM groups g
+            FROM org_groups g
             JOIN ancestors a ON g.id = a.parent_group_id
         )
         SELECT CAST(id AS VARCHAR(36)) FROM ancestors
@@ -53,10 +53,10 @@ public interface GroupRepository extends JpaRepository<Group, UUID> {
      */
     @Query(value = """
         WITH RECURSIVE descendants(id, parent_group_id) AS (
-            SELECT id, parent_group_id FROM groups WHERE id = :groupId
+            SELECT id, parent_group_id FROM org_groups WHERE id = :groupId
             UNION ALL
             SELECT g.id, g.parent_group_id
-            FROM groups g
+            FROM org_groups g
             JOIN descendants d ON g.parent_group_id = d.id
         )
         SELECT CAST(id AS VARCHAR(36)) FROM descendants

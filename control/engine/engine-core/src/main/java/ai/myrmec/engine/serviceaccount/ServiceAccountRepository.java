@@ -18,7 +18,7 @@ public interface ServiceAccountRepository extends JpaRepository<ServiceAccount, 
 
     boolean existsByKeycloakClientId(String keycloakClientId);
 
-    List<ServiceAccount> findByProjectIdOrderByCreatedAtDesc(UUID projectId);
+    List<ServiceAccount> findByTeamIdOrderByCreatedAtDesc(UUID teamId);
 
     List<ServiceAccount> findAllByOrderByCreatedAtDesc();
 }

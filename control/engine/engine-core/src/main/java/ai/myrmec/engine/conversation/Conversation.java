@@ -21,7 +21,7 @@ import java.util.UUID;
  * Conversation — durable container for an interactive chat. Maps 1:1 with
  * the {@code conversations} table.
  *
- * <p>A conversation pins to one {@link ai.myrmec.engine.project.Project}
+ * <p>A conversation pins to one {@link ai.myrmec.engine.team.Team}
  * and optionally to one agent. Messages append to
  * {@link ConversationMessage}; ACL lives on
  * {@link ConversationParticipant}.</p>
@@ -59,8 +59,8 @@ public class Conversation {
     @Column(name = "id", nullable = false, updatable = false)
     private UUID id;
 
-    @Column(name = "project_id", nullable = false)
-    private UUID projectId;
+    @Column(name = "team_id", nullable = false)
+    private UUID teamId;
 
     /** Null until the first agent turn lands; pinned thereafter. */
     @Column(name = "agent_id")

@@ -19,9 +19,9 @@ import java.util.UUID;
 /**
  * AssistantGrant — one ACL entry on an {@link Assistant} (see
  * {@code docs/design/assistant-entity.md} §6). Grants are independent of
- * project membership and never bump a version.
+ * Team membership and never bump a version.
  *
- * <p>Uses a surrogate {@code id} PK per the project's operational-data
+ * <p>Uses a surrogate {@code id} PK per the Team's operational-data
  * convention, with a unique constraint on the natural key
  * {@code (assistant_id, principal_type, principal_id, permission)}.</p>
  */

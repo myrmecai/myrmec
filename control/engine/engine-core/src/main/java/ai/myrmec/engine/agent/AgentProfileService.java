@@ -226,7 +226,8 @@ public class AgentProfileService {
             }
         } else {
             AgentProfileVersion current = published.get();
-            boolean behaviourChanged = !Objects.equals(current.getCapabilities(), capabilities)
+            List<String> currentCapabilities = versionService.getCapabilityKeys(current.getId());
+            boolean behaviourChanged = !Objects.equals(currentCapabilities, capabilities)
                     || !Objects.equals(current.getSystemPrompt(), systemPrompt)
                     || !Objects.equals(current.getDefaultModel(), defaultModel)
                     || (toolCodes != null && !Objects.equals(toolCodesOf(current), toolCodes));

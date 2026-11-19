@@ -3,7 +3,7 @@
 package ai.myrmec.engine.agent;
 
 import ai.myrmec.engine.IntegrationTestBase;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * liveness, never on a profile binding. Every host in the fixture is
  * created with the <em>same</em> arbitrary profile so that a profile-based
  * selector would be indeterminate, while the capacity-based selector
- * returns the project-scoped / live host.
+ * returns the team-scoped / live host.
  */
 class HostSelectionServiceTest extends IntegrationTestBase {
 
@@ -39,15 +39,15 @@ class HostSelectionServiceTest extends IntegrationTestBase {
     @Test
     void selectsProjectScopedHostOverUnscopedWhenBothLive() {
         AgentProfile profile = data.agentProfile().named("selector-profile").create();
-        Project project = data.project().named("selector-project").create();
+        team team = data.team().named("selector-team").create();
 
-        AgentHost scoped = data.agent().named("scoped-live").inProject(project).create().agent();
+        AgentHost scoped = data.agent().named("scoped-live").inTeam(team).create().agent();
         AgentHost unscoped = data.agent().named("unscoped-live").create().agent();
 
         openInstance(scoped);
         openInstance(unscoped);
 
-        assertThat(selector.selectForProject(project.getId()))
+        assertThat(selector.selectForTeam(team.getId()))
                 .isPresent()
                 .hasValueSatisfying(h -> assertThat(h.getId()).isEqualTo(scoped.getId()));
     }
@@ -55,46 +55,46 @@ class HostSelectionServiceTest extends IntegrationTestBase {
     @Test
     void ignoresHostWithoutLiveInstance() {
         AgentProfile profile = data.agentProfile().named("selector-profile").create();
-        Project project = data.project().named("selector-project").create();
+        team team = data.team().named("selector-team").create();
 
-        data.agent().named("dead-host").inProject(project).create();
+        data.agent().named("dead-host").inTeam(team).create();
 
-        assertThat(selector.selectForProject(project.getId())).isEmpty();
+        assertThat(selector.selectForTeam(team.getId())).isEmpty();
     }
 
     @Test
     void prefersUnscopedLiveHostOverScopedDeadHost() {
         AgentProfile profile = data.agentProfile().named("selector-profile").create();
-        Project project = data.project().named("selector-project").create();
+        team team = data.team().named("selector-team").create();
 
-        AgentHost scopedDead = data.agent().named("scoped-dead").inProject(project).create().agent();
+        AgentHost scopedDead = data.agent().named("scoped-dead").inTeam(team).create().agent();
         AgentHost unscopedLive = data.agent().named("unscoped-live").create().agent();
 
         openInstance(unscopedLive);
 
-        assertThat(selector.selectForProject(project.getId()))
+        assertThat(selector.selectForTeam(team.getId()))
                 .isPresent()
                 .hasValueSatisfying(h -> assertThat(h.getId()).isEqualTo(unscopedLive.getId()));
     }
 
     @Test
     void emptyWhenNoHostIsActive() {
-        Project project = data.project().named("selector-project").create();
+        team team = data.team().named("selector-team").create();
 
-        assertThat(selector.selectForProject(project.getId())).isEmpty();
+        assertThat(selector.selectForTeam(team.getId())).isEmpty();
     }
 
     @Test
     void selectForNullPrefersUnscopedLiveHost() {
         AgentProfile profile = data.agentProfile().named("selector-profile").create();
 
-        AgentHost scoped = data.agent().named("scoped-live").inProject(data.project().named("other-project").create()).create().agent();
+        AgentHost scoped = data.agent().named("scoped-live").inTeam(data.team().named("other-team").create()).create().agent();
         AgentHost unscoped = data.agent().named("unscoped-live").create().agent();
 
         openInstance(scoped);
         openInstance(unscoped);
 
-        assertThat(selector.selectForProject(null))
+        assertThat(selector.selectForTeam(null))
                 .isPresent()
                 .hasValueSatisfying(h -> assertThat(h.getId()).isEqualTo(unscoped.getId()));
     }

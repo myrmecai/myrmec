@@ -11,7 +11,7 @@ public interface WorkflowRequestRepository extends JpaRepository<WorkflowRequest
 
     List<WorkflowRequest> findByWorkflowIdAndStatus(UUID workflowId, RequestStatus status);
 
-    List<WorkflowRequest> findByWorkflowProjectId(UUID projectId);
+    List<WorkflowRequest> findByWorkflowTeamId(UUID teamId);
 
     List<WorkflowRequest> findByCreatedById(UUID userId);
 }

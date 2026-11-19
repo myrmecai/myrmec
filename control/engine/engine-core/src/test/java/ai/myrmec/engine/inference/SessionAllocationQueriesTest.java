@@ -10,7 +10,7 @@ import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentRepository;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -68,11 +68,11 @@ class SessionAllocationQueriesTest extends IntegrationTestBase {
     @Test
     void offerExpiryQueryFindsOnlyOfferedPastCutoff() {
         AgentHostInstance instance = openInstance();
-        Project project = data.project().named("q-proj").create();
+        team team = data.team().named("q-proj").create();
 
-        Session offeredPast = session(project, instance, "OFFERED", Instant.now().minusSeconds(60));
-        Session offeredFuture = session(project, instance, "OFFERED", Instant.now().plusSeconds(600));
-        Session activePast = session(project, instance, "ACTIVE", Instant.now().minusSeconds(60));
+        Session offeredPast = session(team, instance, "OFFERED", Instant.now().minusSeconds(60));
+        Session offeredFuture = session(team, instance, "OFFERED", Instant.now().plusSeconds(600));
+        Session activePast = session(team, instance, "ACTIVE", Instant.now().minusSeconds(60));
 
         var results = sessionRepository.findByAllocationStateAndOfferExpiresAtBefore(
                 "OFFERED", Instant.now());
@@ -86,12 +86,12 @@ class SessionAllocationQueriesTest extends IntegrationTestBase {
     @Test
     void idleLeaseQueryFindsOnlyActiveSessionsPastExpiry() {
         AgentHostInstance instance = openInstance();
-        Project project = data.project().named("q-proj2").create();
+        team team = data.team().named("q-proj2").create();
 
-        Session activePast = session(project, instance, "ACTIVE", null);
+        Session activePast = session(team, instance, "ACTIVE", null);
         activePast.setIdleLeaseExpiresAt(Instant.now().minusSeconds(60));
         sessionRepository.saveAndFlush(activePast);
-        Session activeFuture = session(project, instance, "ACTIVE", null);
+        Session activeFuture = session(team, instance, "ACTIVE", null);
         activeFuture.setIdleLeaseExpiresAt(Instant.now().plusSeconds(600));
         sessionRepository.saveAndFlush(activeFuture);
 
@@ -112,12 +112,12 @@ class SessionAllocationQueriesTest extends IntegrationTestBase {
         return agent;
     }
 
-    private Session session(Project project, AgentHostInstance instance,
+    private Session session(team team, AgentHostInstance instance,
                             String allocationState, Instant offerExpiry) {
         Session session = new Session();
         session.setServiceType("CONVERSATION");
         session.setRefId(UUID.randomUUID());
-        session.setProjectId(project.getId());
+        session.setTeamId(team.getId());
         session.setHostInstanceId(instance.getId());
         session.setAllocationState(allocationState);
         session.setOfferExpiresAt(offerExpiry);

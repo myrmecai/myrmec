@@ -23,6 +23,11 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * refresh-token family"). Deactivation/key revocation revokes via the same
  * family set.
  *
+ * <p>The family state carries the LOCAL owner (agent_hosts has no owner
+ * column — agent_host_instances.owner_user_id is the only owner record), so
+ * refresh-minted ACCESS tokens preserve the ownerUserId claim: a reconnect
+ * that re-runs host.open after a refresh stamps the same owner.
+ *
  * <p>In-memory for v1 (single-node engine); §20 leaves multi-replica state
  * replication to the engine's existing inter-node mechanisms.</p>
  */
@@ -33,7 +38,7 @@ public class HostRefreshTokenStore {
     private final JwtTokenProvider jwtTokenProvider;
     private final AgentHostRepository agentHostRepository;
 
-    private record TokenState(UUID hostId, boolean consumed) {}
+    private record TokenState(UUID hostId, UUID ownerUserId, boolean consumed) {}
 
     /** token string -> its state. */
     private final Map<String, TokenState> tokens = new ConcurrentHashMap<>();
@@ -42,10 +47,11 @@ public class HostRefreshTokenStore {
 
     public record TokenPair(String accessToken, String refreshToken) {}
 
-    /** Issue a fresh refresh token for the host and record it in the family. */
-    public String issue(UUID hostId) {
+    /** Issue a fresh refresh token for the host (and its LOCAL owner) and
+     * record it in the family. */
+    public String issue(UUID hostId, UUID ownerUserId) {
         String token = jwtTokenProvider.generateHostRefreshToken(hostId);
-        tokens.put(token, new TokenState(hostId, false));
+        tokens.put(token, new TokenState(hostId, ownerUserId, false));
         families.computeIfAbsent(hostId, k -> new CopyOnWriteArrayList<>()).add(token);
         return token;
     }
@@ -74,10 +80,10 @@ public class HostRefreshTokenStore {
             throw new InvalidTokenException("Host is not active");
         }
 
-        String accessToken = jwtTokenProvider.generateHostAccessToken(hostId, host.getName());
+        String accessToken = jwtTokenProvider.generateHostAccessToken(hostId, host.getName(), state.ownerUserId());
         String nextRefresh = jwtTokenProvider.generateHostRefreshToken(hostId);
-        tokens.put(presentedRefreshToken, new TokenState(hostId, true));
-        tokens.put(nextRefresh, new TokenState(hostId, false));
+        tokens.put(presentedRefreshToken, new TokenState(hostId, state.ownerUserId(), true));
+        tokens.put(nextRefresh, new TokenState(hostId, state.ownerUserId(), false));
         families.computeIfAbsent(hostId, k -> new CopyOnWriteArrayList<>()).add(nextRefresh);
         return new TokenPair(accessToken, nextRefresh);
     }

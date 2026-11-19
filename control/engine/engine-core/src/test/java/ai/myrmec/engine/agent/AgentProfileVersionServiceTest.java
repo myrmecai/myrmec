@@ -7,8 +7,9 @@ import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine.inference.SessionContextAssembler;
 import ai.myrmec.engine.model.Model;
 import ai.myrmec.engine.model.ModelRepository;
-import ai.myrmec.engine.project.ProjectService;
+import ai.myrmec.engine.team.TeamService;
 import ai.myrmec.engine.websocket.message.payload.SessionOpenPayload;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -48,10 +49,13 @@ class AgentProfileVersionServiceTest extends IntegrationTestBase {
     private AgentProfileVersionService versionService;
 
     @Autowired
+    private AgentProfileCapabilityRepository capabilityRepository;
+
+    @Autowired
     private SessionContextAssembler sessionContextAssembler;
 
     @Autowired
-    private ProjectService projectService;
+    private TeamService TeamService;
 
     @Autowired
     private ModelRepository modelRepository;
@@ -75,7 +79,7 @@ class AgentProfileVersionServiceTest extends IntegrationTestBase {
         return agentProfileService.createProfile(
                 "f0-profile-" + System.nanoTime(),
                 "Feature 0 test profile",
-                List.of("docker"),
+                List.of("code.engineering.test", "devops.docker"),
                 null,
                 Set.of(),
                 systemPrompt,
@@ -112,7 +116,7 @@ class AgentProfileVersionServiceTest extends IntegrationTestBase {
         assertThat(v1.getStatus()).isEqualTo(AgentProfileVersion.Status.DRAFT);
         assertThat(v1.getSystemPrompt()).isNull();
         assertThat(v1.getDefaultModel()).isNull();
-        assertThat(v1.getCapabilities()).isEmpty();
+        assertThat(versionService.getCapabilityKeys(v1.getId())).isEmpty();
 
         // The single open draft IS that v1 row.
         assertThat(versionService.findOpenDraft(profile.getId()))
@@ -140,12 +144,14 @@ class AgentProfileVersionServiceTest extends IntegrationTestBase {
 
         AgentProfileVersion draft = versionService.getOpenDraft(profile.getId());
         versionService.updateDraft(
-                draft.getId(), List.of("docker"), Set.of(), "first real prompt", null, null);
+                draft.getId(), List.of("code.engineering.test"), Set.of(), "first real prompt", null, null);
         AgentProfileVersion published = versionService.publish(profile.getId(), null);
 
         assertThat(published.getStatus()).isEqualTo(AgentProfileVersion.Status.PUBLISHED);
         assertThat(published.getVersionNumber()).isEqualTo(1);
         assertThat(published.getSystemPrompt()).isEqualTo("first real prompt");
+        assertThat(versionService.getCapabilityKeys(published.getId()))
+                .containsExactly("code.engineering.test");
 
         // Exactly one PUBLISHED row, nothing archived, no draft left open.
         List<AgentProfileVersion> versions = versionService.listVersions(profile.getId());
@@ -230,6 +236,14 @@ class AgentProfileVersionServiceTest extends IntegrationTestBase {
         assertThat(versionService.findOpenDraft(profile.getId())).isPresent();
     }
 
+    @Test
+    @DisplayName("capability catalog must be seeded for tests that bind capabilities")
+    void seedCapabilities() {
+        // The 000b-capabilities.xml seed runs automatically in integration
+        // tests. This test is a no-op guard to make the dependency explicit.
+        assertThat(capabilityRepository.count()).isGreaterThanOrEqualTo(0);
+    }
+
     // ── seed rule: createProfile publishes v1 ─────────────────
 
     @Test
@@ -274,12 +288,14 @@ class AgentProfileVersionServiceTest extends IntegrationTestBase {
         assertThat(draft.getStatus()).isEqualTo(AgentProfileVersion.Status.DRAFT);
         assertThat(draft.getVersionNumber()).isEqualTo(2);
 
-        versionService.updateDraft(draft.getId(), List.of("docker"), null, "v2 prompt", null, null);
+        versionService.updateDraft(draft.getId(), List.of("code.engineering.test"), null, "v2 prompt", null, null);
         AgentProfileVersion v2 = versionService.publish(profile.getId(), null);
 
         assertThat(v2.getStatus()).isEqualTo(AgentProfileVersion.Status.PUBLISHED);
         assertThat(v2.getVersionNumber()).isEqualTo(2);
         assertThat(v2.getSystemPrompt()).isEqualTo("v2 prompt");
+        assertThat(versionService.getCapabilityKeys(v2.getId()))
+                .containsExactly("code.engineering.test");
 
         // exactly one PUBLISHED version; v1 archived
         List<AgentProfileVersion> versions = versionService.listVersions(profile.getId());
@@ -391,7 +407,7 @@ class AgentProfileVersionServiceTest extends IntegrationTestBase {
         // publish v2 with different content
         String modelCode = ensureModel("m-f0-pin-" + System.nanoTime());
         AgentProfileVersion draft = versionService.createDraft(profile.getId());
-        versionService.updateDraft(draft.getId(), List.of("docker"), null, "v2 prompt", modelCode, null);
+        versionService.updateDraft(draft.getId(), List.of("code.engineering.test"), null, "v2 prompt", modelCode, null);
         AgentProfileVersion v2 = versionService.publish(profile.getId(), null);
 
         // the runtime resolution (reserve-time pin) resolves v2, not v1
@@ -405,6 +421,8 @@ class AgentProfileVersionServiceTest extends IntegrationTestBase {
         AgentProfileVersion v1 = versions.stream()
                 .filter(v -> v.getVersionNumber() == 1).findFirst().orElseThrow();
         assertThat(v1.getSystemPrompt()).isEqualTo("v1 prompt");
+        assertThat(versionService.getCapabilityKeys(v1.getId()))
+                .containsExactly("code.engineering.test", "devops.docker");
     }
 
     // ── session.open carries version content ──────────────────
@@ -415,15 +433,15 @@ class AgentProfileVersionServiceTest extends IntegrationTestBase {
         String modelCode = ensureModel("m-f0-open-" + System.nanoTime());
         AgentProfile profile = newProfile("v1 prompt", modelCode);
 
-        ai.myrmec.engine.project.dto.CreateProjectRequest projectReq =
-                new ai.myrmec.engine.project.dto.CreateProjectRequest();
-        projectReq.setName("f0-sess-" + System.nanoTime());
-        projectReq.setDescription("Feature 0 session test");
-        UUID projectId = projectService.create(projectReq).getId();
+        ai.myrmec.engine.team.dto.CreateTeamRequest teamReq =
+                new ai.myrmec.engine.team.dto.CreateTeamRequest();
+        teamReq.setName("f0-sess-" + System.nanoTime());
+        teamReq.setDescription("Feature 0 session test");
+        UUID teamId = TeamService.create(teamReq).getId();
 
         AgentProfileVersion published = versionService.requirePublished(profile.getId());
         SessionOpenPayload open = sessionContextAssembler.assemble(
-                "CONVERSATION", UUID.randomUUID(), projectId, profile.getId());
+                "CONVERSATION", UUID.randomUUID(), teamId, profile.getId());
 
         // §9.5: the pin is the real published version row ID.
         assertThat(open.profileVersionId()).isEqualTo(published.getId());

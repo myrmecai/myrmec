@@ -63,7 +63,7 @@ public interface NodeTransport {
      * Task 9 (plan 2026-10-03-session-interaction §3.5/§4): the typed
      * EXECUTION-stream fan-out arm — publish an execution stream frame so
      * peer instances deliver it to their local execution subscribers
-     * ({@code /api/v1/projects/../executions/{executionId}/stream}).
+     * ({@code /api/v1/teams/../executions/{executionId}/stream}).
      *
      * <p>Same contract as the conversation arm: fire-and-forget; the local
      * instance has ALREADY delivered to its own subscribers; implementations

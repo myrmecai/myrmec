@@ -10,7 +10,7 @@ import ai.myrmec.engine.assistant.AssistantVersionService;
 import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.conversation.ConversationMessage;
 import ai.myrmec.engine.conversation.ConversationService;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileVersion;
 import ai.myrmec.engine.testing.TestDataBuilder;
@@ -42,16 +42,16 @@ class ExecutionInputAssemblerPinTest extends IntegrationTestBase {
 
     @Test
     void pinnedVersionSurvivesProfileRepublishInAssembledInput() {
-        Project project = data.project().named("pin-republish").create();
+        team team = data.team().named("pin-republish").create();
         // v1 prompt is distinct and greppable.
         AgentProfile profile = data.agentProfile()
                 .named("pin-republish-profile").withSystemPrompt("v1 PINNED PROMPT").create();
 
         Assistant assistant = assistantService.createAssistant(
-                project.getId(), "Pin Assistant", "desc", profile.getId(), TEST_ADMIN_ID);
+                team.getId(), "Pin Assistant", "desc", profile.getId(), TEST_ADMIN_ID);
         AssistantVersion published = assistantVersionService.publish(assistant.getId(), TEST_ADMIN_ID);
 
-        Conversation conversation = data.conversation().inProject(project).create();
+        Conversation conversation = data.conversation().inTeam(team).create();
         conversation.setAssistantId(assistant.getId());
         conversation.setAssistantVersionId(published.getId());
         conversation.setAgentProfileVersionId(published.getAgentProfileVersionId());
@@ -68,7 +68,7 @@ class ExecutionInputAssemblerPinTest extends IntegrationTestBase {
 
         // The assembled input for the next turn still carries v1's prompt.
         Map<String, Object> input = assembler.assembleConversationInput(
-                conversation.getId(), UUID.randomUUID(), project.getId(), 1L);
+                conversation.getId(), UUID.randomUUID(), team.getId(), 1L);
 
         // The assembled input's "messages" is the legacy transcript â€” a
         // List<InferenceMessage> (P5 lesson: never cast it to List<Map>).
@@ -93,14 +93,14 @@ class ExecutionInputAssemblerPinTest extends IntegrationTestBase {
 
     @Test
     void unpinnedConversationIsRejectedByTheAssembler() {
-        Project project = data.project().named("pin-missing").create();
-        Conversation conversation = data.conversation().inProject(project).create();
+        team team = data.team().named("pin-missing").create();
+        Conversation conversation = data.conversation().inTeam(team).create();
         conversationService.appendMessage(conversation.getId(),
                 ConversationMessage.Role.USER, "hello", TEST_ADMIN_ID, null);
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
                         assembler.assembleConversationInput(
-                                conversation.getId(), UUID.randomUUID(), project.getId(), 1L))
+                                conversation.getId(), UUID.randomUUID(), team.getId(), 1L))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("no pinned profile version");
     }

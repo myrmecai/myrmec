@@ -23,9 +23,9 @@ public class UpdateAgentHostRequest {
     private String description;
 
     /**
-     * Project scope can be changed.
+     * Team scope can be changed.
      */
-    private UUID projectId;
+    private UUID teamId;
 
     /**
      * Maximum concurrent Agents this host may run.

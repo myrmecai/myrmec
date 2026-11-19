@@ -177,7 +177,7 @@ public class HttpRetrievalProvider implements RetrievalProvider {
         }
 
         // 3. Resolve auth
-        String authHeader = resolveAuth(connectionConfig, source.getProjectId());
+        String authHeader = resolveAuth(connectionConfig, source.getTeamId());
 
         // 4. Resolve provider config
         Map<String, Object> providerConfig = providerVersion.getConfig();
@@ -346,12 +346,12 @@ public class HttpRetrievalProvider implements RetrievalProvider {
         return source.getId().toString();
     }
 
-    private String resolveAuth(ConnectionConfig connectionConfig, UUID projectId) {
+    private String resolveAuth(ConnectionConfig connectionConfig, UUID teamId) {
         UUID secretId = connectionConfig.getCredentialSecretId();
         if (secretId == null) return null;
 
         try {
-            SecretPayload payload = secretResolverService.resolve(secretId, projectId);
+            SecretPayload payload = secretResolverService.resolve(secretId, teamId);
             return switch (payload) {
                 case SecretPayload.BearerToken bt -> "Bearer " + bt.token();
                 case SecretPayload.ApiKey ak -> "Bearer " + ak.key();

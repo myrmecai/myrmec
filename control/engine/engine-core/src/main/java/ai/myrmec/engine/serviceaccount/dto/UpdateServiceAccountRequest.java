@@ -9,7 +9,7 @@ import jakarta.validation.constraints.Size;
  * unchanged. {@code enabled} is the kill switch; {@code rateLimitPerMin}
  * retunes the per-account limit.
  *
- * <p>{@code projectId} and {@code keycloakClientId} are immutable after
+ * <p>{@code teamId} and {@code keycloakClientId} are immutable after
  * creation and therefore not updatable here.</p>
  */
 public record UpdateServiceAccountRequest(

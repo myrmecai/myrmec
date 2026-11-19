@@ -5,7 +5,7 @@ import ai.myrmec.engine._system.exception.ResourceInUseException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine.group.dto.CreateGroupRequest;
 import ai.myrmec.engine.group.dto.UpdateGroupRequest;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.TeamRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -23,7 +23,7 @@ import java.util.UUID;
 public class GroupService {
 
     private final GroupRepository groupRepository;
-    private final ProjectRepository projectRepository;
+    private final TeamRepository teamRepository;
 
     @Transactional(readOnly = true)
     public List<Group> findAll() {
@@ -85,9 +85,9 @@ public class GroupService {
         if (Group.DEFAULT_GROUP_ID.equals(id)) {
             throw new BadRequestException("The Default group cannot be deleted");
         }
-        long projectCount = projectRepository.countByGroupId(id);
-        if (projectCount > 0) {
-            throw ResourceInUseException.blockedBy("Project", (int) projectCount);
+        long teamCount = teamRepository.countByGroupId(id);
+        if (teamCount > 0) {
+            throw ResourceInUseException.blockedBy("team", (int) teamCount);
         }
         groupRepository.delete(group);
         log.info("Deleted group: {} ({})", group.getName(), id);

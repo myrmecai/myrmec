@@ -4,7 +4,7 @@ package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.agent.AgentProfile;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.User;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,12 +55,12 @@ class OrchestrationApprovalServiceTest extends IntegrationTestBase {
 
     @BeforeEach
     void setUp() {
-        Project project = data.project().named("hitl").withRepo("https://x.git", "main").create();
+        team team = data.team().named("hitl").withRepo("https://x.git", "main").create();
         AgentProfile profile = data.agentProfile().named("hitl-profile").create();
         triggerer = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
 
         Workflow wf = new Workflow();
-        wf.setProject(project);
+        wf.setTeam(team);
         wf.setName("hitl-wf-" + System.nanoTime());
         wf.setSteps(java.util.List.<Map<String, Object>>of());
         wf.setVersion(1);

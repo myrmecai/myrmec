@@ -15,7 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Verifies that {@link ContextBuilder} exists as a Spring bean and
  * has the additive-stack assembly method. The additive stack composes
- * instruction assets from both ORG (priority +1000) and PROJECT (priority
+ * instruction assets from both ORG (priority +1000) and team (priority
  * +2000) scopes, sorted by effective priority.
  *
  * <p>This contract test verifies the infrastructure exists. Full

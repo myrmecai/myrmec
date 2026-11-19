@@ -8,7 +8,7 @@ import java.util.UUID;
 /** Parent-row view of an {@link Assistant} (#92). */
 public record AssistantResponse(
         UUID id,
-        UUID projectId,
+        UUID teamId,
         String name,
         String description,
         UUID currentVersionId,
@@ -21,7 +21,7 @@ public record AssistantResponse(
     public static AssistantResponse from(Assistant a) {
         return new AssistantResponse(
                 a.getId(),
-                a.getProjectId(),
+                a.getTeamId(),
                 a.getName(),
                 a.getDescription(),
                 a.getCurrentVersionId(),

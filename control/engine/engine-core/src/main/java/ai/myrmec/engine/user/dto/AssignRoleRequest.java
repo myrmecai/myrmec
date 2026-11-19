@@ -9,9 +9,9 @@ import java.util.UUID;
 /**
  * Request to assign a role to a user. Supply exactly one of:
  * <ul>
- *   <li>{@code scopeType=SYSTEM} — neither {@code groupId} nor {@code projectId}</li>
+ *   <li>{@code scopeType=SYSTEM} — neither {@code groupId} nor {@code teamId}</li>
  *   <li>{@code scopeType=GROUP}  — {@code groupId} required</li>
- *   <li>{@code scopeType=PROJECT} — {@code projectId} required</li>
+ *   <li>{@code scopeType=Team} — {@code teamId} required</li>
  * </ul>
  */
 @Data
@@ -25,5 +25,5 @@ public class AssignRoleRequest {
 
     private UUID groupId;
 
-    private UUID projectId;
+    private UUID teamId;
 }

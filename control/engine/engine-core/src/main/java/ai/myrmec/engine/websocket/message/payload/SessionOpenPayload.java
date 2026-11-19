@@ -40,13 +40,13 @@ import java.util.UUID;
 public record SessionOpenPayload(
         UUID sessionId,
         String kind,             // §21.4: "WORKFLOW" or "CONVERSATION"
-        UUID projectId,
+        UUID teamId,
         UUID profileVersionId,   // pinned agent-profile version
         ModelConfig model,
         WorkspaceConfig workspace,  // nullable
         List<ToolDefinition> tools,
         List<KnowledgeSourceHandle> knowledgeSources,
-        boolean autoHitlOnDestructive,  // project HITL policy
+        boolean autoHitlOnDestructive,  // Team HITL policy
         String executionMode,             // §7.3: "ORCHESTRATION" or null
         String ref,                       // §7.3: orchestration external reference or null
         Map<String, Object> orchestration,  // §16.2 assignment; null for non-orchestration
@@ -68,7 +68,7 @@ public record SessionOpenPayload(
      * {@code interaction} sibling of {@code assignment} REQUIRED on
      * orchestration (WORKFLOW-kind) session.open payloads and ABSENT on
      * conversation sessions (their execution behavior is unchanged).
-     * Values are the section 22.2 defaults tightened by project policy;
+     * Values are the section 22.2 defaults tightened by Team policy;
      * bounds are enforced by
      * {@code ai.myrmec.engine.inference.execution.interaction.InteractionProperties}.
      */
@@ -101,7 +101,7 @@ public record SessionOpenPayload(
 
     /** Copy the context with the §16.2 assignment installed (orchestration only). */
     public SessionOpenPayload withAssignment(Map<String, Object> assignment, String digest) {
-        return new SessionOpenPayload(sessionId, kind, projectId, profileVersionId,
+        return new SessionOpenPayload(sessionId, kind, teamId, profileVersionId,
                 model, workspace, tools, knowledgeSources, autoHitlOnDestructive,
                 executionMode, ref, assignment, digest, credentials, channel,
                 policy, capture, interaction);
@@ -109,7 +109,7 @@ public record SessionOpenPayload(
 
     /** Copy the context with the §7.5 channel offer installed. */
     public SessionOpenPayload withChannel(ChannelOffer offer) {
-        return new SessionOpenPayload(sessionId, kind, projectId, profileVersionId,
+        return new SessionOpenPayload(sessionId, kind, teamId, profileVersionId,
                 model, workspace, tools, knowledgeSources, autoHitlOnDestructive,
                 executionMode, ref, orchestration, assignmentDigest, credentials, offer,
                 policy, capture, interaction);
@@ -117,7 +117,7 @@ public record SessionOpenPayload(
 
     /** Copy the context with the §22.2 interaction policy installed. */
     public SessionOpenPayload withInteraction(InteractionPolicy interaction) {
-        return new SessionOpenPayload(sessionId, kind, projectId, profileVersionId,
+        return new SessionOpenPayload(sessionId, kind, teamId, profileVersionId,
                 model, workspace, tools, knowledgeSources, autoHitlOnDestructive,
                 executionMode, ref, orchestration, assignmentDigest, credentials, channel,
                 policy, capture, interaction);

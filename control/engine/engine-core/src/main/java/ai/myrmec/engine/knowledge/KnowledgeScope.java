@@ -6,13 +6,13 @@ package ai.myrmec.engine.knowledge;
 public enum KnowledgeScope {
     /**
      * Organization-wide knowledge (applies to all projects).
-     * project_id must be null.
+     * team_id must be null.
      */
     ORGANIZATION,
     
     /**
-     * Project-specific knowledge.
-     * project_id must be set.
+     * Team-specific knowledge.
+     * team_id must be set.
      */
-    PROJECT
+    Team
 }

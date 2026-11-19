@@ -13,10 +13,10 @@ public interface ExecutionSnapshotRepository extends JpaRepository<ExecutionSnap
     /** Most-recent-first replay timeline for a single conversation. */
     List<ExecutionSnapshot> findByConversationIdOrderByCreatedAtAsc(UUID conversationId);
 
-    List<ExecutionSnapshot> findByProjectIdOrderByCreatedAtDesc(UUID projectId);
+    List<ExecutionSnapshot> findByTeamIdOrderByCreatedAtDesc(UUID teamId);
 
     long countByEventType(String eventType);
 
     /** Inputs to the (future) snapshot retention pruner. */
-    List<ExecutionSnapshot> findByProjectIdAndCreatedAtBefore(UUID projectId, Instant cutoff);
+    List<ExecutionSnapshot> findByTeamIdAndCreatedAtBefore(UUID teamId, Instant cutoff);
 }

@@ -516,7 +516,7 @@ public class UserAuthService {
     /**
      * Build roles claim for JWT.
      * System-wide roles: "ROLE"
-     * Project-specific roles: "proj:<projectId>:ROLE"
+     * Team-specific roles: "proj:<teamId>:ROLE"
      */
     private List<String> buildRolesClaim(UUID userId) {
         return userRoleRepository.findByUserId(userId).stream()

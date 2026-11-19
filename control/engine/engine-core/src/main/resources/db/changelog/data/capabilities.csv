@@ -1,0 +1,39 @@
+capability_key,display_name,description,is_active
+fs.workspace.read,Read Workspace Files,"Grants permission to read code files and explore directory structures within the assigned session workspace.",true
+fs.workspace.write,Write & Modify Files,"Grants permission to create, edit, and update code files within allowed workspace paths.",true
+fs.workspace.delete,Delete Files,"Grants permission to remove files or empty directories inside the workspace.",true
+vcs.worktree.manage,Manage Git Worktrees,"Permission to initialize, switch, and clean up isolated Git worktrees for agent tasks.",true
+vcs.diff.read,Inspect Git Diffs,"Permission to generate and read unified diffs between the working tree and base branches.",true
+vcs.commit,Local Git Commit,"Permission to stage changes (git add) and create local commits within the worktree branch.",true
+exec.sandbox.shell,Sandbox Shell Execution,"Permission to execute arbitrary shell commands inside the secure, isolated container sandbox.",true
+exec.test.run,Run Test Suites,"Scoped permission to trigger unit tests and test runners (e.g., npm test, pytest, mvn test).",true
+exec.build.compile,Build & Compile,"Scoped permission to run project builds and compilation tools.",true
+orch.subagent.delegate,Delegate to Sub-Agents,"Permission for the primary orchestrator model to invoke and coordinate helper sub-agents.",true
+mcp.github.read,GitHub Read Integration,"  Permission to query repositories, issues, PRs, and commit history via GitHub MCP servers.",true
+mcp.jira.read,Jira Read Integration,"Permission to search and read Jira tickets, epics, and requirements.",true
+mcp.database.readonly,Read-Only Database Query,"Permission to execute read-only SQL queries against registered internal test/dev databases.",true
+code.analyze.lint,Run Linters & Formatters,"Permission to run static code analysis tools (e.g., ESLint, Checkstyle, SonarQube CLI, Prettier).",true
+code.analyze.security,Security & Vulnerability Scanning,"Permission to execute security scanners (e.g., Snyk, Trivy, OWASP Dependency-Check) on the workspace.",true
+code.dependencies.read,Inspect Dependencies,"Permission to read dependency manifests (package.json, pom.xml, go.mod, requirements.txt).",true
+code.dependencies.install,Install & Update Packages,"Permission to execute package manager installations (e.g., npm install, mvn dependency:resolve, pip install).",true
+runtime.node.execute,Node.js Runtime Execution,"Permission to execute Node.js scripts, build tools (Webpack, Vite), or TypeScript compilation (tsc).",true
+runtime.java.execute,Java & Maven/Gradle Execution,"Permission to run Java compilation, Maven goals (mvn clean compile), or Gradle tasks.",true
+runtime.python.execute,Python Runtime Execution,"Permission to execute Python scripts, virtual environments, or dependency management (poetry, pipenv).",true
+runtime.docker.build,Docker Build & Inspect,Permission to build container images (docker build) or inspect Dockerfiles and Compose configs.,true
+db.schema.migrate,Database Migrations,"Permission to run database migration tools (e.g., Liquibase, Flyway, Prisma) against dev/test databases.",true
+code.design.ast_analyze,AST & Structure Analysis,"Permission to parse code Abstract Syntax Trees (ASTs) to analyze class hierarchies, method signatures, and symbol references across files.",true
+code.design.api_scaffold,API & Schema Generation,"Permission to generate or update OpenAPI specifications, GraphQL schemas, gRPC protos, database entities, and DTO structures.",true
+code.architecture.diagram,Architecture Modeling & Diagrams,"Permission to generate C4 architectural models, PlantUML diagrams, or Architecture Decision Record (ADR) documentation.",true
+code.architecture.compliance,Architectural Compliance Check,"Permission to scan codebases against defined structural rules (e.g., preventing domain layers from depending on infrastructure layers, detecting cyclic dependencies).",true
+code.refactor.structural,Multi-File Structural Refactoring,"Permission to execute complex, multi-file refactoring operations (e.g., interface extraction, package reorganization, global renaming).",true
+code.test.generate,Test Suite Generation,"Permission to automatically generate comprehensive unit tests (JUnit, Jest, PyTest), mock objects, and test fixtures for implemented features.",true
+cs.ticket.manage,CRM & Ticket Management,"Permission to read, update, tag, and draft replies in customer ticketing and CRM systems (e.g., Zendesk, Salesforce Service Cloud).",true
+cs.sentiment.analyze,Customer Sentiment Analysis,"Permission to evaluate customer messages for tone, urgency, churn risk, and escalation triggers.",true
+cs.kb.search,Knowledge Base & FAQ Search,"Permission to query internal documentation, support articles, and FAQ repositories for approved answers.",true
+ops.incident.triage,Incident Triage & Log Analysis,"Permission to inspect monitoring alerts, error logs, and metrics (e.g., Datadog, PagerDuty) to diagnose system outages.",true
+ops.runbook.execute,Runbook Automation,Permission to trigger pre-approved operational remediation scripts or diagnostic commands.,true
+ops.access.provision,Access & Identity Management,"Permission to review or initiate user access requests, permission audits, or SSO group lookups.",true
+data.bi.query_readonly,Business Intelligence Query,"Permission to execute read-only analytics queries against data warehouses (e.g., Snowflake, BigQuery, PostgreSQL analytics DBs).",true
+data.report.generate,Executive Report Generation,"Permission to aggregate metrics, summarize KPI trends, and compile structured business briefing documents.",true
+compliance.doc.review,Document & Policy Review,"Permission to scan contracts, PRDs, or architecture documents against regulatory standards (e.g., GDPR, ISO 27001, internal policies).",true
+hr.policy.lookup,HR Policy & Benefits Lookup,Permission to query internal employee handbooks and benefits portals to answer HR inquiries accurately.,true

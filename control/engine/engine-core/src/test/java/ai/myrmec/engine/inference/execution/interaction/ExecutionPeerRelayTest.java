@@ -9,7 +9,7 @@ import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
 import ai.myrmec.engine.node.NodeTransport;
 import ai.myrmec.engine.node.StreamRelayRequest;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.User;
 import ai.myrmec.engine.user.UserPrincipal;
@@ -75,7 +75,7 @@ class ExecutionPeerRelayTest extends IntegrationTestBase {
     @Autowired PlatformTransactionManager transactionManager;
     @Autowired ai.myrmec.engine.agent.AgentHostInstanceRepository instanceRepository;
 
-    private Project project;
+    private team team;
     private Workflow workflow;
     private WorkflowRequest request;
     private WorkflowTask task;
@@ -136,8 +136,8 @@ class ExecutionPeerRelayTest extends IntegrationTestBase {
     void seed() {
         // The recording bean survives across tests in the class — clear it.
         recorded.executionEnvelopes.clear();
-        project = data.project().named("relay-proj").create();
-        workflow = workflowOf(project);
+        team = data.team().named("relay-proj").create();
+        workflow = workflowOf(team);
         User admin = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
 
         WorkflowRequest req = new WorkflowRequest();
@@ -172,7 +172,7 @@ class ExecutionPeerRelayTest extends IntegrationTestBase {
         session = new Session();
         session.setServiceType("WORKFLOW");
         session.setRefId(request.getId());
-        session.setProjectId(project.getId());
+        session.setTeamId(team.getId());
         session.setKind("ORCHESTRATION_TASK");
         session.setStatus("ACTIVE");
         session.setAllocationState("ACTIVE");
@@ -192,7 +192,7 @@ class ExecutionPeerRelayTest extends IntegrationTestBase {
         execution = executions.saveAndFlush(execution);
 
         editorUser = seedUser("relay-editor");
-        grant(editorUser.getId(), UserRole.Role.EDITOR, project.getId());
+        grant(editorUser.getId(), UserRole.Role.EDITOR, team.getId());
     }
 
     @Test
@@ -220,11 +220,11 @@ class ExecutionPeerRelayTest extends IntegrationTestBase {
             + "settlement = one cursor advance + one peer wakeup)")
     void outcomeSettlementFiresPeerRelay() {
         UUID interactionId = interactionService.admit(
-                scope(project.getId()), editor(), UUID.randomUUID(), "relay check")
+                scope(team.getId()), editor(), UUID.randomUUID(), "relay check")
                 .interactionId();
         recorded.executionEnvelopes.clear();
 
-        interactionService.complete(scope(project.getId()), "msg-relay-1",
+        interactionService.complete(scope(team.getId()), "msg-relay-1",
                 completePayload(interactionId, 1L, "settled"));
 
         assertThat(recorded.executionEnvelopes).isNotEmpty();
@@ -251,8 +251,8 @@ class ExecutionPeerRelayTest extends IntegrationTestBase {
                 List.of(), Instant.now());
     }
 
-    private ExecutionScope scope(UUID projectId) {
-        return new ExecutionScope(projectId, workflow.getId(), request.getId(),
+    private ExecutionScope scope(UUID teamId) {
+        return new ExecutionScope(teamId, workflow.getId(), request.getId(),
                 task.getId(), attempt.getId(), execution.getId());
     }
 
@@ -260,7 +260,7 @@ class ExecutionPeerRelayTest extends IntegrationTestBase {
         return new UserPrincipal(editorUser.getId(), "Test User",
                 "user-" + editorUser.getId().toString().substring(0, 8)
                         + "@test.local",
-                List.of("proj:" + project.getId() + ":EDITOR"));
+                List.of("proj:" + team.getId() + ":EDITOR"));
     }
 
     private User seedUser(String suffix) {
@@ -276,19 +276,19 @@ class ExecutionPeerRelayTest extends IntegrationTestBase {
         return userRepository.save(user);
     }
 
-    private void grant(UUID userId, UserRole.Role role, UUID projectId) {
+    private void grant(UUID userId, UserRole.Role role, UUID teamId) {
         UserRole row = new UserRole();
         row.setUserId(userId);
         row.setRole(role);
-        row.setScopeType(UserRole.ScopeType.PROJECT);
-        row.setProjectId(projectId);
+        row.setScopeType(UserRole.ScopeType.TEAM);
+        row.setTeamId(teamId);
         row.setGrantedByUserId(TEST_ADMIN_ID);
         userRoleRepository.save(row);
     }
 
-    private Workflow workflowOf(Project parent) {
+    private Workflow workflowOf(team parent) {
         Workflow wf = new Workflow();
-        wf.setProject(parent);
+        wf.setTeam(parent);
         wf.setName("relay-wf-" + System.nanoTime());
         wf.setSteps(List.of());
         wf.setVersion(1);

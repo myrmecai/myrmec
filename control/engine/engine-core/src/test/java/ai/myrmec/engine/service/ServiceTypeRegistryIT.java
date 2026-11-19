@@ -1,8 +1,8 @@
 package ai.myrmec.engine.service;
 
 import ai.myrmec.engine.IntegrationTestBase;
-import ai.myrmec.engine.project.ProjectService;
-import ai.myrmec.engine.project.dto.CreateProjectRequest;
+import ai.myrmec.engine.team.TeamService;
+import ai.myrmec.engine.team.dto.CreateTeamRequest;
 import ai.myrmec.engine.service.dto.ServiceTypeResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,7 +27,7 @@ class ServiceTypeRegistryIT extends IntegrationTestBase {
     private ServiceTypeRegistry registry;
 
     @Autowired
-    private ProjectService projectService;
+    private TeamService TeamService;
 
     private Map<String, ServiceTypeResponse> byCode() {
         return registry.list().stream()
@@ -52,24 +52,24 @@ class ServiceTypeRegistryIT extends IntegrationTestBase {
         long conversationalBefore = byCode().get("CONVERSATIONAL").getProjectEnabledCount();
 
         // Both types -> increments both counts.
-        projectService.create(both("svc-reg-both-" + UUID.randomUUID()));
+        TeamService.create(both("svc-reg-both-" + UUID.randomUUID()));
         // Workflow only -> increments WORKFLOW only.
-        projectService.create(onlyWorkflow("svc-reg-wf-" + UUID.randomUUID()));
+        TeamService.create(onlyWorkflow("svc-reg-wf-" + UUID.randomUUID()));
 
         Map<String, ServiceTypeResponse> after = byCode();
         assertThat(after.get("WORKFLOW").getProjectEnabledCount()).isEqualTo(workflowBefore + 2);
         assertThat(after.get("CONVERSATIONAL").getProjectEnabledCount()).isEqualTo(conversationalBefore + 1);
     }
 
-    private CreateProjectRequest both(String name) {
-        CreateProjectRequest r = new CreateProjectRequest();
+    private CreateTeamRequest both(String name) {
+        CreateTeamRequest r = new CreateTeamRequest();
         r.setName(name);
         r.setAllowedServiceTypes(List.of("WORKFLOW", "CONVERSATIONAL"));
         return r;
     }
 
-    private CreateProjectRequest onlyWorkflow(String name) {
-        CreateProjectRequest r = new CreateProjectRequest();
+    private CreateTeamRequest onlyWorkflow(String name) {
+        CreateTeamRequest r = new CreateTeamRequest();
         r.setName(name);
         r.setAllowedServiceTypes(List.of("WORKFLOW"));
         return r;

@@ -13,7 +13,7 @@ import java.util.UUID;
  */
 public record ServiceAccountResponse(
         UUID id,
-        UUID projectId,
+        UUID teamId,
         String name,
         String description,
         String keycloakClientId,
@@ -26,7 +26,7 @@ public record ServiceAccountResponse(
     public static ServiceAccountResponse of(ServiceAccount sa) {
         return new ServiceAccountResponse(
                 sa.getId(),
-                sa.getProjectId(),
+                sa.getTeamId(),
                 sa.getName(),
                 sa.getDescription(),
                 sa.getKeycloakClientId(),

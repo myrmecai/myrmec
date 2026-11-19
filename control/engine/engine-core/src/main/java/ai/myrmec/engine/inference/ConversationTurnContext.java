@@ -30,8 +30,8 @@ public class ConversationTurnContext {
     /** Conversation this turn belongs to. */
     private UUID conversationId;
 
-    /** Parent project (for tool ACL + budget scope). */
-    private UUID projectId;
+    /** Parent Team (for tool ACL + budget scope). */
+    private UUID teamId;
 
     /** The agent profile the conversation is pinned to. */
     private UUID agentId;

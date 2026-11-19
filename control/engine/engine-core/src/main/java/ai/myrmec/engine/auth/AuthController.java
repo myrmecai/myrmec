@@ -86,10 +86,10 @@ public class AuthController {
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "401", description = "Missing or invalid user token",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "403", description = "Insufficient project access",
+            @ApiResponse(responseCode = "403", description = "Insufficient Team access",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
-    @PreAuthorize("(#request.projectId == null or @projectAccess.canEdit(#request.projectId, authentication))")
+    @PreAuthorize("(#request.teamId == null or @teamAccess.canEdit(#request.teamId, authentication))")
     @PostMapping("/local/register")
     public ResponseEntity<LocalAgentRegisterResponse> registerLocalAgent(
             @Valid @RequestBody LocalAgentRegisterRequest request,

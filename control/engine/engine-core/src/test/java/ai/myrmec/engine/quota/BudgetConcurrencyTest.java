@@ -23,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * BUD-08 / J2c &mdash; Quota no-double-spend invariant (P1 carve-out).
  *
- * <p>With a project CEILING of 100 tokens and 95 already consumed,
+ * <p>With a team CEILING of 100 tokens and 95 already consumed,
  * fire 10 concurrent consumption requests (10 tokens each). At most one
  * should succeed; every rejection must carry a specific reason code
  * ({@code QUOTA_EXCEEDED}, never a generic 500); and the final consumed
@@ -45,21 +45,21 @@ class BudgetConcurrencyTest extends IntegrationTestBase {
 
     @Test
     void concurrentRequestsNeverExceedCeiling() throws Exception {
-        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
 
         // Create a CEILING of 100 tokens
         quotaService.create(
-                Quota.Scope.PROJECT, projectId,
+                Quota.Scope.TEAM, teamId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
                 100L, EnforcementMode.BLOCK, QuotaType.CEILING,
                 null, null, null, TEST_ADMIN_ID);
 
         // Pre-consume 95 tokens — only 5 remain
-        engine.recordConsumption(QuotaScope.PROJECT, projectId,
+        engine.recordConsumption(QuotaScope.TEAM, teamId,
                 QuotaResourceType.TOKENS, 95);
 
         // Verify setup: 95 consumed, 5 remaining
-        QuotaDecision setupCheck = engine.check(QuotaScope.PROJECT, projectId,
+        QuotaDecision setupCheck = engine.check(QuotaScope.TEAM, teamId,
                 QuotaResourceType.TOKENS, 0);
         assertThat(setupCheck.getConsumedAmount()).isEqualTo(95L);
         assertThat(setupCheck.getRemainingAmount()).isEqualTo(5L);
@@ -83,13 +83,13 @@ class BudgetConcurrencyTest extends IntegrationTestBase {
                 futures[i] = CompletableFuture.runAsync(() -> {
                     // Pre-flight check
                     QuotaDecision decision = engine.check(
-                            QuotaScope.PROJECT, projectId,
+                            QuotaScope.TEAM, teamId,
                             QuotaResourceType.TOKENS, requestAmount);
 
                     if (!decision.isBlocked()) {
                         // Record consumption only if check passed
                         engine.recordConsumption(
-                                QuotaScope.PROJECT, projectId,
+                                QuotaScope.TEAM, teamId,
                                 QuotaResourceType.TOKENS, requestAmount);
                         allowedCount.incrementAndGet();
                     } else {
@@ -116,7 +116,7 @@ class BudgetConcurrencyTest extends IntegrationTestBase {
         //    The invariant: final consumed must never exceed 100.
 
         // The key invariant: final consumed must never exceed the limit (100)
-        QuotaDecision finalCheck = engine.check(QuotaScope.PROJECT, projectId,
+        QuotaDecision finalCheck = engine.check(QuotaScope.TEAM, teamId,
                 QuotaResourceType.TOKENS, 0);
         long finalConsumed = finalCheck.getConsumedAmount();
 
@@ -139,16 +139,16 @@ class BudgetConcurrencyTest extends IntegrationTestBase {
      */
     @Test
     void concurrentSmallRequestsFillExactlyToCeiling() throws Exception {
-        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
 
         quotaService.create(
-                Quota.Scope.PROJECT, projectId,
+                Quota.Scope.TEAM, teamId,
                 Quota.ResourceType.TOKENS, Quota.Period.DAILY,
                 100L, EnforcementMode.BLOCK, QuotaType.CEILING,
                 null, null, null, TEST_ADMIN_ID);
 
         // Pre-consume 90 tokens — 10 remain
-        engine.recordConsumption(QuotaScope.PROJECT, projectId,
+        engine.recordConsumption(QuotaScope.TEAM, teamId,
                 QuotaResourceType.TOKENS, 90);
 
         int numRequests = 20;  // 20 requests, each for 1 token
@@ -163,12 +163,12 @@ class BudgetConcurrencyTest extends IntegrationTestBase {
             for (int i = 0; i < numRequests; i++) {
                 futures[i] = CompletableFuture.runAsync(() -> {
                     QuotaDecision decision = engine.check(
-                            QuotaScope.PROJECT, projectId,
+                            QuotaScope.TEAM, teamId,
                             QuotaResourceType.TOKENS, requestAmount);
 
                     if (!decision.isBlocked()) {
                         engine.recordConsumption(
-                                QuotaScope.PROJECT, projectId,
+                                QuotaScope.TEAM, teamId,
                                 QuotaResourceType.TOKENS, requestAmount);
                         allowedCount.incrementAndGet();
                     } else {
@@ -182,7 +182,7 @@ class BudgetConcurrencyTest extends IntegrationTestBase {
         }
 
         // Final consumed must never exceed 100
-        QuotaDecision finalCheck = engine.check(QuotaScope.PROJECT, projectId,
+        QuotaDecision finalCheck = engine.check(QuotaScope.TEAM, teamId,
                 QuotaResourceType.TOKENS, 0);
         long finalConsumed = finalCheck.getConsumedAmount();
 

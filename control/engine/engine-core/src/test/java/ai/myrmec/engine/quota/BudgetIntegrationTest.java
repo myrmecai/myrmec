@@ -6,12 +6,12 @@ package ai.myrmec.engine.quota;
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.group.Group;
 import ai.myrmec.engine.group.GroupRepository;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamRepository;
 import ai.myrmec.engine.quota.dto.BudgetTreeNode;
 import ai.myrmec.engine.quota.dto.CreateQuotaRequest;
 import ai.myrmec.engine.quota.dto.DashboardResponse;
-import ai.myrmec.engine.quota.dto.ProjectServiceBudgetsResponse;
+import ai.myrmec.engine.quota.dto.TeamServiceBudgetsResponse;
 import ai.myrmec.engine.spi.quota.QuotaDecision;
 import ai.myrmec.engine.spi.quota.QuotaResourceType;
 import ai.myrmec.engine.spi.quota.QuotaScope;
@@ -31,27 +31,27 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Phase 8j &mdash; end-to-end budget hierarchy test.
  *
- * <p>Creates an org ceiling, project ceiling, and service reservation,
+ * <p>Creates an org ceiling, team ceiling, and service reservation,
  * then verifies the dashboard tree, service-budget read surface, and
  * that the policy engine blocks at the correct (service) scope.</p>
  */
 class BudgetIntegrationTest extends IntegrationTestBase {
 
-    @Autowired private ProjectRepository projectRepository;
+    @Autowired private TeamRepository TeamRepository;
     @Autowired private GroupRepository groupRepository;
     @Autowired private BasicQuotaPolicyEngine engine;
 
     @Test
     void orgCeilingCascadesToProjectAndService() {
-        // Arrange: group + project hierarchy
+        // Arrange: group + team hierarchy
         Group group = new Group();
         group.setName("Budget Integration Group");
         group = groupRepository.save(group);
 
-        Project project = new Project();
-        project.setName("Budget Integration Project");
-        project.setGroupId(group.getId());
-        project = projectRepository.save(project);
+        team team = new team();
+        team.setName("Budget Integration team");
+        team.setGroupId(group.getId());
+        team = TeamRepository.save(team);
 
         UUID orgScopeId = UUID.randomUUID();
 
@@ -66,10 +66,10 @@ class BudgetIntegrationTest extends IntegrationTestBase {
                 .enforcementMode("BLOCK")
                 .build());
 
-        // Project ceiling 800 tokens (tighter than org)
+        // team ceiling 800 tokens (tighter than org)
         createQuota(CreateQuotaRequest.builder()
-                .scopeType("PROJECT")
-                .scopeId(project.getId())
+                .scopeType("TEAM")
+                .scopeId(team.getId())
                 .resourceType("TOKENS")
                 .period("DAILY")
                 .limitAmount(800L)
@@ -77,10 +77,10 @@ class BudgetIntegrationTest extends IntegrationTestBase {
                 .enforcementMode("BLOCK")
                 .build());
 
-        // Service reservation 300 tokens under the project
+        // Service reservation 300 tokens under the team
         createQuota(CreateQuotaRequest.builder()
                 .scopeType("SERVICE")
-                .scopeId(project.getId())
+                .scopeId(team.getId())
                 .resourceType("TOKENS")
                 .period("DAILY")
                 .limitAmount(300L)
@@ -103,17 +103,17 @@ class BudgetIntegrationTest extends IntegrationTestBase {
         assertThat(orgNode.getScopeType()).isEqualTo("ORG");
         assertThat(orgNode.getEffectiveLimit()).isEqualTo(1_000L);
 
-        // Act / Assert: project services budget
-        ResponseEntity<ProjectServiceBudgetsResponse> services = restTemplate.exchange(
-                "/api/v1/budgets/projects/" + project.getId()
+        // Act / Assert: team services budget
+        ResponseEntity<TeamServiceBudgetsResponse> services = restTemplate.exchange(
+                "/api/v1/budgets/teams/" + team.getId()
                         + "/services?resourceType=TOKENS&period=DAILY",
                 HttpMethod.GET,
                 new HttpEntity<>(adminHeaders()),
-                ProjectServiceBudgetsResponse.class);
+                TeamServiceBudgetsResponse.class);
         assertThat(services.getStatusCode()).isEqualTo(HttpStatus.OK);
-        ProjectServiceBudgetsResponse body = services.getBody();
+        TeamServiceBudgetsResponse body = services.getBody();
         assertThat(body).isNotNull();
-        assertThat(body.getProjectId()).isEqualTo(project.getId());
+        assertThat(body.getTeamId()).isEqualTo(team.getId());
         assertThat(body.getSharedPool().getTotalLimit()).isEqualTo(800L);
         assertThat(body.getSharedPool().getReservedAmount()).isEqualTo(300L);
         assertThat(body.getSharedPool().getSharedAmount()).isEqualTo(500L);
@@ -121,19 +121,19 @@ class BudgetIntegrationTest extends IntegrationTestBase {
         assertThat(body.getServiceBudgets().get(0).getEffectiveLimit()).isEqualTo(300L);
 
         // Act / Assert: policy engine blocks service consumption at the reservation
-        QuotaDecision blocked = engine.check(QuotaScope.SERVICE, project.getId(),
+        QuotaDecision blocked = engine.check(QuotaScope.SERVICE, team.getId(),
                 QuotaResourceType.TOKENS, 350);
         assertThat(blocked.isBlocked()).isTrue();
         assertThat(blocked.getScopeHit()).isEqualTo(QuotaScope.SERVICE);
         assertThat(blocked.getLimitAmount()).isEqualTo(300L);
 
-        // Within project shared pool but above reservation still passes
-        QuotaDecision ok = engine.check(QuotaScope.PROJECT, project.getId(),
+        // Within team shared pool but above reservation still passes
+        QuotaDecision ok = engine.check(QuotaScope.TEAM, team.getId(),
                 QuotaResourceType.TOKENS, 400);
         assertThat(ok.isBlocked()).isFalse();
         assertThat(ok.getLimitAmount()).isEqualTo(800L);
 
-        // Org ceiling is enforced when no project ceiling exists: consume 950 of 1000
+        // Org ceiling is enforced when no team ceiling exists: consume 950 of 1000
         QuotaDecision orgWarning = engine.check(QuotaScope.ORG, orgScopeId,
                 QuotaResourceType.TOKENS, 950);
         assertThat(orgWarning.isWarning()).isTrue();

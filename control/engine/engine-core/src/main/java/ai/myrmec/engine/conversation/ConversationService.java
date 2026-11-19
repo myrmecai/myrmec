@@ -68,10 +68,10 @@ public class ConversationService {
     /** Create a new conversation and seed an OWNER participant row. */
     @Transactional
     public Conversation createConversation(
-            UUID projectId,
+            UUID teamId,
             UUID createdBy,
             String title) {
-        return createConversation(projectId, createdBy, title, null, null);
+        return createConversation(teamId, createdBy, title, null, null);
     }
 
     /**
@@ -81,12 +81,12 @@ public class ConversationService {
      */
     @Transactional
     public Conversation createConversation(
-            UUID projectId,
+            UUID teamId,
             UUID createdBy,
             String title,
             UUID agentId,
             String systemPromptOverride) {
-        return createConversation(projectId, createdBy, title, agentId, systemPromptOverride, null);
+        return createConversation(teamId, createdBy, title, agentId, systemPromptOverride, null);
     }
 
     /**
@@ -103,14 +103,14 @@ public class ConversationService {
      */
     @Transactional
     public Conversation createConversation(
-            UUID projectId,
+            UUID teamId,
             UUID createdBy,
             String title,
             UUID agentId,
             String systemPromptOverride,
             UUID assistantId) {
         Conversation conversation = new Conversation();
-        conversation.setProjectId(projectId);
+        conversation.setTeamId(teamId);
         conversation.setCreatedBy(createdBy);
         conversation.setTitle(title);
         conversation.setAgentId(agentId);
@@ -118,11 +118,11 @@ public class ConversationService {
         conversation.setStatus(Conversation.Status.ACTIVE);
 
         if (assistantId != null) {
-            pinAssistantVersion(conversation, projectId, assistantId);
+            pinAssistantVersion(conversation, teamId, assistantId);
         }
 
         // Build and set the context snapshot if the governance profile has CONTEXT_PINNING=ON
-        ai.myrmec.engine.context.ContextSnapshot snapshot = buildContextSnapshot(projectId);
+        ai.myrmec.engine.context.ContextSnapshot snapshot = buildContextSnapshot(teamId);
         conversation.setContextSnapshot(snapshot);
 
         conversation = conversationRepository.save(conversation);
@@ -141,12 +141,12 @@ public class ConversationService {
      * Resolve and pin the assistant's published version under a row lock.
      * Mutates {@code conversation} in place; never persists it.
      */
-    private void pinAssistantVersion(Conversation conversation, UUID projectId, UUID assistantId) {
+    private void pinAssistantVersion(Conversation conversation, UUID teamId, UUID assistantId) {
         Assistant assistant = assistantRepository.findByIdForUpdate(assistantId)
                 .orElseThrow(() -> ResourceNotFoundException.of("Assistant", assistantId.toString()));
 
-        if (projectId != null && !projectId.equals(assistant.getProjectId())) {
-            throw new BadRequestException("Assistant does not belong to the requested project.");
+        if (teamId != null && !teamId.equals(assistant.getTeamId())) {
+            throw new BadRequestException("Assistant does not belong to the requested Team.");
         }
         if (assistant.getArchivedAt() != null) {
             throw new BadRequestException("Assistant is archived and cannot start new conversations.");
@@ -171,7 +171,7 @@ public class ConversationService {
         // Leaving it null is non-fatal — the session is created and the turn
         // dispatcher simply declines until a host becomes available.
         if (conversation.getAgentId() == null) {
-            hostSelectionService.selectForProject(projectId)
+            hostSelectionService.selectForTeam(teamId)
                     .ifPresent(h -> conversation.setAgentId(h.getId()));
         }
     }
@@ -621,7 +621,7 @@ public class ConversationService {
     }
 
     /**
-     * List conversations under a project ordered by most-recently-updated
+     * List conversations under a Team ordered by most-recently-updated
      * first. Used by the chat sidebar to show the user the threads they
      * can resume.
      *
@@ -631,8 +631,8 @@ public class ConversationService {
      * shows only resumable ACTIVE chats.</p>
      */
     @Transactional(readOnly = true)
-    public List<Conversation> listByProject(UUID projectId, boolean includeClosed, boolean includeArchived) {
-        return conversationRepository.findByProjectIdOrderByUpdatedAtDesc(projectId).stream()
+    public List<Conversation> listByTeam(UUID teamId, boolean includeClosed, boolean includeArchived) {
+        return conversationRepository.findByTeamIdOrderByUpdatedAtDesc(teamId).stream()
                 .filter(c -> includeClosed || c.getStatus() != Conversation.Status.CLOSED)
                 .filter(c -> includeArchived || c.getStatus() != Conversation.Status.ARCHIVED)
                 .toList();
@@ -922,13 +922,13 @@ public class ConversationService {
             ConversationMessage response) { }
 
     /**
-     * Build a {@link ai.myrmec.engine.context.ContextSnapshot} for the project
+     * Build a {@link ai.myrmec.engine.context.ContextSnapshot} for the Team
      * if the governance profile has {@code CONTEXT_PINNING=ON} (PINNED_AT_START).
      * Returns null for {@code IMMEDIATE_EFFECT} profiles.
      */
-    private ai.myrmec.engine.context.ContextSnapshot buildContextSnapshot(UUID projectId) {
+    private ai.myrmec.engine.context.ContextSnapshot buildContextSnapshot(UUID teamId) {
         var policy = governancePolicyResolver.resolve(
-                ai.myrmec.engine.governance.GovernanceScope.ofProject(projectId));
+                ai.myrmec.engine.governance.GovernanceScope.ofTeam(teamId));
         String contextPinning = ai.myrmec.engine.governance.ProductFeature.CONTEXT_PINNING
                 .runtimeName(policy.single(ai.myrmec.engine.governance.ProductFeature.CONTEXT_PINNING));
 
@@ -937,11 +937,11 @@ public class ConversationService {
         }
 
         java.util.List<UUID> instructionVersionIds = instructionAssetVersionResolver
-                .resolveActiveVersionIdsForProject(projectId);
+                .resolveActiveVersionIdsForTeam(teamId);
 
         // Knowledge source IDs: mirror the same logic SessionContextAssembler uses
         java.util.List<UUID> knowledgeSourceIds = sessionContextAssembler
-                .resolveActiveKnowledgeSourceIds(projectId);
+                .resolveActiveKnowledgeSourceIds(teamId);
 
         return new ai.myrmec.engine.context.ContextSnapshot(
                 policy.code(),

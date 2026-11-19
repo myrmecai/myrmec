@@ -47,7 +47,7 @@ public class DataFeedController {
     public ResponseEntity<DataFeedResponse> create(
             @Valid @RequestBody CreateDataFeedRequest request,
             @CurrentUser UUID userId) {
-        var feed = service.create(request.scope(), request.projectId(), request.name(),
+        var feed = service.create(request.scope(), request.teamId(), request.name(),
                 request.description(), request.providerVersionId(), request.datasetName(),
                 request.connectionConfigId(), request.connectionDetails(), request.syncSchedule(),
                 userId, userId != null ? userId.toString() : ActorType.SYSTEM);

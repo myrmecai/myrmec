@@ -9,7 +9,7 @@ import java.util.Map;
 import java.util.UUID;
 
 public record DataFeedResponse(
-        UUID id, String scope, UUID projectId, String name, String description,
+        UUID id, String scope, UUID teamId, String name, String description,
         String status, UUID providerVersionId, String datasetName,
         UUID connectionConfigId, Map<String, Object> connectionDetails,
         String syncSchedule, String syncStatus, Instant lastSyncAt,
@@ -17,7 +17,7 @@ public record DataFeedResponse(
         Instant createdAt, Instant updatedAt, UUID updatedBy) {
 
     public static DataFeedResponse from(DataFeed f) {
-        return new DataFeedResponse(f.getId(), f.getScope(), f.getProjectId(), f.getName(),
+        return new DataFeedResponse(f.getId(), f.getScope(), f.getTeamId(), f.getName(),
                 f.getDescription(), f.getStatus(), f.getProviderVersionId(), f.getDatasetName(),
                 f.getConnectionConfigId(), f.getConnectionDetails(), f.getSyncSchedule(),
                 f.getSyncStatus(), f.getLastSyncAt(), f.getChunkCount(), f.getErrorMessage(),

@@ -7,7 +7,7 @@ import ai.myrmec.engine.agent.dto.AgentHostResponse;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.inference.SessionContextAssembler;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.setting.SystemSettingService;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.User;
@@ -176,10 +176,10 @@ class ModelAccessModeValidationTest extends IntegrationTestBase {
         withGatewayEnabled(true, () -> {
             AgentHost host = data.agent().named("mode-admin-host")
                     .withModelAccessMode(ModelAccessMode.DIRECT).create().agent();
-            Project project = data.project().named("mode-admin-prj").create();
+            team team = data.team().named("mode-admin-prj").create();
 
             // An EDITOR-scoped user may not change the mode.
-            HttpHeaders editor = userHeaders(createUserRow(), project.getId());
+            HttpHeaders editor = userHeaders(createUserRow(), team.getId());
             ResponseEntity<String> editorResp = restTemplate.exchange(
                     "/api/v1/admin/agent-hosts/" + host.getId() + "/model-access-mode",
                     HttpMethod.PUT,
@@ -211,8 +211,8 @@ class ModelAccessModeValidationTest extends IntegrationTestBase {
     void sharedPutRejectsEditorModeChange() {
         withGatewayEnabled(true, () -> {
             AgentHost host = data.agent().named("mode-shared-host").create().agent();
-            Project project = data.project().named("mode-shared-prj").create();
-            HttpHeaders editor = userHeaders(createUserRow(), project.getId());
+            team team = data.team().named("mode-shared-prj").create();
+            HttpHeaders editor = userHeaders(createUserRow(), team.getId());
 
             ResponseEntity<String> resp = restTemplate.exchange(
                     "/api/v1/admin/agent-hosts/" + host.getId(),
@@ -240,7 +240,7 @@ class ModelAccessModeValidationTest extends IntegrationTestBase {
             Session session = new Session();
             session.setServiceType("CONVERSATION");
             session.setRefId(UUID.randomUUID());
-            session.setProjectId(data.project().named("mode-dispatch-prj").create().getId());
+            session.setTeamId(data.team().named("mode-dispatch-prj").create().getId());
             session.setKind("CONVERSATION");
             session.setHostInstanceId(instance.getId());
             session.setAllocationState("INITIALIZING");
@@ -252,7 +252,7 @@ class ModelAccessModeValidationTest extends IntegrationTestBase {
 
             assertThatThrownBy(() -> sessionContextAssembler.assembleContext(
                     pinned.getId(), pinned.getServiceType(), pinned.getRefId(),
-                    pinned.getProjectId(), profile.getId()))
+                    pinned.getTeamId(), profile.getId()))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("GATEWAY");
         });

@@ -22,8 +22,8 @@ import java.util.UUID;
 public record MyApprovalRow(
         UUID messageId,
         UUID conversationId,
-        UUID projectId,
-        String projectName,
+        UUID teamId,
+        String teamName,
         Source source,
         UUID assistantId,
         String summary,
@@ -41,12 +41,12 @@ public record MyApprovalRow(
 
     /** Build a conversation-sourced approval row from the request message + its conversation. */
     public static MyApprovalRow fromConversation(
-            ConversationMessage request, Conversation conversation, String projectName) {
+            ConversationMessage request, Conversation conversation, String teamName) {
         return new MyApprovalRow(
                 request.getId(),
                 conversation.getId(),
-                conversation.getProjectId(),
-                projectName,
+                conversation.getTeamId(),
+                teamName,
                 Source.CONVERSATION,
                 conversation.getAssistantId(),
                 request.getContent(),
@@ -58,7 +58,7 @@ public record MyApprovalRow(
     }
 
     /** Build an execution-sourced approval row from a DESTRUCTIVE tool call awaiting approval. */
-    public static MyApprovalRow fromExecution(WorkflowTask task, String projectName) {
+    public static MyApprovalRow fromExecution(WorkflowTask task, String teamName) {
         // §17.4: the governed pending action's summary reads best — the
         // worker:purpose identity of the suspended invocation; fall back
         // to the request-id label the ingestion path stamped, then the
@@ -79,8 +79,8 @@ public record MyApprovalRow(
         return new MyApprovalRow(
                 task.getId(),
                 null, // no conversation context for execution approvals
-                task.getRequest().getWorkflow().getProject().getId(),
-                projectName,
+                task.getRequest().getWorkflow().getTeam().getId(),
+                teamName,
                 Source.EXECUTION,
                 null, // no assistant context
                 summary,

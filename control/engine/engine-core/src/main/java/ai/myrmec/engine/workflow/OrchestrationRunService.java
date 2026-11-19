@@ -58,7 +58,7 @@ public class OrchestrationRunService {
     public AgentProfileVersion pinRun(
             UUID requestId,
             UUID workflowId,
-            UUID projectId,
+            UUID teamId,
             UUID agentProfileId) {
         AgentProfileVersion published = agentProfileVersionService
                 .requirePublished(agentProfileId);
@@ -66,9 +66,9 @@ public class OrchestrationRunService {
         OrchestrationRun run = OrchestrationRun.builder()
                 .id(requestId)
                 .workflowId(workflowId)
-                .projectId(projectId)
+                .teamId(teamId)
                 .profileVersionId(published.getId())
-                .profileVersionDigest(contentDigestOf(published))
+                .profileVersionDigest(contentDigestOf(published, agentProfileVersionService))
                 .build();
         runRepository.save(run);
         log.info("Run {} pinned to profile version {} (digest {}) for workflow {}",
@@ -93,10 +93,13 @@ public class OrchestrationRunService {
      * audit digest (§16.7). Two runs of one workflow may pin different
      * digests after a re-publish; each run is fully pinned and auditable.
      */
-    public static String contentDigestOf(AgentProfileVersion version) {
+    public static String contentDigestOf(AgentProfileVersion version,
+            AgentProfileVersionService versionService) {
         StringBuilder canonical = new StringBuilder();
         canonical.append("systemPrompt=").append(nullSafe(version.getSystemPrompt())).append('\n');
-        canonical.append("capabilities=").append(version.getCapabilities()).append('\n');
+        canonical.append("capabilities=")
+                .append(versionService.getCapabilityKeys(version.getId()))
+                .append('\n');
         canonical.append("tools=").append(version.getTools() == null
                 ? java.util.List.of() : version.getTools().stream()
                         .map(t -> t.getCode())

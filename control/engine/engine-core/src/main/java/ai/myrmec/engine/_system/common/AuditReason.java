@@ -26,8 +26,8 @@ public final class AuditReason {
     public static final String ADMIN_ARCHIVED = "ADMIN_ARCHIVED";
     /** Entity was un-archived by an admin (restored from ARCHIVED). */
     public static final String ADMIN_UNARCHIVED = "ADMIN_UNARCHIVED";
-    /** Project configuration was changed (e.g. agent profile, model). */
+    /** Team configuration was changed (e.g. agent profile, model). */
     public static final String CONFIG_CHANGED = "CONFIG_CHANGED";
-    /** A system or project setting value was changed. */
+    /** A system or Team setting value was changed. */
     public static final String SETTING_CHANGED = "SETTING_CHANGED";
 }

@@ -114,7 +114,7 @@ public class TaskDispatchContinuation {
         // session.open policy block so the host enforces the workflow's limits.
         SessionOpenPayload open = sessionContextAssembler.assembleContext(
                 sessionId, session.getServiceType(), session.getRefId(),
-                session.getProjectId(), context.agentProfileId(),
+                session.getTeamId(), context.agentProfileId(),
                 context.timeoutSeconds(), null);
         if (context.orchestration()) {
             open = open.withAssignment(context.assignment(), context.assignmentDigest());

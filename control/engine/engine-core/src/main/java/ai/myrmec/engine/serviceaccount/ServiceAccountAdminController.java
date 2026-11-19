@@ -33,7 +33,7 @@ import java.util.UUID;
  *
  * <p>Restricted to {@code PLATFORM_ADMIN}/{@code ORG_ADMIN} by the
  * {@code /api/v1/admin/**} rule in {@code SecurityConfig}. A service account
- * maps a Keycloak client to a single project; the assistants it may open are
+ * maps a Keycloak client to a single Team; the assistants it may open are
  * further gated by {@code assistant_grants(USE)} ∩ {@code EXTERNAL_API ∈ usable_via}.
  * V1 disables accounts (kill switch) rather than hard-deleting them.</p>
  */
@@ -50,7 +50,7 @@ public class ServiceAccountAdminController {
             @ApiResponse(responseCode = "201", description = "Service account created"),
             @ApiResponse(responseCode = "400", description = "Invalid parameters",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
-            @ApiResponse(responseCode = "404", description = "Project not found",
+            @ApiResponse(responseCode = "404", description = "Team not found",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
             @ApiResponse(responseCode = "409", description = "Keycloak client id already in use",
                     content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
@@ -63,12 +63,12 @@ public class ServiceAccountAdminController {
         return ResponseEntity.status(HttpStatus.CREATED).body(ServiceAccountResponse.of(sa));
     }
 
-    @Operation(summary = "List service accounts, optionally filtered by project")
+    @Operation(summary = "List service accounts, optionally filtered by Team")
     @GetMapping
     public ResponseEntity<List<ServiceAccountResponse>> list(
-            @Parameter(description = "Optional project filter")
-            @RequestParam(required = false) UUID projectId) {
-        List<ServiceAccountResponse> body = serviceAccountService.list(projectId).stream()
+            @Parameter(description = "Optional Team filter")
+            @RequestParam(required = false) UUID teamId) {
+        List<ServiceAccountResponse> body = serviceAccountService.list(teamId).stream()
                 .map(ServiceAccountResponse::of)
                 .toList();
         return ResponseEntity.ok(body);

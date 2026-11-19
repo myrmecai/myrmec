@@ -1,11 +1,11 @@
 package ai.myrmec.engine.model.dto;
 
 import ai.myrmec.engine.model.*;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Builder;
 import lombok.Data;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Map;
 
 /**
@@ -22,8 +22,6 @@ public class ModelResponse {
     private String providerName;
     private String modelId;
     private String apiEndpoint;
-    @JsonProperty("supportsVision")
-    private boolean supportsVision;
     private Map<String, Object> infraConfig;
     private Map<String, Object> defaultParams;
     private ModelStatus status;
@@ -31,6 +29,10 @@ public class ModelResponse {
     private Instant lastHealthCheck;
     private Instant lastTestedAt;
     private String lastTestStatus;
+    private Integer contextWindowTokens;
+    private Integer maxOutputTokens;
+    private LocalDate trainingCutoffDate;
+    private LocalDate releaseDate;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -52,7 +54,6 @@ public class ModelResponse {
                 .providerName(providerConfig != null ? providerConfig.getName() : model.getProvider())
                 .modelId(model.getModelId())
                 .apiEndpoint(model.getApiEndpoint())
-                .supportsVision(model.isSupportsVision())
                 .infraConfig(model.getInfraConfig())
                 .defaultParams(model.getDefaultParams())
                 .status(model.getStatus())
@@ -60,6 +61,10 @@ public class ModelResponse {
                 .lastHealthCheck(model.getLastHealthCheck())
                 .lastTestedAt(model.getLastTestedAt())
                 .lastTestStatus(model.getLastTestStatus())
+                .contextWindowTokens(model.getContextWindowTokens())
+                .maxOutputTokens(model.getMaxOutputTokens())
+                .trainingCutoffDate(model.getTrainingCutoffDate())
+                .releaseDate(model.getReleaseDate())
                 .createdAt(model.getCreatedAt())
                 .updatedAt(model.getUpdatedAt())
                 .inputPrice(model.getInputPrice())
@@ -83,7 +88,6 @@ public class ModelResponse {
                 .status(model.getStatus())
                 .healthStatus(model.getHealthStatus())
                 .defaultParams(model.getDefaultParams())
-                .supportsVision(model.isSupportsVision())
                 .build();
     }
 }

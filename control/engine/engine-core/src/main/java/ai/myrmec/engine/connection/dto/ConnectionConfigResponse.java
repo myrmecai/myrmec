@@ -10,7 +10,7 @@ import java.util.UUID;
 public record ConnectionConfigResponse(
         UUID id,
         String scope,
-        UUID projectId,
+        UUID teamId,
         String name,
         String description,
         String type,
@@ -28,7 +28,7 @@ public record ConnectionConfigResponse(
         return new ConnectionConfigResponse(
                 c.getId(),
                 c.getScope(),
-                c.getProjectId(),
+                c.getTeamId(),
                 c.getName(),
                 c.getDescription(),
                 c.getType(),

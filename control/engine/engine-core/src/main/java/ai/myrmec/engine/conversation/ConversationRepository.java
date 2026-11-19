@@ -9,7 +9,7 @@ import java.util.UUID;
 @Repository
 public interface ConversationRepository extends JpaRepository<Conversation, UUID> {
 
-    List<Conversation> findByProjectIdOrderByUpdatedAtDesc(UUID projectId);
+    List<Conversation> findByTeamIdOrderByUpdatedAtDesc(UUID teamId);
 
     List<Conversation> findByCreatedByOrderByUpdatedAtDesc(UUID createdBy);
 

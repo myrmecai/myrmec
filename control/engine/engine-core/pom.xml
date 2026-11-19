@@ -155,6 +155,11 @@
             <artifactId>h2</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <dependency> <!-- Log trace truncation utility -->
+            <groupId>com.github.michaelgantman</groupId>
+            <artifactId>MgntUtils</artifactId>
+            <version>1.7.1.0</version>
+        </dependency>
     </dependencies>
 
     <build>

@@ -1,0 +1,324 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- ================================================================
+         model_providers
+         ================================================================ -->
+    <changeSet id="004-models-create-model-providers" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="model_providers"/>
+            </not>
+        </preConditions>
+        <comment>Create model_providers table for AI provider configurations</comment>
+
+        <createTable tableName="model_providers">
+            <column name="code" type="varchar(50)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="base_url" type="varchar(500)"/>
+            <column name="deployment_type" type="varchar(20)" defaultValue="CLOUD">
+                <constraints nullable="false"/>
+            </column>
+            <column name="requires_auth" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="docs_url" type="varchar(500)"/>
+            <column name="description" type="text"/>
+            <column name="is_system" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="connection_config_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone"/>
+        </createTable>
+    </changeSet>
+
+    <!-- Seed moved to db/changelog/data/model_providers.csv -->
+    <changeSet id="004-models-seed-model-providers" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM model_providers WHERE code = 'openai'</sqlCheck>
+        </preConditions>
+        <comment>Seed known AI model providers (all INACTIVE until an admin enables them)</comment>
+
+        <loadData
+            tableName="model_providers"
+            file="db/changelog/data/model_providers.csv"
+            separator=","
+            encoding="UTF-8"
+            relativeToChangelogFile="false">
+            <column name="code" type="STRING"/>
+            <column name="name" type="STRING"/>
+            <column name="base_url" type="STRING"/>
+            <column name="deployment_type" type="STRING"/>
+            <column name="requires_auth" type="BOOLEAN"/>
+            <column name="docs_url" type="STRING"/>
+            <column name="description" type="STRING"/>
+            <column name="is_system" type="BOOLEAN"/>
+            <column name="status" type="STRING"/>
+            <column name="connection_config_id" type="STRING"/>
+            <column name="created_at" type="DATE"/>
+            <column name="updated_at" type="DATE"/>
+    </loadData>
+    </changeSet>
+
+    <!-- ================================================================
+         model_capabilities
+         ================================================================ -->
+    <changeSet id="004-models-create-model-capabilities" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="model_capabilities"/>
+            </not>
+        </preConditions>
+        <comment>Reference table for model capabilities (vision, embedding, thinking, etc.)</comment>
+
+        <createTable tableName="model_capabilities">
+            <column name="code" type="varchar(30)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="is_system" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <loadData
+            tableName="model_capabilities"
+            file="db/changelog/data/model_capabilities.csv"
+            separator=","
+            encoding="UTF-8"
+            relativeToChangelogFile="false">
+            <column name="code" type="STRING"/>
+            <column name="name" type="STRING"/>
+            <column name="description" type="STRING"/>
+            <column name="is_system" type="BOOLEAN"/>
+            <column name="status" type="STRING"/>
+            <column name="created_at" type="DATE"/>
+            <column name="updated_at" type="DATE"/>
+        </loadData>
+    </changeSet>
+
+    <!-- ================================================================
+         models
+         ================================================================ -->
+    <changeSet id="004-models-create-models" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="models"/>
+            </not>
+        </preConditions>
+        <comment>Create models table for AI model configurations</comment>
+
+        <createTable tableName="models">
+            <column name="code" type="varchar(50)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(200)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="provider" type="varchar(50)">
+                <constraints nullable="false" foreignKeyName="fk_models_provider" references="model_providers(code)"/>
+            </column>
+            <column name="model_id" type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="api_endpoint" type="varchar(500)"/>
+            <column name="infra_config" type="text"/>
+            <column name="default_params" type="text"/>
+            <column name="status" type="varchar(20)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="health_status" type="varchar(20)" defaultValue="UNKNOWN">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_health_check" type="timestamp with time zone"/>
+            <column name="last_tested_at" type="timestamp with time zone"/>
+            <column name="last_test_status" type="varchar(20)"/>
+            <column name="input_price" type="numeric(10,6)"/>
+            <column name="output_price" type="numeric(10,6)"/>
+            <column name="currency" type="varchar(3)" defaultValue="USD">
+                <constraints nullable="false"/>
+            </column>
+            <column name="context_window_tokens" type="int"/>
+            <column name="max_output_tokens" type="int"/>
+            <column name="training_cutoff_date" type="date"/>
+            <column name="release_date" type="date"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone"/>
+        </createTable>
+
+        <createIndex indexName="idx_models_status" tableName="models">
+            <column name="status"/>
+        </createIndex>
+
+        <createIndex indexName="idx_models_provider" tableName="models">
+            <column name="provider"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         model_capability_bindings
+         ================================================================ -->
+    <changeSet id="004-models-create-model-capability-bindings" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="model_capability_bindings"/>
+            </not>
+        </preConditions>
+        <comment>Many-to-many bindings between models and capabilities, with optional per-capability parameters</comment>
+
+        <createTable tableName="model_capability_bindings">
+            <column name="model_code" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="capability_code" type="varchar(30)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="parameters" type="text"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addPrimaryKey
+            tableName="model_capability_bindings"
+            columnNames="model_code, capability_code"
+            constraintName="pk_model_capability_bindings"/>
+
+        <addForeignKeyConstraint
+            baseTableName="model_capability_bindings"
+            baseColumnNames="model_code"
+            constraintName="fk_mcb_model"
+            referencedTableName="models"
+            referencedColumnNames="code"
+            onDelete="CASCADE"/>
+
+        <addForeignKeyConstraint
+            baseTableName="model_capability_bindings"
+            baseColumnNames="capability_code"
+            constraintName="fk_mcb_capability"
+            referencedTableName="model_capabilities"
+            referencedColumnNames="code"
+            onDelete="CASCADE"/>
+
+        <createIndex indexName="idx_mcb_capability" tableName="model_capability_bindings">
+            <column name="capability_code"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- Seed moved to db/changelog/data/models.csv -->
+    <changeSet id="004-models-seed-github-gpt4o" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM models WHERE code = 'github-gpt-4o'</sqlCheck>
+        </preConditions>
+        <comment>Seed default GPT-4o model via GitHub Models for E2E testing and demo</comment>
+
+        <loadData
+            tableName="models"
+            file="db/changelog/data/models.csv"
+            separator=","
+            encoding="UTF-8"
+            relativeToChangelogFile="false">
+            <column name="code" type="STRING"/>
+            <column name="name" type="STRING"/>
+            <column name="provider" type="STRING"/>
+            <column name="model_id" type="STRING"/>
+            <column name="api_endpoint" type="STRING"/>
+            <column name="infra_config" type="STRING"/>
+            <column name="default_params" type="STRING"/>
+            <column name="status" type="STRING"/>
+            <column name="health_status" type="STRING"/>
+            <column name="last_health_check" type="DATE"/>
+            <column name="last_tested_at" type="DATE"/>
+            <column name="last_test_status" type="STRING"/>
+            <column name="input_price" type="NUMERIC"/>
+            <column name="output_price" type="NUMERIC"/>
+            <column name="currency" type="STRING"/>
+            <column name="context_window_tokens" type="NUMERIC"/>
+            <column name="max_output_tokens" type="NUMERIC"/>
+            <column name="training_cutoff_date" type="DATE"/>
+            <column name="release_date" type="DATE"/>
+            <column name="created_at" type="DATE"/>
+            <column name="updated_at" type="DATE"/>
+        </loadData>
+
+        <insert tableName="model_capability_bindings">
+            <column name="model_code" value="github-gpt-4o"/>
+            <column name="capability_code" value="VISION"/>
+            <column name="parameters" value='{"maxImages":8}'/>
+        </insert>
+        <insert tableName="model_capability_bindings">
+            <column name="model_code" value="github-gpt-4o"/>
+            <column name="capability_code" value="INPUT_TEXT"/>
+        </insert>
+        <insert tableName="model_capability_bindings">
+            <column name="model_code" value="github-gpt-4o"/>
+            <column name="capability_code" value="INPUT_IMAGE"/>
+        </insert>
+        <insert tableName="model_capability_bindings">
+            <column name="model_code" value="github-gpt-4o"/>
+            <column name="capability_code" value="OUTPUT_TEXT"/>
+        </insert>
+        <insert tableName="model_capability_bindings">
+            <column name="model_code" value="github-gpt-4o"/>
+            <column name="capability_code" value="STREAMING"/>
+        </insert>
+        <insert tableName="model_capability_bindings">
+            <column name="model_code" value="github-gpt-4o"/>
+            <column name="capability_code" value="TOOL_USE"/>
+        </insert>
+    </changeSet>
+
+    <!-- ================================================================
+         Cross-file FKs
+         ================================================================ -->
+
+    <!-- model_providers.connection_config_id → connection_configs(id)
+         — connection_configs created in 007b-ai-context.xml -->
+    <changeSet id="004-models-add-connection-config-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_mp_connection_config"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="model_providers"
+            baseColumnNames="connection_config_id"
+            referencedTableName="connection_configs"
+            referencedColumnNames="id"
+            constraintName="fk_mp_connection_config"
+            onDelete="SET NULL"/>
+    </changeSet>
+
+</databaseChangeLog>

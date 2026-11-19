@@ -4,11 +4,11 @@
 package ai.myrmec.engine.quota;
 
 import ai.myrmec.engine._system.security.GroupAccessEvaluator;
-import ai.myrmec.engine._system.security.ProjectAccessEvaluator;
+import ai.myrmec.engine._system.security.TeamAccessEvaluator;
 import ai.myrmec.engine.assistant.AssistantRepository;
 import ai.myrmec.engine.group.GroupRepository;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamRepository;
 import ai.myrmec.engine.quota.dto.BudgetPermissions;
 import ai.myrmec.engine.user.UserPrincipal;
 import ai.myrmec.engine.user.UserRole;
@@ -39,9 +39,9 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class BudgetAuthorizationTest {
 
-    @Mock private ProjectAccessEvaluator projectAccess;
+    @Mock private TeamAccessEvaluator teamAccess;
     @Mock private GroupAccessEvaluator groupAccess;
-    @Mock private ProjectRepository projectRepository;
+    @Mock private TeamRepository TeamRepository;
     @Mock private GroupRepository groupRepository;
     @Mock private WorkflowRepository workflowRepository;
     @Mock private AssistantRepository assistantRepository;
@@ -50,15 +50,15 @@ class BudgetAuthorizationTest {
 
     @BeforeEach
     void setUp() {
-        authorization = new BudgetAuthorization(projectAccess, groupAccess, projectRepository,
+        authorization = new BudgetAuthorization(teamAccess, groupAccess, TeamRepository,
                 groupRepository, workflowRepository, assistantRepository);
-        lenient().when(projectAccess.canView(any(), any())).thenReturn(false);
+        lenient().when(teamAccess.canView(any(), any())).thenReturn(false);
         lenient().when(groupAccess.canView(any(), any())).thenReturn(false);
         // For SERVICE-scope permission checks, the service instance is
-        // resolved to a project ID. In these unit tests the "service"
-        // scopeId is a project UUID, so the project-exists fallback
+        // resolved to a Team ID. In these unit tests the "service"
+        // scopeId is a team UUID, so the team-exists fallback
         // must return true.
-        lenient().when(projectRepository.existsById(any(UUID.class))).thenReturn(true);
+        lenient().when(TeamRepository.existsById(any(UUID.class))).thenReturn(true);
     }
 
     private static Authentication auth(String... claims) {
@@ -94,12 +94,12 @@ class BudgetAuthorizationTest {
         assertThat(group.canCreateServiceBudget()).isFalse();
         assertThat(group.canPauseResume()).isTrue();
 
-        UUID projectId = UUID.randomUUID();
-        BudgetPermissions project = authorization.permissionsFor(Quota.Scope.PROJECT, projectId, auth);
-        assertThat(project.canCreateReservation()).isTrue();
-        assertThat(project.canCreateServiceBudget()).isFalse();
+        UUID teamId = UUID.randomUUID();
+        BudgetPermissions team = authorization.permissionsFor(Quota.Scope.TEAM, teamId, auth);
+        assertThat(team.canCreateReservation()).isTrue();
+        assertThat(team.canCreateServiceBudget()).isFalse();
 
-        BudgetPermissions service = authorization.permissionsFor(Quota.Scope.SERVICE, projectId, auth);
+        BudgetPermissions service = authorization.permissionsFor(Quota.Scope.SERVICE, teamId, auth);
         assertThat(service.canCreateCeiling()).isFalse();
         assertThat(service.canCreateReservation()).isFalse();
         assertThat(service.canCreateServiceBudget()).isTrue();
@@ -113,34 +113,34 @@ class BudgetAuthorizationTest {
         assertThat(group.canCreateCeiling()).isTrue();
         assertThat(group.canCreateReservation()).isTrue();
 
-        UUID projectId = UUID.randomUUID();
-        BudgetPermissions project = authorization.permissionsFor(Quota.Scope.PROJECT, projectId, auth);
-        assertThat(project.canCreateCeiling()).isTrue();
-        assertThat(project.canCreateReservation()).isTrue();
+        UUID teamId = UUID.randomUUID();
+        BudgetPermissions team = authorization.permissionsFor(Quota.Scope.TEAM, teamId, auth);
+        assertThat(team.canCreateCeiling()).isTrue();
+        assertThat(team.canCreateReservation()).isTrue();
 
-        BudgetPermissions service = authorization.permissionsFor(Quota.Scope.SERVICE, projectId, auth);
+        BudgetPermissions service = authorization.permissionsFor(Quota.Scope.SERVICE, teamId, auth);
         assertThat(service.canCreateServiceBudget()).isTrue();
     }
 
     @Test
     void orgAdminCanViewOnly() {
         Authentication auth = auth("sys:ORG_ADMIN");
-        UUID projectId = UUID.randomUUID();
-        BudgetPermissions project = authorization.permissionsFor(Quota.Scope.PROJECT, projectId, auth);
+        UUID teamId = UUID.randomUUID();
+        BudgetPermissions team = authorization.permissionsFor(Quota.Scope.TEAM, teamId, auth);
 
-        assertThat(project.canView()).isTrue();
-        assertThat(project.canCreateCeiling()).isFalse();
-        assertThat(project.canCreateReservation()).isFalse();
-        assertThat(project.canCreateServiceBudget()).isFalse();
-        assertThat(project.canPauseResume()).isFalse();
-        assertThat(project.canDelete()).isFalse();
+        assertThat(team.canView()).isTrue();
+        assertThat(team.canCreateCeiling()).isFalse();
+        assertThat(team.canCreateReservation()).isFalse();
+        assertThat(team.canCreateServiceBudget()).isFalse();
+        assertThat(team.canPauseResume()).isFalse();
+        assertThat(team.canDelete()).isFalse();
     }
 
     @Test
     void groupBudgetOwnerCanManageOwnGroupAndDescendantProjects() {
         UUID groupId = UUID.randomUUID();
-        UUID projectId = UUID.randomUUID();
-        when(projectRepository.findById(projectId)).thenReturn(Optional.of(projectWithGroup(projectId, groupId)));
+        UUID teamId = UUID.randomUUID();
+        when(TeamRepository.findById(teamId)).thenReturn(Optional.of(projectWithGroup(teamId, groupId)));
         when(groupRepository.findAncestorIds(groupId)).thenReturn(List.of());
 
         Authentication auth = auth("grp:" + groupId + ":BUDGET_OWNER");
@@ -150,31 +150,31 @@ class BudgetAuthorizationTest {
         assertThat(group.canCreateCeiling()).isTrue();
         assertThat(group.canCreateReservation()).isTrue();
 
-        BudgetPermissions project = authorization.permissionsFor(Quota.Scope.PROJECT, projectId, auth);
-        assertThat(project.canView()).isTrue();
-        assertThat(project.canCreateCeiling()).isTrue();
-        assertThat(project.canCreateReservation()).isTrue();
+        BudgetPermissions team = authorization.permissionsFor(Quota.Scope.TEAM, teamId, auth);
+        assertThat(team.canView()).isTrue();
+        assertThat(team.canCreateCeiling()).isTrue();
+        assertThat(team.canCreateReservation()).isTrue();
 
-        BudgetPermissions service = authorization.permissionsFor(Quota.Scope.SERVICE, projectId, auth);
+        BudgetPermissions service = authorization.permissionsFor(Quota.Scope.SERVICE, teamId, auth);
         assertThat(service.canView()).isTrue();
         assertThat(service.canCreateServiceBudget()).isTrue();
     }
 
     @Test
     void projectBudgetOwnerCanManageProjectAndServices() {
-        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
 
-        Authentication auth = auth("proj:" + projectId + ":BUDGET_OWNER");
+        Authentication auth = auth("proj:" + teamId + ":BUDGET_OWNER");
 
-        BudgetPermissions project = authorization.permissionsFor(Quota.Scope.PROJECT, projectId, auth);
-        assertThat(project.canView()).isTrue();
-        assertThat(project.canCreateCeiling()).isTrue();
-        assertThat(project.canCreateReservation()).isTrue();
-        assertThat(project.canCreateServiceBudget()).isFalse();
-        assertThat(project.canPauseResume()).isTrue();
-        assertThat(project.canDelete()).isTrue();
+        BudgetPermissions team = authorization.permissionsFor(Quota.Scope.TEAM, teamId, auth);
+        assertThat(team.canView()).isTrue();
+        assertThat(team.canCreateCeiling()).isTrue();
+        assertThat(team.canCreateReservation()).isTrue();
+        assertThat(team.canCreateServiceBudget()).isFalse();
+        assertThat(team.canPauseResume()).isTrue();
+        assertThat(team.canDelete()).isTrue();
 
-        BudgetPermissions service = authorization.permissionsFor(Quota.Scope.SERVICE, projectId, auth);
+        BudgetPermissions service = authorization.permissionsFor(Quota.Scope.SERVICE, teamId, auth);
         assertThat(service.canCreateCeiling()).isFalse();
         assertThat(service.canCreateServiceBudget()).isTrue();
         assertThat(service.canPauseResume()).isTrue();
@@ -182,19 +182,19 @@ class BudgetAuthorizationTest {
 
     @Test
     void projectOwnerCanCarveServiceBudgetsButNotProjectCeilings() {
-        UUID projectId = UUID.randomUUID();
-        when(projectRepository.findById(projectId)).thenReturn(Optional.of(projectWithGroup(projectId, null)));
+        UUID teamId = UUID.randomUUID();
+        when(TeamRepository.findById(teamId)).thenReturn(Optional.of(projectWithGroup(teamId, null)));
 
-        Authentication auth = auth("proj:" + projectId + ":PROJECT_OWNER");
+        Authentication auth = auth("proj:" + teamId + ":TEAM_OWNER");
 
-        BudgetPermissions project = authorization.permissionsFor(Quota.Scope.PROJECT, projectId, auth);
-        assertThat(project.canView()).isTrue();
-        assertThat(project.canCreateCeiling()).isFalse();
-        assertThat(project.canCreateReservation()).isFalse();
-        assertThat(project.canPauseResume()).isFalse();
-        assertThat(project.canDelete()).isFalse();
+        BudgetPermissions team = authorization.permissionsFor(Quota.Scope.TEAM, teamId, auth);
+        assertThat(team.canView()).isTrue();
+        assertThat(team.canCreateCeiling()).isFalse();
+        assertThat(team.canCreateReservation()).isFalse();
+        assertThat(team.canPauseResume()).isFalse();
+        assertThat(team.canDelete()).isFalse();
 
-        BudgetPermissions service = authorization.permissionsFor(Quota.Scope.SERVICE, projectId, auth);
+        BudgetPermissions service = authorization.permissionsFor(Quota.Scope.SERVICE, teamId, auth);
         assertThat(service.canCreateServiceBudget()).isTrue();
         assertThat(service.canCreateReservation()).isFalse();
         assertThat(service.canPauseResume()).isTrue();
@@ -203,28 +203,28 @@ class BudgetAuthorizationTest {
 
     @Test
     void editorCanCarveServiceBudgets() {
-        UUID projectId = UUID.randomUUID();
-        when(projectRepository.findById(projectId)).thenReturn(Optional.of(projectWithGroup(projectId, null)));
+        UUID teamId = UUID.randomUUID();
+        when(TeamRepository.findById(teamId)).thenReturn(Optional.of(projectWithGroup(teamId, null)));
 
-        Authentication auth = auth("proj:" + projectId + ":EDITOR");
+        Authentication auth = auth("proj:" + teamId + ":EDITOR");
 
-        BudgetPermissions service = authorization.permissionsFor(Quota.Scope.SERVICE, projectId, auth);
+        BudgetPermissions service = authorization.permissionsFor(Quota.Scope.SERVICE, teamId, auth);
         assertThat(service.canCreateServiceBudget()).isTrue();
         assertThat(service.canPauseResume()).isTrue();
         assertThat(service.canDelete()).isTrue();
 
-        BudgetPermissions project = authorization.permissionsFor(Quota.Scope.PROJECT, projectId, auth);
-        assertThat(project.canCreateCeiling()).isFalse();
-        assertThat(project.canCreateServiceBudget()).isFalse();
+        BudgetPermissions team = authorization.permissionsFor(Quota.Scope.TEAM, teamId, auth);
+        assertThat(team.canCreateCeiling()).isFalse();
+        assertThat(team.canCreateServiceBudget()).isFalse();
     }
 
     @Test
     void viewerCannotMutateBudgets() {
-        UUID projectId = UUID.randomUUID();
-        when(projectRepository.findById(projectId)).thenReturn(Optional.of(projectWithGroup(projectId, null)));
+        UUID teamId = UUID.randomUUID();
+        when(TeamRepository.findById(teamId)).thenReturn(Optional.of(projectWithGroup(teamId, null)));
 
-        Authentication auth = auth("proj:" + projectId + ":VIEWER");
-        BudgetPermissions p = authorization.permissionsFor(Quota.Scope.PROJECT, projectId, auth);
+        Authentication auth = auth("proj:" + teamId + ":VIEWER");
+        BudgetPermissions p = authorization.permissionsFor(Quota.Scope.TEAM, teamId, auth);
 
         assertThat(p.canView()).isTrue();
         assertThat(p.canCreateCeiling()).isFalse();
@@ -246,9 +246,9 @@ class BudgetAuthorizationTest {
         assertThat(p.canCreateCeiling()).isFalse();
     }
 
-    private static Project projectWithGroup(UUID projectId, UUID groupId) {
-        Project p = new Project();
-        p.setId(projectId);
+    private static team projectWithGroup(UUID teamId, UUID groupId) {
+        team p = new team();
+        p.setId(teamId);
         p.setGroupId(groupId);
         return p;
     }

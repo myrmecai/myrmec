@@ -5,8 +5,8 @@ import ai.myrmec.engine._system.common.DomainConstants.AuditAction;
 import ai.myrmec.engine._system.common.ResourceType;
 import ai.myrmec.engine._system.exception.DuplicateResourceException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamRepository;
 import ai.myrmec.engine.secret.dto.CreateSecretRequest;
 import ai.myrmec.engine.secret.dto.SecretResponse;
 import ai.myrmec.engine.secret.dto.UpdateSecretRequest;
@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Write-side service for secrets — shared by the project-scoped controller and
+ * Write-side service for secrets — shared by the Team-scoped controller and
  * the SYSTEM_ADMIN global controller. Authorization happens at the controller
  * layer via {@code @PreAuthorize}; this service trusts its caller.
  */
@@ -31,7 +31,7 @@ import java.util.UUID;
 public class SecretService {
 
     private final SecretRepository secretRepository;
-    private final ProjectRepository projectRepository;
+    private final TeamRepository teamRepository;
     private final UserRepository userRepository;
     private final SecretBackendRegistry backendRegistry;
     private final LocalSecretBackendAdapter localBackend;
@@ -41,8 +41,8 @@ public class SecretService {
     // -------- reads --------
 
     @Transactional(readOnly = true)
-    public List<SecretResponse> listForProject(UUID projectId) {
-        return secretRepository.findByProjectIdOrderByNameAsc(projectId).stream()
+    public List<SecretResponse> listForTeam(UUID teamId) {
+        return secretRepository.findByTeamIdOrderByNameAsc(teamId).stream()
                 .map(SecretResponse::from)
                 .toList();
     }
@@ -64,18 +64,18 @@ public class SecretService {
     // -------- writes --------
 
     @Transactional
-    public SecretResponse createForProject(UUID projectId, CreateSecretRequest request, UUID currentUserId) {
+    public SecretResponse createForTeam(UUID teamId, CreateSecretRequest request, UUID currentUserId) {
         validatePayloadMatchesType(request);
 
-        Project project = projectRepository.findById(projectId)
-                .orElseThrow(() -> new ResourceNotFoundException("Project", projectId.toString()));
+        Team team = teamRepository.findById(teamId)
+                .orElseThrow(() -> new ResourceNotFoundException("team", teamId.toString()));
 
-        if (secretRepository.existsByProjectIdAndName(projectId, request.name())) {
+        if (secretRepository.existsByTeamIdAndName(teamId, request.name())) {
             throw new DuplicateResourceException("Secret", "name", request.name());
         }
 
         Secret secret = new Secret();
-        secret.setProject(project);
+        secret.setTeam(team);
         return persist(secret, request, currentUserId);
     }
 
@@ -88,7 +88,7 @@ public class SecretService {
         }
 
         Secret secret = new Secret();
-        secret.setProject(null);
+        secret.setTeam(null);
         return persist(secret, request, currentUserId);
     }
 
@@ -110,8 +110,8 @@ public class SecretService {
         log.info("Updated secret {} ({})", secret.getName(), id);
         auditEventService.recordEvent(
                 ResourceType.SECRET, secret.getId(), AuditAction.UPDATED,
-                secret.getProject() == null ? "ORGANIZATION" : "PROJECT",
-                secret.getProject() == null ? null : secret.getProject().getId(),
+                secret.getTeam() == null ? "ORGANIZATION" : "TEAM",
+                secret.getTeam() == null ? null : secret.getTeam().getId(),
                 null, ActorType.SYSTEM,
                 null, null, null, null,
                 java.util.Map.of("name", secret.getName(), "type", secret.getType().name()));
@@ -127,8 +127,8 @@ public class SecretService {
         log.info("Updated secret metadata for {} ({})", secret.getName(), id);
         auditEventService.recordEvent(
                 ResourceType.SECRET, secret.getId(), AuditAction.METADATA_UPDATED,
-                secret.getProject() == null ? "ORGANIZATION" : "PROJECT",
-                secret.getProject() == null ? null : secret.getProject().getId(),
+                secret.getTeam() == null ? "ORGANIZATION" : "TEAM",
+                secret.getTeam() == null ? null : secret.getTeam().getId(),
                 null, ActorType.SYSTEM,
                 null, null, null, null,
                 java.util.Map.of("name", secret.getName()));
@@ -157,8 +157,8 @@ public class SecretService {
         log.info("Deleted secret {} ({})", secret.getName(), id);
         auditEventService.recordEvent(
                 ResourceType.SECRET, id, AuditAction.DELETED,
-                secret.getProject() == null ? "ORGANIZATION" : "PROJECT",
-                secret.getProject() == null ? null : secret.getProject().getId(),
+                secret.getTeam() == null ? "ORGANIZATION" : "TEAM",
+                secret.getTeam() == null ? null : secret.getTeam().getId(),
                 null, ActorType.SYSTEM,
                 null, null, null, null,
                 java.util.Map.of("name", secret.getName()));
@@ -188,11 +188,11 @@ public class SecretService {
 
         secret = secretRepository.save(secret);
         log.info("Created secret {} (type={}, scope={})",
-                secret.getName(), secret.getType(), secret.isGlobal() ? "GLOBAL" : "PROJECT");
+                secret.getName(), secret.getType(), secret.isGlobal() ? "GLOBAL" : "TEAM");
         auditEventService.recordEvent(
                 ResourceType.SECRET, secret.getId(), AuditAction.CREATED,
-                secret.isGlobal() ? "ORGANIZATION" : "PROJECT",
-                secret.isGlobal() ? null : secret.getProject().getId(),
+                secret.isGlobal() ? "ORGANIZATION" : "TEAM",
+                secret.isGlobal() ? null : secret.getTeam().getId(),
                 currentUserId != null ? currentUserId : null,
                 ActorType.SYSTEM,
                 null, null, null, null,

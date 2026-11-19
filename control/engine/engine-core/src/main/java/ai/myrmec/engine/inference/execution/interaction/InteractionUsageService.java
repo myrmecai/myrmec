@@ -151,22 +151,22 @@ public class InteractionUsageService {
     // ------------------------------------------------------------------
 
     /**
-     * The quota charge: the PROJECT scope of the execution's session (the
+     * The quota charge: the Team scope of the execution's session (the
      * same walk the pre-flight check resolves). Failures never break the
      * settlement — the accounting projection still advanced (the next
      * batch reconciles).
      */
     private void chargeQuota(SessionExecution locked, long charge) {
         try {
-            UUID projectId = sessionRepository.findById(locked.getSessionId())
-                    .map(Session::getProjectId)
+            UUID teamId = sessionRepository.findById(locked.getSessionId())
+                    .map(Session::getTeamId)
                     .orElse(null);
-            if (projectId == null) {
-                log.warn("Usage settlement could not resolve the project (session {}) — "
+            if (teamId == null) {
+                log.warn("Usage settlement could not resolve the Team (session {}) — "
                         + "charge skipped", locked.getSessionId());
                 return;
             }
-            quotaPolicyEngine.recordConsumption(QuotaScope.PROJECT, projectId,
+            quotaPolicyEngine.recordConsumption(QuotaScope.TEAM, teamId,
                     QuotaResourceType.TOKENS, charge);
         } catch (Exception e) {
             log.warn("Quota charge failed (accounting advanced anyway): {}", e.getMessage());

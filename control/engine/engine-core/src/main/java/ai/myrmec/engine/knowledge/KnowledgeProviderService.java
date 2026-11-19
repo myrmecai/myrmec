@@ -13,7 +13,7 @@ import ai.myrmec.engine.audit.AuditEventService;
 import ai.myrmec.engine.governance.GovernancePolicyEnforcer;
 import ai.myrmec.engine.governance.GovernanceScope;
 import ai.myrmec.engine.governance.ProductFeature;
-import ai.myrmec.engine.project.ProjectProviderBindingRepository;
+import ai.myrmec.engine.team.TeamProviderBindingRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -35,18 +35,18 @@ public class KnowledgeProviderService {
     private final KnowledgeProviderVersionRepository versionRepository;
     private final KnowledgeSourceRepository sourceRepository;
     private final DataFeedRepository dataFeedRepository;
-    private final ProjectProviderBindingRepository bindingRepository;
+    private final TeamProviderBindingRepository bindingRepository;
     private final AuditEventService auditEventService;
     private final GovernancePolicyEnforcer governanceEnforcer;
 
     @Transactional(readOnly = true)
     public List<KnowledgeProvider> findAllOrgScoped() {
-        return repository.findByScopeAndProjectIdIsNull(Scope.ORGANIZATION);
+        return repository.findByScopeAndTeamIdIsNull(Scope.ORGANIZATION);
     }
 
     @Transactional(readOnly = true)
-    public List<KnowledgeProvider> findAllProjectScoped(UUID projectId) {
-        return repository.findByScopeAndProjectId(Scope.PROJECT, projectId);
+    public List<KnowledgeProvider> findAllTeamScoped(UUID teamId) {
+        return repository.findByScopeAndTeamId(Scope.TEAM, teamId);
     }
 
     @Transactional(readOnly = true)
@@ -73,12 +73,12 @@ public class KnowledgeProviderService {
     }
 
     @Transactional
-    public KnowledgeProvider create(String scope, UUID projectId, String name,
+    public KnowledgeProvider create(String scope, UUID teamId, String name,
                                     String description, String type,
                                     UUID actorId, String actorDisplayName) {
-        boolean exists = projectId == null
-                ? repository.existsByScopeAndProjectIdIsNullAndName(scope, name)
-                : repository.existsByScopeAndProjectIdAndName(scope, projectId, name);
+        boolean exists = teamId == null
+                ? repository.existsByScopeAndTeamIdIsNullAndName(scope, name)
+                : repository.existsByScopeAndTeamIdAndName(scope, teamId, name);
         if (exists) {
             throw BadRequestException.forField("name", "DUPLICATE_CODE",
                     "A knowledge provider with this name already exists in this scope.");
@@ -86,13 +86,13 @@ public class KnowledgeProviderService {
 
         // Governance: KNOWLEDGE_PROVIDERS — gate provider type by profile
         governanceEnforcer.assertAllowed(
-            projectId != null ? GovernanceScope.ofProject(projectId) : GovernanceScope.orgScope(),
+            teamId != null ? GovernanceScope.ofTeam(teamId) : GovernanceScope.orgScope(),
             ProductFeature.KNOWLEDGE_PROVIDERS,
             type);
 
         KnowledgeProvider provider = new KnowledgeProvider();
         provider.setScope(scope);
-        provider.setProjectId(projectId);
+        provider.setTeamId(teamId);
         provider.setName(name);
         provider.setDescription(description);
         provider.setType(type);
@@ -111,7 +111,7 @@ public class KnowledgeProviderService {
         versionRepository.save(draft);
 
         auditEventService.recordEvent(ResourceType.KNOWLEDGE_PROVIDER, saved.getId(), AuditAction.CREATED,
-                scope, projectId, actorId, actorDisplayName,
+                scope, teamId, actorId, actorDisplayName,
                 null, null, null, Map.of("name", name, "type", type), null);
 
         return saved;
@@ -155,7 +155,7 @@ public class KnowledgeProviderService {
         log.info("Created draft version {} for knowledge provider: {}", versionNumber, providerId);
 
         auditEventService.recordEvent(ResourceType.KNOWLEDGE_PROVIDER, providerId, AuditAction.DRAFT_CREATED,
-                provider.getScope(), provider.getProjectId(), actorId, actorDisplayName,
+                provider.getScope(), provider.getTeamId(), actorId, actorDisplayName,
                 saved.getId(), null, null, Map.of("version_number", versionNumber), null);
 
         return saved;
@@ -225,7 +225,7 @@ public class KnowledgeProviderService {
         log.info("Published knowledge provider version {} (id: {})", draft.getVersionNumber(), providerId);
 
         auditEventService.recordEvent(ResourceType.KNOWLEDGE_PROVIDER, providerId, EntityStatus.PUBLISHED,
-                provider.getScope(), provider.getProjectId(), actorId, actorDisplayName,
+                provider.getScope(), provider.getTeamId(), actorId, actorDisplayName,
                 saved.getId(), null, null, Map.of("version_number", draft.getVersionNumber()), null);
 
         return saved;
@@ -251,7 +251,7 @@ public class KnowledgeProviderService {
         log.info("Discarded draft for knowledge provider: {}", providerId);
 
         auditEventService.recordEvent(ResourceType.KNOWLEDGE_PROVIDER, providerId, AuditAction.DRAFT_DISCARDED,
-                provider.getScope(), provider.getProjectId(), actorId, actorDisplayName,
+                provider.getScope(), provider.getTeamId(), actorId, actorDisplayName,
                 draft.getId(), null, null, null, null);
     }
 
@@ -261,7 +261,7 @@ public class KnowledgeProviderService {
         provider.setStatus(EntityStatus.DISABLED);
         KnowledgeProvider saved = repository.save(provider);
         auditEventService.recordEvent(ResourceType.KNOWLEDGE_PROVIDER, providerId, EntityStatus.DISABLED,
-                provider.getScope(), provider.getProjectId(), actorId, actorDisplayName,
+                provider.getScope(), provider.getTeamId(), actorId, actorDisplayName,
                 null, AuditReason.ADMIN_DISABLED, null, null, null);
         return saved;
     }
@@ -272,7 +272,7 @@ public class KnowledgeProviderService {
         provider.setStatus(EntityStatus.ACTIVE);
         KnowledgeProvider saved = repository.save(provider);
         auditEventService.recordEvent(ResourceType.KNOWLEDGE_PROVIDER, providerId, AuditAction.REENABLED,
-                provider.getScope(), provider.getProjectId(), actorId, actorDisplayName,
+                provider.getScope(), provider.getTeamId(), actorId, actorDisplayName,
                 null, AuditReason.ADMIN_REENABLED, null, null, null);
         return saved;
     }
@@ -282,7 +282,7 @@ public class KnowledgeProviderService {
     @Transactional
     public void delete(UUID providerId, UUID actorId, String actorDisplayName) {
         KnowledgeProvider provider = findById(providerId);
-        // Delete project provider bindings (FK → knowledge_providers)
+        // Delete Team provider bindings (FK → knowledge_providers)
         bindingRepository.findByProviderId(providerId).forEach(bindingRepository::delete);
         // Delete linked data feeds, sources (FK → versions), then versions, then parent
         List<KnowledgeProviderVersion> versions = versionRepository.findAllByProviderIdOrderByVersionNumberDesc(providerId);
@@ -307,7 +307,7 @@ public class KnowledgeProviderService {
         KnowledgeProvider saved = repository.save(provider);
         log.info("Updated knowledge provider Zone 1: {}", providerId);
         auditEventService.recordEvent(ResourceType.KNOWLEDGE_PROVIDER, providerId, AuditAction.UPDATED,
-                provider.getScope(), provider.getProjectId(), actorId, actorDisplayName,
+                provider.getScope(), provider.getTeamId(), actorId, actorDisplayName,
                 null, null, null, Map.of(), null);
         return saved;
     }
@@ -338,7 +338,7 @@ public class KnowledgeProviderService {
         provider.setStatus(EntityStatus.ARCHIVED);
         KnowledgeProvider saved = repository.save(provider);
         auditEventService.recordEvent(ResourceType.KNOWLEDGE_PROVIDER, providerId, EntityStatus.ARCHIVED,
-                provider.getScope(), provider.getProjectId(), actorId, actorDisplayName,
+                provider.getScope(), provider.getTeamId(), actorId, actorDisplayName,
                 null, AuditReason.ADMIN_ARCHIVED, null, null, null);
         return saved;
     }
@@ -352,7 +352,7 @@ public class KnowledgeProviderService {
         provider.setStatus(EntityStatus.DISABLED);
         KnowledgeProvider saved = repository.save(provider);
         auditEventService.recordEvent(ResourceType.KNOWLEDGE_PROVIDER, providerId, AuditAction.UNARCHIVED,
-                provider.getScope(), provider.getProjectId(), actorId, actorDisplayName,
+                provider.getScope(), provider.getTeamId(), actorId, actorDisplayName,
                 null, AuditReason.ADMIN_UNARCHIVED, null, null, null);
         return saved;
     }
@@ -397,7 +397,7 @@ public class KnowledgeProviderService {
 
         log.info("Cloned version {} as draft v{} for provider {}", versionId, saved.getVersionNumber(), providerId);
         auditEventService.recordEvent(ResourceType.KNOWLEDGE_PROVIDER, providerId, AuditAction.VERSION_CLONED,
-                provider.getScope(), provider.getProjectId(), actorId, actorDisplayName,
+                provider.getScope(), provider.getTeamId(), actorId, actorDisplayName,
                 saved.getId(), null, null,
                 Map.of("source_version_id", versionId, "new_version_number", saved.getVersionNumber()), null);
 
@@ -446,7 +446,7 @@ public class KnowledgeProviderService {
 
         KnowledgeSource source = new KnowledgeSource();
         source.setScope(provider.getScope());
-        source.setProjectId(provider.getProjectId());
+        source.setTeamId(provider.getTeamId());
         source.setName(name);
         source.setDescription(description);
         source.setStatus(EntityStatus.ACTIVE);
@@ -460,7 +460,7 @@ public class KnowledgeProviderService {
         log.info("Added knowledge source '{}' to provider {} draft", name, providerId);
 
         auditEventService.recordEvent(ResourceType.KNOWLEDGE_SOURCE, saved.getId(), AuditAction.CREATED,
-                provider.getScope(), provider.getProjectId(), actorId, actorDisplayName,
+                provider.getScope(), provider.getTeamId(), actorId, actorDisplayName,
                 null, null, null, Map.of("name", name, "providerId", providerId), null);
 
         return saved;
@@ -486,7 +486,7 @@ public class KnowledgeProviderService {
         sourceRepository.delete(source);
         log.info("Deleted knowledge source: {} (id: {})", source.getName(), sourceId);
         auditEventService.recordEvent(ResourceType.KNOWLEDGE_SOURCE, sourceId, AuditAction.DELETED,
-                source.getScope(), source.getProjectId(), actorId, actorDisplayName,
+                source.getScope(), source.getTeamId(), actorId, actorDisplayName,
                 null, null, null, Map.of("name", source.getName()), null);
     }
 }

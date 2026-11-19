@@ -5,7 +5,7 @@ package ai.myrmec.engine.inference.execution.interaction;
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.DuplicateResourceException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
-import ai.myrmec.engine._system.security.ProjectAccessEvaluator;
+import ai.myrmec.engine._system.security.TeamAccessEvaluator;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.inference.execution.SessionExecution;
@@ -72,7 +72,7 @@ public class ExecutionControlService {
     private final ExecutionInteractionRepository interactionRepository;
     private final ExecutionControlRequestRepository controlRequestRepository;
     private final ExecutionCommandOutboxRepository outboxRepository;
-    private final ProjectAccessEvaluator projectAccess;
+    private final TeamAccessEvaluator teamAccess;
     private final UserRoleRepository userRoleRepository;
     private final ai.myrmec.engine.user.UserRepository userRepository;
     private final ObjectMapper objectMapper;
@@ -91,7 +91,7 @@ public class ExecutionControlService {
             ExecutionInteractionRepository interactionRepository,
             ExecutionControlRequestRepository controlRequestRepository,
             ExecutionCommandOutboxRepository outboxRepository,
-            ProjectAccessEvaluator projectAccess,
+            TeamAccessEvaluator teamAccess,
             UserRoleRepository userRoleRepository,
             ai.myrmec.engine.user.UserRepository userRepository,
             ObjectMapper objectMapper,
@@ -102,7 +102,7 @@ public class ExecutionControlService {
         this.interactionRepository = interactionRepository;
         this.controlRequestRepository = controlRequestRepository;
         this.outboxRepository = outboxRepository;
-        this.projectAccess = projectAccess;
+        this.teamAccess = teamAccess;
         this.userRoleRepository = userRoleRepository;
         this.userRepository = userRepository;
         this.objectMapper = objectMapper;
@@ -121,7 +121,7 @@ public class ExecutionControlService {
     @Transactional
     public ControlReceipt control(ExecutionScope scope, UserPrincipal principal,
                                   ControlRequest request) {
-        assertCanEdit(principal, scope.projectId(), "control");
+        assertCanEdit(principal, scope.teamId(), "control");
         HeldChain chain = resolveChain(scope);
 
         SessionExecution locked = executionRepository.findWithLockById(chain.execution().getId())
@@ -176,6 +176,11 @@ public class ExecutionControlService {
                 null, envelope);
 
         locked.setControlRevision(revision);
+        if (hold) {
+            locked.setHoldState("HOLD_REQUESTED");
+        } else {
+            locked.setHoldState("RUNNING");
+        }
         executionRepository.save(locked);
 
         // Post-commit dispatch of the STORED envelope (never rebuilt) — the
@@ -202,7 +207,7 @@ public class ExecutionControlService {
             throw BadRequestException.forField("confirmed", "INVALID_VALUE",
                     "Cancel requires explicit confirmation (confirmed:true).");
         }
-        assertCanEdit(principal, scope.projectId(), "cancel");
+        assertCanEdit(principal, scope.teamId(), "cancel");
         HeldChain chain = resolveChain(scope);
 
         SessionExecution locked = executionRepository.findWithLockById(chain.execution().getId())
@@ -329,9 +334,9 @@ public class ExecutionControlService {
 
         // §22.7 re-authorization: the derived actor's CURRENT EDITOR-
         // equivalent access from the GRANT ROWS (revocation-safe, no JWT).
-        if (!actorHasEditorAccess(actorUserId, scope.projectId())) {
-            log.info("Proposal {} rejected: actor {} no longer holds EDITOR on project {}",
-                    payload.controlRequestId(), actorUserId, scope.projectId());
+        if (!actorHasEditorAccess(actorUserId, scope.teamId())) {
+            log.info("Proposal {} rejected: actor {} no longer holds EDITOR on Team {}",
+                    payload.controlRequestId(), actorUserId, scope.teamId());
             return rejectProposal(chain, payload, locked.getControlRevision(),
                     ExecutionControlRequestResolvedPayload.ErrorCode.FORBIDDEN);
         }
@@ -348,13 +353,13 @@ public class ExecutionControlService {
      * from {@code user_roles} (NOT JWT claims — the actor may hold no live
      * token), rebuild the scope-prefixed claim list exactly as JWT minting
      * does, and run the SAME evaluator the routes use. This reuses the
-     * platform's access model verbatim: project-scoped grants (PROJECT_OWNER
+     * platform's access model verbatim: Team-scoped grants (TEAM_OWNER
      * implies EDITOR), group-scoped grants cascading down through the
-     * project's group and ITS ancestors (the evaluator walks the ancestors),
+     * Team's group and ITS ancestors (the evaluator walks the ancestors),
      * and system-wide grants — with the implicit-role expansion and the
      * PLATFORM_ADMIN isolation from {@link UserRole.Role}.
      */
-    private boolean actorHasEditorAccess(UUID actorUserId, UUID projectId) {
+    private boolean actorHasEditorAccess(UUID actorUserId, UUID teamId) {
         // User-active parity with the live-JWT path (JwtAuthenticationFilter
         // denies deactivated users before the evaluator ever runs): a
         // deactivated user's grants do not authorize, deny on missing too.
@@ -368,7 +373,7 @@ public class ExecutionControlService {
         var actorPrincipal = new UserPrincipal(actorUserId, "", "", claims);
         var authentication = new org.springframework.security.authentication
                 .UsernamePasswordAuthenticationToken(actorPrincipal, null, java.util.List.of());
-        return projectAccess.canEdit(projectId, authentication);
+        return teamAccess.canEdit(teamId, authentication);
     }
 
     private ProposalReceipt proposeHoldContinue(HeldChain chain,
@@ -474,7 +479,7 @@ public class ExecutionControlService {
     @Transactional
     public ProposalReceipt decide(ExecutionScope scope, UUID controlRequestId,
                                   UserPrincipal principal, Decision decision) {
-        assertCanEdit(principal, scope.projectId(), "decision");
+        assertCanEdit(principal, scope.teamId(), "decision");
 
         HeldChain chain = resolveChain(scope);
         SessionExecution locked = executionRepository.findWithLockById(chain.execution().getId())
@@ -563,14 +568,14 @@ public class ExecutionControlService {
     // chain resolution + intent plumbing
     // =================================================================
 
-    /** Validated ownership chain (§4): session/execution + attempt/task/request/workflow/project all line up. */
+    /** Validated ownership chain (§4): session/execution + attempt/task/request/workflow/Team all line up. */
     private HeldChain resolveChain(ExecutionScope scope) {
         SessionExecution execution = executionRepository.findById(scope.executionId())
                 .orElseThrow(() -> ResourceNotFoundException.of("Execution", scope.executionId()));
         Session session = sessionRepository.findById(execution.getSessionId())
                 .orElseThrow(() -> ResourceNotFoundException.of("Session",
                         execution.getSessionId()));
-        if (!scope.projectId().equals(session.getProjectId())) {
+        if (!scope.teamId().equals(session.getTeamId())) {
             throw chainNotFound(scope);
         }
         if (!"WORKFLOW".equals(session.getServiceType())
@@ -593,7 +598,7 @@ public class ExecutionControlService {
 
     /**
      * Task-6 handler seam: resolve the COMPLETE §4 ownership chain for an
-     * execution (its attempt/task/request/workflow/project) so the host arm
+     * execution (its attempt/task/request/workflow/Team) so the host arm
      * can call {@link #propose} without re-deriving the chain. Throws 404
      * when any level fails to line up.
      */
@@ -620,10 +625,10 @@ public class ExecutionControlService {
             throw ResourceNotFoundException.of("WorkflowRequest", task.getId());
         }
         var workflow = request.getWorkflow();
-        if (workflow == null || workflow.getProject() == null) {
+        if (workflow == null || workflow.getTeam() == null) {
             throw ResourceNotFoundException.of("Workflow", request.getId());
         }
-        return new ExecutionScope(workflow.getProject().getId(), workflow.getId(),
+        return new ExecutionScope(workflow.getTeam().getId(), workflow.getId(),
                 request.getId(), task.getId(), attempt.getId(), executionId);
     }
 
@@ -650,18 +655,18 @@ public class ExecutionControlService {
         if (workflow == null || !scope.workflowId().equals(workflow.getId())) {
             return new TaskAttemptRef(task.getId(), request.getId(), null, true, true);
         }
-        var project = workflow.getProject();
-        if (project == null || !scope.projectId().equals(project.getId())) {
+        var team = workflow.getTeam();
+        if (team == null || !scope.teamId().equals(team.getId())) {
             return new TaskAttemptRef(task.getId(), request.getId(), workflow.getId(), true, true);
         }
         return new TaskAttemptRef(task.getId(), request.getId(), workflow.getId(), true, true);
     }
 
-    private void assertCanEdit(UserPrincipal principal, UUID projectId, String action) {
+    private void assertCanEdit(UserPrincipal principal, UUID teamId, String action) {
         if (principal == null) {
             throw new AccessDeniedException("Control actions require a USER principal");
         }
-        // ProjectAccessEvaluator consults the CURRENT grant rows at execution
+        // TeamAccessEvaluator consults the CURRENT grant rows at execution
         // time (revocation-safe) and the platform-admin isolation holds
         // (PLATFORM_ADMIN implies no data-access role).
         var authentication = new org.springframework.security.authentication
@@ -670,11 +675,11 @@ public class ExecutionControlService {
         org.springframework.security.core.Authentication previous = holder.getAuthentication();
         try {
             holder.setAuthentication(authentication);
-            if (!projectAccess.canEdit(projectId, authentication)) {
-                log.debug("Control {} denied: actor {} lacks EDITOR on project {}",
-                        action, principal.getUserId(), projectId);
+            if (!teamAccess.canEdit(teamId, authentication)) {
+                log.debug("Control {} denied: actor {} lacks EDITOR on Team {}",
+                        action, principal.getUserId(), teamId);
                 throw new AccessDeniedException(
-                        "EDITOR-equivalent project access is required for " + action);
+                        "EDITOR-equivalent Team access is required for " + action);
             }
         } finally {
             holder.setAuthentication(previous);

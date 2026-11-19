@@ -2,7 +2,6 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.agent;
 
-import ai.myrmec.engine._system.common.JsonListConverter;
 import ai.myrmec.engine.tool.Tool;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -11,7 +10,6 @@ import lombok.Setter;
 
 import java.time.Instant;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -81,14 +79,6 @@ public class AgentProfileVersion {
         inverseJoinColumns = @JoinColumn(name = "tool_code")
     )
     private Set<Tool> tools = new HashSet<>();
-
-    /**
-     * Runtime requirements as JSON array.
-     * Examples: ["python:>=3.11", "docker", "gpu:nvidia", "16gb-ram"]
-     */
-    @Convert(converter = JsonListConverter.class)
-    @Column(name = "capabilities", nullable = false)
-    private List<String> capabilities;
 
     /**
      * Default model code for agents running this version.

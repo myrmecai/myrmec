@@ -16,7 +16,7 @@ import ai.myrmec.engine.conversation.stream.ConversationSubscriber;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionAllocator;
 import ai.myrmec.engine.inference.SessionRepository;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.websocket.host.HostControlHandshakeInterceptor;
 import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
@@ -116,7 +116,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
         return null;
     }
 
-    private record ActiveSession(UUID sessionId, UUID instanceId, Project project, Conversation conversation,
+    private record ActiveSession(UUID sessionId, UUID instanceId, team team, Conversation conversation,
                                  UUID executionId, Host host) {}
 
     private ActiveSession openedConversationWithExecution() throws Exception {
@@ -124,20 +124,20 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
         UUID instanceId = (UUID) hostSetup.session().getAttributes()
                 .get(HostControlWebSocketHandler.ATTR_HOST_INSTANCE_ID);
 
-        // The agent host needs a project owner grant so the conversation service
+        // The agent host needs a team owner grant so the conversation service
         // can create the conversation and append the user turn under the
         // test admin identity.
-        Project project = data.project().named("f-proj").create();
+        team team = data.team().named("f-proj").create();
 
         // Create a real conversation with a USER message so the assembler returns messages.
-        Conversation conversation = data.conversation().inProject(project).create();
+        Conversation conversation = data.conversation().inTeam(team).create();
         conversationService.appendMessage(conversation.getId(),
                 ai.myrmec.engine.conversation.ConversationMessage.Role.USER,
                 "Hello, engine", TEST_ADMIN_ID, null);
         // Pin an assistant profile version: the assembler resolves the profile
         // from the pin (Â§3.7), never from the host. Mirror the pinning-IT flow.
         ai.myrmec.engine.assistant.Assistant pinAssistant =
-                assistantService.createAssistant(project.getId(),
+                assistantService.createAssistant(team.getId(),
                         "flow-assistant-" + System.nanoTime(), "flow",
                         hostSetup.profile().getId(), TEST_ADMIN_ID);
         ai.myrmec.engine.assistant.AssistantVersion pinnedVersion =
@@ -157,7 +157,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
         conversationRepository.save(conversation);
 
         UUID sessionId = allocator.offer("CONVERSATION", conversation.getId(), "CONVERSATION",
-                project.getId(), hostSetup.host().getId()).orElseThrow();
+                team.getId(), hostSetup.host().getId()).orElseThrow();
 
         String accept = """
                 { "protocolVersion": 1, "messageId": "m-acc", "type": "session.accept",
@@ -179,7 +179,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
         // Start a conversation execution through the registry.
         SessionExecution execution = registry.start(sessionId, conversation.getId().toString(),
                 Instant.now().plusSeconds(60), Map.of()).orElseThrow();
-        return new ActiveSession(sessionId, instanceId, project, conversation, execution.getId(), hostSetup);
+        return new ActiveSession(sessionId, instanceId, team, conversation, execution.getId(), hostSetup);
     }
 
     @Test
@@ -370,7 +370,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
         Host hostSetup = openedHost();
         UUID instanceId = (UUID) hostSetup.session().getAttributes()
                 .get(HostControlWebSocketHandler.ATTR_HOST_INSTANCE_ID);
-        Project project = data.project().named("f-proj2").create();
+        team team = data.team().named("f-proj2").create();
         UUID executionId = UUID.randomUUID();
 
         // execution.complete before start â€” no execution row.
@@ -490,7 +490,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
      */
     @org.junit.jupiter.api.Test
     void terminalLinearizationInvalidatesPendingInteractionFamily() {
-        var project = data.project().named("terminal-invalidation").create();
+        var team = data.team().named("terminal-invalidation").create();
         var created = data.agent().named("terminal-invalidation-host")
                 .withMaxAgents(2).create();
         AgentHostInstance instance = instances.saveAndFlush(AgentHostInstance.open(
@@ -499,7 +499,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
         Session session = new Session();
         session.setServiceType("WORKFLOW");
         session.setRefId(UUID.randomUUID());
-        session.setProjectId(project.getId());
+        session.setTeamId(team.getId());
         session.setKind("ORCHESTRATION_TASK");
         session.setHostInstanceId(instance.getId());
         session.setAllocationState(SessionAllocator.ALLOC_STATE_ACTIVE);
@@ -606,7 +606,7 @@ class ExecutionLifecycleFlowTest extends IntegrationTestBase {
         long sequenceNo = executionRepository.findById(executionId)
                 .map(SessionExecution::getSequenceNo).map(Integer::longValue).orElse(1L);
         Map<String, Object> input = executionInputAssembler.assembleConversationInput(
-                conversationId, sessionId, session.getProjectId(), sequenceNo);
+                conversationId, sessionId, session.getTeamId(), sequenceNo);
 
         // assembleConversationInput's "messages" IS the legacy transcript â€” a
         // List<InferenceMessage> (the assembler returns assign.messages()

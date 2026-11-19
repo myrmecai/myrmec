@@ -38,7 +38,7 @@ public class KnowledgeSourceService {
      */
     @Transactional(readOnly = true)
     public List<KnowledgeSource> findAllOrgScoped(boolean includeArchived) {
-        List<KnowledgeSource> sources = repository.findByScopeAndProjectIdIsNull(Scope.ORGANIZATION);
+        List<KnowledgeSource> sources = repository.findByScopeAndTeamIdIsNull(Scope.ORGANIZATION);
         if (includeArchived) {
             return sources;
         }
@@ -66,13 +66,13 @@ public class KnowledgeSourceService {
     }
 
     @Transactional
-    public KnowledgeSource create(String scope, UUID projectId, String name, String description,
+    public KnowledgeSource create(String scope, UUID teamId, String name, String description,
                                    UUID providerVersionId, Map<String, Object> config,
                                    String availability, Integer priority,
                                    UUID actorId, String actorDisplayName) {
         KnowledgeSource source = new KnowledgeSource();
         source.setScope(scope);
-        source.setProjectId(projectId);
+        source.setTeamId(teamId);
         source.setName(name);
         source.setDescription(description);
         source.setStatus(EntityStatus.ACTIVE);
@@ -86,7 +86,7 @@ public class KnowledgeSourceService {
         log.info("Created knowledge source: {} (id: {})", name, saved.getId());
 
         auditEventService.recordEvent(ResourceType.KNOWLEDGE_SOURCE, saved.getId(), AuditAction.CREATED,
-                scope, projectId, actorId, actorDisplayName,
+                scope, teamId, actorId, actorDisplayName,
                 null, null, null, Map.of("name", name), null);
 
         return saved;
@@ -98,7 +98,7 @@ public class KnowledgeSourceService {
         source.setStatus(EntityStatus.DISABLED);
         KnowledgeSource saved = repository.save(source);
         auditEventService.recordEvent(ResourceType.KNOWLEDGE_SOURCE, id, EntityStatus.DISABLED,
-                source.getScope(), source.getProjectId(), actorId, actorDisplayName,
+                source.getScope(), source.getTeamId(), actorId, actorDisplayName,
                 null, AuditReason.ADMIN_DISABLED, null, null, null);
         return saved;
     }
@@ -109,7 +109,7 @@ public class KnowledgeSourceService {
         source.setStatus(EntityStatus.ARCHIVED);
         KnowledgeSource saved = repository.save(source);
         auditEventService.recordEvent(ResourceType.KNOWLEDGE_SOURCE, id, EntityStatus.ARCHIVED,
-                source.getScope(), source.getProjectId(), actorId, actorDisplayName,
+                source.getScope(), source.getTeamId(), actorId, actorDisplayName,
                 null, AuditReason.ADMIN_ARCHIVED, null, null, null);
         return saved;
     }

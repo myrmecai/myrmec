@@ -1,0 +1,452 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+
+    <!-- ================================================================
+         engine_nodes - registered engine replicas and liveness
+         ================================================================ -->
+    <changeSet id="003-agents-create-engine-nodes" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="engine_nodes"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="engine_nodes">
+            <column name="node_id" type="varchar(255)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="address" type="varchar(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="UP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="started_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_heartbeat_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <createIndex indexName="idx_engine_nodes_status_heartbeat" tableName="engine_nodes">
+            <column name="status"/>
+            <column name="last_heartbeat_at"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         agent_profiles (Zone 1: identity + administrative fields —
+         design §16.1; the behaviour contract lives on versions)
+         ================================================================ -->
+    <changeSet id="003-agents-create-agent-profiles" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="agent_profiles"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="agent_profiles">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uk_agent_profiles_name"/>
+            </column>
+            <column name="description" type="text"/>
+            <column name="is_system" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="addendum_allowed" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone"/>
+        </createTable>
+
+        <createIndex tableName="agent_profiles" indexName="idx_agent_profiles_status">
+            <column name="status"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         agent_profile_versions (Zone 2: the immutable behaviour contract —
+         DRAFT → PUBLISHED → ARCHIVED lifecycle; orchestration policy
+         fields are nullable/inert for conversation profiles until
+         orchestration consumes them; budget ceilings are deliberately
+         absent — spend governance is the engine quota system's job)
+         ================================================================ -->
+    <changeSet id="003-agents-create-agent-profile-versions" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="agent_profile_versions"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="agent_profile_versions">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="profile_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="version_number" type="integer">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="DRAFT">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Zone 2 behaviour contract -->
+            <column name="default_model" type="varchar(50)"/>
+            <column name="system_prompt" type="text"/>
+            <column name="interaction_mode" type="varchar(20)" defaultValue="ONE_SHOT">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Orchestration policy (§7 ExecutionPolicy source of truth) -->
+            <column name="command_templates" type="text"/>
+            <column name="approval_policy" type="text"/>
+            <column name="required_isolation" type="varchar(30)"/>
+            <column name="git_policy" type="text"/>
+            <column name="workspace_retention_seconds" type="integer"/>
+            <!-- HITL (§17.4): bounded approval-request TTL. NULL = platform default. -->
+            <column name="approval_request_ttl_seconds" type="integer"/>
+            <column name="published_at" type="timestamp with time zone"/>
+            <column name="published_by" type="uuid"/>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="agent_profile_versions"
+            baseColumnNames="profile_id"
+            referencedTableName="agent_profiles"
+            referencedColumnNames="id"
+            constraintName="fk_agent_profile_versions_profile"
+            onDelete="CASCADE"/>
+
+        <addUniqueConstraint
+            tableName="agent_profile_versions"
+            columnNames="profile_id, version_number"
+            constraintName="uk_agent_profile_versions_profile_number"/>
+
+        <createIndex tableName="agent_profile_versions"
+                     indexName="idx_agent_profile_versions_profile">
+            <column name="profile_id"/>
+            <column name="version_number"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         agent_profile_tools (keyed to the VERSION — design §16.1:
+         the tool set is part of the behaviour contract)
+         ================================================================ -->
+    <changeSet id="003-agents-create-agent-profile-tools" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="agent_profile_tools"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="agent_profile_tools">
+            <column name="profile_version_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="tool_code" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addPrimaryKey tableName="agent_profile_tools"
+                       columnNames="profile_version_id, tool_code"
+                       constraintName="pk_agent_profile_tools"/>
+
+        <addForeignKeyConstraint
+            baseTableName="agent_profile_tools"
+            baseColumnNames="profile_version_id"
+            referencedTableName="agent_profile_versions"
+            referencedColumnNames="id"
+            constraintName="fk_agent_profile_tools_version"
+            onDelete="CASCADE"/>
+
+        <createIndex tableName="agent_profile_tools" indexName="idx_agent_profile_tools_tool_code">
+            <column name="tool_code"/>
+        </createIndex>
+    </changeSet>
+    <changeSet id="agent-profile-capabilities-table" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="agent_profile_capabilities"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="agent_profile_capabilities">
+            <column name="profile_version_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="capability_key" type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addPrimaryKey tableName="agent_profile_capabilities"
+                       columnNames="profile_version_id, capability_key"
+                       constraintName="pk_agent_profile_capabilities"/>
+
+        <addForeignKeyConstraint
+            baseTableName="agent_profile_capabilities"
+            baseColumnNames="profile_version_id"
+            referencedTableName="agent_profile_versions"
+            referencedColumnNames="id"
+            constraintName="fk_agent_profile_capabilities_version"
+            onDelete="CASCADE"/>
+
+        <addForeignKeyConstraint
+            baseTableName="agent_profile_capabilities"
+            baseColumnNames="capability_key"
+            referencedTableName="capabilities"
+            referencedColumnNames="capability_key"
+            constraintName="fk_agent_profile_capabilities_capability"
+            onDelete="CASCADE"/>
+
+        <createIndex tableName="agent_profile_capabilities" indexName="idx_agent_profile_capabilities_capability_key">
+            <column name="capability_key"/>
+        </createIndex>
+
+    </changeSet>
+    <!-- ================================================================
+         agent_hosts - durable supervisor identity and provisioning policy
+         ================================================================ -->
+    <changeSet id="003-agents-create-agent-hosts" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="agent_hosts"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="agent_hosts">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uk_agent_hosts_name"/>
+            </column>
+            <column name="description" type="text"/>
+            <!-- Optional Team scope. NULL = system-wide. -->
+            <column name="team_id" type="uuid"/>
+            <column name="registration_key" type="varchar(255)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uk_agent_hosts_registration_key"/>
+            </column>
+            <column name="provisions" type="text"/>
+            <column name="max_agents" type="integer" defaultValueNumeric="1">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Durable host type (protocol §2.3): MANAGED | LOCAL | DEDICATED. -->
+            <column name="host_type" type="varchar(20)" defaultValue="MANAGED">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Per-host model access mode (credential-envelope design §5): DIRECT | GATEWAY. -->
+            <column name="model_access_mode" type="varchar(20)" defaultValue="DIRECT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone"/>
+        </createTable>
+
+        <createIndex tableName="agent_hosts" indexName="idx_agent_hosts_team">
+            <column name="team_id"/>
+        </createIndex>
+
+        <createIndex tableName="agent_hosts" indexName="idx_agent_hosts_status">
+            <column name="status"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         agent_host_instances - append-only supervisor run history
+         (unified protocol §3/§19.1). One row per process run.
+         ================================================================ -->
+    <changeSet id="003-agents-create-agent-host-instances" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="agent_host_instances"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="agent_host_instances">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="agent_host_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <!-- LOCAL/DEDICATED owner; NULL for MANAGED (§2.3). -->
+            <column name="owner_user_id" type="uuid"/>
+            <!-- Supervisor-run identity (§6.1). -->
+            <column name="instance_nonce" type="varchar(36)"/>
+            <column name="hostname" type="varchar(255)"/>
+            <column name="pool_size" type="integer" defaultValueNumeric="1">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reported_capacity" type="text"/>
+            <!-- §20 routing identity: the engine node whose socket serves this run. -->
+            <column name="control_node_id" type="varchar(255)"/>
+            <!-- Per-run PSK identity (credential-envelope design §6). -->
+            <column name="psk_key_id" type="uuid"/>
+            <!-- At-rest-encrypted PSK; nulled on close for key erasure. -->
+            <column name="psk_encrypted" type="bytea"/>
+            <column name="status" type="varchar(20)" defaultValue="OPEN">
+                <constraints nullable="false"/>
+            </column>
+            <!-- 'OPEN' while live, NULL once closed; supports one-live-per-owner index. -->
+            <column name="live_key" type="varchar(8)"/>
+            <!-- §13: bounded recovery window horizon (null unless RECOVERING). -->
+            <column name="recovery_expires_at" type="timestamp with time zone"/>
+            <column name="opened_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_heartbeat_at" type="timestamp with time zone"/>
+            <column name="closed_at" type="timestamp with time zone"/>
+            <column name="close_reason" type="varchar(100)"/>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="agent_host_instances"
+            baseColumnNames="agent_host_id"
+            referencedTableName="agent_hosts"
+            referencedColumnNames="id"
+            constraintName="fk_agent_host_instances_host"
+            onDelete="CASCADE"/>
+
+        <createIndex indexName="idx_agent_host_instances_host_status" tableName="agent_host_instances">
+            <column name="agent_host_id"/>
+            <column name="status"/>
+        </createIndex>
+
+        <!-- Portable one-live-per-owner: NULL live_key (closed rows) and NULL
+             owner (MANAGED) never collide under NULL-distinct semantics. -->
+        <createIndex indexName="uk_agent_host_instances_live" tableName="agent_host_instances" unique="true">
+            <column name="agent_host_id"/>
+            <column name="owner_user_id"/>
+            <column name="live_key"/>
+        </createIndex>
+
+        <!-- §6.1: replay idempotency by nonce. -->
+        <createIndex indexName="uk_agent_host_instances_nonce" tableName="agent_host_instances" unique="true">
+            <column name="agent_host_id"/>
+            <column name="instance_nonce"/>
+            <column name="live_key"/>
+        </createIndex>
+
+        <createIndex indexName="idx_agent_host_instances_host_opened" tableName="agent_host_instances">
+            <column name="agent_host_id"/>
+            <column name="opened_at"/>
+        </createIndex>
+
+        <createIndex indexName="idx_agent_host_instances_control_node" tableName="agent_host_instances">
+            <column name="control_node_id"/>
+        </createIndex>
+
+        <createIndex indexName="idx_agent_host_instances_recovery" tableName="agent_host_instances">
+            <column name="status"/>
+            <column name="recovery_expires_at"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         agents - a single execution body bound to one session at a time
+         ================================================================ -->
+    <changeSet id="003-agents-create-agents" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="agents"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="agents">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="agent_host_id" type="uuid"/>
+            <!-- The live supervisor run that minted/serves this agent (§19.1). -->
+            <column name="agent_host_instance_id" type="uuid"/>
+            <column name="conversation_id" type="uuid"/>
+            <column name="profile_version_id" type="uuid"/>
+            <column name="hostname" type="varchar(255)"/>
+            <column name="ip_address" type="varchar(45)"/>
+            <column name="runtime_version" type="varchar(20)"/>
+            <column name="status" type="varchar(20)" defaultValue="OFFLINE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_heartbeat_at" type="timestamp with time zone"/>
+            <column name="registered_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="state_changed_at" type="timestamp with time zone"/>
+            <column name="home_node_id" type="varchar(255)"/>
+            <column name="metadata" type="text"/>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="agents"
+            baseColumnNames="agent_host_id"
+            referencedTableName="agent_hosts"
+            referencedColumnNames="id"
+            constraintName="fk_agents_host"
+            onDelete="CASCADE"/>
+
+        <addForeignKeyConstraint
+            baseTableName="agents"
+            baseColumnNames="agent_host_instance_id"
+            referencedTableName="agent_host_instances"
+            referencedColumnNames="id"
+            constraintName="fk_agents_host_instance"
+            onDelete="SET NULL"/>
+
+        <addForeignKeyConstraint
+            baseTableName="agents"
+            baseColumnNames="home_node_id"
+            referencedTableName="engine_nodes"
+            referencedColumnNames="node_id"
+            constraintName="fk_agents_home_node"
+            onDelete="SET NULL"/>
+
+        <createIndex tableName="agents" indexName="idx_agents_status">
+            <column name="status"/>
+        </createIndex>
+
+        <createIndex tableName="agents" indexName="idx_agents_host">
+            <column name="agent_host_id"/>
+        </createIndex>
+
+        <createIndex tableName="agents" indexName="idx_agents_host_instance">
+            <column name="agent_host_instance_id"/>
+        </createIndex>
+
+        <createIndex tableName="agents" indexName="idx_agents_last_heartbeat">
+            <column name="last_heartbeat_at"/>
+        </createIndex>
+
+        <createIndex tableName="agents" indexName="idx_agents_home_node">
+            <column name="home_node_id"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

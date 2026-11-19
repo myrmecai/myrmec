@@ -6,7 +6,7 @@ import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentHostCreationResult;
 import ai.myrmec.engine.agent.AgentProfile;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.websocket.host.HostControlHandshakeInterceptor;
 import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
@@ -58,11 +58,11 @@ abstract class WorkflowDispatchSupport extends IntegrationTestBase {
      * creates the {@code agent_host_instances} row the allocator reserves
      * against, so capacity is real rather than registered.
      */
-    protected SocketHost openHost(String name, AgentProfile profile, Project project,
+    protected SocketHost openHost(String name, AgentProfile profile, team team,
                                   int poolSize) throws Exception {
-        AgentHostCreationResult created = (project == null
+        AgentHostCreationResult created = (team == null
                 ? data.agent().named(name)
-                : data.agent().named(name).inProject(project))
+                : data.agent().named(name).inTeam(team))
                 .withMaxAgents(Math.max(poolSize, 4)).create();
         AgentHost host = created.agent();
 

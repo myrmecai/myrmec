@@ -5,7 +5,7 @@ package ai.myrmec.engine.mywork.dto;
 
 import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.conversation.ConversationMessage;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.workflow.Workflow;
 import ai.myrmec.engine.workflow.WorkflowRequest;
 import ai.myrmec.engine.workflow.WorkflowTask;
@@ -31,7 +31,7 @@ class MyApprovalRowFactoryTest {
     void fromConversationMapsAllFields() {
         UUID messageId = UUID.randomUUID();
         UUID conversationId = UUID.randomUUID();
-        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
         UUID assistantId = UUID.randomUUID();
         UUID createdBy = UUID.randomUUID();
         Instant createdAt = Instant.now();
@@ -39,7 +39,7 @@ class MyApprovalRowFactoryTest {
 
         Conversation conversation = new Conversation();
         conversation.setId(conversationId);
-        conversation.setProjectId(projectId);
+        conversation.setTeamId(teamId);
         conversation.setAssistantId(assistantId);
         conversation.setCreatedBy(createdBy);
         conversation.setExternalUserRef("ext-user-42");
@@ -53,12 +53,12 @@ class MyApprovalRowFactoryTest {
         request.setCreatedAt(createdAt);
         request.setExpiresAt(expiresAt);
 
-        MyApprovalRow row = MyApprovalRow.fromConversation(request, conversation, "Acme Project");
+        MyApprovalRow row = MyApprovalRow.fromConversation(request, conversation, "Acme team");
 
         assertThat(row.messageId()).isEqualTo(messageId);
         assertThat(row.conversationId()).isEqualTo(conversationId);
-        assertThat(row.projectId()).isEqualTo(projectId);
-        assertThat(row.projectName()).isEqualTo("Acme Project");
+        assertThat(row.teamId()).isEqualTo(teamId);
+        assertThat(row.teamName()).isEqualTo("Acme team");
         assertThat(row.source()).isEqualTo(MyApprovalRow.Source.CONVERSATION);
         assertThat(row.assistantId()).isEqualTo(assistantId);
         assertThat(row.summary()).isEqualTo("DELETE user account");
@@ -74,10 +74,10 @@ class MyApprovalRowFactoryTest {
         WorkflowTask task = executionTask(
                 Map.of("summary", "Drop customers table"), "step-7");
 
-        MyApprovalRow row = MyApprovalRow.fromExecution(task, "Ops Project");
+        MyApprovalRow row = MyApprovalRow.fromExecution(task, "Ops team");
 
         assertThat(row.source()).isEqualTo(MyApprovalRow.Source.EXECUTION);
-        assertThat(row.projectName()).isEqualTo("Ops Project");
+        assertThat(row.teamName()).isEqualTo("Ops team");
         assertThat(row.conversationId()).isNull();
         assertThat(row.assistantId()).isNull();
         assertThat(row.payloadJson()).isNull();
@@ -88,19 +88,19 @@ class MyApprovalRowFactoryTest {
     void fromExecutionFallsBackToStepIdWhenNoPayload() {
         WorkflowTask task = executionTask(null, "step-7");
 
-        MyApprovalRow row = MyApprovalRow.fromExecution(task, "Ops Project");
+        MyApprovalRow row = MyApprovalRow.fromExecution(task, "Ops team");
 
         assertThat(row.source()).isEqualTo(MyApprovalRow.Source.EXECUTION);
         assertThat(row.summary()).isEqualTo("step-7");
     }
 
     private static WorkflowTask executionTask(Map<String, Object> approvalPayload, String stepId) {
-        UUID projectId = UUID.randomUUID();
-        Project project = new Project();
-        project.setId(projectId);
+        UUID teamId = UUID.randomUUID();
+        team team = new team();
+        team.setId(teamId);
 
         Workflow workflow = new Workflow();
-        workflow.setProject(project);
+        workflow.setTeam(team);
 
         WorkflowRequest request = new WorkflowRequest();
         request.setWorkflow(workflow);
@@ -113,7 +113,7 @@ class MyApprovalRowFactoryTest {
         task.setApprovalRequestedAt(Instant.now());
         task.setApprovalExpiresAt(Instant.now().plusSeconds(3600));
 
-        assertThat(task.getRequest().getWorkflow().getProject().getId()).isEqualTo(projectId);
+        assertThat(task.getRequest().getWorkflow().getTeam().getId()).isEqualTo(teamId);
         return task;
     }
 }

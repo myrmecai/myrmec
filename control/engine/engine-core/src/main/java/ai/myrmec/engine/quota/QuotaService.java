@@ -8,8 +8,8 @@ import ai.myrmec.engine._system.common.ResourceType;
 import ai.myrmec.engine.assistant.Assistant;
 import ai.myrmec.engine.assistant.AssistantRepository;
 import ai.myrmec.engine.audit.AuditEventService;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamRepository;
 import ai.myrmec.engine.workflow.Workflow;
 import ai.myrmec.engine.workflow.WorkflowRepository;
 import lombok.RequiredArgsConstructor;
@@ -31,7 +31,7 @@ import java.util.UUID;
  * parent CEILING's remaining shared pool.
  *
  * <p>Hierarchy parent lookup is intentionally simple in Community:
- * we don't crawl the org/group/project relationship table here, we
+ * we don't crawl the org/group/Team relationship table here, we
  * just compare against quotas at the next-higher scope that have
  * matching (resource, period). Enterprise can layer in inherited
  * scoping later by overriding the bean.</p>
@@ -47,16 +47,16 @@ public class QuotaService {
 
     private final QuotaRepository quotaRepository;
     private final AuditEventService auditEventService;
-    private final ProjectRepository projectRepository;
+    private final TeamRepository teamRepository;
     private final WorkflowRepository workflowRepository;
     private final AssistantRepository assistantRepository;
 
     /**
-     * Resolve the project ID for a SERVICE-scope quota by looking up the
+     * Resolve the Team ID for a SERVICE-scope quota by looking up the
      * workflow / assistant instance.  Returns {@code null} for non-SERVICE
      * scopes or when the instance cannot be found.
      */
-    private UUID resolveProjectIdForService(Quota.Scope scope, UUID scopeId, ServiceType serviceType) {
+    private UUID resolveTeamIdForService(Quota.Scope scope, UUID scopeId, ServiceType serviceType) {
         if (scope != Quota.Scope.SERVICE || scopeId == null) {
             return null;
         }
@@ -64,17 +64,17 @@ public class QuotaService {
         // serviceType=null cases).
         Optional<Workflow> wf = workflowRepository.findById(scopeId);
         if (wf.isPresent()) {
-            return wf.get().getProject().getId();
+            return wf.get().getTeam().getId();
         }
         // Try the assistant table.
         Optional<Assistant> asst = assistantRepository.findById(scopeId);
         if (asst.isPresent()) {
-            return asst.get().getProjectId();
+            return asst.get().getTeamId();
         }
-        // Legacy fallback: scopeId might be a project ID itself (old
+        // Legacy fallback: scopeId might be a Team ID itself (old
         // test data or tests that didn't create a workflow/assistant
         // instance). This preserves backward compatibility.
-        if (projectRepository.existsById(scopeId)) {
+        if (teamRepository.existsById(scopeId)) {
             return scopeId;
         }
         return null;
@@ -95,12 +95,12 @@ public class QuotaService {
                         Quota.Period period, long limitAmount, EnforcementMode enforcementMode,
                         QuotaType quotaType, ServiceType serviceType, Long maxExecutionAmount,
                         Map<String, Object> tags, UUID createdBy) {
-        UUID projectId = resolveProjectIdForService(scope, scopeId, serviceType);
-        validateBudgetCreateOrUpdate(scope, scopeId, projectId, resource, period, limitAmount, quotaType);
+        UUID teamId = resolveTeamIdForService(scope, scopeId, serviceType);
+        validateBudgetCreateOrUpdate(scope, scopeId, teamId, resource, period, limitAmount, quotaType);
         Quota q = new Quota();
         q.setScopeType(scope);
         q.setScopeId(scopeId);
-        q.setProjectId(projectId);
+        q.setTeamId(teamId);
         q.setResourceType(resource);
         q.setPeriod(period);
         q.setLimitAmount(limitAmount);
@@ -123,7 +123,7 @@ public class QuotaService {
                 .orElseThrow(() -> new IllegalArgumentException("Quota not found: " + id));
         // Partial update: keep existing values for any field that is null.
         long resolvedLimit = newLimitAmount != null ? newLimitAmount : q.getLimitAmount();
-        validateBudgetCreateOrUpdate(q.getScopeType(), q.getScopeId(), q.getProjectId(),
+        validateBudgetCreateOrUpdate(q.getScopeType(), q.getScopeId(), q.getTeamId(),
                 q.getResourceType(),
                 q.getPeriod(), resolvedLimit, quotaType != null ? quotaType : q.getQuotaType());
         // Only record a limit-change event when the limit actually changed.
@@ -162,11 +162,11 @@ public class QuotaService {
     }
 
     private List<Quota> findChildReservationsForCeiling(Quota ceiling) {
-        // For PROJECT ceilings, child reservations are SERVICE-scope rows
-        // under that specific project (matched by the denormalised
-        // projectId column).  For other scopes, use the global lookup.
-        if (ceiling.getScopeType() == Quota.Scope.PROJECT) {
-            return quotaRepository.findByScopeTypeAndProjectIdAndResourceType(
+        // For team ceilings, child reservations are SERVICE-scope rows
+        // under that specific team (matched by the denormalised
+        // teamId column).  For other scopes, use the global lookup.
+        if (ceiling.getScopeType() == Quota.Scope.TEAM) {
+            return quotaRepository.findByScopeTypeAndTeamIdAndResourceType(
                             Quota.Scope.SERVICE, ceiling.getScopeId(), ceiling.getResourceType())
                     .stream()
                     .filter(q -> q.getQuotaType() == QuotaType.RESERVATION
@@ -175,8 +175,8 @@ public class QuotaService {
         }
         List<Quota.Scope> childScopes = switch (ceiling.getScopeType()) {
             case ORG -> List.of(Quota.Scope.GROUP);
-            case GROUP -> List.of(Quota.Scope.PROJECT);
-            case PROJECT -> List.of(Quota.Scope.SERVICE);
+            case GROUP -> List.of(Quota.Scope.TEAM);
+            case TEAM -> List.of(Quota.Scope.SERVICE);
             case SERVICE -> List.of();
         };
         if (childScopes.isEmpty()) {
@@ -211,15 +211,15 @@ public class QuotaService {
     /**
      * Phase 8e &mdash; child-tightens-only: a quota at level N must
      * not be more generous than any matching quota at level N-1
-     * (ORG &gt; GROUP &gt; PROJECT &gt; SERVICE, in that order of
+     * (ORG &gt; GROUP &gt; Team &gt; SERVICE, in that order of
      * generosity).
      *
      * <p>Walk performed:
      * <ul>
-     *   <li>{@code SERVICE} &mdash; resolve via {@code projectRepository}
-     *       to get {@code groupId}, then check project + group + every ORG
+     *   <li>{@code SERVICE} &mdash; resolve via {@code TeamRepository}
+     *       to get {@code groupId}, then check Team + group + every ORG
      *       quota that matches (resource, period).</li>
-     *   <li>{@code PROJECT} &mdash; resolve via {@code projectRepository}
+     *   <li>{@code Team} &mdash; resolve via {@code TeamRepository}
      *       to get {@code groupId}, then check group + every ORG
      *       quota that matches (resource, period).</li>
      *   <li>{@code GROUP} &mdash; check every ORG quota that matches
@@ -228,12 +228,12 @@ public class QuotaService {
      *   <li>{@code ORG} &mdash; top of hierarchy, pass through.</li>
      * </ul>
      */
-    private void validateBudgetCreateOrUpdate(Quota.Scope scope, UUID scopeId, UUID projectId,
+    private void validateBudgetCreateOrUpdate(Quota.Scope scope, UUID scopeId, UUID teamId,
                                               Quota.ResourceType resource,
                                               Quota.Period period, long limitAmount,
                                               QuotaType quotaType) {
         if (quotaType == QuotaType.RESERVATION) {
-            validateReservationFits(scope, scopeId, projectId, resource, period, limitAmount);
+            validateReservationFits(scope, scopeId, teamId, resource, period, limitAmount);
             return;
         }
         switch (scope) {
@@ -241,29 +241,29 @@ public class QuotaService {
                 // Top of hierarchy — no parent to check.
             }
             case SERVICE -> {
-                // For SERVICE scope, resolve the project from the denormalised
-                // projectId (resolved from the workflow/assistant instance).
-                if (projectId == null) {
+                // For SERVICE scope, resolve the team from the denormalised
+                // teamId (resolved from the workflow/assistant instance).
+                if (teamId == null) {
                     return;
                 }
-                Optional<Project> project = projectRepository.findById(projectId);
-                if (project.isEmpty()) {
+                Optional<Team> team = teamRepository.findById(teamId);
+                if (team.isEmpty()) {
                     return;
                 }
-                UUID groupId = project.get().getGroupId();
-                // Check the PROJECT ceiling first.
-                enforceCeiling(scope, Quota.Scope.PROJECT, projectId, resource, period, limitAmount);
+                UUID groupId = team.get().getGroupId();
+                // Check the team ceiling first.
+                enforceCeiling(scope, Quota.Scope.TEAM, teamId, resource, period, limitAmount);
                 if (groupId != null) {
                     enforceCeiling(scope, Quota.Scope.GROUP, groupId, resource, period, limitAmount);
                 }
                 enforceCeilingAcrossAllOrgs(scope, resource, period, limitAmount);
             }
-            case PROJECT -> {
-                Optional<Project> project = projectRepository.findById(scopeId);
-                if (project.isEmpty()) {
+            case TEAM -> {
+                Optional<Team> team = teamRepository.findById(scopeId);
+                if (team.isEmpty()) {
                     return;
                 }
-                UUID groupId = project.get().getGroupId();
+                UUID groupId = team.get().getGroupId();
                 if (groupId != null) {
                     enforceCeiling(scope, Quota.Scope.GROUP, groupId, resource, period, limitAmount);
                 }
@@ -275,7 +275,7 @@ public class QuotaService {
         }
     }
 
-    private void validateReservationFits(Quota.Scope scope, UUID scopeId, UUID projectId,
+    private void validateReservationFits(Quota.Scope scope, UUID scopeId, UUID teamId,
                                          Quota.ResourceType resource,
                                          Quota.Period period, long requestedAmount) {
         if (scope == Quota.Scope.ORG) {
@@ -283,7 +283,7 @@ public class QuotaService {
                     "ORG-level RESERVATION is not allowed; create a CEILING instead");
         }
 
-        List<Quota> parentCeilings = findParentCeilings(scope, scopeId, projectId, resource, period);
+        List<Quota> parentCeilings = findParentCeilings(scope, scopeId, teamId, resource, period);
         if (parentCeilings.isEmpty()) {
             throw new IllegalArgumentException(String.format(
                     "Reservations require an explicit budget at the parent scope: " +
@@ -292,13 +292,13 @@ public class QuotaService {
         }
 
         // Sum existing sibling reservations.  For SERVICE-scope reservations
-        // the siblings are other SERVICE rows under the same project (matched
-        // by the denormalised projectId column).  For GROUP / PROJECT
+        // the siblings are other SERVICE rows under the same Team (matched
+        // by the denormalised teamId column).  For GROUP / Team
         // reservations the siblings share the parent's scopeType + scopeId.
         long alreadyReserved;
-        if (scope == Quota.Scope.SERVICE && projectId != null) {
-            alreadyReserved = quotaRepository.sumServiceReservationLimitByProject(
-                    projectId, resource, period, null);
+        if (scope == Quota.Scope.SERVICE && teamId != null) {
+            alreadyReserved = quotaRepository.sumServiceReservationLimitByTeam(
+                    teamId, resource, period, null);
         } else {
             alreadyReserved = quotaRepository.sumReservationLimitByParent(
                     parentCeilings.get(0).getScopeType(),
@@ -318,7 +318,7 @@ public class QuotaService {
         }
     }
 
-    private List<Quota> findParentCeilings(Quota.Scope scope, UUID scopeId, UUID projectId,
+    private List<Quota> findParentCeilings(Quota.Scope scope, UUID scopeId, UUID teamId,
                                            Quota.ResourceType resource, Quota.Period period) {
         return switch (scope) {
             case ORG -> List.of();
@@ -326,21 +326,21 @@ public class QuotaService {
                     .findByScopeTypeAndResourceTypeAndPeriod(Quota.Scope.ORG, resource, period)
                     .stream().filter(q -> q.getQuotaType() == QuotaType.CEILING).toList();
             case SERVICE -> {
-                // For SERVICE scope, resolve the project from the denormalised
-                // projectId (resolved from the workflow/assistant instance).
-                if (projectId == null) {
+                // For SERVICE scope, resolve the team from the denormalised
+                // teamId (resolved from the workflow/assistant instance).
+                if (teamId == null) {
                     yield List.of();
                 }
-                Optional<Project> project = projectRepository.findById(projectId);
-                if (project.isEmpty()) {
+                Optional<Team> team = teamRepository.findById(teamId);
+                if (team.isEmpty()) {
                     yield List.of();
                 }
-                UUID groupId = project.get().getGroupId();
+                UUID groupId = team.get().getGroupId();
                 List<Quota> parents = new java.util.ArrayList<>();
-                // SERVICE reservations are carved from the PROJECT ceiling.
+                // SERVICE reservations are carved from the team ceiling.
                 parents.addAll(quotaRepository
                         .findByScopeTypeAndScopeIdAndResourceType(
-                                Quota.Scope.PROJECT, projectId, resource)
+                                Quota.Scope.TEAM, teamId, resource)
                         .stream().filter(q -> q.getQuotaType() == QuotaType.CEILING
                                 && q.getPeriod() == period)
                         .toList());
@@ -358,12 +358,12 @@ public class QuotaService {
                         .toList());
                 yield parents;
             }
-            case PROJECT -> {
-                Optional<Project> project = projectRepository.findById(scopeId);
-                if (project.isEmpty()) {
+            case TEAM -> {
+                Optional<Team> team = teamRepository.findById(scopeId);
+                if (team.isEmpty()) {
                     yield List.of();
                 }
-                UUID groupId = project.get().getGroupId();
+                UUID groupId = team.get().getGroupId();
                 List<Quota> parents = new java.util.ArrayList<>();
                 if (groupId != null) {
                     parents.addAll(quotaRepository
@@ -438,7 +438,7 @@ public class QuotaService {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("scopeType", q.getScopeType().name());
         payload.put("scopeId", q.getScopeId() != null ? q.getScopeId().toString() : null);
-        payload.put("projectId", q.getProjectId() != null ? q.getProjectId().toString() : null);
+        payload.put("teamId", q.getTeamId() != null ? q.getTeamId().toString() : null);
         payload.put("resourceType", q.getResourceType().name());
         payload.put("period", q.getPeriod().name());
         payload.put("limitAmount", q.getLimitAmount());

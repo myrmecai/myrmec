@@ -19,13 +19,13 @@ import java.util.UUID;
  * <ul>
  *   <li>{@code sys:ROLE} — system-wide</li>
  *   <li>{@code grp:<groupId>:ROLE} — group-scoped</li>
- *   <li>{@code proj:<projectId>:ROLE} — project-scoped</li>
+ *   <li>{@code proj:<teamId>:ROLE} — Team-scoped</li>
  * </ul>
  *
  * <p>The principal exposes per-scope role checks with implicit-role expansion
  * (see {@link UserRole.Role#impliedRoles()}). It does <b>not</b> walk group
  * ancestry — that requires DB access and is performed by the access evaluator
- * beans (see {@code ProjectAccessEvaluator}, {@code GroupAccessEvaluator}).
+ * beans (see {@code TeamAccessEvaluator}, {@code GroupAccessEvaluator}).
  */
 @Getter
 public class UserPrincipal implements Principal {
@@ -43,8 +43,8 @@ public class UserPrincipal implements Principal {
     private final Set<UserRole.Role> effectiveSystemRoles;
     /** Effective group-scoped roles per group id (with implicit expansion). */
     private final Map<UUID, Set<UserRole.Role>> effectiveGroupRoles;
-    /** Effective project-scoped roles per project id (with implicit expansion). */
-    private final Map<UUID, Set<UserRole.Role>> effectiveProjectRoles;
+    /** Effective Team-scoped roles per Team id (with implicit expansion). */
+    private final Map<UUID, Set<UserRole.Role>> effectiveTeamRoles;
 
     public UserPrincipal(UUID userId, String name, String email, List<String> roles) {
         this.userId = userId;
@@ -65,7 +65,7 @@ public class UserPrincipal implements Principal {
 
         this.effectiveSystemRoles = sys;
         this.effectiveGroupRoles = grp;
-        this.effectiveProjectRoles = proj;
+        this.effectiveTeamRoles = proj;
     }
 
     private static void parseAndAdd(String claim,
@@ -133,10 +133,10 @@ public class UserPrincipal implements Principal {
         return roles != null && roles.contains(role);
     }
 
-    /** Check a project-scoped role. */
-    public boolean hasProjectRoleDirect(UUID projectId, UserRole.Role role) {
-        if (projectId == null) return false;
-        Set<UserRole.Role> roles = effectiveProjectRoles.get(projectId);
+    /** Check a Team-scoped role. */
+    public boolean hasTeamRoleDirect(UUID teamId, UserRole.Role role) {
+        if (teamId == null) return false;
+        Set<UserRole.Role> roles = effectiveTeamRoles.get(teamId);
         return roles != null && roles.contains(role);
     }
 
@@ -157,8 +157,8 @@ public class UserPrincipal implements Principal {
         return new HashSet<>(effectiveGroupRoles.keySet());
     }
 
-    /** All project ids for which the user has any direct role grant. */
-    public Set<UUID> projectIdsWithAnyRole() {
-        return new HashSet<>(effectiveProjectRoles.keySet());
+    /** All Team ids for which the user has any direct role grant. */
+    public Set<UUID> teamIdsWithAnyRole() {
+        return new HashSet<>(effectiveTeamRoles.keySet());
     }
 }

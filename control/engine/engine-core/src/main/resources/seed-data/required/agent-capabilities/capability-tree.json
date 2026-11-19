@@ -1,0 +1,363 @@
+[
+  {
+    "id": "code.engineering",
+    "parentId": null,
+    "displayName": "Software Engineering Capabilities",
+    "description": "Represents capabilities specific to the software engineering domain.",
+    "active": true
+  },
+  {
+    "id": "code.engineering.fs",
+    "parentId": "code.engineering",
+    "displayName": "File System",
+    "description": "File system access permissions.",
+    "active": true,
+    "capabilities": [
+      "fs.workspace.read",
+      "fs.workspace.write",
+      "fs.workspace.delete"
+    ]
+  },
+  {
+    "id": "code.engineering.vcs",
+    "parentId": "code.engineering",
+    "displayName": "Version Control",
+    "description": "Git and version control operations.",
+    "active": true,
+    "capabilities": [
+      "vcs.worktree.manage",
+      "vcs.diff.read",
+      "vcs.commit"
+    ]
+  },
+  {
+    "id": "code.engineering.exec",
+    "parentId": "code.engineering",
+    "displayName": "Execution",
+    "description": "Command and script execution.",
+    "active": true,
+    "capabilities": [
+      "exec.sandbox.shell"
+    ]
+  },
+  {
+    "id": "code.engineering.orch",
+    "parentId": "code.engineering",
+    "displayName": "Orchestration",
+    "description": "Agent orchestration and delegation.",
+    "active": true,
+    "capabilities": [
+      "orch.subagent.delegate"
+    ]
+  },
+  {
+    "id": "code.engineering.mcp",
+    "parentId": "code.engineering",
+    "displayName": "MCP Integrations",
+    "description": "Model Context Protocol integrations.",
+    "active": true,
+    "capabilities": [
+      "mcp.github.read",
+      "mcp.jira.read",
+      "mcp.database.readonly"
+    ]
+  },
+  {
+    "id": "code.engineering.analyze",
+    "parentId": "code.engineering",
+    "displayName": "Code Analysis",
+    "description": "Static analysis and linting.",
+    "active": true,
+    "capabilities": [
+      "code.analyze.lint",
+      "code.analyze.security"
+    ]
+  },
+  {
+    "id": "code.engineering.design",
+    "parentId": "code.engineering",
+    "displayName": "Design & Architecture",
+    "description": "Design, architecture, and API scaffolding.",
+    "active": true,
+    "capabilities": [
+      "code.design.ast_analyze",
+      "code.design.api_scaffold",
+      "code.architecture.diagram",
+      "code.architecture.compliance"
+    ]
+  },
+  {
+    "id": "code.engineering.dependencies",
+    "parentId": "code.engineering",
+    "displayName": "Dependencies",
+    "description": "Dependency inspection and management.",
+    "active": true,
+    "capabilities": [
+      "code.dependencies.read",
+      "code.dependencies.install"
+    ]
+  },
+  {
+    "id": "code.engineering.runtime",
+    "parentId": "code.engineering",
+    "displayName": "Language Runtimes",
+    "description": "Language runtime execution.",
+    "active": true,
+    "capabilities": [
+      "runtime.node.execute",
+      "runtime.java.execute",
+      "runtime.python.execute"
+    ]
+  },
+  {
+    "id": "code.engineering.refactor",
+    "parentId": "code.engineering",
+    "displayName": "Refactoring",
+    "description": "Multi-file structural refactoring.",
+    "active": true,
+    "capabilities": [
+      "code.refactor.structural"
+    ]
+  },
+  {
+    "id": "code.engineering.test",
+    "parentId": "code.engineering",
+    "displayName": "Test Generation",
+    "description": "Test suite generation.",
+    "active": true,
+    "capabilities": [
+      "code.test.generate"
+    ]
+  },
+  {
+    "id": "devops",
+    "parentId": null,
+    "displayName": "DevOps Capabilities",
+    "description": "Represents capabilities specific to the DevOps domain.",
+    "active": true
+  },
+  {
+    "id": "devops.fs",
+    "parentId": "devops",
+    "displayName": "File System",
+    "description": "File system access permissions.",
+    "active": true,
+    "capabilities": [
+      "fs.workspace.read",
+      "fs.workspace.write",
+      "fs.workspace.delete"
+    ]
+  },
+  {
+    "id": "devops.vcs",
+    "parentId": "devops",
+    "displayName": "Version Control",
+    "description": "Git and version control operations.",
+    "active": true,
+    "capabilities": [
+      "vcs.worktree.manage",
+      "vcs.diff.read",
+      "vcs.commit"
+    ]
+  },
+  {
+    "id": "devops.exec",
+    "parentId": "devops",
+    "displayName": "Execution",
+    "description": "Command and script execution.",
+    "active": true,
+    "capabilities": [
+      "exec.sandbox.shell",
+      "exec.build.compile",
+      "exec.test.run"
+    ]
+  },
+  {
+    "id": "devops.build",
+    "parentId": "devops",
+    "displayName": "Build & Compile",
+    "description": "Build and compilation tasks.",
+    "active": true,
+    "capabilities": [
+      "exec.build.compile",
+      "runtime.java.execute"
+    ]
+  },
+  {
+    "id": "devops.test",
+    "parentId": "devops",
+    "displayName": "Test Execution",
+    "description": "Running test suites.",
+    "active": true,
+    "capabilities": [
+      "exec.test.run"
+    ]
+  },
+  {
+    "id": "devops.docker",
+    "parentId": "devops",
+    "displayName": "Docker",
+    "description": "Docker build and inspect operations.",
+    "active": true,
+    "capabilities": [
+      "runtime.docker.build"
+    ]
+  },
+  {
+    "id": "devops.runtime",
+    "parentId": "devops",
+    "displayName": "Language Runtimes",
+    "description": "Language runtime execution.",
+    "active": true,
+    "capabilities": [
+      "runtime.node.execute",
+      "runtime.java.execute",
+      "runtime.python.execute"
+    ]
+  },
+  {
+    "id": "database",
+    "parentId": null,
+    "displayName": "Database Capabilities",
+    "description": "Represents capabilities specific to the database domain.",
+    "active": true
+  },
+  {
+    "id": "database.migrations",
+    "parentId": "database",
+    "displayName": "Schema Migrations",
+    "description": "Database migration tools.",
+    "active": true,
+    "capabilities": [
+      "db.schema.migrate"
+    ]
+  },
+  {
+    "id": "database.query",
+    "parentId": "database",
+    "displayName": "Database Query",
+    "description": "Read-only database queries.",
+    "active": true,
+    "capabilities": [
+      "mcp.database.readonly",
+      "data.bi.query_readonly"
+    ]
+  },
+  {
+    "id": "security",
+    "parentId": null,
+    "displayName": "Security Capabilities",
+    "description": "Represents capabilities specific to the security domain.",
+    "active": true
+  },
+  {
+    "id": "security.scan",
+    "parentId": "security",
+    "displayName": "Security Scanning",
+    "description": "Security and vulnerability scanning.",
+    "active": true,
+    "capabilities": [
+      "code.analyze.security"
+    ]
+  },
+  {
+    "id": "security.compliance",
+    "parentId": "security",
+    "displayName": "Compliance Review",
+    "description": "Document and policy compliance review.",
+    "active": true,
+    "capabilities": [
+      "compliance.doc.review"
+    ]
+  },
+  {
+    "id": "operations",
+    "parentId": null,
+    "displayName": "Operations Capabilities",
+    "description": "Represents capabilities specific to the operations domain.",
+    "active": true
+  },
+  {
+    "id": "operations.fs",
+    "parentId": "operations",
+    "displayName": "File System",
+    "description": "File system access permissions.",
+    "active": true,
+    "capabilities": [
+      "fs.workspace.read"
+    ]
+  },
+  {
+    "id": "operations.exec",
+    "parentId": "operations",
+    "displayName": "Execution",
+    "description": "Command and script execution.",
+    "active": true,
+    "capabilities": [
+      "exec.sandbox.shell"
+    ]
+  },
+  {
+    "id": "operations.incident",
+    "parentId": "operations",
+    "displayName": "Incident Triage",
+    "description": "Monitoring alerts and log analysis.",
+    "active": true,
+    "capabilities": [
+      "ops.incident.triage"
+    ]
+  },
+  {
+    "id": "operations.runbook",
+    "parentId": "operations",
+    "displayName": "Runbook Automation",
+    "description": "Pre-approved remediation scripts.",
+    "active": true,
+    "capabilities": [
+      "ops.runbook.execute"
+    ]
+  },
+  {
+    "id": "operations.access",
+    "parentId": "operations",
+    "displayName": "Access Management",
+    "description": "User access and identity lookups.",
+    "active": true,
+    "capabilities": [
+      "ops.access.provision"
+    ]
+  },
+  {
+    "id": "operations.data",
+    "parentId": "operations",
+    "displayName": "Data & Reporting",
+    "description": "Analytics queries and executive reports.",
+    "active": true,
+    "capabilities": [
+      "data.bi.query_readonly",
+      "data.report.generate"
+    ]
+  },
+  {
+    "id": "operations.cs",
+    "parentId": "operations",
+    "displayName": "Customer Support",
+    "description": "Customer support and ticketing.",
+    "active": true,
+    "capabilities": [
+      "cs.ticket.manage",
+      "cs.sentiment.analyze",
+      "cs.kb.search"
+    ]
+  },
+  {
+    "id": "operations.hr",
+    "parentId": "operations",
+    "displayName": "HR & Policies",
+    "description": "HR policy and benefits lookup.",
+    "active": true,
+    "capabilities": [
+      "hr.policy.lookup"
+    ]
+  }
+]

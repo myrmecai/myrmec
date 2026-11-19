@@ -2,6 +2,8 @@ package ai.myrmec.engine.agent.dto;
 
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileVersion;
+import ai.myrmec.engine.agent.AgentProfileVersionService;
+import ai.myrmec.engine.agent.dto.AgentProfileCapabilityInfo;
 import lombok.Builder;
 import lombok.Data;
 
@@ -24,7 +26,7 @@ public class AgentProfileResponse {
     private UUID id;
     private String name;
     private String description;
-    private List<String> capabilities;
+    private List<AgentProfileCapabilityInfo> capabilities;
     private Set<String> toolCodes;
     private String systemPrompt;
     private String defaultModel;
@@ -41,19 +43,25 @@ public class AgentProfileResponse {
     private Instant createdAt;
     private Instant updatedAt;
 
-    public static AgentProfileResponse from(AgentProfile profile, AgentProfileVersion published) {
-        return from(profile, published, null);
+    public static AgentProfileResponse from(
+            AgentProfile profile,
+            AgentProfileVersion published,
+            AgentProfileVersionService versionService) {
+        return from(profile, published, null, versionService);
     }
 
     public static AgentProfileResponse from(
             AgentProfile profile,
             AgentProfileVersion published,
-            AgentProfileVersion openDraft) {
+            AgentProfileVersion openDraft,
+            AgentProfileVersionService versionService) {
         return AgentProfileResponse.builder()
                 .id(profile.getId())
                 .name(profile.getName())
                 .description(profile.getDescription())
-                .capabilities(published != null ? published.getCapabilities() : List.of())
+                .capabilities(published != null
+                    ? versionService.getCapabilities(published.getId())
+                    : List.of())
                 .toolCodes(published != null && published.getTools() != null
                     ? published.getTools().stream()
                         .map(ai.myrmec.engine.tool.Tool::getCode)
@@ -80,7 +88,8 @@ public class AgentProfileResponse {
      */
     public static AgentProfileResponse fromPublic(
             AgentProfile profile,
-            AgentProfileVersion published) {
+            AgentProfileVersion published,
+            AgentProfileVersionService versionService) {
         return AgentProfileResponse.builder()
                 .id(profile.getId())
                 .name(profile.getName())
@@ -90,6 +99,7 @@ public class AgentProfileResponse {
                 .defaultModel(published != null ? published.getDefaultModel() : null)
                 .publishedVersionId(published != null ? published.getId() : null)
                 .publishedVersionNumber(published != null ? published.getVersionNumber() : null)
+                .capabilities(published != null ? versionService.getCapabilities(published.getId()) : List.of())
                 .build();
     }
 }

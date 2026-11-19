@@ -23,8 +23,8 @@ import java.util.UUID;
 /**
  * Connection Config — parent table. Global connection definitions.
  *
- * <p>Parent+version model. See UC-018. Uses scope + project_id for
- * org/project scoping. Zone 1: identity/metadata, editable in-place.</p>
+ * <p>Parent+version model. See UC-018. Uses scope + team_id for
+ * org/Team scoping. Zone 1: identity/metadata, editable in-place.</p>
  */
 @Entity
 @Table(name = "connection_configs")
@@ -41,8 +41,8 @@ public class ConnectionConfig {
     @Column(name = "scope", nullable = false, length = 20)
     private String scope;
 
-    @Column(name = "project_id")
-    private UUID projectId;
+    @Column(name = "team_id")
+    private UUID teamId;
 
     @Column(name = "name", nullable = false, length = 100)
     private String name;

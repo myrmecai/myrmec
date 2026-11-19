@@ -14,7 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>Verifies that the ratchet rule (a child profile must be at least as
  * strict as its parent) is enforced by {@link FeatureStrictness#atLeastAsStrict}.
  *
- * <p>STRICT ≥ STANDARD ≥ FLEXIBLE in strictness ordering. A project may
+ * <p>STRICT ≥ STANDARD ≥ FLEXIBLE in strictness ordering. A team may
  * tighten (STANDARD → STRICT) but not loosen (STRICT → FLEXIBLE).
  */
 @Tag("RECON-02")

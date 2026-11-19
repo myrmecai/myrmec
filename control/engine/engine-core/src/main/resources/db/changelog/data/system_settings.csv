@@ -1,0 +1,16 @@
+﻿setting_key,value_type,setting_value,description,updated_by,created_at,updated_at
+history_limit,INT,20,Sliding-window size: most-recent messages sent verbatim to the model each turn.,NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+bind_wait_timeout_seconds,INT,30,How long a PENDING conversation waits for agent capacity before failing with BIND_TIMEOUT_NO_CAPACITY.,NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+turn_timeout_seconds,INT,120,Hard cap on a single turn's generation before TURN_FAILED (timeout).,,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+summary_trigger_ratio,RATIO,0.75,Fold the tail of the conversation into a CONTEXT_SUMMARY when context usage crosses this fraction of the model window.,NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+max_pinned,INT,20,Maximum pinned messages per conversation; further pins are rejected.,,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+summarizer_model_code,MODEL_REF,,Utility model code for context summaries and conversation auto-titles. Empty = fall back to the session model.,NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+host_heartbeat_interval_seconds,INT,10,Interval at which an Agent Host supervisor emits heartbeats to the engine.,NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+host_heartbeat_soft_grace_seconds,INT,30,Heartbeat soft grace before ONLINE -> DEGRADED (HEARTBEAT_LATE).,NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+host_heartbeat_hard_threshold_seconds,INT,90,Heartbeat hard threshold before DEGRADED -> OFFLINE (HEARTBEAT_LOST).,NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+host_drain_deadline_seconds,INT,300,Drain deadline before DRAINING -> OFFLINE forces a soft release (DRAIN_TIMEOUT).,NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+secret_leak_mode,STRING,REDACT,Secret leak enforcement mode: BLOCK REDACT or WARN.,,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+modelGateway.enabled,BOOL,false,Whether the org model gateway is deployed and reachable. GATEWAY host mode requires this (credential-envelope design §5.1).,NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+modelGateway.endpoint,STRING,,The model gateway's OpenAI-compatible base endpoint. Required when modelGateway.enabled is true.,,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+governance_profile_code,STRING,STANDARD,The org-level governance profile code (STRICT STANDARD or FLEXIBLE).,NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+attachment_inline_ratio_max,RATIO,0.5,Maximum fraction of the resolved per-turn context token budget that inline attachment text may occupy in aggregate.,NULL,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP

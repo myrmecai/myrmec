@@ -4,6 +4,7 @@ package ai.myrmec.engine.agent;
 
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
+import ai.myrmec.engine.agent.dto.AgentProfileCapabilityInfo;
 import ai.myrmec.engine.tool.Tool;
 import ai.myrmec.engine.tool.ToolRepository;
 import lombok.RequiredArgsConstructor;
@@ -18,6 +19,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * AgentProfileVersionService (plan Feature 0, design §16.1): the Draft →
@@ -46,6 +48,8 @@ public class AgentProfileVersionService {
     private final AgentProfileVersionRepository versionRepository;
     private final AgentProfileRepository profileRepository;
     private final ToolRepository toolRepository;
+    private final AgentProfileCapabilityRepository capabilityRepository;
+    private final CapabilityRepository capabilityCatalogRepository;
 
     /**
      * The first publish: create a profile's version 1 directly in the
@@ -87,7 +91,6 @@ public class AgentProfileVersionService {
         AgentProfileVersion version = new AgentProfileVersion();
         version.setProfileId(profileId);
         version.setVersionNumber(1);
-        version.setCapabilities(capabilities == null ? List.of() : capabilities);
         version.setSystemPrompt(systemPrompt);
         version.setDefaultModel(defaultModel);
         version.setInteractionMode(
@@ -99,6 +102,7 @@ public class AgentProfileVersionService {
         version.setPublishedAt(Instant.now());
         version = versionRepository.save(version);
         assignTools(version, toolCodes);
+        assignCapabilities(version.getId(), capabilities == null ? List.of() : capabilities);
         log.info("Published initial agent-profile version v1 for profile {}", profileId);
         return version;
     }
@@ -133,6 +137,7 @@ public class AgentProfileVersionService {
         draft.setStatus(AgentProfileVersion.Status.DRAFT);
         draft = versionRepository.save(draft);
         assignTools(draft, toolCodesOf(published));
+        assignCapabilities(draft.getId(), capabilityKeysOf(published));
         log.info("Opened draft v{} for agent profile {}", draft.getVersionNumber(), profileId);
         return draft;
     }
@@ -159,7 +164,6 @@ public class AgentProfileVersionService {
         AgentProfileVersion draft = new AgentProfileVersion();
         draft.setProfileId(profileId);
         draft.setVersionNumber(nextVersionNumber(profileId));
-        draft.setCapabilities(List.of());
         draft.setSystemPrompt(null);
         draft.setDefaultModel(null);
         draft.setInteractionMode(AgentProfileVersion.InteractionMode.ONE_SHOT);
@@ -188,7 +192,6 @@ public class AgentProfileVersionService {
             throw new BadRequestException(
                     "Published profile versions are immutable. Open a new draft to edit this profile.");
         }
-        draft.setCapabilities(capabilities == null ? List.of() : capabilities);
         draft.setSystemPrompt(systemPrompt);
         draft.setDefaultModel(defaultModel);
         draft.setInteractionMode(
@@ -197,6 +200,7 @@ public class AgentProfileVersionService {
         if (toolCodes != null) {
             assignTools(saved, toolCodes);
         }
+        assignCapabilities(saved.getId(), capabilities == null ? List.of() : capabilities);
         // Re-fetch with the tools collection initialized so the response
         // DTO can be assembled after this transaction closes (open-in-view
         // off) without a LazyInitializationException.
@@ -336,7 +340,6 @@ public class AgentProfileVersionService {
 
     private AgentProfileVersion copyContent(AgentProfileVersion source) {
         AgentProfileVersion copy = new AgentProfileVersion();
-        copy.setCapabilities(source.getCapabilities());
         copy.setSystemPrompt(source.getSystemPrompt());
         copy.setDefaultModel(source.getDefaultModel());
         copy.setInteractionMode(source.getInteractionMode());
@@ -365,12 +368,63 @@ public class AgentProfileVersionService {
         return codes;
     }
 
+    private List<String> capabilityKeysOf(AgentProfileVersion version) {
+        return capabilityRepository.findCapabilityKeysByVersionId(version.getId());
+    }
+
+    /**
+     * Replace the capability bindings for a profile version.
+     * Only allowed when the version is in DRAFT status.
+     */
+    @Transactional
+    public void setCapabilities(UUID versionId, List<String> capabilityKeys) {
+        AgentProfileVersion version = versionRepository.findById(versionId)
+                .orElseThrow(() -> ResourceNotFoundException.of("AgentProfileVersion", versionId));
+        if (version.getStatus() != AgentProfileVersion.Status.DRAFT) {
+            throw new BadRequestException(
+                    "Capabilities can only be updated on a DRAFT profile version.");
+        }
+        assignCapabilities(versionId, capabilityKeys == null ? List.of() : capabilityKeys);
+    }
+
+    private void assignCapabilities(UUID versionId, List<String> capabilityKeys) {
+        Set<String> requested = new HashSet<>(capabilityKeys);
+        validateCapabilityKeys(requested);
+        capabilityRepository.deleteByVersionId(versionId);
+        for (String capabilityKey : requested) {
+            AgentProfileCapability binding = new AgentProfileCapability();
+            binding.setId(new AgentProfileCapabilityId(versionId, capabilityKey));
+            capabilityRepository.save(binding);
+        }
+    }
+
+    private void validateCapabilityKeys(Set<String> capabilityKeys) {
+        for (String key : capabilityKeys) {
+            if (key == null || key.isBlank()) {
+                throw new BadRequestException("Capability key must not be blank");
+            }
+            if (!capabilityCatalogRepository.existsById(key)) {
+                throw new BadRequestException("Unknown capability key: " + key);
+            }
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public List<String> getCapabilityKeys(UUID versionId) {
+        return capabilityRepository.findCapabilityKeysByVersionId(versionId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AgentProfileCapabilityInfo> getCapabilities(UUID versionId) {
+        return capabilityRepository.findCapabilitiesByVersionId(versionId);
+    }
+
     private boolean contentEquals(
             AgentProfileVersion a, AgentProfileVersion b,
             Set<String> toolsA, Set<String> toolsB) {
         return Objects.equals(a.getSystemPrompt(), b.getSystemPrompt())
                 && Objects.equals(a.getDefaultModel(), b.getDefaultModel())
-                && Objects.equals(a.getCapabilities(), b.getCapabilities())
+                && Objects.equals(capabilityKeysOf(a), capabilityKeysOf(b))
                 && Objects.equals(a.getInteractionMode(), b.getInteractionMode())
                 && Objects.equals(toolsA, toolsB);
     }

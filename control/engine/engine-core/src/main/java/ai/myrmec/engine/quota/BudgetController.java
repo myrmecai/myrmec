@@ -5,7 +5,7 @@ package ai.myrmec.engine.quota;
 
 import ai.myrmec.engine.quota.dto.DashboardResponse;
 import ai.myrmec.engine.quota.dto.EffectiveQuotasResponse;
-import ai.myrmec.engine.quota.dto.ProjectServiceBudgetsResponse;
+import ai.myrmec.engine.quota.dto.TeamServiceBudgetsResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
@@ -40,36 +40,36 @@ public class BudgetController {
                 .build();
     }
 
-    @GetMapping("/projects/{projectId}/services")
-    public ProjectServiceBudgetsResponse projectServices(
-            @PathVariable("projectId") UUID projectId,
+    @GetMapping("/teams/{teamId}/services")
+    public TeamServiceBudgetsResponse teamServices(
+            @PathVariable("teamId") UUID teamId,
             @RequestParam("resourceType") String resourceType,
             @RequestParam("period") String period,
             Authentication auth) {
-        requireView(Quota.Scope.PROJECT, projectId, auth);
+        requireView(Quota.Scope.TEAM, teamId, auth);
         Quota.ResourceType r = Quota.ResourceType.valueOf(resourceType);
         Quota.Period p = Quota.Period.valueOf(period);
-        return ProjectServiceBudgetsResponse.builder()
-                .projectId(projectId)
+        return TeamServiceBudgetsResponse.builder()
+                .teamId(teamId)
                 .resourceType(r.name())
                 .period(p.name())
-                .sharedPool(budgetService.sharedPool(projectId, r, p))
-                .serviceBudgets(budgetService.serviceBudgets(projectId, r, p))
+                .sharedPool(budgetService.sharedPool(teamId, r, p))
+                .serviceBudgets(budgetService.serviceBudgets(teamId, r, p))
                 .build();
     }
 
-    @GetMapping("/projects/{projectId}/effective-quotas")
-    public EffectiveQuotasResponse projectEffectiveQuotas(
-            @PathVariable("projectId") UUID projectId,
+    @GetMapping("/teams/{teamId}/effective-quotas")
+    public EffectiveQuotasResponse teamEffectiveQuotas(
+            @PathVariable("teamId") UUID teamId,
             @RequestParam("resourceType") String resourceType,
             @RequestParam("period") String period,
             Authentication auth) {
-        requireView(Quota.Scope.PROJECT, projectId, auth);
+        requireView(Quota.Scope.TEAM, teamId, auth);
         Quota.ResourceType r = Quota.ResourceType.valueOf(resourceType);
         Quota.Period p = Quota.Period.valueOf(period);
         return EffectiveQuotasResponse.builder()
                 .quotas(java.util.List.of(
-                        budgetService.effectiveQuota(Quota.Scope.PROJECT, projectId, r, p, auth)))
+                        budgetService.effectiveQuota(Quota.Scope.TEAM, teamId, r, p, auth)))
                 .build();
     }
 

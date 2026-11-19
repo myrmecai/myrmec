@@ -1,0 +1,2 @@
+﻿id,profile_id,version_number,status,default_model,system_prompt,interaction_mode,command_templates,approval_policy,required_isolation,git_policy,workspace_retention_seconds,approval_request_ttl_seconds,published_at,published_by,created_at
+7e8c9d0e-1f2a-4b3c-9d4e-0f1a2b3c4d5e,6d7b8c9d-0e1f-4a2b-8c3d-9e4f5a6b7c8d,1,PUBLISHED,NULL,"You are a helpful local coding assistant running inside the user's VS Code workspace. You can answer questions and use workspace tools when explicitly asked.",CONVERSATIONAL,NULL,NULL,NULL,NULL,NULL,NULL,CURRENT_TIMESTAMP,NULL,CURRENT_TIMESTAMP

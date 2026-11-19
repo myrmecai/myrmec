@@ -10,7 +10,7 @@ import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
 import ai.myrmec.engine.node.DirectRpcNodeTransport;
 import ai.myrmec.engine.node.StreamRelayRequest;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.User;
 import ai.myrmec.engine.user.UserPrincipal;
@@ -93,7 +93,7 @@ class ExecutionStreamTest extends IntegrationTestBase {
     @Autowired WorkflowTaskRepository taskRepository;
     @Autowired TaskAttemptRepository attemptRepository;
 
-    private Project project;
+    private team team;
     private Workflow workflow;
     private WorkflowRequest request;
     private WorkflowTask task;
@@ -104,8 +104,8 @@ class ExecutionStreamTest extends IntegrationTestBase {
 
     @BeforeEach
     void seed() {
-        project = data.project().named("stream-proj").create();
-        workflow = workflowOf(project);
+        team = data.team().named("stream-proj").create();
+        workflow = workflowOf(team);
         User admin = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
 
         WorkflowRequest req = new WorkflowRequest();
@@ -138,7 +138,7 @@ class ExecutionStreamTest extends IntegrationTestBase {
         session = new Session();
         session.setServiceType("WORKFLOW");
         session.setRefId(request.getId());
-        session.setProjectId(project.getId());
+        session.setTeamId(team.getId());
         session.setKind("ORCHESTRATION_TASK");
         session.setStatus("ACTIVE");
         session.setAllocationState("ACTIVE");
@@ -158,7 +158,7 @@ class ExecutionStreamTest extends IntegrationTestBase {
         execution = executions.saveAndFlush(execution);
 
         editorUser = seedUser("stream-editor");
-        grant(editorUser.getId(), UserRole.Role.EDITOR, project.getId());
+        grant(editorUser.getId(), UserRole.Role.EDITOR, team.getId());
     }
 
     // =================================================================
@@ -555,7 +555,7 @@ class ExecutionStreamTest extends IntegrationTestBase {
     @Test
     @DisplayName("foreign ownership chain → RESOURCE_NOT_FOUND (never a 200 read)")
     void foreignOwnershipChainFailsNotFound() {
-        Project other = data.project().named("stream-foreign").create();
+        team other = data.team().named("stream-foreign").create();
         UUID foreignExecution = UUID.randomUUID();
         ExecutionScope foreignScope = new ExecutionScope(other.getId(), workflow.getId(),
                 request.getId(), task.getId(), attempt.getId(), foreignExecution);
@@ -754,7 +754,7 @@ class ExecutionStreamTest extends IntegrationTestBase {
     }
 
     private ExecutionScope scope(UUID executionId) {
-        return new ExecutionScope(project.getId(), workflow.getId(), request.getId(),
+        return new ExecutionScope(team.getId(), workflow.getId(), request.getId(),
                 task.getId(), attempt.getId(), executionId);
     }
 
@@ -790,19 +790,19 @@ class ExecutionStreamTest extends IntegrationTestBase {
         return userRepository.save(user);
     }
 
-    private void grant(UUID userId, UserRole.Role role, UUID projectId) {
+    private void grant(UUID userId, UserRole.Role role, UUID teamId) {
         UserRole row = new UserRole();
         row.setUserId(userId);
         row.setRole(role);
-        row.setScopeType(UserRole.ScopeType.PROJECT);
-        row.setProjectId(projectId);
+        row.setScopeType(UserRole.ScopeType.TEAM);
+        row.setTeamId(teamId);
         row.setGrantedByUserId(TEST_ADMIN_ID);
         userRoleRepository.save(row);
     }
 
-    private Workflow workflowOf(Project parent) {
+    private Workflow workflowOf(team parent) {
         Workflow wf = new Workflow();
-        wf.setProject(parent);
+        wf.setTeam(parent);
         wf.setName("stream-wf-" + System.nanoTime());
         wf.setSteps(List.of());
         wf.setVersion(1);
@@ -815,7 +815,7 @@ class ExecutionStreamTest extends IntegrationTestBase {
         return new UserPrincipal(editorUser.getId(), "Test User",
                 "user-" + editorUser.getId().toString().substring(0, 8)
                         + "@test.local",
-                List.of("proj:" + project.getId() + ":EDITOR"));
+                List.of("proj:" + team.getId() + ":EDITOR"));
     }
 
     private void tx(Runnable body) {

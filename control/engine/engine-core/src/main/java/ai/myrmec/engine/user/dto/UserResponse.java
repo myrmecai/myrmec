@@ -26,7 +26,7 @@ public class UserResponse {
     public static class RoleInfo {
         private UUID id;
         private String role;
-        private UUID projectId;
+        private UUID teamId;
         private Instant createdAt;
     }
 }

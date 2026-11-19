@@ -40,8 +40,8 @@ public class ExecutionSnapshot {
     @Column(name = "id", nullable = false, updatable = false)
     private UUID id;
 
-    @Column(name = "project_id", nullable = false)
-    private UUID projectId;
+    @Column(name = "team_id", nullable = false)
+    private UUID teamId;
 
     @Column(name = "agent_id")
     private UUID agentId;

@@ -66,9 +66,9 @@ class ConversationStreamSseIntegrationTest extends IntegrationTestBase {
 
     @Test
     void clientReceivesHistoryReplayAndLiveBrokerFrames() throws Exception {
-        var project = projectFor("user-sse-history");
+        var team = projectFor("user-sse-history");
         Conversation conv = conversationService.createConversation(
-                project, TEST_ADMIN_ID, "history test");
+                team, TEST_ADMIN_ID, "history test");
         ConversationMessage seeded = conversationService.appendMessage(
                 conv.getId(), ConversationMessage.Role.USER,
                 "seed question", TEST_ADMIN_ID, null);
@@ -134,9 +134,9 @@ class ConversationStreamSseIntegrationTest extends IntegrationTestBase {
 
     @Test
     void connectRejectedWithoutToken() throws Exception {
-        var project = projectFor("user-sse-noauth");
+        var team = projectFor("user-sse-noauth");
         Conversation conv = conversationService.createConversation(
-                project, TEST_ADMIN_ID, "no token");
+                team, TEST_ADMIN_ID, "no token");
 
         URI uri = URI.create(baseUrl() + "/api/v1/conversations/" + conv.getId() + "/stream");
         HttpRequest request = HttpRequest.newBuilder(uri)
@@ -154,7 +154,7 @@ class ConversationStreamSseIntegrationTest extends IntegrationTestBase {
     }
 
     private UUID projectFor(String name) {
-        return data.project().named(name).create().getId();
+        return data.team().named(name).create().getId();
     }
 
     @Autowired

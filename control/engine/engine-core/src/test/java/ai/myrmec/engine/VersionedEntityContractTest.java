@@ -92,13 +92,13 @@ class VersionedEntityContractTest extends IntegrationTestBase {
                     .create();
             agentProfileId = profile.getId();
 
-            // Use TestDataBuilder to create a project (handles group_id requirement).
-            var project = data.project()
+            // Use TestDataBuilder to create a team (handles group_id requirement).
+            var team = data.team()
                     .named("vct-prj-" + UUID.randomUUID().toString().substring(0, 8))
                     .create();
 
             Assistant assistant = assistantService.createAssistant(
-                    project.getId(),
+                    team.getId(),
                     "vct-asst-" + UUID.randomUUID().toString().substring(0, 8),
                     "Versioned entity contract test",
                     agentProfileId,

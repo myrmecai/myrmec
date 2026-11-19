@@ -47,7 +47,7 @@ public class ServiceAccountJwtAuthenticationConverter
                         "No active service account for client id"));
 
         ServiceAccountPrincipal principal = new ServiceAccountPrincipal(
-                account.getId(), account.getProjectId(),
+                account.getId(), account.getTeamId(),
                 account.getKeycloakClientId(), account.getName());
 
         return new ServiceAccountAuthenticationToken(principal, jwt, List.of(SERVICE_ACCOUNT_AUTHORITY));

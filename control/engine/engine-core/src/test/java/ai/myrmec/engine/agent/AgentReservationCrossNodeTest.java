@@ -158,10 +158,10 @@ class AgentReservationCrossNodeTest extends IntegrationTestBase {
     }
 
     private Agent idleWorker() {
-        var project = data.project().named("cross-node-" + UUID.randomUUID()).create();
+        var team = data.team().named("cross-node-" + UUID.randomUUID()).create();
         AgentHost host = data.agent()
                 .named("cross-node-host-" + UUID.randomUUID())
-                .inProject(project)
+                .inTeam(team)
                 .create()
                 .agent();
 

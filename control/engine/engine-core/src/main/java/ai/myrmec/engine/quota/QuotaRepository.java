@@ -18,12 +18,12 @@ public interface QuotaRepository extends JpaRepository<Quota, UUID> {
             Quota.Scope scopeType, UUID scopeId, Quota.ResourceType resourceType);
 
     /**
-     * Find all SERVICE-scope quotas under a given project.  Uses the
-     * denormalised {@code project_id} column so we don't need to join
+     * Find all SERVICE-scope quotas under a given Team.  Uses the
+     * denormalised {@code team_id} column so we don't need to join
      * through the workflow / assistant tables.
      */
-    List<Quota> findByScopeTypeAndProjectIdAndResourceType(
-            Quota.Scope scopeType, UUID projectId, Quota.ResourceType resourceType);
+    List<Quota> findByScopeTypeAndTeamIdAndResourceType(
+            Quota.Scope scopeType, UUID teamId, Quota.ResourceType resourceType);
 
     /**
      * Phase 8e &mdash; used by the parent-walk in {@code QuotaService} to
@@ -38,12 +38,12 @@ public interface QuotaRepository extends JpaRepository<Quota, UUID> {
      * {@code excludeId} is non-null, that quota row is excluded (used
      * during updates to avoid double-counting the current row).
      *
-     * <p>For GROUP and PROJECT parents the query matches by
+     * <p>For GROUP and Team parents the query matches by
      * {@code scopeType} / {@code scopeId} of the parent.  For SERVICE
-     * reservations under a PROJECT ceiling the reservations have
+     * reservations under a Team ceiling the reservations have
      * {@code scopeType=SERVICE} and their {@code scopeId} is the
-     * instance UUID (not the project UUID), so a separate query
-     * ({@link #sumServiceReservationLimitByProject}) is used.</p>
+     * instance UUID (not the Team UUID), so a separate query
+     * ({@link #sumServiceReservationLimitByTeam}) is used.</p>
      */
     @Query("""
             SELECT COALESCE(SUM(q.limitAmount), 0)
@@ -62,22 +62,22 @@ public interface QuotaRepository extends JpaRepository<Quota, UUID> {
                                      @Param("excludeId") UUID excludeId);
 
     /**
-     * Sum of SERVICE-scope reservation limits under a given project.
-     * Uses the denormalised {@code projectId} column to find all
-     * SERVICE reservations belonging to the project, regardless of
+     * Sum of SERVICE-scope reservation limits under a given Team.
+     * Uses the denormalised {@code teamId} column to find all
+     * SERVICE reservations belonging to the Team, regardless of
      * which workflow / assistant instance they are attached to.
      */
     @Query("""
             SELECT COALESCE(SUM(q.limitAmount), 0)
             FROM Quota q
             WHERE q.scopeType = ai.myrmec.engine.quota.Quota.Scope.SERVICE
-              AND q.projectId = :projectId
+              AND q.teamId = :teamId
               AND q.resourceType = :resourceType
               AND q.period = :period
               AND q.quotaType = ai.myrmec.engine.quota.QuotaType.RESERVATION
               AND (:excludeId IS NULL OR q.id <> :excludeId)
             """)
-    long sumServiceReservationLimitByProject(@Param("projectId") UUID projectId,
+    long sumServiceReservationLimitByTeam(@Param("teamId") UUID teamId,
                                               @Param("resourceType") Quota.ResourceType resourceType,
                                               @Param("period") Quota.Period period,
                                               @Param("excludeId") UUID excludeId);

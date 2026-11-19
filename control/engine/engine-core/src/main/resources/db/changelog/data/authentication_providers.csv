@@ -1,0 +1,5 @@
+﻿code,provider_type,name,is_enabled,is_system,metadata,created_at,updated_at
+LOCAL,LOCAL,Local Account,true,true,{},CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+OIDC_DEFAULT,OIDC,OIDC (Default),false,true,{},CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+GITHUB_DEFAULT,GITHUB,GitHub (Default),false,true,{},CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+GOOGLE_DEFAULT,GOOGLE,Google (Default),false,true,{},CURRENT_TIMESTAMP,CURRENT_TIMESTAMP

@@ -18,7 +18,7 @@ import java.util.UUID;
 /**
  * Admin REST controller for groups. {@code ORG_ADMIN} only — group CRUD is a
  * governance operation. Read access is shared with {@code PLATFORM_ADMIN} so
- * platform tooling (e.g. project listings) can resolve group names.
+ * platform tooling (e.g. Team listings) can resolve group names.
  */
 @RestController
 @RequestMapping("/api/v1/admin/groups")

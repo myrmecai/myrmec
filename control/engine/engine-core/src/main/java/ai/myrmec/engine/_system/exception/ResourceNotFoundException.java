@@ -51,10 +51,10 @@ public class ResourceNotFoundException extends RuntimeException {
     }
 
     /**
-     * Factory method for project not found.
+     * Factory method for Team not found.
      */
-    public static ResourceNotFoundException project(Object id) {
-        return new ResourceNotFoundException("Project", id);
+    public static ResourceNotFoundException team(Object id) {
+        return new ResourceNotFoundException("team", id);
     }
 
     /**

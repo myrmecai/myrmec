@@ -3,8 +3,8 @@
 package ai.myrmec.engine.audit;
 
 import ai.myrmec.engine.IntegrationTestBase;
-import ai.myrmec.engine.project.ProjectSetting;
-import ai.myrmec.engine.project.ProjectSettingRepository;
+import ai.myrmec.engine.team.TeamSetting;
+import ai.myrmec.engine.team.ProjectSettingRepository;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -19,8 +19,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Audit chain gating tests — verify the two-level gating model.
  *
- * <p>STRICT profile forces chaining ON (project setting ignored).
- * STANDARD/FLEXIBLE: chaining only if project setting
+ * <p>STRICT profile forces chaining ON (team setting ignored).
+ * STANDARD/FLEXIBLE: chaining only if team setting
  * {@code audit_integrity_enabled} is true (default off).
  */
 @Tag("INV-6")
@@ -40,51 +40,51 @@ class AuditChainGatingTest extends IntegrationTestBase {
     @Autowired
     private TestDataBuilder data;
 
-    private static final String SCOPE_PROJECT = "PROJECT";
+    private static final String SCOPE_PROJECT = "TEAM";
 
     @Test
-    @DisplayName("STANDARD profile: chaining OFF by default (no project setting)")
+    @DisplayName("STANDARD profile: chaining OFF by default (no team setting)")
     void chainingOffByDefault() {
-        UUID projectId = data.project().create().getId();
+        UUID teamId = data.team().create().getId();
 
-        writeProjectEvent(projectId, "CREATED", "entity-1");
+        writeProjectEvent(teamId, "CREATED", "entity-1");
 
         // Event should NOT have a hash (chaining is off by default)
-        var events = auditEventRepository.findByScopeTypeAndProjectIdOrderByIdAsc(SCOPE_PROJECT, projectId);
+        var events = auditEventRepository.findByScopeTypeAndTeamIdOrderByIdAsc(SCOPE_PROJECT, teamId);
         assertThat(events).hasSize(1);
         assertThat(events.get(0).getEventHash()).isNull();
     }
 
     @Test
-    @DisplayName("STANDARD profile: chaining ON when project setting is true")
+    @DisplayName("STANDARD profile: chaining ON when team setting is true")
     void chainingOnWhenSettingTrue() {
-        UUID projectId = data.project().create().getId();
+        UUID teamId = data.team().create().getId();
 
-        enableChaining(projectId);
-        writeProjectEvent(projectId, "CREATED", "entity-1");
+        enableChaining(teamId);
+        writeProjectEvent(teamId, "CREATED", "entity-1");
 
-        var events = auditEventRepository.findByScopeTypeAndProjectIdOrderByIdAsc(SCOPE_PROJECT, projectId);
+        var events = auditEventRepository.findByScopeTypeAndTeamIdOrderByIdAsc(SCOPE_PROJECT, teamId);
         assertThat(events).hasSize(1);
         assertThat(events.get(0).getEventHash()).isNotNull();
         assertThat(events.get(0).getPrevEventHash()).isNotNull();
     }
 
     @Test
-    @DisplayName("STANDARD profile: chaining OFF when project setting is false")
+    @DisplayName("STANDARD profile: chaining OFF when team setting is false")
     void chainingOffWhenSettingFalse() {
-        UUID projectId = data.project().create().getId();
+        UUID teamId = data.team().create().getId();
 
         // Explicitly set to false
-        ProjectSetting setting = new ProjectSetting();
-        setting.setProjectId(projectId);
+        TeamSetting setting = new TeamSetting();
+        setting.setTeamId(teamId);
         setting.setSettingKey("audit_integrity_enabled");
         setting.setValueType("STRING");
         setting.setSettingValue("false");
         projectSettingRepository.save(setting);
 
-        writeProjectEvent(projectId, "CREATED", "entity-1");
+        writeProjectEvent(teamId, "CREATED", "entity-1");
 
-        var events = auditEventRepository.findByScopeTypeAndProjectIdOrderByIdAsc(SCOPE_PROJECT, projectId);
+        var events = auditEventRepository.findByScopeTypeAndTeamIdOrderByIdAsc(SCOPE_PROJECT, teamId);
         assertThat(events).hasSize(1);
         assertThat(events.get(0).getEventHash()).isNull();
     }
@@ -101,7 +101,7 @@ class AuditChainGatingTest extends IntegrationTestBase {
                 null, null, null);
 
         // The ORG event should not have a hash
-        var events = auditEventRepository.findByScopeTypeAndProjectIdOrderByIdAsc("ORGANIZATION", null);
+        var events = auditEventRepository.findByScopeTypeAndTeamIdOrderByIdAsc("ORGANIZATION", null);
         // There may be other ORG events from test setup; just check the latest
         if (!events.isEmpty()) {
             // The last event should be ours — but it might not be the very last
@@ -115,19 +115,19 @@ class AuditChainGatingTest extends IntegrationTestBase {
 
     // --- helpers ---
 
-    private void enableChaining(UUID projectId) {
-        ProjectSetting setting = new ProjectSetting();
-        setting.setProjectId(projectId);
+    private void enableChaining(UUID teamId) {
+        TeamSetting setting = new TeamSetting();
+        setting.setTeamId(teamId);
         setting.setSettingKey("audit_integrity_enabled");
         setting.setValueType("STRING");
         setting.setSettingValue("true");
         projectSettingRepository.save(setting);
     }
 
-    private void writeProjectEvent(UUID projectId, String eventType, String entityName) {
+    private void writeProjectEvent(UUID teamId, String eventType, String entityName) {
         auditEventService.recordEvent(
                 "test_entity", UUID.randomUUID(), eventType,
-                SCOPE_PROJECT, projectId,
+                SCOPE_PROJECT, teamId,
                 null, "Gating Test", null, null,
                 null, Map.of("name", entityName), null);
     }

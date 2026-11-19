@@ -39,7 +39,7 @@ public interface AgentHostRepository extends JpaRepository<AgentHost, UUID> {
     Optional<AgentHost> findByRegistrationKey(String registrationKey);
 
     /**
-     * Find agents by project ID.
+     * Find agents by Team ID.
      */
-    List<AgentHost> findByProjectId(UUID projectId);
+    List<AgentHost> findByTeamId(UUID teamId);
 }

@@ -6,7 +6,7 @@ import ai.myrmec.engine.conversation.ConversationEvent;
 import ai.myrmec.engine.conversation.ConversationEventReason;
 import ai.myrmec.engine.conversation.ConversationEventRepository;
 import ai.myrmec.engine.conversation.ConversationRepository;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -116,18 +116,18 @@ class AgentLifecycleEventTest extends IntegrationTestBase {
     }
 
     private UUID conversation() {
-        Project project = data.project().named("lifecycle-" + UUID.randomUUID()).create();
+        team team = data.team().named("lifecycle-" + UUID.randomUUID()).create();
         Conversation conversation = new Conversation();
-        conversation.setProjectId(project.getId());
+        conversation.setTeamId(team.getId());
         conversation.setTitle("lifecycle-test");
         return conversationRepository.save(conversation).getId();
     }
 
     private Agent idleWorker() {
-        var project = data.project().named("lifecycle-host-" + UUID.randomUUID()).create();
+        var team = data.team().named("lifecycle-host-" + UUID.randomUUID()).create();
         AgentHost host = data.agent()
                 .named("lifecycle-host-" + UUID.randomUUID())
-                .inProject(project)
+                .inTeam(team)
                 .create()
                 .agent();
 

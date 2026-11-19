@@ -33,7 +33,7 @@ public class DataFeedService {
 
     @Transactional(readOnly = true)
     public List<DataFeed> findAllOrgScoped() {
-        return repository.findByScopeAndProjectIdIsNull(Scope.ORGANIZATION);
+        return repository.findByScopeAndTeamIdIsNull(Scope.ORGANIZATION);
     }
 
     @Transactional(readOnly = true)
@@ -43,7 +43,7 @@ public class DataFeedService {
     }
 
     @Transactional
-    public DataFeed create(String scope, UUID projectId, String name, String description,
+    public DataFeed create(String scope, UUID teamId, String name, String description,
                             UUID providerVersionId, String datasetName,
                             UUID connectionConfigId, Map<String, Object> connectionDetails,
                             String syncSchedule, UUID actorId, String actorDisplayName) {
@@ -57,14 +57,14 @@ public class DataFeedService {
                 : null;
         if (feedType != null && !feedType.isBlank()) {
             governanceEnforcer.assertAllowed(
-                projectId != null ? GovernanceScope.ofProject(projectId) : GovernanceScope.orgScope(),
+                teamId != null ? GovernanceScope.ofTeam(teamId) : GovernanceScope.orgScope(),
                 ProductFeature.DATA_FEEDS,
                 feedType);
         }
 
         DataFeed feed = new DataFeed();
         feed.setScope(scope);
-        feed.setProjectId(projectId);
+        feed.setTeamId(teamId);
         feed.setName(name);
         feed.setDescription(description);
         feed.setStatus(EntityStatus.ACTIVE);
@@ -80,7 +80,7 @@ public class DataFeedService {
         log.info("Created data feed: {} (id: {})", name, saved.getId());
 
         auditEventService.recordEvent(ResourceType.DATA_FEED, saved.getId(), AuditAction.CREATED,
-                scope, projectId, actorId, actorDisplayName,
+                scope, teamId, actorId, actorDisplayName,
                 null, null, null, Map.of("name", name, "datasetName", datasetName), null);
 
         return saved;
@@ -103,7 +103,7 @@ public class DataFeedService {
         feed.setStatus(EntityStatus.DISABLED);
         DataFeed saved = repository.save(feed);
         auditEventService.recordEvent(ResourceType.DATA_FEED, id, EntityStatus.DISABLED,
-                feed.getScope(), feed.getProjectId(), actorId, actorDisplayName,
+                feed.getScope(), feed.getTeamId(), actorId, actorDisplayName,
                 null, AuditReason.ADMIN_DISABLED, null, null, null);
         return saved;
     }

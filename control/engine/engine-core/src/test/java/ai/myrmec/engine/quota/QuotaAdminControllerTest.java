@@ -2,7 +2,7 @@ package ai.myrmec.engine.quota;
 
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.group.Group;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.quota.dto.CreateQuotaRequest;
 import ai.myrmec.engine.quota.dto.QuotaResponse;
 import ai.myrmec.engine.quota.dto.UpdateQuotaRequest;
@@ -139,12 +139,12 @@ class QuotaAdminControllerTest extends IntegrationTestBase {
 
     @Test
     void projectBudgetOwnerCanCreateAndUpdateProjectCeiling() {
-        Project project = createTestProject();
-        HttpHeaders headers = budgetOwnerHeaders(project.getId());
+        team team = createTestProject();
+        HttpHeaders headers = budgetOwnerHeaders(team.getId());
 
         CreateQuotaRequest req = CreateQuotaRequest.builder()
-                .scopeType("PROJECT")
-                .scopeId(project.getId())
+                .scopeType("TEAM")
+                .scopeId(team.getId())
                 .resourceType("TOKENS")
                 .period("DAILY")
                 .limitAmount(5_000L)
@@ -181,8 +181,8 @@ class QuotaAdminControllerTest extends IntegrationTestBase {
 
     @Test
     void nonAdminCannotCreateOrgCeiling() {
-        Project project = createTestProject();
-        HttpHeaders headers = budgetOwnerHeaders(project.getId());
+        team team = createTestProject();
+        HttpHeaders headers = budgetOwnerHeaders(team.getId());
 
         CreateQuotaRequest req = CreateQuotaRequest.builder()
                 .scopeType("ORG")
@@ -202,21 +202,21 @@ class QuotaAdminControllerTest extends IntegrationTestBase {
         assertThat(created.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
-    private Project createTestProject() {
-        Project project = new Project();
-        project.setName("Quota Test Project " + UUID.randomUUID());
-        project.setGroupId(Group.DEFAULT_GROUP_ID);
-        project.setCreatedAt(Instant.now());
-        project.setUpdatedAt(Instant.now());
-        return projectRepository.save(project);
+    private team createTestProject() {
+        team team = new team();
+        team.setName("Quota Test team " + UUID.randomUUID());
+        team.setGroupId(Group.DEFAULT_GROUP_ID);
+        team.setCreatedAt(Instant.now());
+        team.setUpdatedAt(Instant.now());
+        return TeamRepository.save(team);
     }
 
-    private HttpHeaders budgetOwnerHeaders(UUID projectId) {
+    private HttpHeaders budgetOwnerHeaders(UUID teamId) {
         String token = jwtTokenProvider.generateUserAccessToken(
                 TEST_ADMIN_ID,
                 "Budget Owner",
                 "budget@e2e-test.local",
-                List.of("proj:" + projectId + ":BUDGET_OWNER"));
+                List.of("proj:" + teamId + ":BUDGET_OWNER"));
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(token);
         headers.set("Content-Type", "application/json");

@@ -35,7 +35,7 @@ import java.util.UUID;
  * User-facing REST surface for the Assistant entity (#92, UC-017).
  *
  * <p>Parent-row CRUD + kill switches, the Draft/Publish version lifecycle, and
- * the {@code assistant_grants} ACL. Authorization is project-scoped via
+ * the {@code assistant_grants} ACL. Authorization is Team-scoped via
  * {@code assistantAccess} (VIEWER reads, EDITOR authors, OWNER manages grants);
  * per-assistant grant enforcement is a follow-up (#99).</p>
  */
@@ -54,22 +54,22 @@ public class AssistantController {
 
     @PostMapping
     @Operation(summary = "Create an assistant (start dialog) with an initial draft")
-    @PreAuthorize("@projectAccess.canEdit(#request.projectId, authentication) "
-            + "and @projectAccess.allowsServiceType(#request.projectId, 'CONVERSATIONAL')")
+    @PreAuthorize("@teamAccess.canEdit(#request.teamId, authentication) "
+            + "and @teamAccess.allowsServiceType(#request.teamId, 'CONVERSATIONAL')")
     public ResponseEntity<AssistantResponse> create(
             @Valid @RequestBody CreateAssistantRequest request,
             @CurrentUser UUID userId) {
         Assistant a = assistantService.createAssistant(
-                request.projectId(), request.name(), request.description(),
+                request.teamId(), request.name(), request.description(),
                 request.agentProfileId(), userId);
         return ResponseEntity.status(HttpStatus.CREATED).body(AssistantResponse.from(a));
     }
 
     @GetMapping
-    @Operation(summary = "List assistants under a project (by name)")
-    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
-    public ResponseEntity<List<AssistantResponse>> listByProject(@RequestParam UUID projectId) {
-        List<AssistantResponse> body = assistantService.listByProject(projectId).stream()
+    @Operation(summary = "List assistants under a Team (by name)")
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
+    public ResponseEntity<List<AssistantResponse>> listByTeam(@RequestParam UUID teamId) {
+        List<AssistantResponse> body = assistantService.listByTeam(teamId).stream()
                 .map(AssistantResponse::from)
                 .toList();
         return ResponseEntity.ok(body);

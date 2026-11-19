@@ -107,7 +107,7 @@ public class ConversationMessage {
 
     /**
      * The user pinned to decide this approval, if any. Null until the
-     * policy engine assigns one (Phase 7e) — currently any project
+     * policy engine assigns one (Phase 7e) — currently any Team
      * editor may decide.
      */
     @Column(name = "approver_id")

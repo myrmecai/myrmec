@@ -10,20 +10,20 @@ import java.util.UUID;
  *
  * <p>Unlike {@link ai.myrmec.engine.user.UserPrincipal} it carries no role
  * expansion: a service account's authority is its single owning
- * {@link #projectId} plus the per-assistant {@code USE} grants checked at the
+ * {@link #teamId} plus the per-assistant {@code USE} grants checked at the
  * controller. {@link #getName()} returns the service-account id for audit.</p>
  */
 public final class ServiceAccountPrincipal implements Principal {
 
     private final UUID serviceAccountId;
-    private final UUID projectId;
+    private final UUID teamId;
     private final String keycloakClientId;
     private final String displayName;
 
-    public ServiceAccountPrincipal(UUID serviceAccountId, UUID projectId,
+    public ServiceAccountPrincipal(UUID serviceAccountId, UUID teamId,
                                    String keycloakClientId, String displayName) {
         this.serviceAccountId = serviceAccountId;
-        this.projectId = projectId;
+        this.teamId = teamId;
         this.keycloakClientId = keycloakClientId;
         this.displayName = displayName;
     }
@@ -32,8 +32,8 @@ public final class ServiceAccountPrincipal implements Principal {
         return serviceAccountId;
     }
 
-    public UUID getProjectId() {
-        return projectId;
+    public UUID getTeamId() {
+        return teamId;
     }
 
     public String getKeycloakClientId() {

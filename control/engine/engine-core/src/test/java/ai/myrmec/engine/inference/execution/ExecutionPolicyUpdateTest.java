@@ -8,7 +8,7 @@ import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionAllocator;
 import ai.myrmec.engine.inference.SessionRepository;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.quota.EnforcementMode;
 import ai.myrmec.engine.quota.Quota;
 import ai.myrmec.engine.quota.QuotaRepository;
@@ -47,7 +47,7 @@ import static org.mockito.Mockito.verify;
  *       accounted {usage, allowance}; a second notification with no
  *       advance is throttled; an ADVANCE emits the next frame (per-batch
  *       throttle, not per-execution lock).</li>
- *   <li>Allowance source: the project's most restrictive quota ceiling;
+ *   <li>Allowance source: the team's most restrictive quota ceiling;
  *       no quota row → allowance absent (no host-side token limit).</li>
  *   <li>Inbound: the same frame arriving FROM a host on the engine socket
  *       is rejected INVALID_MESSAGE (engine→host frame, §4.3 arm
@@ -105,21 +105,21 @@ class ExecutionPolicyUpdateTest extends IntegrationTestBase {
     @org.springframework.beans.factory.annotation.Autowired
     ai.myrmec.engine.agent.AgentHostInstanceRepository instanceRepository;
 
-    private record Setup(UUID sessionId, UUID executionId, Host host, Project project,
+    private record Setup(UUID sessionId, UUID executionId, Host host, team team,
                          Conversation conversation) {}
 
     private Setup runningConversationExecution() throws Exception {
         Host host = openedHost();
-        Project project = data.project().named("a4-proj").create();
+        team team = data.team().named("a4-proj").create();
 
-        Conversation conversation = data.conversation().inProject(project).create();
+        Conversation conversation = data.conversation().inTeam(team).create();
         UUID agentHostId = instanceRepository.findById(host.instanceId())
                 .map(i -> i.getAgentHostId()).orElseThrow();
         conversation.setAgentId(agentHostId);
         conversationRepository.save(conversation);
 
         UUID sessionId = allocator.offer("CONVERSATION", conversation.getId(), "CONVERSATION",
-                project.getId(), agentHostId).orElseThrow();
+                team.getId(), agentHostId).orElseThrow();
 
         String accept = """
                 { "protocolVersion": 1, "messageId": "m-acc", "type": "session.accept",
@@ -143,7 +143,7 @@ class ExecutionPolicyUpdateTest extends IntegrationTestBase {
         execution.setStartedAt(Instant.now());
         execution = executionRepository.save(execution);
 
-        return new Setup(sessionId, execution.getId(), host, project, conversation);
+        return new Setup(sessionId, execution.getId(), host, team, conversation);
     }
 
     private java.util.List<JsonNode> replies(WebSocketSession session) {
@@ -160,17 +160,17 @@ class ExecutionPolicyUpdateTest extends IntegrationTestBase {
                 .toList();
     }
 
-    private Project tokensQuota(Project project, long limit) {
+    private team tokensQuota(team team, long limit) {
         Quota quota = new Quota();
-        quota.setScopeType(Quota.Scope.PROJECT);
-        quota.setScopeId(project.getId());
+        quota.setScopeType(Quota.Scope.TEAM);
+        quota.setScopeId(team.getId());
         quota.setResourceType(Quota.ResourceType.TOKENS);
         quota.setPeriod(Quota.Period.DAILY);
         quota.setLimitAmount(limit);
         quota.setQuotaType(QuotaType.CEILING);
         quota.setEnforcementMode(EnforcementMode.BLOCK);
         quotaRepository.save(quota);
-        return project;
+        return team;
     }
 
     // =================================================================
@@ -180,7 +180,7 @@ class ExecutionPolicyUpdateTest extends IntegrationTestBase {
     @Test
     void usageAdvanceEmitsPolicyUpdateWithAccountedUsageAndAllowance() throws Exception {
         Setup setup = runningConversationExecution();
-        tokensQuota(setup.project(), 500_000L);
+        tokensQuota(setup.team(), 500_000L);
 
         sessionPolicyService.onUsageRecorded(setup.executionId(), 3L, 8_200L);
 
@@ -193,7 +193,7 @@ class ExecutionPolicyUpdateTest extends IntegrationTestBase {
                 .isEqualTo(3L);
         assertThat(frame.path("payload").path("usage").path("totalTokens").asLong())
                 .isEqualTo(8_200L);
-        // The allowance is the project's most restrictive ceiling.
+        // The allowance is the team's most restrictive ceiling.
         assertThat(frame.path("payload").path("allowance").path("maxTokens").asLong())
                 .isEqualTo(500_000L);
     }
@@ -205,7 +205,7 @@ class ExecutionPolicyUpdateTest extends IntegrationTestBase {
     @Test
     void updateThrottlesToAccountingBatches() throws Exception {
         Setup setup = runningConversationExecution();
-        tokensQuota(setup.project(), 100_000L);
+        tokensQuota(setup.team(), 100_000L);
 
         sessionPolicyService.onUsageRecorded(setup.executionId(), 1L, 1_000L);
         // Same-or-lower totals: no advance → no additional frame.

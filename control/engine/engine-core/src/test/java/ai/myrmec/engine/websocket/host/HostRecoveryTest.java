@@ -108,12 +108,12 @@ class HostRecoveryTest extends IntegrationTestBase {
     }
 
     /** A session row parked on the given instance (caller picks the state). */
-    private Session parkedSession(UUID projectId, UUID instanceId, String state,
+    private Session parkedSession(UUID teamId, UUID instanceId, String state,
                                   String serviceType, long cursor) {
         Session s = new Session();
         s.setServiceType(serviceType);
         s.setRefId(UUID.randomUUID());
-        s.setProjectId(projectId);
+        s.setTeamId(teamId);
         s.setKind(serviceType);
         s.setHostInstanceId(instanceId);
         s.setAllocationState(state);
@@ -154,8 +154,8 @@ class HostRecoveryTest extends IntegrationTestBase {
     @Test
     void dropParksInstanceRecoveringAndResumeReAdopts() throws Exception {
         Setup setup = openedHost("recovery-a");
-        var project = data.project().named("recovery-a").create();
-        Session conversation = parkedSession(project.getId(), setup.instanceId(),
+        var team = data.team().named("recovery-a").create();
+        Session conversation = parkedSession(team.getId(), setup.instanceId(),
                 SessionAllocator.ALLOC_STATE_ACTIVE, "CONVERSATION", 0L);
 
         handler.afterConnectionClosed(setup.session(), CloseStatus.GOING_AWAY);
@@ -209,8 +209,8 @@ class HostRecoveryTest extends IntegrationTestBase {
     @Test
     void windowExpiryFallsBackToHostLostClose() throws Exception {
         Setup setup = openedHost("recovery-b");
-        var project = data.project().named("recovery-b").create();
-        Session conversation = parkedSession(project.getId(), setup.instanceId(),
+        var team = data.team().named("recovery-b").create();
+        Session conversation = parkedSession(team.getId(), setup.instanceId(),
                 SessionAllocator.ALLOC_STATE_ACTIVE, "CONVERSATION", 0L);
 
         WebSocketSession socket = setup.session();
@@ -239,8 +239,8 @@ class HostRecoveryTest extends IntegrationTestBase {
     @Test
     void reconcileReplaysDurableEventsInOrderAndDedupsTerminals() throws Exception {
         Setup setup = openedHost("recovery-c");
-        var project = data.project().named("recovery-c").create();
-        Session conversation = parkedSession(project.getId(), setup.instanceId(),
+        var team = data.team().named("recovery-c").create();
+        Session conversation = parkedSession(team.getId(), setup.instanceId(),
                 SessionAllocator.ALLOC_STATE_ACTIVE, "CONVERSATION", 0L);
         SessionExecution turn = execution(conversation, SessionExecution.State.RUNNING, null);
 
@@ -371,12 +371,12 @@ class HostRecoveryTest extends IntegrationTestBase {
     @Test
     void reconcileClosesClosedRacedSessionsAndCancelsInFlightOrchestration() throws Exception {
         Setup setup = openedHost("recovery-f");
-        var project = data.project().named("recovery-f").create();
+        var team = data.team().named("recovery-f").create();
         // A session the engine already closed (HOST_LOST raced).
-        Session raced = parkedSession(project.getId(), setup.instanceId(),
+        Session raced = parkedSession(team.getId(), setup.instanceId(),
                 SessionAllocator.ALLOC_STATE_CLOSED, "CONVERSATION", 0L);
         // An in-flight orchestration execution with no recorded outcome.
-        Session orchestration = parkedSession(project.getId(), setup.instanceId(),
+        Session orchestration = parkedSession(team.getId(), setup.instanceId(),
                 SessionAllocator.ALLOC_STATE_ACTIVE, "WORKFLOW", 0L);
         execution(orchestration, SessionExecution.State.RUNNING, null);
 
@@ -417,8 +417,8 @@ class HostRecoveryTest extends IntegrationTestBase {
     @Test
     void channelFatalityVictimDoesNotGetKeepOnReconcile() throws Exception {
         Setup setup = openedHost("recovery-d7");
-        var project = data.project().named("recovery-d7").create();
-        Session conversation = parkedSession(project.getId(), setup.instanceId(),
+        var team = data.team().named("recovery-d7").create();
+        Session conversation = parkedSession(team.getId(), setup.instanceId(),
                 SessionAllocator.ALLOC_STATE_ACTIVE, "CONVERSATION", 0L);
 
         // Bind a dedicated channel socket the way the §7.5 handshake does:
@@ -476,8 +476,8 @@ class HostRecoveryTest extends IntegrationTestBase {
     @Test
     void resumeWithInteractionStateKeepsInFlightExecutionAndProjectsEvidence() throws Exception {
         Setup setup = openedHost("recovery-overlay");
-        var project = data.project().named("recovery-overlay").create();
-        Session workflow = parkedSession(project.getId(), setup.instanceId(),
+        var team = data.team().named("recovery-overlay").create();
+        Session workflow = parkedSession(team.getId(), setup.instanceId(),
                 SessionAllocator.ALLOC_STATE_ACTIVE, "WORKFLOW", 0L);
         SessionExecution inFlight = execution(workflow,
                 SessionExecution.State.RUNNING, null);
@@ -525,8 +525,8 @@ class HostRecoveryTest extends IntegrationTestBase {
     @Test
     void resumeWithoutInteractionStateCancelsInFlightAsBefore() throws Exception {
         Setup setup = openedHost("recovery-no-overlay");
-        var project = data.project().named("recovery-no-overlay").create();
-        Session workflow = parkedSession(project.getId(), setup.instanceId(),
+        var team = data.team().named("recovery-no-overlay").create();
+        Session workflow = parkedSession(team.getId(), setup.instanceId(),
                 SessionAllocator.ALLOC_STATE_ACTIVE, "WORKFLOW", 0L);
         SessionExecution inFlight = execution(workflow,
                 SessionExecution.State.RUNNING, null);
@@ -561,8 +561,8 @@ class HostRecoveryTest extends IntegrationTestBase {
     @Test
     void restartCancelSettlesPendingInteractionHostStateLost() throws Exception {
         Setup setup = openedHost("recovery-restart-lost");
-        var project = data.project().named("recovery-restart-lost").create();
-        Session workflow = parkedSession(project.getId(), setup.instanceId(),
+        var team = data.team().named("recovery-restart-lost").create();
+        Session workflow = parkedSession(team.getId(), setup.instanceId(),
                 SessionAllocator.ALLOC_STATE_ACTIVE, "WORKFLOW", 0L);
         SessionExecution inFlight = execution(workflow,
                 SessionExecution.State.RUNNING, null);
@@ -624,8 +624,8 @@ class HostRecoveryTest extends IntegrationTestBase {
     @Test
     void staleInteractionStateEvidenceDoesNotRegressObservedState() throws Exception {
         Setup setup = openedHost("recovery-stale");
-        var project = data.project().named("recovery-stale").create();
-        Session workflow = parkedSession(project.getId(), setup.instanceId(),
+        var team = data.team().named("recovery-stale").create();
+        Session workflow = parkedSession(team.getId(), setup.instanceId(),
                 SessionAllocator.ALLOC_STATE_ACTIVE, "WORKFLOW", 0L);
         SessionExecution inFlight = execution(workflow,
                 SessionExecution.State.RUNNING, null);
@@ -659,8 +659,8 @@ class HostRecoveryTest extends IntegrationTestBase {
     @Test
     void interactionStateNeverRestoresATerminalExecution() throws Exception {
         Setup setup = openedHost("recovery-terminal");
-        var project = data.project().named("recovery-terminal").create();
-        Session workflow = parkedSession(project.getId(), setup.instanceId(),
+        var team = data.team().named("recovery-terminal").create();
+        Session workflow = parkedSession(team.getId(), setup.instanceId(),
                 SessionAllocator.ALLOC_STATE_ACTIVE, "WORKFLOW", 0L);
         SessionExecution done = execution(workflow,
                 SessionExecution.State.COMPLETED, "tm-done");

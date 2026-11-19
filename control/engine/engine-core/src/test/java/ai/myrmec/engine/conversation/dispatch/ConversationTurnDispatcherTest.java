@@ -142,21 +142,21 @@ class ConversationTurnDispatcherTest {
     @Test
     void offersASessionAndParksTheTurnWhenNoActiveSessionExists() {
         UUID conversationId = UUID.randomUUID();
-        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
         UUID hostId = UUID.randomUUID();
         UUID sessionId = UUID.randomUUID();
 
-        Conversation conv = pinnedConversation(conversationId, projectId);
+        Conversation conv = pinnedConversation(conversationId, teamId);
         wireHost(conv, hostId);
         when(sessionRepository.findByRefIdAndServiceTypeAndAllocationStateIn(
                 eq(conversationId), eq("CONVERSATION"), any())).thenReturn(Optional.empty());
-        when(sessionAllocator.offer("CONVERSATION", conversationId, "CONVERSATION", projectId, hostId))
+        when(sessionAllocator.offer("CONVERSATION", conversationId, "CONVERSATION", teamId, hostId))
                 .thenReturn(Optional.of(sessionId));
 
         assertThat(dispatcher.dispatch(conversationId)).isTrue();
 
         // The allocator minted the session and the OFFER went on the wire.
-        verify(sessionAllocator).offer("CONVERSATION", conversationId, "CONVERSATION", projectId, hostId);
+        verify(sessionAllocator).offer("CONVERSATION", conversationId, "CONVERSATION", teamId, hostId);
         verify(hostControlWebSocketHandler).sendSessionOffer(sessionId, "CONVERSATION", conversationId);
         // Â§7.4: no execution.start may precede session.opened, so nothing is
         // started or sent yet â€” the turn is parked instead.
@@ -174,7 +174,7 @@ class ConversationTurnDispatcherTest {
         UUID conversationId = UUID.randomUUID();
         Conversation conv = pinnedConversation(conversationId, UUID.randomUUID());
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
-        when(hostSelectionService.selectForProject(conv.getProjectId())).thenReturn(Optional.empty());
+        when(hostSelectionService.selectForTeam(conv.getTeamId())).thenReturn(Optional.empty());
         when(conversationService.listMessages(conversationId)).thenReturn(List.of());
 
         assertThat(dispatcher.dispatch(conversationId)).isFalse();
@@ -189,13 +189,13 @@ class ConversationTurnDispatcherTest {
         UUID hostId = UUID.randomUUID();
         Conversation conv = new Conversation();
         conv.setId(conversationId);
-        conv.setProjectId(UUID.randomUUID());
+        conv.setTeamId(UUID.randomUUID());
         // No agentProfileVersionId â€” an unpinned legacy conversation.
 
         AgentHost host = new AgentHost();
         host.setId(hostId);
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
-        when(hostSelectionService.selectForProject(conv.getProjectId())).thenReturn(Optional.of(host));
+        when(hostSelectionService.selectForTeam(conv.getTeamId())).thenReturn(Optional.of(host));
 
         assertThat(dispatcher.dispatch(conversationId)).isFalse();
 
@@ -225,13 +225,13 @@ class ConversationTurnDispatcherTest {
     @Test
     void reusesTheSameActiveSessionAndShipsExecutionStartImmediately() {
         UUID conversationId = UUID.randomUUID();
-        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
         UUID hostId = UUID.randomUUID();
         UUID instanceId = UUID.randomUUID();
         UUID sessionId = UUID.randomUUID();
         UUID executionId = UUID.randomUUID();
 
-        Conversation conv = pinnedConversation(conversationId, projectId);
+        Conversation conv = pinnedConversation(conversationId, teamId);
         wireHost(conv, hostId);
 
         Session active = new Session();
@@ -275,14 +275,14 @@ class ConversationTurnDispatcherTest {
     @Test
     void closesAnActiveSessionPinnedToADifferentHostSoTheTurnCanReOffer() {
         UUID conversationId = UUID.randomUUID();
-        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
         UUID selectedHostId = UUID.randomUUID();
         UUID staleInstanceId = UUID.randomUUID();
         UUID staleHostId = UUID.randomUUID();
         UUID sessionId = UUID.randomUUID();
         UUID freshSessionId = UUID.randomUUID();
 
-        Conversation conv = pinnedConversation(conversationId, projectId);
+        Conversation conv = pinnedConversation(conversationId, teamId);
         wireHost(conv, selectedHostId);
 
         Session stale = new Session();
@@ -297,14 +297,14 @@ class ConversationTurnDispatcherTest {
         when(hostInstanceRepository.findById(staleInstanceId)).thenReturn(Optional.of(staleInstance));
 
         when(sessionAllocator.offer("CONVERSATION", conversationId, "CONVERSATION",
-                projectId, selectedHostId)).thenReturn(Optional.of(freshSessionId));
+                teamId, selectedHostId)).thenReturn(Optional.of(freshSessionId));
 
         assertThat(dispatcher.dispatch(conversationId)).isTrue();
 
         // The dead-host session is closed, and a fresh offer goes to the live host.
         verify(sessionAllocator).close(sessionId, "HOST_RESELECTED");
         verify(sessionAllocator).offer("CONVERSATION", conversationId, "CONVERSATION",
-                projectId, selectedHostId);
+                teamId, selectedHostId);
         verify(hostControlWebSocketHandler).sendSessionOffer(freshSessionId, "CONVERSATION", conversationId);
         verify(executionRegistry, never()).start(any(), any(), any(), any());
     }
@@ -312,12 +312,12 @@ class ConversationTurnDispatcherTest {
     @Test
     void refusesToShipWhenATurnIsAlreadyInFlightOnTheSession() {
         UUID conversationId = UUID.randomUUID();
-        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
         UUID hostId = UUID.randomUUID();
         UUID instanceId = UUID.randomUUID();
         UUID sessionId = UUID.randomUUID();
 
-        Conversation conv = pinnedConversation(conversationId, projectId);
+        Conversation conv = pinnedConversation(conversationId, teamId);
         wireHost(conv, hostId);
 
         Session active = new Session();
@@ -401,11 +401,11 @@ class ConversationTurnDispatcherTest {
     @Test
     void summaryTurnRidesTheSameUnifiedPathWithTheSummariserPrompt() {
         UUID conversationId = UUID.randomUUID();
-        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
         UUID hostId = UUID.randomUUID();
         UUID sessionId = UUID.randomUUID();
 
-        Conversation conv = pinnedConversation(conversationId, projectId);
+        Conversation conv = pinnedConversation(conversationId, teamId);
         wireHost(conv, hostId);
         when(sessionRepository.findByRefIdAndServiceTypeAndAllocationStateIn(
                 eq(conversationId), eq("CONVERSATION"), any())).thenReturn(Optional.empty());
@@ -437,7 +437,7 @@ class ConversationTurnDispatcherTest {
         UUID conversationId = UUID.randomUUID();
         Conversation conv = pinnedConversation(conversationId, UUID.randomUUID());
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conv));
-        when(hostSelectionService.selectForProject(conv.getProjectId())).thenReturn(Optional.empty());
+        when(hostSelectionService.selectForTeam(conv.getTeamId())).thenReturn(Optional.empty());
 
         assertThat(dispatcher.dispatchSummary(conversationId, null, List.of())).isFalse();
 
@@ -449,12 +449,12 @@ class ConversationTurnDispatcherTest {
 
     // ---------------------------------------------------------------- fixtures
 
-    private Conversation pinnedConversation(UUID conversationId, UUID projectId) {
+    private Conversation pinnedConversation(UUID conversationId, UUID teamId) {
         UUID profileVersionId = UUID.randomUUID();
         UUID profileId = UUID.randomUUID();
         Conversation conv = new Conversation();
         conv.setId(conversationId);
-        conv.setProjectId(projectId);
+        conv.setTeamId(teamId);
         conv.setAgentProfileVersionId(profileVersionId);
 
         AgentProfile profile = new AgentProfile();
@@ -475,7 +475,7 @@ class ConversationTurnDispatcherTest {
         AgentHost host = new AgentHost();
         host.setId(hostId);
         when(conversationRepository.findById(conv.getId())).thenReturn(Optional.of(conv));
-        when(hostSelectionService.selectForProject(conv.getProjectId())).thenReturn(Optional.of(host));
+        when(hostSelectionService.selectForTeam(conv.getTeamId())).thenReturn(Optional.of(host));
         when(conversationService.listMessages(conv.getId())).thenReturn(
                 List.of(message(conv.getId(), 0L, ConversationMessage.Role.USER, "ping")));
     }

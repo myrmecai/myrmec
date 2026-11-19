@@ -17,10 +17,10 @@ import java.util.UUID;
 @Repository
 public interface AssistantRepository extends JpaRepository<Assistant, UUID> {
 
-    List<Assistant> findByProjectIdOrderByNameAsc(UUID projectId);
+    List<Assistant> findByTeamIdOrderByNameAsc(UUID teamId);
 
-    /** Case-insensitive name-uniqueness lookup within a project (excludes archived). */
-    Optional<Assistant> findByProjectIdAndNameIgnoreCaseAndArchivedAtIsNull(UUID projectId, String name);
+    /** Case-insensitive name-uniqueness lookup within a Team (excludes archived). */
+    Optional<Assistant> findByTeamIdAndNameIgnoreCaseAndArchivedAtIsNull(UUID teamId, String name);
 
     /**
      * Pessimistic row lock on the parent — taken by publish before flipping

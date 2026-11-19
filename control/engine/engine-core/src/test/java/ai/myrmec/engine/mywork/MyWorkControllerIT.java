@@ -11,7 +11,7 @@ import ai.myrmec.engine.mywork.dto.MyArchivedRow;
 import ai.myrmec.engine.mywork.dto.MyAssistantRow;
 import ai.myrmec.engine.mywork.dto.MyWorkSummaryResponse;
 import ai.myrmec.engine.mywork.dto.MyWorkflowRow;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.User;
 import ai.myrmec.engine.workflow.Workflow;
@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * HTTP smoke test for {@link MyWorkController} (UC-013) — validates bean wiring,
- * project-scope resolution, the four read-only tab roll-ups, and the
+ * team-scope resolution, the four read-only tab roll-ups, and the
  * summary counters / first-run hints over the REST surface.
  */
 class MyWorkControllerIT extends IntegrationTestBase {
@@ -72,13 +72,13 @@ class MyWorkControllerIT extends IntegrationTestBase {
 
     @Test
     void summaryAndTabsRollUpScopedServices() {
-        Project project = data.project().named("my-work-it").create();
+        team team = data.team().named("my-work-it").create();
         AgentProfile profile = data.agentProfile().named("my-work-it-profile").create();
         User admin = userRepository.findById(TEST_ADMIN_ID).orElseThrow();
 
         // One active workflow definition.
         Workflow workflow = new Workflow();
-        workflow.setProject(project);
+        workflow.setTeam(team);
         workflow.setName("Nightly Import");
         workflow.setDescription("imports dealers");
         workflow.setSteps(List.of());
@@ -88,13 +88,13 @@ class MyWorkControllerIT extends IntegrationTestBase {
 
         // One live assistant, plus one archived assistant.
         Assistant live = assistantService.createAssistant(
-                project.getId(), "Support Bot", "answers questions", profile.getId(), TEST_ADMIN_ID);
+                team.getId(), "Support Bot", "answers questions", profile.getId(), TEST_ADMIN_ID);
         Assistant archived = assistantService.createAssistant(
-                project.getId(), "Retired Bot", "old", profile.getId(), TEST_ADMIN_ID);
+                team.getId(), "Retired Bot", "old", profile.getId(), TEST_ADMIN_ID);
         assistantService.archive(archived.getId());
 
-        HttpHeaders headers = ownerHeaders(project.getId());
-        String scope = "?projectIds=" + project.getId();
+        HttpHeaders headers = ownerHeaders(team.getId());
+        String scope = "?teamIds=" + team.getId();
 
         // ---- summary
         ResponseEntity<MyWorkSummaryResponse> summary = restTemplate.exchange(
@@ -118,7 +118,7 @@ class MyWorkControllerIT extends IntegrationTestBase {
                 });
         assertThat(workflows.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(workflows.getBody()).extracting(MyWorkflowRow::name).containsExactly("Nightly Import");
-        assertThat(workflows.getBody().get(0).projectName()).isEqualTo(project.getName());
+        assertThat(workflows.getBody().get(0).teamName()).isEqualTo(team.getName());
 
         // ---- conversations tab (active assistants only)
         ResponseEntity<List<MyAssistantRow>> conversations = restTemplate.exchange(
@@ -148,11 +148,11 @@ class MyWorkControllerIT extends IntegrationTestBase {
 
     @Test
     void firstRunWhenScopeHasNoServices() {
-        Project empty = data.project().named("my-work-empty").create();
+        team empty = data.team().named("my-work-empty").create();
         HttpHeaders headers = adminHeaders();
 
         ResponseEntity<MyWorkSummaryResponse> summary = restTemplate.exchange(
-                "/api/v1/my-work/summary?projectIds=" + empty.getId(), HttpMethod.GET,
+                "/api/v1/my-work/summary?teamIds=" + empty.getId(), HttpMethod.GET,
                 new HttpEntity<>(headers), MyWorkSummaryResponse.class);
         assertThat(summary.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(summary.getBody()).isNotNull();
@@ -163,28 +163,28 @@ class MyWorkControllerIT extends IntegrationTestBase {
 
     @Test
     void strangerSeesEmptyScope() {
-        Project project = data.project().named("my-work-private").create();
+        team team = data.team().named("my-work-private").create();
         AgentProfile profile = data.agentProfile().named("my-work-private-profile").create();
         assistantService.createAssistant(
-                project.getId(), "Hidden Bot", "secret", profile.getId(), TEST_ADMIN_ID);
+                team.getId(), "Hidden Bot", "secret", profile.getId(), TEST_ADMIN_ID);
 
         // A real, active user whose token only grants EDITOR on a different
-        // project must resolve to an empty My Work scope (no 403, just no rows).
+        // team must resolve to an empty My Work scope (no 403, just no rows).
         HttpHeaders strangerHeaders = userHeaders(TEST_ADMIN_ID, UUID.randomUUID());
 
         ResponseEntity<List<MyAssistantRow>> conversations = restTemplate.exchange(
-                "/api/v1/my-work/conversations?projectIds=" + project.getId(), HttpMethod.GET,
+                "/api/v1/my-work/conversations?teamIds=" + team.getId(), HttpMethod.GET,
                 new HttpEntity<>(strangerHeaders), new ParameterizedTypeReference<>() {
                 });
         assertThat(conversations.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(conversations.getBody()).isEmpty();
     }
 
-    /** Owner (PROJECT_OWNER ⇒ EDITOR) token on a single project, as a real active user. */
-    private HttpHeaders ownerHeaders(UUID projectId) {
+    /** Owner (TEAM_OWNER ⇒ EDITOR) token on a single team, as a real active user. */
+    private HttpHeaders ownerHeaders(UUID teamId) {
         String token = jwtTokenProvider.generateUserAccessToken(
                 TEST_ADMIN_ID, "Owner User", "owner@test.local",
-                List.of("proj:" + projectId + ":PROJECT_OWNER"));
+                List.of("proj:" + teamId + ":TEAM_OWNER"));
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(token);
         headers.set("Content-Type", "application/json");

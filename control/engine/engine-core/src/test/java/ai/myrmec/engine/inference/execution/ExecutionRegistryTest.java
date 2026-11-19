@@ -11,7 +11,7 @@ import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.conversation.ConversationMessage;
 import ai.myrmec.engine.conversation.ConversationService;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,16 +44,16 @@ class ExecutionRegistryTest extends IntegrationTestBase {
                 created.agent(), null, UUID.randomUUID().toString(), "laptop", pool, Map.of(), "node-1"));
     }
 
-    private Project project() {
-        return data.project().named("x-proj").create();
+    private team team() {
+        return data.team().named("x-proj").create();
     }
 
     private UUID activeConversationSession() {
         AgentHostInstance instance = openInstance(2);
-        Project project = project();
+        team team = team();
 
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId()).orElseThrow();
+                team.getId(), instance.getAgentHostId()).orElseThrow();
         assertThat(allocator.accept(sessionId)).isTrue();
         assertThat(allocator.confirmOpened(sessionId, "slot")).isTrue();
         return sessionId;
@@ -61,11 +61,11 @@ class ExecutionRegistryTest extends IntegrationTestBase {
 
     private UUID activeOrchestrationSession() {
         AgentHostInstance instance = openInstance(2);
-        Project project = project();
+        team team = team();
 
         UUID refId = UUID.randomUUID();
         UUID sessionId = allocator.offer("ORCHESTRATION_TASK", refId, "WORKFLOW",
-                project.getId(), instance.getAgentHostId()).orElseThrow();
+                team.getId(), instance.getAgentHostId()).orElseThrow();
         assertThat(allocator.accept(sessionId)).isTrue();
         assertThat(allocator.confirmOpened(sessionId, "slot")).isTrue();
         return sessionId;
@@ -208,10 +208,10 @@ class ExecutionRegistryTest extends IntegrationTestBase {
     @Test
     void startRequiresAllocationActive() {
         AgentHostInstance instance = openInstance(2);
-        Project project = project();
+        team team = team();
         // OFFERED session (not ACTIVE).
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId()).orElseThrow();
+                team.getId(), instance.getAgentHostId()).orElseThrow();
 
         assertThat(registry.start(sessionId, "r1", Instant.now().plusSeconds(60), Map.of())).isEmpty();
     }

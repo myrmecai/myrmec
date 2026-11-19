@@ -4,7 +4,7 @@ import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.conversation.dto.ApprovalDecisionRequest;
 import ai.myrmec.engine.conversation.dto.ConversationMessageResponse;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,7 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Phase 7a — end-to-end coverage for the HITL approval surface.
  *
- * <p>Each test arranges a project + agent profile + agent + conversation
+ * <p>Each test arranges a team + agent profile + agent + conversation
  * via the existing builders (FK on
  * {@code conversation_messages.author_agent_id} requires a real agent
  * row), drops an {@code APPROVAL_REQUEST} row through the service (the
@@ -40,18 +40,18 @@ class HitlApprovalTest extends IntegrationTestBase {
     @Autowired
     private ConversationService conversationService;
 
-    private record Setup(Project project, AgentHost agent, Conversation conversation,
+    private record Setup(team team, AgentHost agent, Conversation conversation,
                           ConversationMessage request) { }
 
     private Setup arrange(String suffix, Instant expiresAt) {
-        Project project = data.project().named("hitl-" + suffix).create();
+        team team = data.team().named("hitl-" + suffix).create();
         AgentHost agent = data.agent()
                 .named("hitl-agent-" + suffix)
-                .inProject(project)
+                .inTeam(team)
                 .create()
                 .agent();
         Conversation conversation = conversationService.createConversation(
-                project.getId(), TEST_ADMIN_ID, "hitl-conv-" + suffix,
+                team.getId(), TEST_ADMIN_ID, "hitl-conv-" + suffix,
                 agent.getId(), null);
         ConversationMessage request = conversationService.appendApprovalRequest(
                 conversation.getId(),
@@ -59,7 +59,7 @@ class HitlApprovalTest extends IntegrationTestBase {
                 "Proposed: drop table users",
                 "{\"tool\":\"postgres.execute\",\"sql\":\"DROP TABLE users\"}",
                 expiresAt);
-        return new Setup(project, agent, conversation, request);
+        return new Setup(team, agent, conversation, request);
     }
 
     @Test

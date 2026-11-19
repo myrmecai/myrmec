@@ -7,8 +7,8 @@ import ai.myrmec.engine.governance.EffectivePolicy;
 import ai.myrmec.engine.governance.GovernancePolicyResolver;
 import ai.myrmec.engine.governance.GovernanceScope;
 import ai.myrmec.engine.governance.ProductFeature;
-import ai.myrmec.engine.project.ProjectSetting;
-import ai.myrmec.engine.project.ProjectSettingRepository;
+import ai.myrmec.engine.team.TeamSetting;
+import ai.myrmec.engine.team.TeamSettingRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
@@ -39,9 +39,9 @@ public class AuditEventService {
     private final AuditEventRepository repository;
     private final AuditHashChainService hashChainService;
     private final GovernancePolicyResolver governancePolicyResolver;
-    private final ProjectSettingRepository projectSettingRepository;
+    private final TeamSettingRepository teamSettingRepository;
 
-    /** Well-known project setting key for audit integrity opt-in. */
+    /** Well-known Team setting key for audit integrity opt-in. */
     static final String AUDIT_INTEGRITY_SETTING_KEY = "audit_integrity_enabled";
 
     /**
@@ -54,11 +54,11 @@ public class AuditEventService {
             AuditEventRepository repository,
             AuditHashChainService hashChainService,
             @Lazy GovernancePolicyResolver governancePolicyResolver,
-            ProjectSettingRepository projectSettingRepository) {
+            TeamSettingRepository teamSettingRepository) {
         this.repository = repository;
         this.hashChainService = hashChainService;
         this.governancePolicyResolver = governancePolicyResolver;
-        this.projectSettingRepository = projectSettingRepository;
+        this.teamSettingRepository = teamSettingRepository;
     }
 
     /**
@@ -76,8 +76,8 @@ public class AuditEventService {
      * @param entityType    the entity type (e.g., "connection_config", "instruction_asset")
      * @param entityId      the parent row id
      * @param eventType     the event type (e.g., "CREATED", "PUBLISHED", "DISABLED")
-     * @param scopeType     the scope type ("ORGANIZATION" or "PROJECT")
-     * @param projectId     the project id (null for org-scoped events)
+     * @param scopeType     the scope type ("ORGANIZATION" or "TEAM")
+     * @param teamId     the Team id (null for org-scoped events)
      * @param actorId       the user id who triggered the event
      * @param actorDisplayName the user's display name (denormalized for survival after deletion)
      * @param versionId     the version row id (null for parent-only events)
@@ -93,7 +93,7 @@ public class AuditEventService {
             UUID entityId,
             String eventType,
             String scopeType,
-            UUID projectId,
+            UUID teamId,
             UUID actorId,
             String actorDisplayName,
             UUID versionId,
@@ -101,7 +101,7 @@ public class AuditEventService {
             Map<String, Object> beforeSnapshot,
             Map<String, Object> afterSnapshot,
             Map<String, Object> metadata) {
-        return buildAndSave(entityType, entityId, eventType, scopeType, projectId,
+        return buildAndSave(entityType, entityId, eventType, scopeType, teamId,
                 actorId, actorDisplayName, versionId, reasonCode,
                 beforeSnapshot, afterSnapshot, metadata);
     }
@@ -129,7 +129,7 @@ public class AuditEventService {
             UUID entityId,
             String eventType,
             String scopeType,
-            UUID projectId,
+            UUID teamId,
             UUID actorId,
             String actorDisplayName,
             UUID versionId,
@@ -137,7 +137,7 @@ public class AuditEventService {
             Map<String, Object> beforeSnapshot,
             Map<String, Object> afterSnapshot,
             Map<String, Object> metadata) {
-        return buildAndSave(entityType, entityId, eventType, scopeType, projectId,
+        return buildAndSave(entityType, entityId, eventType, scopeType, teamId,
                 actorId, actorDisplayName, versionId, reasonCode,
                 beforeSnapshot, afterSnapshot, metadata);
     }
@@ -151,7 +151,7 @@ public class AuditEventService {
             UUID entityId,
             String eventType,
             String scopeType,
-            UUID projectId,
+            UUID teamId,
             UUID actorId,
             String actorDisplayName,
             UUID versionId,
@@ -166,7 +166,7 @@ public class AuditEventService {
         event.setEntityId(entityId);
         event.setVersionId(versionId);
         event.setScopeType(scopeType);
-        event.setProjectId(projectId);
+        event.setTeamId(teamId);
         event.setActorId(actorId);
         event.setActorDisplayName(actorDisplayName);
         event.setReasonCode(reasonCode);
@@ -186,7 +186,7 @@ public class AuditEventService {
         // Hash-chain the event if chaining is active for this scope.
         // Must happen BEFORE the initial save because hash fields are
         // updatable=false (no UPDATE after INSERT).
-        if (isChainingActiveForScope(scopeType, projectId)) {
+        if (isChainingActiveForScope(scopeType, teamId)) {
             hashChainService.chainEvent(event);
         }
 
@@ -199,8 +199,8 @@ public class AuditEventService {
     }
 
     @Transactional(readOnly = true)
-    public List<AuditEvent> findByScope(String scopeType, UUID projectId) {
-        return repository.findByScopeTypeAndProjectIdOrderByTimestampDesc(scopeType, projectId);
+    public List<AuditEvent> findByScope(String scopeType, UUID teamId) {
+        return repository.findByScopeTypeAndTeamIdOrderByTimestampDesc(scopeType, teamId);
     }
 
     @Transactional(readOnly = true)
@@ -269,29 +269,29 @@ public class AuditEventService {
      * <p>Resolution:
      * <ol>
      *   <li>Read the governance profile's {@code AUDIT_INTEGRITY} ceiling.</li>
-     *   <li>STRICT (ON) ⇒ always chain, ignore project setting.</li>
-     *   <li>STANDARD/FLEXIBLE (OFF) ⇒ chain only if the project setting
+     *   <li>STRICT (ON) ⇒ always chain, ignore Team setting.</li>
+     *   <li>STANDARD/FLEXIBLE (OFF) ⇒ chain only if the Team setting
      *       {@code audit_integrity_enabled} is {@code "true"}.
-     *       ORG-scope events (projectId=null) follow the ceiling directly.</li>
+     *       ORG-scope events (teamId=null) follow the ceiling directly.</li>
      * </ol>
      */
-    private boolean isChainingActiveForScope(String scopeType, UUID projectId) {
+    private boolean isChainingActiveForScope(String scopeType, UUID teamId) {
         EffectivePolicy policy = governancePolicyResolver.resolve(
-                projectId != null ? GovernanceScope.ofProject(projectId) : GovernanceScope.orgScope());
+                teamId != null ? GovernanceScope.ofTeam(teamId) : GovernanceScope.orgScope());
         String ceiling = policy.single(ProductFeature.AUDIT_INTEGRITY);
 
         if ("ON".equals(ceiling)) {
             return true; // STRICT forces chaining
         }
 
-        // STANDARD/FLEXIBLE: chain only if project setting is on.
-        // ORG-scope events (projectId=null) have no project setting to check.
-        if (projectId == null) {
+        // STANDARD/FLEXIBLE: chain only if Team setting is on.
+        // ORG-scope events (teamId=null) have no Team setting to check.
+        if (teamId == null) {
             return false;
         }
 
-        return projectSettingRepository
-                .findByProjectIdAndSettingKey(projectId, AUDIT_INTEGRITY_SETTING_KEY)
+        return teamSettingRepository
+                .findByTeamIdAndSettingKey(teamId, AUDIT_INTEGRITY_SETTING_KEY)
                 .map(s -> "true".equalsIgnoreCase(s.getSettingValue()))
                 .orElse(false);
     }

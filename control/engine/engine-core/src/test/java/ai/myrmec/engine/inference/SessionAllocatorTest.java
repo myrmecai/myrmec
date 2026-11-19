@@ -14,7 +14,7 @@ import ai.myrmec.engine.conversation.event.IdleSessionExpiredEvent;
 import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
 import ai.myrmec.engine.node.NodeRegistryService;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -55,22 +55,22 @@ class SessionAllocatorTest extends IntegrationTestBase {
                 created.agent(), null, UUID.randomUUID().toString(), "laptop", pool, Map.of(), "node-1"));
     }
 
-    private Project project() {
-        return data.project().named("a-proj").create();
+    private team team() {
+        return data.team().named("a-proj").create();
     }
 
     @Test
     void offerReservesPendingCapacityAtomically() {
         AgentHostInstance instance = openInstance(2);
-        Project project = project();
+        team team = team();
 
         UUID s1 = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId()).orElseThrow();
+                team.getId(), instance.getAgentHostId()).orElseThrow();
         UUID s2 = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId()).orElseThrow();
+                team.getId(), instance.getAgentHostId()).orElseThrow();
         // Pool 2: third offer must be refused (pending + active < pool).
         assertThat(allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId())).isEmpty();
+                team.getId(), instance.getAgentHostId())).isEmpty();
 
         Session first = sessionRepository.findById(s1).orElseThrow();
         assertThat(first.getAllocationState()).isEqualTo(SessionAllocator.ALLOC_STATE_OFFERED);
@@ -81,26 +81,26 @@ class SessionAllocatorTest extends IntegrationTestBase {
     @Test
     void acceptRejectAndExpiryAreSingleOutcomeTransitions() {
         AgentHostInstance instance = openInstance(3);
-        Project project = project();
+        team team = team();
 
         UUID accepted = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId()).orElseThrow();
+                team.getId(), instance.getAgentHostId()).orElseThrow();
         assertThat(allocator.accept(accepted)).isTrue();
         assertThat(allocator.accept(accepted)).isFalse(); // already INITIALIZING
         assertThat(sessionRepository.findById(accepted).orElseThrow().getAllocationState())
                 .isEqualTo(SessionAllocator.ALLOC_STATE_INITIALIZING);
 
         UUID rejected = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId()).orElseThrow();
+                team.getId(), instance.getAgentHostId()).orElseThrow();
         allocator.reject(rejected, "NO_CAPACITY", "host refused", true);
         assertThat(sessionRepository.findById(rejected).orElseThrow().getAllocationState())
                 .isEqualTo(SessionAllocator.ALLOC_STATE_CLOSED);
         // Capacity is back: a fresh offer succeeds on the same instance.
         assertThat(allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId())).isPresent();
+                team.getId(), instance.getAgentHostId())).isPresent();
 
         UUID expired = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId()).orElseThrow();
+                team.getId(), instance.getAgentHostId()).orElseThrow();
         Session row = sessionRepository.findById(expired).orElseThrow();
         row.setOfferExpiresAt(Instant.now().minusSeconds(60));
         sessionRepository.saveAndFlush(row);
@@ -113,10 +113,10 @@ class SessionAllocatorTest extends IntegrationTestBase {
     @Test
     void openedMintsExactlyOneAgentRowPerSession() {
         AgentHostInstance instance = openInstance(2);
-        Project project = project();
+        team team = team();
 
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId()).orElseThrow();
+                team.getId(), instance.getAgentHostId()).orElseThrow();
         allocator.accept(sessionId);
         allocator.confirmOpened(sessionId, "slot-thread-1");
 
@@ -138,10 +138,10 @@ class SessionAllocatorTest extends IntegrationTestBase {
     @Test
     void closeReturnsCapacityOnceAndReleasesTheWorker() {
         AgentHostInstance instance = openInstance(1);
-        Project project = project();
+        team team = team();
 
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId()).orElseThrow();
+                team.getId(), instance.getAgentHostId()).orElseThrow();
         allocator.accept(sessionId);
         allocator.confirmOpened(sessionId, "slot-thread-1");
 
@@ -152,7 +152,7 @@ class SessionAllocatorTest extends IntegrationTestBase {
         assertThat(closed.getClosedAt()).isNotNull();
         // The Agent row is released (IDLE) and reusable — capacity is back.
         assertThat(allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId())).isPresent();
+                team.getId(), instance.getAgentHostId())).isPresent();
 
         // Idempotent close: second call does nothing.
         allocator.close(sessionId, SessionCloseReasonForTest.CONVERSATION_ARCHIVED);
@@ -162,10 +162,10 @@ class SessionAllocatorTest extends IntegrationTestBase {
     @Test
     void idleLeaseExpiryClosesActiveSessions() {
         AgentHostInstance instance = openInstance(2);
-        Project project = project();
+        team team = team();
 
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId()).orElseThrow();
+                team.getId(), instance.getAgentHostId()).orElseThrow();
         allocator.accept(sessionId);
         allocator.confirmOpened(sessionId, "slot-thread-1");
 
@@ -180,7 +180,7 @@ class SessionAllocatorTest extends IntegrationTestBase {
                 .isEqualTo(SessionAllocator.ALLOC_STATE_CLOSED);
         // Capacity returned.
         assertThat(allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId())).isPresent();
+                team.getId(), instance.getAgentHostId())).isPresent();
     }
 
     /**
@@ -192,17 +192,17 @@ class SessionAllocatorTest extends IntegrationTestBase {
     @Test
     void initializationTimeoutSweepsStuckInitializingSessionsClosed() {
         AgentHostInstance instance = openInstance(3);
-        Project project = project();
+        team team = team();
 
         UUID stuck = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId()).orElseThrow();
+                team.getId(), instance.getAgentHostId()).orElseThrow();
         assertThat(allocator.accept(stuck)).isTrue();
         // accept() re-arms the deadline — verify before aging it.
         assertThat(sessionRepository.findById(stuck).orElseThrow().getOfferExpiresAt())
                 .isAfter(Instant.now());
 
         UUID opened = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId()).orElseThrow();
+                team.getId(), instance.getAgentHostId()).orElseThrow();
         allocator.accept(opened);
         allocator.confirmOpened(opened, "slot-thread-1");
 
@@ -223,13 +223,13 @@ class SessionAllocatorTest extends IntegrationTestBase {
         assertThat(activeRow.getAllocationState()).isEqualTo(SessionAllocator.ALLOC_STATE_ACTIVE);
         // Capacity returned for the swept slot.
         assertThat(allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId())).isPresent();
+                team.getId(), instance.getAgentHostId())).isPresent();
     }
 
     @Test
     void concurrentOffersCannotOversubscribeThePool() throws Exception {
         AgentHostInstance instance = openInstance(2);
-        Project project = project();
+        team team = team();
         AtomicInteger wins = new AtomicInteger();
         CountDownLatch start = new CountDownLatch(1);
         ExecutorService pool = Executors.newFixedThreadPool(4);
@@ -239,7 +239,7 @@ class SessionAllocatorTest extends IntegrationTestBase {
                 try {
                     start.await();
                     allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                            project.getId(), instance.getAgentHostId())
+                            team.getId(), instance.getAgentHostId())
                             .ifPresent(id -> wins.incrementAndGet());
                 } catch (Exception e) {
                     // counted as a loss
@@ -262,14 +262,14 @@ class SessionAllocatorTest extends IntegrationTestBase {
     @Test
     void twoSessionsOnOneInstanceMintExactlyOneWorkerEachAndCloseReleases() {
         AgentHostInstance instance = openInstance(2);
-        Project project = project();
+        team team = team();
 
         UUID conversationA = UUID.randomUUID();
         UUID conversationB = UUID.randomUUID();
         UUID sessionA = allocator.offer("CONVERSATION", conversationA, "CONVERSATION",
-                project.getId(), instance.getAgentHostId()).orElseThrow();
+                team.getId(), instance.getAgentHostId()).orElseThrow();
         UUID sessionB = allocator.offer("CONVERSATION", conversationB, "CONVERSATION",
-                project.getId(), instance.getAgentHostId()).orElseThrow();
+                team.getId(), instance.getAgentHostId()).orElseThrow();
 
         allocator.accept(sessionA);
         allocator.accept(sessionB);
@@ -298,9 +298,9 @@ class SessionAllocatorTest extends IntegrationTestBase {
         // Disabled half: the e2e profile sets myrmec.host.allocation-sweep.enabled=false,
         // so the autowired allocator's sweep must be a no-op — an expired offer survives.
         AgentHostInstance instance = openInstance(2);
-        Project project = project();
+        team team = team();
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId()).orElseThrow();
+                team.getId(), instance.getAgentHostId()).orElseThrow();
         // Force the offer to be already expired.
         Session row = sessionRepository.findById(sessionId).orElseThrow();
         row.setOfferExpiresAt(Instant.now().minusSeconds(60));
@@ -326,9 +326,9 @@ class SessionAllocatorTest extends IntegrationTestBase {
     // ------------------------------------------------------------------
 
     /** Active session fixture: offer → accept → confirmOpened. */
-    private UUID activeSession(AgentHostInstance instance, Project project) {
+    private UUID activeSession(AgentHostInstance instance, team team) {
         UUID sessionId = allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId()).orElseThrow();
+                team.getId(), instance.getAgentHostId()).orElseThrow();
         allocator.accept(sessionId);
         allocator.confirmOpened(sessionId, "slot-thread-1");
         return sessionId;
@@ -357,10 +357,10 @@ class SessionAllocatorTest extends IntegrationTestBase {
     @org.springframework.transaction.annotation.Transactional
     void idleLeaseSweepPublishesIdleEventForConversationSessionsOnly() {
         AgentHostInstance instance = openInstance(3);
-        Project project = project();
+        team team = team();
 
         // A CONVERSATION session (activeSession) with a bound host: must publish.
-        UUID conversationSession = activeSession(instance, project);
+        UUID conversationSession = activeSession(instance, team);
         UUID conversationId = UUID.randomUUID();
         Session convRow = sessionRepository.findById(conversationSession).orElseThrow();
         convRow.setRefId(conversationId);
@@ -371,7 +371,7 @@ class SessionAllocatorTest extends IntegrationTestBase {
         // covers every ACTIVE session past expiry, so the WORKFLOW row needs
         // an aged idle lease too (a fresh ACTIVE row carries one).
         UUID workflowSession = allocator.offer("WORKFLOW", UUID.randomUUID(), "WORKFLOW",
-                project.getId(), instance.getAgentHostId()).orElseThrow();
+                team.getId(), instance.getAgentHostId()).orElseThrow();
         allocator.accept(workflowSession);
         allocator.confirmOpened(workflowSession, "wf-slot");
         Session wfRow = sessionRepository.findById(workflowSession).orElseThrow();
@@ -425,8 +425,8 @@ class SessionAllocatorTest extends IntegrationTestBase {
     @Test
     void touchIdleLeaseRearmsExpiryAndSweepSparesTheSession() {
         AgentHostInstance instance = openInstance(2);
-        Project project = project();
-        UUID sessionId = activeSession(instance, project);
+        team team = team();
+        UUID sessionId = activeSession(instance, team);
 
         // Age the lease past the window first.
         Session row = sessionRepository.findById(sessionId).orElseThrow();
@@ -453,8 +453,8 @@ class SessionAllocatorTest extends IntegrationTestBase {
     @Test
     void idleLeaseSweepSkipsSessionsWithRunningExecution() {
         AgentHostInstance instance = openInstance(2);
-        Project project = project();
-        UUID sessionId = activeSession(instance, project);
+        team team = team();
+        UUID sessionId = activeSession(instance, team);
 
         Session row = sessionRepository.findById(sessionId).orElseThrow();
         row.setIdleLeaseExpiresAt(Instant.now().minusSeconds(60));
@@ -478,8 +478,8 @@ class SessionAllocatorTest extends IntegrationTestBase {
     @Test
     void terminalExecutionReleasesGuardAndSessionSweepsClosed() {
         AgentHostInstance instance = openInstance(2);
-        Project project = project();
-        UUID sessionId = activeSession(instance, project);
+        team team = team();
+        UUID sessionId = activeSession(instance, team);
 
         Session row = sessionRepository.findById(sessionId).orElseThrow();
         row.setIdleLeaseExpiresAt(Instant.now().minusSeconds(60));
@@ -503,6 +503,6 @@ class SessionAllocatorTest extends IntegrationTestBase {
                 .isEqualTo(SessionAllocator.ALLOC_STATE_CLOSED);
         // Capacity returned.
         assertThat(allocator.offer("CONVERSATION", UUID.randomUUID(), "CONVERSATION",
-                project.getId(), instance.getAgentHostId())).isPresent();
+                team.getId(), instance.getAgentHostId())).isPresent();
     }
 }

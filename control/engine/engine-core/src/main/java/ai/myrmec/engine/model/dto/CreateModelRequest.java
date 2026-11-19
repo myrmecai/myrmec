@@ -5,6 +5,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.util.Map;
 
 /**
@@ -33,8 +34,6 @@ public class CreateModelRequest {
     @Size(max = 500, message = "API endpoint cannot exceed 500 characters")
     private String apiEndpoint;
 
-    private Boolean supportsVision;
-
     private Map<String, Object> infraConfig;
 
     private Map<String, Object> defaultParams;
@@ -43,4 +42,9 @@ public class CreateModelRequest {
     private java.math.BigDecimal outputPrice;
     @Size(max = 3)
     private String currency;
+
+    private Integer contextWindowTokens;
+    private Integer maxOutputTokens;
+    private LocalDate trainingCutoffDate;
+    private LocalDate releaseDate;
 }

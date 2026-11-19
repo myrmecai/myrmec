@@ -2,6 +2,7 @@ package ai.myrmec.engine.model;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -47,4 +48,14 @@ public interface ModelRepository extends JpaRepository<Model, String> {
     default List<Model> findAllActive() {
         return findByStatus(ModelStatus.ACTIVE);
     }
+
+    /**
+     * Check whether the given model has a specific capability binding.
+     */
+    @Query(value = """
+            SELECT CASE WHEN COUNT(*) > 0 THEN true ELSE false END
+            FROM model_capability_bindings
+            WHERE model_code = :modelCode AND capability_code = :capabilityCode
+            """, nativeQuery = true)
+    boolean hasCapability(@Param("modelCode") String modelCode, @Param("capabilityCode") String capabilityCode);
 }

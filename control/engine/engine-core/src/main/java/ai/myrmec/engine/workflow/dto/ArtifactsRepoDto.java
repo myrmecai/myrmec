@@ -23,7 +23,7 @@ public record ArtifactsRepoDto(
         @Size(max = 100) String baseBranch,
         
         /**
-         * ID of a {@link ai.myrmec.engine.secret.Secret} (global or project-scoped)
+         * ID of a {@link ai.myrmec.engine.secret.Secret} (global or Team-scoped)
          * holding git credentials — typically a BEARER_TOKEN or USERNAME_PASSWORD.
          * Null = unauthenticated.
          */

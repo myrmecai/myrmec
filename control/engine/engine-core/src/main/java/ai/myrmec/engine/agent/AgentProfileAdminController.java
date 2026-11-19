@@ -57,7 +57,8 @@ public class AgentProfileAdminController {
                 .map(p -> AgentProfileResponse.from(
                         p,
                         versionService.findPublishedWithTools(p.getId()).orElse(null),
-                        versionService.findOpenDraft(p.getId()).orElse(null)))
+                        versionService.findOpenDraft(p.getId()).orElse(null),
+                        versionService))
                 .collect(Collectors.toList()));
     }
 
@@ -73,7 +74,8 @@ public class AgentProfileAdminController {
         return ResponseEntity.ok(AgentProfileResponse.from(
                 profile,
                 versionService.findPublishedWithTools(id).orElse(null),
-                versionService.findOpenDraft(id).orElse(null)));
+                versionService.findOpenDraft(id).orElse(null),
+                versionService));
     }
 
     @Operation(summary = "Create a new agent profile")
@@ -119,7 +121,8 @@ public class AgentProfileAdminController {
                 .body(AgentProfileResponse.from(
                         profile,
                         versionService.findPublishedWithTools(profile.getId()).orElse(null),
-                        versionService.findOpenDraft(profile.getId()).orElse(null)));
+                        versionService.findOpenDraft(profile.getId()).orElse(null),
+                        versionService));
     }
 
     @Operation(summary = "Update an agent profile")
@@ -149,7 +152,8 @@ public class AgentProfileAdminController {
         return ResponseEntity.ok(AgentProfileResponse.from(
                 profile,
                 versionService.findPublishedWithTools(id).orElse(null),
-                versionService.findOpenDraft(id).orElse(null)));
+                versionService.findOpenDraft(id).orElse(null),
+                versionService));
     }
 
     @Operation(summary = "Delete an agent profile")
@@ -204,7 +208,7 @@ public class AgentProfileAdminController {
     public ResponseEntity<List<AgentProfileVersionResponse>> listVersions(@PathVariable UUID id) {
         profileService.getProfile(id); // 404 when the profile is absent
         return ResponseEntity.ok(versionService.listVersions(id).stream()
-                .map(AgentProfileVersionResponse::from)
+                .map(v -> AgentProfileVersionResponse.from(v, versionService))
                 .toList());
     }
 
@@ -216,7 +220,8 @@ public class AgentProfileAdminController {
     })
     @GetMapping("/{id}/draft")
     public ResponseEntity<AgentProfileVersionResponse> getDraft(@PathVariable UUID id) {
-        return ResponseEntity.ok(AgentProfileVersionResponse.from(versionService.getOpenDraft(id)));
+        return ResponseEntity.ok(AgentProfileVersionResponse.from(
+                versionService.getOpenDraft(id), versionService));
     }
 
     @Operation(summary = "Open a new draft by cloning the currently published version (409 if a draft is open)")
@@ -230,7 +235,7 @@ public class AgentProfileAdminController {
     @PostMapping("/{id}/versions")
     public ResponseEntity<AgentProfileVersionResponse> openDraft(@PathVariable UUID id) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(AgentProfileVersionResponse.from(versionService.createDraft(id)));
+                .body(AgentProfileVersionResponse.from(versionService.createDraft(id), versionService));
     }
 
     @Operation(summary = "Edit the open draft's behaviour fields (PATCH semantics)")
@@ -250,7 +255,8 @@ public class AgentProfileAdminController {
         var saved = versionService.updateDraft(
                 draft.getId(),
                 request.getCapabilities() != null
-                        ? request.getCapabilities() : draft.getCapabilities(),
+                        ? request.getCapabilities()
+                        : versionService.getCapabilityKeys(draft.getId()),
                 request.getToolCodes(),
                 request.getSystemPrompt() != null
                         ? request.getSystemPrompt() : draft.getSystemPrompt(),
@@ -259,7 +265,7 @@ public class AgentProfileAdminController {
                 request.getInteractionMode() != null
                         ? AgentProfileVersion.InteractionMode.valueOf(request.getInteractionMode())
                         : draft.getInteractionMode());
-        return ResponseEntity.ok(AgentProfileVersionResponse.from(saved));
+        return ResponseEntity.ok(AgentProfileVersionResponse.from(saved, versionService));
     }
 
     @Operation(summary = "Discard the open draft, freeing the single-draft slot")
@@ -287,6 +293,6 @@ public class AgentProfileAdminController {
             @PathVariable UUID id,
             @ai.myrmec.engine._system.security.CurrentUser UUID publisherId) {
         var published = versionService.publish(id, publisherId);
-        return ResponseEntity.ok(AgentProfileVersionResponse.from(published));
+        return ResponseEntity.ok(AgentProfileVersionResponse.from(published, versionService));
     }
 }

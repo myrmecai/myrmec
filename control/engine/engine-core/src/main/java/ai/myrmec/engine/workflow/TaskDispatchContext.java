@@ -39,7 +39,7 @@ public record TaskDispatchContext(
         UUID taskId,
         UUID attemptId,
         UUID requestId,
-        UUID projectId,
+        UUID teamId,
         UUID agentProfileId,
         String stepId,
         boolean orchestration,

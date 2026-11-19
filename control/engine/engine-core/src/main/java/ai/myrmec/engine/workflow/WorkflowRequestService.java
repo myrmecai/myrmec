@@ -57,8 +57,8 @@ public class WorkflowRequestService {
     }
 
     @Transactional(readOnly = true)
-    public List<WorkflowRequestResponse> findByProject(UUID projectId) {
-        return requestRepository.findByWorkflowProjectId(projectId).stream()
+    public List<WorkflowRequestResponse> findByTeam(UUID teamId) {
+        return requestRepository.findByWorkflowTeamId(teamId).stream()
                 .map(this::toResponse)
                 .toList();
     }
@@ -86,17 +86,17 @@ public class WorkflowRequestService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", userId.toString()));
 
-        // Phase 8c: pre-flight token quota at PROJECT scope. Token spend on
+        // Phase 8c: pre-flight token quota at Team scope. Token spend on
         // workflow execution is hard to predict, so we charge a nominal cost
         // up-front and let downstream LLM calls record their actual usage.
-        UUID projectId = workflow.getProject() != null ? workflow.getProject().getId() : null;
-        if (projectId != null) {
+        UUID teamId = workflow.getTeam() != null ? workflow.getTeam().getId() : null;
+        if (teamId != null) {
             QuotaDecision decision = quotaPolicyEngine.check(
-                    QuotaScope.PROJECT, projectId, QuotaResourceType.TOKENS, 0L);
+                    QuotaScope.TEAM, teamId, QuotaResourceType.TOKENS, 0L);
             if (decision.isBlocked()) {
                 throw new ai.myrmec.engine._system.exception.QuotaExceededException(
-                        decision.getScopeHit() != null ? decision.getScopeHit() : QuotaScope.PROJECT,
-                        projectId,
+                        decision.getScopeHit() != null ? decision.getScopeHit() : QuotaScope.TEAM,
+                        teamId,
                         QuotaResourceType.TOKENS,
                         decision.getLimitAmount(),
                         decision.getConsumedAmount());
@@ -129,7 +129,7 @@ public class WorkflowRequestService {
             orchestrationRunService.pinRun(
                     savedRequest.getId(),
                     workflow.getId(),
-                    projectId,
+                    teamId,
                     boundProfileId);
         }
 
@@ -207,8 +207,10 @@ public class WorkflowRequestService {
         AgentProfile profile = agentProfileRepository.findById(agentProfileId)
                 .orElseThrow(() -> new ResourceNotFoundException("AgentProfile", agentProfileIdStr));
 
-        // Build task input from workflow input + step prompt
-        Map<String, Object> taskInput = new HashMap<>(input);
+        // Build task input from workflow input + step prompt.
+        // The input map is optional in StartWorkflowRequest; default to empty
+        // so callers (e.g. the VS Code plugin's "New Run") can omit it.
+        Map<String, Object> taskInput = input != null ? new HashMap<>(input) : new HashMap<>();
         if (step.containsKey("prompt")) {
             taskInput.put("prompt", step.get("prompt"));
         }

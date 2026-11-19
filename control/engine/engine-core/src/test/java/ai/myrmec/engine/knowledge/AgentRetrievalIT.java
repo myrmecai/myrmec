@@ -80,11 +80,11 @@ class AgentRetrievalIT extends IntegrationTestBase {
     /**
      * Create an ACTIVE session with the given knowledge source pinned.
      */
-    private UUID createSessionWithPinnedSource(UUID projectId, UUID knowledgeSourceId) {
+    private UUID createSessionWithPinnedSource(UUID teamId, UUID knowledgeSourceId) {
         ai.myrmec.engine.inference.Session session = new ai.myrmec.engine.inference.Session();
         session.setServiceType("CONVERSATION");
         session.setRefId(UUID.randomUUID());
-        session.setProjectId(projectId);
+        session.setTeamId(teamId);
         session.setStatus("ACTIVE");
         session.setContextPins(Map.of(
                 "knowledgeSourceIds", List.of(knowledgeSourceId.toString())));
@@ -93,9 +93,9 @@ class AgentRetrievalIT extends IntegrationTestBase {
 
     @Test
     void retrieve_returnsHitsFromStubProvider() {
-        var project = data.project().named("retr-proj").create();
+        var team = data.team().named("retr-proj").create();
         UUID sourceId = setupKnowledgeBase("retr");
-        UUID sessionId = createSessionWithPinnedSource(project.getId(), sourceId);
+        UUID sessionId = createSessionWithPinnedSource(team.getId(), sourceId);
 
         RetrievalRequest request = new RetrievalRequest(
                 sourceId, "quick", 5, null, sessionId, null, null);
@@ -125,12 +125,12 @@ class AgentRetrievalIT extends IntegrationTestBase {
 
     @Test
     void retrieve_sourceNotPinnedReturns403() {
-        var project = data.project().named("retr-unpinned-proj").create();
+        var team = data.team().named("retr-unpinned-proj").create();
         UUID sourceId = setupKnowledgeBase("retr-unpinned");
 
         // Create a session but pin a DIFFERENT source
         UUID otherSourceId = UUID.randomUUID();
-        UUID sessionId = createSessionWithPinnedSource(project.getId(), otherSourceId);
+        UUID sessionId = createSessionWithPinnedSource(team.getId(), otherSourceId);
 
         RetrievalRequest request = new RetrievalRequest(
                 sourceId, "quick", 5, null, sessionId, null, null);
@@ -142,9 +142,9 @@ class AgentRetrievalIT extends IntegrationTestBase {
 
     @Test
     void retrieve_noMatchingChunksReturnsEmptyHits() {
-        var project = data.project().named("retr-empty-proj").create();
+        var team = data.team().named("retr-empty-proj").create();
         UUID sourceId = setupKnowledgeBase("retr-empty");
-        UUID sessionId = createSessionWithPinnedSource(project.getId(), sourceId);
+        UUID sessionId = createSessionWithPinnedSource(team.getId(), sourceId);
 
         // Query that doesn't match any chunk content
         RetrievalRequest request = new RetrievalRequest(
@@ -156,7 +156,7 @@ class AgentRetrievalIT extends IntegrationTestBase {
 
     @Test
     void retrieve_unknownProviderIdReturns404() {
-        var project = data.project().named("retr-badprov-proj").create();
+        var team = data.team().named("retr-badprov-proj").create();
 
         // Create a provider with config pointing to a non-existent provider id
         var provider = data.knowledgeProvider()
@@ -181,7 +181,7 @@ class AgentRetrievalIT extends IntegrationTestBase {
                 .withActor(TEST_ADMIN_ID, TEST_ADMIN_NAME)
                 .create();
 
-        UUID sessionId = createSessionWithPinnedSource(project.getId(), source.getId());
+        UUID sessionId = createSessionWithPinnedSource(team.getId(), source.getId());
 
         RetrievalRequest request = new RetrievalRequest(
                 source.getId(), "test", 5, null, sessionId, null, null);
@@ -193,9 +193,9 @@ class AgentRetrievalIT extends IntegrationTestBase {
 
     @Test
     void retrieve_topKLimitsResults() {
-        var project = data.project().named("retr-topk-proj").create();
+        var team = data.team().named("retr-topk-proj").create();
         UUID sourceId = setupKnowledgeBase("retr-topk");
-        UUID sessionId = createSessionWithPinnedSource(project.getId(), sourceId);
+        UUID sessionId = createSessionWithPinnedSource(team.getId(), sourceId);
 
         // topK=1 — should only return 1 of the 2 "quick" matches
         RetrievalRequest request = new RetrievalRequest(

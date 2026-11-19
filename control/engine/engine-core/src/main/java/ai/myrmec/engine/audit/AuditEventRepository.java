@@ -21,7 +21,7 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, Long>,
 
     List<AuditEvent> findByEntityTypeAndEntityIdOrderByTimestampDesc(String entityType, UUID entityId);
 
-    List<AuditEvent> findByScopeTypeAndProjectIdOrderByTimestampDesc(String scopeType, UUID projectId);
+    List<AuditEvent> findByScopeTypeAndTeamIdOrderByTimestampDesc(String scopeType, UUID teamId);
 
     List<AuditEvent> findByActorIdOrderByTimestampDesc(UUID actorId);
 
@@ -31,7 +31,7 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, Long>,
      * Find all events in a scope ordered by ascending ID — the chain
      * verification walk order. Used by {@link AuditHashChainService#verifyScope}.
      */
-    List<AuditEvent> findByScopeTypeAndProjectIdOrderByIdAsc(String scopeType, UUID projectId);
+    List<AuditEvent> findByScopeTypeAndTeamIdOrderByIdAsc(String scopeType, UUID teamId);
 
     /**
      * Native update to tamper with an event's hash — used only in tests

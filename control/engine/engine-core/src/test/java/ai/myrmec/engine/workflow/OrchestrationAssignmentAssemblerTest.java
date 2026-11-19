@@ -45,7 +45,7 @@ class OrchestrationAssignmentAssemblerTest extends IntegrationTestBase {
     private WorkflowService workflowService;
 
     private UUID profileId;
-    private UUID projectId;
+    private UUID teamId;
 
     /** A real local bare origin with a main branch (git ls-remote target). */
     private String originUrl;
@@ -63,7 +63,7 @@ class OrchestrationAssignmentAssemblerTest extends IntegrationTestBase {
                 originUrl = origin.toAbsolutePath().toString().replace('\\', '/'), "main");
         seed.toFile().deleteOnExit();
 
-        projectId = data.project().named("orch-asm")
+        teamId = data.team().named("orch-asm")
                 .withRepo(originUrl, "main").create().getId();
         profileId = data.agentProfile().named("orch-asm-profile").create().getId();
     }
@@ -121,7 +121,7 @@ class OrchestrationAssignmentAssemblerTest extends IntegrationTestBase {
                 List.of(), Map.of(), 600, null, null,
                 "ORCHESTRATOR", orchestration, null);
         var created = workflowService.create(new CreateWorkflowRequest(
-                projectId, "asm-workflow-" + System.nanoTime(),
+                teamId, "asm-workflow-" + System.nanoTime(),
                 "Assembler test", List.of(step), null, null), TEST_ADMIN_ID);
         return workflowRepository.findById(created.id()).orElseThrow();
     }
@@ -257,7 +257,7 @@ class OrchestrationAssignmentAssemblerTest extends IntegrationTestBase {
                 List.of(), Map.of(), 300, null, null,
                 "INFERENCE", null, null);
         var created = workflowService.create(new CreateWorkflowRequest(
-                projectId, "asm-plain-" + System.nanoTime(), "Plain",
+                teamId, "asm-plain-" + System.nanoTime(), "Plain",
                 List.of(step), null, null), TEST_ADMIN_ID);
         Workflow workflow = workflowRepository().findById(created.id()).orElseThrow();
         WorkflowRequest request = requestOf(workflow);

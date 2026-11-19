@@ -11,11 +11,11 @@ import java.util.UUID;
 
 public interface WorkflowRepository extends JpaRepository<Workflow, UUID> {
 
-    List<Workflow> findByProjectId(UUID projectId);
+    List<Workflow> findByTeamId(UUID teamId);
 
-    List<Workflow> findByProjectIdAndStatus(UUID projectId, WorkflowStatus status);
+    List<Workflow> findByTeamIdAndStatus(UUID teamId, WorkflowStatus status);
 
-    Optional<Workflow> findByProjectIdAndName(UUID projectId, String name);
+    Optional<Workflow> findByTeamIdAndName(UUID teamId, String name);
 
-    boolean existsByProjectIdAndName(UUID projectId, String name);
+    boolean existsByTeamIdAndName(UUID teamId, String name);
 }

@@ -8,11 +8,13 @@ import ai.myrmec.engine.agent.AgentHostInstanceRepository;
 import ai.myrmec.engine.agent.AgentHostRepository;
 import ai.myrmec.engine.agent.AgentHostType;
 import ai.myrmec.engine.spi.crypto.EncryptionService;
+import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionAllocator;
 import ai.myrmec.engine.inference.SessionContextAssembler;
 import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.node.HostFrameRelayService;
 import ai.myrmec.engine.node.NodeRegistryService;
+import ai.myrmec.engine.user.UserPrincipal;
 import ai.myrmec.engine.websocket.host.payload.HostCapacityPayload;
 import ai.myrmec.engine.websocket.host.payload.HostHeartbeatPayload;
 import ai.myrmec.engine.websocket.host.payload.HostOpenPayload;
@@ -36,6 +38,7 @@ import ai.myrmec.engine.websocket.host.payload.ExecutionAcceptPayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionApprovalRequestedPayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionCancelledPayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionCompletePayload;
+import ai.myrmec.engine.websocket.host.payload.ExecutionControlPayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionControlStatePayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionDeltaPayload;
 import ai.myrmec.engine.websocket.host.payload.ExecutionEventPayload;
@@ -203,6 +206,13 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         return connectionManager;
     }
 
+    /** Test seam: expose the channel registry so channel-bound tests can
+     * construct a {@link HostChannelWebSocketHandler} wired to the same
+     * registry. */
+    public ChannelConnectionRegistry getChannelRegistry() {
+        return channelRegistry;
+    }
+
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) {
         final String correlationId;
@@ -269,7 +279,14 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                     handleExecutionInteractionDelta(session, envelope);
             case HostProtocol.EXECUTION_CONTROL_STATE ->
                     handleExecutionControlState(session, envelope);
-            case HostProtocol.EXECUTION_START, HostProtocol.EXECUTION_CANCEL ->
+            // §22.4 (Task 11 fix): the engine's durable HOLD/CONTINUE command
+            // is ENGINE→host only. The host must not author it; reject clearly.
+            case HostProtocol.EXECUTION_CONTROL ->
+                    sendError(session, correlationId, HostProtocol.INVALID_MESSAGE,
+                            "execution.control is engine→host only; a host may not send it",
+                            false, "EXECUTION", null);
+            case HostProtocol.EXECUTION_START, HostProtocol.EXECUTION_CANCEL,
+                    HostProtocol.EXECUTION_CONTROL_REQUEST_RESOLVED ->
                     logEngineToHostIgnored(session, envelope);
             // §8.7 (A4): execution.policy.update is an ENGINE→host frame — a
             // host-authored copy is a protocol violation, NOT a silent ignore
@@ -333,25 +350,21 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
-        // Local-owner model (§3.7/§4.1): agent_hosts.owner_user_id is gone —
-        // the ONLY owner record is agent_host_instances.owner_user_id, seeded
-        // from the additive host.open payload field (the HOST_JWT carries no
-        // user identity, §18 token isolation). Validation matrix:
-        //   LOCAL  + ownerUserId        → instance stamped with the owner;
-        //   LOCAL  + ownerUserId == null → allowed (owner stays null), but
-        //         logged — the VS Code plugin always sends it;
-        //   MANAGED + ownerUserId != null → protocol violation (a headless
-        //         supervisor must never claim an owner).
+        // Local-owner model (§3.7/§4.1): the ONLY owner record is
+        // agent_host_instances.owner_user_id, stamped from the HOST token's
+        // ownerUserId claim (resolved at the handshake — the payload no
+        // longer carries owner identity; a MANAGED token can never carry
+        // the claim, so the old "owner on a MANAGED host" violation is
+        // structurally impossible).
         boolean localHost = host.getHostType() != AgentHostType.MANAGED;
-        UUID ownerUserId = open.ownerUserId();
+        UUID ownerUserId = (UUID) session.getAttributes()
+                .get(HostControlHandshakeInterceptor.ATTR_OWNER_USER_ID);
         if (!localHost && ownerUserId != null) {
-            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
-                    "MANAGED hosts do not carry an owner", false, "CONNECTION", null);
+            // Defense in depth: the claim exists only on LOCAL-minted tokens;
+            // a mismatch would mean a token/host binding corruption.
+            sendError(session, envelope.getMessageId(), HostProtocol.IDENTITY_MISMATCH,
+                    "MANAGED host presented an owner identity", false, "CONNECTION", null);
             return;
-        }
-        if (localHost && ownerUserId == null) {
-            log.debug("host.open for LOCAL host {} carries no ownerUserId — "
-                    + "instance owner stays null", hostId);
         }
         int announced = open.poolSize() > 0 ? open.poolSize() : 1;
         int effective = Math.min(announced, host.getMaxAgents());
@@ -797,7 +810,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         HostProtocolEnvelope envelope = HostProtocolEnvelope.reply(HostProtocol.SESSION_OPEN, null,
                 sessionAssembler.assembleContext(
                         sessionId, session.getServiceType(), session.getRefId(),
-                        session.getProjectId(), agentProfileId),
+                        session.getTeamId(), agentProfileId),
                 objectMapper);
         relayOrSend(sessionId, session.getHostInstanceId(), envelope);
     }
@@ -1096,7 +1109,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
     /**
      * §22.7 (Task 6, plan 2026-10-03-session-interaction): the host's chat
      * tool proposes an engine-authorized control. The engine resolves the
-     * execution's OWNERSHIP CHAIN (plan section 4 — project → workflow →
+     * execution's OWNERSHIP CHAIN (plan section 4 — Team → workflow →
      * request → task → attempt → execution) itself, derives the actor from
      * the persisted interaction (a host-supplied actor is impossible by
      * payload shape), and resolves the disposition transactionally. The
@@ -1254,6 +1267,82 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             // Malformed deltas are best-effort dropped — never a protocol
             // error (the durable complete is the authority; §22.6).
             log.debug("Dropping malformed execution.interaction.delta: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * §22.4 (Task 11 fix): the engine's durable HOLD/CONTINUE command. The
+     * frame is engine→host only, so on the control socket it is a protocol
+     * violation; on the dedicated channel it is the normal delivery path for
+     * the §22.3 interaction family. Identity matches the other execution arms
+     * (instance, executionId, dispatchId); a matching command is handed to
+     * {@link ExecutionControlService} for idempotent application. The host's
+     * resulting {@code execution.control.state} will be handled separately.
+     */
+    private void handleExecutionControl(WebSocketSession session,
+                                        HostProtocolEnvelope envelope) {
+        UUID instanceId = (UUID) session.getAttributes().get(ATTR_HOST_INSTANCE_ID);
+        if (instanceId == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                    "execution.control before host.opened", false, "EXECUTION", null);
+            return;
+        }
+        if (envelope.getHostInstanceId() == null || envelope.getSessionId() == null
+                || envelope.getExecutionId() == null) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "execution.control requires hostInstanceId, sessionId and executionId",
+                    false, "EXECUTION", null);
+            return;
+        }
+        try {
+            ExecutionControlPayload payload = objectMapper.treeToValue(
+                    envelope.getPayload(), ExecutionControlPayload.class);
+            SessionExecution execution = executionRepository.findById(
+                    envelope.getExecutionId()).orElse(null);
+            if (execution == null) {
+                sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                        "execution.control for unknown execution", false, "EXECUTION", null);
+                return;
+            }
+            // §22.3 identity walk: the execution must belong to this connection's session.
+            UUID boundSessionId = envelope.getSessionId();
+            if (!boundSessionId.equals(execution.getSessionId())
+                    || !instanceId.equals(executionSessionInstanceId(execution))) {
+                sendError(session, envelope.getMessageId(), HostProtocol.IDENTITY_MISMATCH,
+                        "execution does not belong to this connection's session", false,
+                        "EXECUTION", null);
+                return;
+            }
+            if (!payload.executionId().equals(execution.getId())
+                    || !executionIdsMatchDispatch(execution, payload)) {
+                sendError(session, envelope.getMessageId(), HostProtocol.IDENTITY_MISMATCH,
+                        "control command identity does not match the admitted execution",
+                        false, "EXECUTION", null);
+                return;
+            }
+            // §22.4: apply the command through the service, which updates the
+            // execution row and stores the resulting state record. The ack is
+            // sent after the command is durably applied.
+            ai.myrmec.engine.inference.execution.interaction.ExecutionScope scope =
+                    executionControlService.scopeForExecution(execution.getId());
+            UUID clientRequestId = payload.controlRequestId() != null
+                    ? payload.controlRequestId()
+                    : UUID.fromString(envelope.getMessageId());
+            ai.myrmec.engine.inference.execution.interaction.ControlRequest request =
+                    new ai.myrmec.engine.inference.execution.interaction.ControlRequest(
+                            clientRequestId, payload.action().name());
+            executionControlService.control(scope, enginePrincipal(execution), request);
+            acknowledge(session, envelope.getMessageId(), execution.getSessionId(), 0L);
+        } catch (ai.myrmec.engine._system.exception.ResourceInUseException e) {
+            // §22.4: terminal executions reject new controls — surface as
+            // protocol.error with the canonical reasonCode in the details.
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_STATE,
+                    "execution.control refused: execution is terminal", false, "EXECUTION",
+                    Map.of("reasonCode", "EXECUTION_TERMINAL"));
+        } catch (Exception e) {
+            sendError(session, envelope.getMessageId(), HostProtocol.INVALID_MESSAGE,
+                    "execution.control payload invalid: " + e.getMessage(),
+                    false, "EXECUTION", null);
         }
     }
 
@@ -1452,6 +1541,24 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    /** Synthetic user id for engine-originated control commands. */
+    private static final UUID ENGINE_USER_ID =
+            UUID.fromString("00000000-0000-0000-0000-000000000000");
+
+    /** A synthetic principal for engine-originated control commands. */
+    private UserPrincipal enginePrincipal(SessionExecution execution) {
+        // §22.4: engine-issued commands are applied on behalf of the engine
+        // itself. The control request row records a synthetic system user so
+        // the audit trail is explicit, and Team access is satisfied via
+        // the ownership chain already validated by scopeForExecution.
+        Session session = sessionRepository.findById(execution.getSessionId()).orElse(null);
+        UUID teamId = session != null ? session.getTeamId() : null;
+        List<String> roles = teamId != null
+                ? List.of("proj:" + teamId + ":TEAM_OWNER")
+                : List.of();
+        return new UserPrincipal(ENGINE_USER_ID, "engine", "engine@myrmec.local", roles);
+    }
+
     /** The §22.3 capability gate: the connection negotiated sessionInteraction. */
     private boolean advertisesSessionInteraction(UUID instanceId) {
         Object capability = connectionManager.getAdvertisedCapabilities(instanceId)
@@ -1468,6 +1575,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             case ExecutionInteractionFailedPayload failed -> failed.executionId();
             case ExecutionInteractionDeltaPayload delta -> delta.executionId();
             case ExecutionControlStatePayload state -> state.executionId();
+            case ExecutionControlPayload control -> control.executionId();
             default -> null;
         };
     }
@@ -1479,6 +1587,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             case ExecutionInteractionFailedPayload failed -> failed.dispatchId();
             case ExecutionInteractionDeltaPayload delta -> delta.dispatchId();
             case ExecutionControlStatePayload state -> state.dispatchId();
+            case ExecutionControlPayload control -> control.dispatchId();
             default -> null;
         };
         return dispatchId != null && dispatchId.equals(execution.getDispatchId());
@@ -1542,12 +1651,12 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
             if (!isReplay) {
                 ai.myrmec.engine.inference.Session sess = sessionRepository.findById(execution.getSessionId()).orElse(null);
                 UUID conversationId = sess != null && "CONVERSATION".equals(execution.getServiceType()) ? sess.getRefId() : null;
-                UUID projectId = sess != null ? sess.getProjectId() : null;
+                UUID teamId = sess != null ? sess.getTeamId() : null;
                 if ("CONVERSATION".equals(execution.getServiceType())) {
                     bridgeConversationTerminal(execution, sess, terminalState, payloadNode);
                 } else if ("WORKFLOW".equals(execution.getServiceType())) {
                     bridgeWorkflowTerminal(execution, terminalState, payloadNode, payloadMap,
-                            conversationId, projectId);
+                            conversationId, teamId);
                 }
             }
             acknowledge(session, envelope.getMessageId(), execution.getSessionId(), 0L);
@@ -1591,7 +1700,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
         switch (terminalState) {
             case COMPLETED -> {
                 ExecutionCompletePayload complete = objectMapper.convertValue(payloadNode, ExecutionCompletePayload.class);
-                executionBridge.onConversationComplete(conversationId, sess.getProjectId(), agentId, complete);
+                executionBridge.onConversationComplete(conversationId, sess.getTeamId(), agentId, complete);
             }
             case PAUSED -> {
                 ExecutionPausedPayload paused = objectMapper.convertValue(payloadNode, ExecutionPausedPayload.class);
@@ -1601,7 +1710,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                 ExecutionFailedPayload failed =
                         objectMapper.convertValue(payloadNode, ExecutionFailedPayload.class);
                 executionBridge.onConversationFailure(
-                        conversationId, sess.getProjectId(), agentId, failed);
+                        conversationId, sess.getTeamId(), agentId, failed);
             }
             case CANCELLED -> {
                 // No transcript row for a cancelled conversation turn.
@@ -1631,10 +1740,10 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                                         JsonNode payloadNode,
                                         Map<String, Object> payloadMap,
                                         UUID conversationId,
-                                        UUID projectId) {
+                                        UUID teamId) {
         if (execution.getDispatchId() != null) {
             bridgeOrchestrationTerminal(execution, terminalState, payloadNode, payloadMap,
-                    conversationId, projectId);
+                    conversationId, teamId);
             return;
         }
         UUID attemptId = attemptIdOf(execution);
@@ -1672,7 +1781,7 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                                               JsonNode payloadNode,
                                               Map<String, Object> payloadMap,
                                               UUID conversationId,
-                                              UUID projectId) {
+                                              UUID teamId) {
         UUID dispatchId = execution.getDispatchId();
         if (dispatchId == null) {
             log.debug("No dispatchId on orchestration execution {} — skipping outcome bridge", execution.getId());
@@ -1823,6 +1932,12 @@ public class HostControlWebSocketHandler extends TextWebSocketHandler {
                     handleExecutionInteractionDelta(channelSocket, envelope);
             case HostProtocol.EXECUTION_CONTROL_STATE ->
                     handleExecutionControlState(channelSocket, envelope);
+            // §22.4 (Task 11 fix): the engine's durable HOLD/CONTINUE command
+            // rides the dedicated channel (dedicated-only outbound from the
+            // engine, consumed by the SDK's coordinator). Identity validation
+            // and ack happen in the handler.
+            case HostProtocol.EXECUTION_CONTROL ->
+                    handleExecutionControl(channelSocket, envelope);
             default -> sendError(channelSocket, envelope.getMessageId(),
                     HostProtocol.INVALID_MESSAGE,
                     "Frame type " + type + " is not permitted on the dedicated channel",

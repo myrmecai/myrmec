@@ -16,8 +16,8 @@ import ai.myrmec.engine.knowledge.KnowledgeSource;
 import ai.myrmec.engine.knowledge.KnowledgeSourceRepository;
 import ai.myrmec.engine.model.Model;
 import ai.myrmec.engine.model.ModelService;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamRepository;
 import ai.myrmec.engine.secret.SecretPayload;
 import ai.myrmec.engine.secret.SecretResolverService;
 import ai.myrmec.engine.tool.Tool;
@@ -50,7 +50,7 @@ import java.util.UUID;
 public class SessionContextAssembler {
 
     private final ModelService modelService;
-    private final ProjectRepository projectRepository;
+    private final TeamRepository teamRepository;
     private final KnowledgeSourceRepository knowledgeSourceRepository;
     private final AgentProfileRepository agentProfileRepository;
     private final AgentProfileVersionService agentProfileVersionService;
@@ -110,7 +110,7 @@ public class SessionContextAssembler {
     /**
      * section 22.2: the effective interaction policy for orchestration
      * (WORKFLOW) sessions. Task 1 ships the InteractionProperties defaults —
-     * the project-policy configuration source is wired in Task 2 with the
+     * the Team-policy configuration source is wired in Task 2 with the
      * persistence; until then every orchestration session receives exactly
      * the section 22.2 default policy (validation lives in
      * InteractionProperties; the block is REQUIRED on the wire for WORKFLOW).
@@ -169,12 +169,12 @@ public class SessionContextAssembler {
      *
      * @param kind              "CONVERSATION" or "WORKFLOW" (§21.4 wire field)
      * @param refId             conversation_id or workflow_request_id
-     * @param projectId         project scope
+     * @param teamId         Team scope
      * @param agentProfileId    agent profile (for model + system prompt resolution)
      * @return the assembled SessionOpenPayload (ready to send over WebSocket)
      */
     @Transactional
-    public SessionOpenPayload assemble(String kind, UUID refId, UUID projectId,
+    public SessionOpenPayload assemble(String kind, UUID refId, UUID teamId,
                                         UUID agentProfileId) {
         // 1. Resolve agent profile and its PUBLISHED version (design
         //    §16.1: the behaviour contract lives on the version row).
@@ -184,13 +184,13 @@ public class SessionContextAssembler {
         AgentProfileVersion version = agentProfileVersionService.requirePublished(agentProfileId);
 
         // 2-6. Resolve model, workspace, tools, knowledge, HITL policy, and pins.
-        ResolvedContext ctx = resolveContext(profile, version, projectId);
+        ResolvedContext ctx = resolveContext(profile, version, teamId);
 
         // 7. Create session row
         Session session = new Session();
         session.setServiceType(kind);
         session.setRefId(refId);
-        session.setProjectId(projectId);
+        session.setTeamId(teamId);
         session.setContextPins(ctx.contextPins());
         session.setStatus(EntityStatus.ACTIVE);
         session = sessionRepository.save(session);
@@ -203,7 +203,7 @@ public class SessionContextAssembler {
         return new SessionOpenPayload(
                 session.getId(),
                 kind,
-                projectId,
+                teamId,
                 version.getId(),
                 ctx.modelConfig(),
                 ctx.workspace(),
@@ -229,8 +229,8 @@ public class SessionContextAssembler {
      */
     @Transactional
     public SessionOpenPayload assembleContext(UUID sessionId, String kind, UUID refId,
-                                              UUID projectId, UUID agentProfileId) {
-        return assembleContext(sessionId, kind, refId, projectId, agentProfileId, 0, null);
+                                              UUID teamId, UUID agentProfileId) {
+        return assembleContext(sessionId, kind, refId, teamId, agentProfileId, 0, null);
     }
 
     /**
@@ -240,14 +240,14 @@ public class SessionContextAssembler {
      */
     @Transactional
     public SessionOpenPayload assembleContext(UUID sessionId, String kind, UUID refId,
-                                              UUID projectId, UUID agentProfileId,
+                                              UUID teamId, UUID agentProfileId,
                                               int stepTimeoutSeconds, Integer stepMaxIterations) {
         AgentProfile profile = agentProfileRepository.findById(agentProfileId)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Agent profile not found: " + agentProfileId));
         AgentProfileVersion version = agentProfileVersionService.requirePublished(agentProfileId);
 
-        ResolvedContext ctx = resolveContext(profile, version, projectId);
+        ResolvedContext ctx = resolveContext(profile, version, teamId);
 
         // Install the pins on the EXISTING allocator-owned row.
         Session session = sessionRepository.findById(sessionId)
@@ -258,7 +258,7 @@ public class SessionContextAssembler {
         return new SessionOpenPayload(
                 sessionId,
                 kind,
-                projectId,
+                teamId,
                 version.getId(),
                 ctx.modelConfig(),
                 ctx.workspace(),
@@ -363,29 +363,29 @@ public class SessionContextAssembler {
 
     private ResolvedContext resolveContext(AgentProfile profile,
                                             AgentProfileVersion version,
-                                            UUID projectId) {
+                                            UUID teamId) {
         // 2. Resolve model (read the API key once per session for sealing)
         String modelApiKey = modelService.getApiKey(version.getDefaultModel());
         SessionOpenPayload.ModelConfig modelConfig =
                 resolveModel(profile, version, modelApiKey);
 
         // 3. Resolve workspace (nullable); read the repo token for sealing
-        String workspaceRepoToken = resolveWorkspaceToken(projectId);
-        SessionOpenPayload.WorkspaceConfig workspace = resolveWorkspace(projectId);
+        String workspaceRepoToken = resolveWorkspaceToken(teamId);
+        SessionOpenPayload.WorkspaceConfig workspace = resolveWorkspace(teamId);
 
         // 4. Resolve tool catalog (authorized set — filtered by the version)
         List<SessionOpenPayload.ToolDefinition> tools = resolveTools(profile.getId(), version);
 
         // 5. Resolve knowledge-source handles (pinned KB catalog — handles only)
-        List<KnowledgeSource> activeSources = resolveActiveKnowledgeSources(projectId);
+        List<KnowledgeSource> activeSources = resolveActiveKnowledgeSources(teamId);
         List<SessionOpenPayload.KnowledgeSourceHandle> kbHandles = activeSources.stream()
                 .map(s -> new SessionOpenPayload.KnowledgeSourceHandle(
                         s.getId(), s.getName(), s.getDescription()))
                 .toList();
 
-        // 6. Resolve project HITL policy
-        boolean autoHitl = projectRepository.findById(projectId)
-                .map(ai.myrmec.engine.project.Project::isAutoHitlOnDestructive)
+        // 6. Resolve team HITL policy
+        boolean autoHitl = teamRepository.findById(teamId)
+                .map(Team::isAutoHitlOnDestructive)
                 .orElse(false);
 
         // 6. Pin instruction asset versions + knowledge source IDs
@@ -396,9 +396,9 @@ public class SessionContextAssembler {
                 .map(UUID::toString)
                 .toList();
         contextPins.put("knowledgeSourceIds", sourceIds);
-        // Instruction asset version pinning — resolve published version IDs for the project scope
+        // Instruction asset version pinning — resolve published version IDs for the Team scope
         List<UUID> instructionVersionIds = instructionAssetVersionResolver
-                .resolveActiveVersionIdsForProject(projectId);
+                .resolveActiveVersionIdsForTeam(teamId);
         contextPins.put("instructionAssetVersionIds",
                 instructionVersionIds.stream().map(UUID::toString).toList());
 
@@ -512,35 +512,35 @@ public class SessionContextAssembler {
     }
 
     /** Read the workspace repo token for sealing (design §9); null when none. */
-    private String resolveWorkspaceToken(UUID projectId) {
-        Project project = projectRepository.findById(projectId).orElse(null);
-        if (project == null || project.getWorkspaceCredentialSecretId() == null) {
+    private String resolveWorkspaceToken(UUID teamId) {
+        Team team = teamRepository.findById(teamId).orElse(null);
+        if (team == null || team.getWorkspaceCredentialSecretId() == null) {
             return null;
         }
         try {
             SecretPayload payload = secretResolverService.resolve(
-                    project.getWorkspaceCredentialSecretId(), projectId);
+                    team.getWorkspaceCredentialSecretId(), teamId);
             return extractToken(payload);
         } catch (Exception e) {
-            log.warn("Failed to resolve workspace credential for project {}: {}",
-                    projectId, e.getMessage());
+            log.warn("Failed to resolve workspace credential for team {}: {}",
+                    teamId, e.getMessage());
             return null;
         }
     }
 
-    private SessionOpenPayload.WorkspaceConfig resolveWorkspace(UUID projectId) {
-        Project project = projectRepository.findById(projectId).orElse(null);
-        if (project == null || project.getWorkspaceRepoUrl() == null
-                || project.getWorkspaceRepoUrl().isBlank()) {
+    private SessionOpenPayload.WorkspaceConfig resolveWorkspace(UUID teamId) {
+        Team team = teamRepository.findById(teamId).orElse(null);
+        if (team == null || team.getWorkspaceRepoUrl() == null
+                || team.getWorkspaceRepoUrl().isBlank()) {
             return null;
         }
-        String branch = project.getWorkspaceRepoBranch() != null
-                ? project.getWorkspaceRepoBranch() : "main";
-        String repoToken = resolveWorkspaceToken(projectId);
+        String branch = team.getWorkspaceRepoBranch() != null
+                ? team.getWorkspaceRepoBranch() : "main";
+        String repoToken = resolveWorkspaceToken(teamId);
         return new SessionOpenPayload.WorkspaceConfig(
-                project.getWorkspaceRepoUrl(),
+                team.getWorkspaceRepoUrl(),
                 branch,
-                null,  // subPath — not stored on Project today
+                null,  // subPath — not stored on team today
                 repoToken != null ? WORKSPACE_CREDENTIAL_REF : null);
     }
 
@@ -569,12 +569,12 @@ public class SessionContextAssembler {
         return List.of();
     }
 
-    private List<KnowledgeSource> resolveActiveKnowledgeSources(UUID projectId) {
+    private List<KnowledgeSource> resolveActiveKnowledgeSources(UUID teamId) {
         List<KnowledgeSource> sources = new ArrayList<>();
         // Org-scoped
-        sources.addAll(knowledgeSourceRepository.findByScopeAndProjectIdIsNull(Scope.ORGANIZATION));
-        // Project-scoped
-        sources.addAll(knowledgeSourceRepository.findByScopeAndProjectId(Scope.PROJECT, projectId));
+        sources.addAll(knowledgeSourceRepository.findByScopeAndTeamIdIsNull(Scope.ORGANIZATION));
+        // Team-scoped
+        sources.addAll(knowledgeSourceRepository.findByScopeAndTeamId(Scope.TEAM, teamId));
         // Filter to ACTIVE only
         return sources.stream()
                 .filter(s -> EntityStatus.ACTIVE.equals(s.getStatus()))
@@ -582,12 +582,12 @@ public class SessionContextAssembler {
     }
 
     /**
-     * Return the IDs of active knowledge sources for the project.
+     * Return the IDs of active knowledge sources for the Team.
      * Public so {@link ai.myrmec.engine.conversation.ConversationService} can
      * build a {@link ai.myrmec.engine.context.ContextSnapshot} at creation time.
      */
-    public List<UUID> resolveActiveKnowledgeSourceIds(UUID projectId) {
-        return resolveActiveKnowledgeSources(projectId).stream()
+    public List<UUID> resolveActiveKnowledgeSourceIds(UUID teamId) {
+        return resolveActiveKnowledgeSources(teamId).stream()
                 .map(KnowledgeSource::getId)
                 .toList();
     }

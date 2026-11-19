@@ -41,9 +41,9 @@
             <column name="id" type="uuid" defaultValueComputed="gen_random_uuid()">
                 <constraints primaryKey="true" nullable="false"/>
             </column>
-            <column name="project_id" type="uuid">
-                <constraints nullable="false" foreignKeyName="fk_conversation_project"
-                             references="projects(id)"/>
+            <column name="team_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_conversation_team"
+                             references="teams(id)"/>
             </column>
             <column name="agent_id" type="uuid">
                 <constraints nullable="true" foreignKeyName="fk_conversation_agent"
@@ -63,7 +63,9 @@
             <column name="assistant_version_id" type="uuid">
                 <constraints nullable="true"/>
             </column>
-            <column name="agent_profile_version_id" type="uuid"/>
+            <column name="agent_profile_version_id" type="uuid">
+                <constraints nullable="true"/>
+            </column>
             <column name="title" type="varchar(500)"/>
             <column name="status" type="varchar(20)" defaultValue="ACTIVE">
                 <constraints nullable="false"/>
@@ -102,11 +104,11 @@
     <changeSet id="008-conversations-conversations-indexes" author="myrmec">
         <preConditions onFail="MARK_RAN">
             <not>
-                <indexExists indexName="idx_conversation_project_id"/>
+                <indexExists indexName="idx_conversation_team_id"/>
             </not>
         </preConditions>
-        <createIndex indexName="idx_conversation_project_id" tableName="conversations">
-            <column name="project_id"/>
+        <createIndex indexName="idx_conversation_team_id" tableName="conversations">
+            <column name="team_id"/>
         </createIndex>
         <createIndex indexName="idx_conversation_created_by" tableName="conversations">
             <column name="created_by"/>
@@ -426,11 +428,13 @@
     </changeSet>
 
     <!-- ================================================================
-         Cross-file FK: execution_snapshots.conversation_id → conversations(id)
-         The execution_snapshots table is created in 007-workflows.xml (runs before
-         008). The FK is added here because conversations is created in this file.
+         Cross-file FKs: tables created in earlier files that reference
+         tables created in this file, or tables created in this file that
+         reference tables created in later files.
          ================================================================ -->
 
+    <!-- execution_snapshots.conversation_id → conversations(id)
+         — execution_snapshots created in 007-workflows.xml -->
     <changeSet id="008-conversations-add-snapshot-fk" author="myrmec">
         <preConditions onFail="MARK_RAN">
             <tableExists tableName="conversations"/>
@@ -443,6 +447,57 @@
             referencedTableName="conversations"
             referencedColumnNames="id"
             constraintName="fk_exec_snap_conv"/>
+    </changeSet>
+
+    <!-- conversations.assistant_id → assistants(id)
+         — assistants created in 007b-ai-context.xml -->
+    <changeSet id="008-conversations-add-assistant-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_conversation_assistant"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="conversations"
+            baseColumnNames="assistant_id"
+            referencedTableName="assistants"
+            referencedColumnNames="id"
+            constraintName="fk_conversation_assistant"
+            onDelete="SET NULL"/>
+    </changeSet>
+
+    <!-- conversations.assistant_version_id → assistant_version(id)
+         — assistant_version created in 007b-ai-context.xml -->
+    <changeSet id="008-conversations-add-assistant-version-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_conversation_assistant_version"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="conversations"
+            baseColumnNames="assistant_version_id"
+            referencedTableName="assistant_version"
+            referencedColumnNames="id"
+            constraintName="fk_conversation_assistant_version"
+            onDelete="SET NULL"/>
+    </changeSet>
+
+    <!-- conversations.agent_profile_version_id → agent_profile_versions(id)
+         — agent_profile_versions created in 003-agents.xml -->
+    <changeSet id="008-conversations-add-agent-profile-version-fk" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <foreignKeyConstraintExists foreignKeyName="fk_conversation_agent_profile_version"/>
+            </not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="conversations"
+            baseColumnNames="agent_profile_version_id"
+            referencedTableName="agent_profile_versions"
+            referencedColumnNames="id"
+            constraintName="fk_conversation_agent_profile_version"
+            onDelete="SET NULL"/>
     </changeSet>
 
 </databaseChangeLog>

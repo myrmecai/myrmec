@@ -16,7 +16,7 @@ import java.util.UUID;
 /**
  * Phase 8a/8g &mdash; budget/quota row for a single (scope, resource, period) tuple.
  *
- * <p>{@link Scope} chains org &rarr; group &rarr; project &rarr; service.
+ * <p>{@link Scope} chains org &rarr; group &rarr; Team &rarr; service.
  * The child-tightens-only rule (Phase 8e) is enforced in {@link QuotaService};
  * the row itself is polymorphic on {@link #scopeId} (no FK).</p>
  *
@@ -36,7 +36,7 @@ import java.util.UUID;
 @NoArgsConstructor
 public class Quota {
 
-    public enum Scope { ORG, GROUP, PROJECT, SERVICE }
+    public enum Scope { ORG, GROUP, TEAM, SERVICE }
 
     public enum ResourceType { TOKENS, COST_USD_CENTS }
 
@@ -57,24 +57,24 @@ public class Quota {
 
     /**
      * Polymorphic scope identifier.  For {@code ORG} this is {@code null}
-     * (no org entity in Community).  For {@code GROUP} / {@code PROJECT}
-     * it is the group / project UUID.  For {@code SERVICE} it is the
-     * workflow or assistant instance UUID — <em>not</em> the project ID.
+     * (no org entity in Community).  For {@code GROUP} / {@code Team}
+     * it is the group / Team UUID.  For {@code SERVICE} it is the
+     * workflow or assistant instance UUID — <em>not</em> the Team ID.
      *
-     * @see #projectId
+     * @see #teamId
      */
     @Column(name = "scope_id")
     private UUID scopeId;
 
     /**
-     * Denormalised project reference for {@code SERVICE}-scope rows.
+     * Denormalised Team reference for {@code SERVICE}-scope rows.
      * Populated at create time so {@code BudgetService} can find all
-     * service-instance budgets under a project without joining through
+     * service-instance budgets under a Team without joining through
      * the workflow / assistant tables.  {@code null} for non-SERVICE
      * scopes.
      */
-    @Column(name = "project_id")
-    private UUID projectId;
+    @Column(name = "team_id")
+    private UUID teamId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "resource_type", nullable = false, length = 20)

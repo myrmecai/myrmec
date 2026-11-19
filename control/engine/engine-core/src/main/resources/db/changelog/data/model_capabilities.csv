@@ -1,0 +1,18 @@
+code,name,description,is_system,status,created_at,updated_at
+VISION,Vision,Accepts image inputs and can reason over visual content,true,ACTIVE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+EMBEDDING,Embedding,Produces vector embeddings for text or multimodal content,true,ACTIVE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+THINKING,Thinking,Exposes reasoning / chain-of-thought output (e.g. OpenAI o1/o3),true,ACTIVE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+DECISION,Decision,Supports structured decision / choice output for HITL or policy gates,true,ACTIVE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+TOOL_USE,Tool Use,Native function/tool calling support,true,ACTIVE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+FUNCTION_CALLING,Function Calling,Legacy parallel function calling support,true,ACTIVE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+JSON_MODE,JSON Mode,Reliable structured JSON output mode or mode support,true,ACTIVE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+LONG_CONTEXT,Long Context,Supports an above-average context window (>128k tokens),true,ACTIVE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+INPUT_TEXT,Input Text,Accepts text prompts,true,ACTIVE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+INPUT_IMAGE,Input Image,Accepts image inputs,true,ACTIVE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+INPUT_AUDIO,Input Audio,Accepts audio inputs,true,ACTIVE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+INPUT_VIDEO,Input Video,Accepts video inputs,true,ACTIVE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+OUTPUT_TEXT,Output Text,Produces text output,true,ACTIVE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+OUTPUT_IMAGE,Output Image,Produces image output,true,ACTIVE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+OUTPUT_AUDIO,Output Audio,Produces audio output,true,ACTIVE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+OUTPUT_VIDEO,Output Video,Produces video output,true,ACTIVE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+STREAMING,Streaming,Supports streaming response generation,true,ACTIVE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP

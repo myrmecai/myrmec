@@ -17,7 +17,7 @@ import java.util.UUID;
  * default (60/min) is used.</p>
  */
 public record CreateServiceAccountRequest(
-        @NotNull UUID projectId,
+        @NotNull UUID teamId,
         @NotBlank @Size(max = 120) String name,
         @Size(max = 2000) String description,
         @NotBlank @Size(max = 255) String keycloakClientId,

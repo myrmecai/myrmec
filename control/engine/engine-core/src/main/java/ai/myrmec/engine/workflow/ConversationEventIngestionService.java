@@ -34,7 +34,7 @@ import java.util.UUID;
  *
  * <p>Correlation validates the {@code executionId} against the
  * {@code session_executions} row (the execution knows its session, the
- * session its conversation + project) — NOT against an attempt.
+ * session its conversation + Team) — NOT against an attempt.
  * TOKEN_USAGE events additionally feed
  * {@link QuotaPolicyEngine#recordConsumption} per call, so conversation
  * quota attribution no longer depends only on the terminal
@@ -165,7 +165,7 @@ public class ConversationEventIngestionService {
     /**
      * §12.3-adjacent usage attribution: a TOKEN_USAGE event feeds the
      * existing quota seam per call. The conversation is the session's
-     * {@code refId}; the session row owns {@code projectId}.
+     * {@code refId}; the session row owns {@code teamId}.
      */
     private void attributeUsage(Session sess, Map<String, Object> data) {
         long tokens = tokenCount(data);
@@ -181,9 +181,9 @@ public class ConversationEventIngestionService {
                         tokens, assistantId, sess.getRefId());
             } else {
                 quotaPolicyEngine.recordConsumption(
-                        QuotaScope.PROJECT, sess.getProjectId(), QuotaResourceType.TOKENS, tokens);
-                log.debug("Attributed {} token consumption to project {} (conversation {})",
-                        tokens, sess.getProjectId(), sess.getRefId());
+                        QuotaScope.TEAM, sess.getTeamId(), QuotaResourceType.TOKENS, tokens);
+                log.debug("Attributed {} token consumption to Team {} (conversation {})",
+                        tokens, sess.getTeamId(), sess.getRefId());
             }
         } catch (Exception e) {
             log.warn("Failed to attribute token usage for conversation {}: {}",

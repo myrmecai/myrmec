@@ -28,7 +28,7 @@ import java.util.UUID;
  *       {@code usableVia} set.</li>
  * </ol>
  *
- * <p>Any failure of either gate (plus not-found, wrong project, archived,
+ * <p>Any failure of either gate (plus not-found, wrong Team, archived,
  * disabled, or unpublished) is reported uniformly as a 404
  * {@code RESOURCE_NOT_FOUND} so an external caller cannot enumerate or probe
  * assistants it has no access to.</p>
@@ -49,12 +49,12 @@ public class ExternalAssistantService {
     }
 
     /**
-     * Every assistant in the service account's project that satisfies the
+     * Every assistant in the service account's Team that satisfies the
      * double gate, ordered by name. Used by {@code GET /external/assistants}.
      */
     @Transactional(readOnly = true)
-    public List<UsableAssistant> listUsable(UUID serviceAccountId, UUID projectId) {
-        return assistantRepository.findByProjectIdOrderByNameAsc(projectId).stream()
+    public List<UsableAssistant> listUsable(UUID serviceAccountId, UUID teamId) {
+        return assistantRepository.findByTeamIdOrderByNameAsc(teamId).stream()
                 .map(assistant -> toUsable(serviceAccountId, assistant))
                 .flatMap(Optional::stream)
                 .toList();
@@ -65,7 +65,7 @@ public class ExternalAssistantService {
      * gate. Throws 404 when the assistant is missing or fails either gate.
      */
     @Transactional(readOnly = true)
-    public UsableAssistant requireUsable(UUID serviceAccountId, UUID projectId, UUID assistantId) {
+    public UsableAssistant requireUsable(UUID serviceAccountId, UUID teamId, UUID assistantId) {
         Assistant assistant = assistantId == null
                 ? null
                 : assistantRepository.findById(assistantId).orElse(null);
@@ -73,7 +73,7 @@ public class ExternalAssistantService {
             throw notFound(assistantId);
         }
         return toUsable(serviceAccountId, assistant)
-                .filter(u -> projectId == null || projectId.equals(assistant.getProjectId()))
+                .filter(u -> teamId == null || teamId.equals(assistant.getTeamId()))
                 .orElseThrow(() -> notFound(assistantId));
     }
 

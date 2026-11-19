@@ -11,14 +11,14 @@ import java.util.UUID;
 
 /**
  * One row in the My Work "Workflows" tab (UC-013) — a workflow definition with
- * its cross-project context and live execution rollup. {@code activeExecutions}
+ * its cross-Team context and live execution rollup. {@code activeExecutions}
  * counts in-flight runs (PENDING / RUNNING); {@code lastExecution*} reflect the
  * most recent run, or null when the workflow has never executed.
  */
 public record MyWorkflowRow(
         UUID id,
-        UUID projectId,
-        String projectName,
+        UUID teamId,
+        String teamName,
         String name,
         String description,
         WorkflowStatus status,
@@ -34,18 +34,18 @@ public record MyWorkflowRow(
 
     /**
      * Build a row from a workflow and all of its execution requests. The caller
-     * supplies the resolved project name (it already holds the project) so this
-     * factory never touches the lazy {@code Workflow.project} association.
+     * supplies the resolved Team name (it already holds the team) so this
+     * factory never touches the lazy {@code Workflow.team} association.
      */
-    public static MyWorkflowRow of(Workflow workflow, String projectName, List<WorkflowRequest> requests) {
+    public static MyWorkflowRow of(Workflow workflow, String teamName, List<WorkflowRequest> requests) {
         long active = requests.stream().filter(r -> isActive(r.getStatus())).count();
         WorkflowRequest latest = requests.stream()
                 .max((a, b) -> a.getCreatedAt().compareTo(b.getCreatedAt()))
                 .orElse(null);
         return new MyWorkflowRow(
                 workflow.getId(),
-                workflow.getProject().getId(),
-                projectName,
+                workflow.getTeam().getId(),
+                teamName,
                 workflow.getName(),
                 workflow.getDescription(),
                 workflow.getStatus(),

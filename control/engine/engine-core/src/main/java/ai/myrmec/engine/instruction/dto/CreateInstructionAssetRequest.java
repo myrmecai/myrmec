@@ -9,7 +9,7 @@ import java.util.UUID;
 
 public record CreateInstructionAssetRequest(
         @NotBlank @Size(max = 20) String scope,
-        UUID projectId,
+        UUID teamId,
         @NotBlank @Size(max = 100) String name,
         @Size(max = 2000) String description,
         @NotBlank @Size(max = 50) String category) {

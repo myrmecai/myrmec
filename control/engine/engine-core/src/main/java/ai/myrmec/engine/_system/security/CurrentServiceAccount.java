@@ -10,7 +10,7 @@ import java.lang.annotation.*;
  * <pre>
  * &#64;PostMapping("/assistants/{id}/sessions")
  * public ResponseEntity&lt;?&gt; start(&#64;CurrentServiceAccount ServiceAccountPrincipal sa) {
- *     // sa.getServiceAccountId(), sa.getProjectId(), ...
+ *     // sa.getServiceAccountId(), sa.getTeamId(), ...
  * }
  * </pre>
  * The parameter resolves only when the request was authenticated by the

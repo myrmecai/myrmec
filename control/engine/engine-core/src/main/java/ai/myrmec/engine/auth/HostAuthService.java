@@ -12,7 +12,6 @@ import ai.myrmec.engine.agent.AgentHostService;
 import ai.myrmec.engine.auth.dto.HostLocalRegisterRequest;
 import ai.myrmec.engine.auth.dto.HostRefreshRequest;
 import ai.myrmec.engine.auth.dto.HostRefreshResponse;
-import ai.myrmec.engine.auth.dto.HostRegisterRequest;
 import ai.myrmec.engine.auth.dto.HostRegisterResponse;
 import ai.myrmec.engine.registration.RegistrationKeyService;
 import lombok.RequiredArgsConstructor;
@@ -34,14 +33,16 @@ public class HostAuthService {
     private final HostRefreshTokenStore hostRefreshTokenStore;
 
     /**
-     * Managed-host registration (protocol §4.1). Validates the durable host
-     * definition via its registration key, mints the HOST_JWT/refresh pair —
-     * and deliberately creates NO agents row (no execution slot) and NO
+     * MANAGED-host registration (protocol §4.1): the registration key IS the
+     * credential (`Authorization: Key myr_agent_…`). Validates the durable
+     * host definition via its key, mints the HOST_JWT/refresh pair — and
+     * deliberately creates NO agents row (no execution slot) and NO
      * host-instance row. The live instance is created later by host.open.
+     * MANAGED hosts have no owner: the minted token carries no ownerUserId.
      */
     @Transactional
-    public HostRegisterResponse registerManaged(HostRegisterRequest request) {
-        AgentHost host = agentHostRepository.findByRegistrationKey(request.getRegistrationKey())
+    public HostRegisterResponse registerManaged(String registrationKey) {
+        AgentHost host = agentHostRepository.findByRegistrationKey(registrationKey)
                 .orElseThrow(() -> new InvalidRegistrationKeyException("Invalid registration key"));
 
         if (host.getStatus() != AgentHost.Status.ACTIVE) {
@@ -50,38 +51,39 @@ public class HostAuthService {
 
         // Local-owner model (§4.1): only MANAGED hosts consume registration
         // keys. A LOCAL host's key is a dormant placeholder — the plugin
-        // authenticates via registerLocal + the user's JWT.
+        // authenticates via the Bearer branch + the user's JWT.
         if (host.getHostType() != AgentHostType.MANAGED) {
             throw new InvalidRegistrationKeyException(
                     "Registration key is not valid for a LOCAL host");
         }
 
-        registrationKeyService.findByKeyValue(request.getRegistrationKey())
+        registrationKeyService.findByKeyValue(registrationKey)
                 .filter(key -> !key.isValid())
                 .ifPresent(key -> {
                     throw new InvalidRegistrationKeyException("Registration key is expired or revoked");
                 });
 
-        return mintPair(host, "managed");
+        return mintPair(host, "managed", null);
     }
 
     /**
-     * Local-host registration (protocol §4.1). The caller (controller) has
-     * already authenticated the user; ownership comes from the user id and
-     * is stored on the durable host record, never in the token.
+     * Local-host registration (protocol §4.1): the caller (controller) has
+     * already authenticated the user via the Bearer branch; ownership comes
+     * from the user id, rides the minted token's ownerUserId claim, and is
+     * stored on the durable host record's live instance at host.open.
      */
     @Transactional
     public HostRegisterResponse registerLocal(UUID userId, HostLocalRegisterRequest request, String hostname) {
         if (userId == null) {
             throw new InvalidRegistrationKeyException("userId is required for local host registration");
         }
-        AgentHost host = agentHostService.upsertLocalAgentHost(userId, request.getProjectId(), hostname);
-        return mintPair(host, "local");
+        AgentHost host = agentHostService.upsertLocalAgentHost(userId, request.getTeamId(), hostname);
+        return mintPair(host, "local", userId);
     }
 
-    private HostRegisterResponse mintPair(AgentHost host, String flavour) {
-        String accessToken = jwtTokenProvider.generateHostAccessToken(host.getId(), host.getName());
-        String refreshToken = hostRefreshTokenStore.issue(host.getId());
+    private HostRegisterResponse mintPair(AgentHost host, String flavour, UUID ownerUserId) {
+        String accessToken = jwtTokenProvider.generateHostAccessToken(host.getId(), host.getName(), ownerUserId);
+        String refreshToken = hostRefreshTokenStore.issue(host.getId(), ownerUserId);
         log.info("Host principal registered ({}): host {} ({})", flavour, host.getId(), host.getName());
         return HostRegisterResponse.builder()
                 .hostId(host.getId())
@@ -89,6 +91,8 @@ public class HostAuthService {
                 .accessTokenExpiresAt(jwtTokenProvider.getExpiration(accessToken))
                 .refreshToken(refreshToken)
                 .refreshTokenExpiresAt(jwtTokenProvider.getExpiration(refreshToken))
+                .hostType(flavour.toUpperCase())
+                .ownerUserId(ownerUserId)
                 .build();
     }
 

@@ -48,11 +48,11 @@ class AuditChainCanonicalizerTest {
     void nullFieldsPresent() {
         AuditEvent event = new AuditEvent();
         event.setEventType("CREATED");
-        event.setEntityType("project");
+        event.setEntityType("TEAM");
         event.setScopeType("ORGANIZATION");
         event.setActorDisplayName("admin");
         event.setTimestamp(Instant.parse("2026-08-20T10:00:00Z"));
-        // entityId, versionId, projectId, actorId, reasonCode, snapshots all null
+        // entityId, versionId, teamId, actorId, reasonCode, snapshots all null
         byte[] result = canonicalizer.canonicalize(event);
         String str = new String(result, StandardCharsets.UTF_8);
         assertTrue(str.contains("entityId=null"), "null UUID field must be present as 'null'");
@@ -119,10 +119,10 @@ class AuditChainCanonicalizerTest {
     private AuditEvent sampleEvent() {
         AuditEvent event = new AuditEvent();
         event.setEventType("CREATED");
-        event.setEntityType("project");
+        event.setEntityType("TEAM");
         event.setEntityId(UUID.fromString("00000000-0000-0000-0000-000000000001"));
-        event.setScopeType("PROJECT");
-        event.setProjectId(UUID.fromString("00000000-0000-0000-0000-000000000002"));
+        event.setScopeType("TEAM");
+        event.setTeamId(UUID.fromString("00000000-0000-0000-0000-000000000002"));
         event.setActorId(UUID.fromString("00000000-0000-0000-0000-000000000003"));
         event.setActorDisplayName("admin");
         event.setTimestamp(Instant.parse("2026-08-20T10:00:00Z"));
@@ -136,7 +136,7 @@ class AuditChainCanonicalizerTest {
     private AuditEvent makeEventWithMetadata(Map<String, Object> metadata) {
         AuditEvent event = new AuditEvent();
         event.setEventType("CREATED");
-        event.setEntityType("project");
+        event.setEntityType("TEAM");
         event.setScopeType("ORGANIZATION");
         event.setActorDisplayName("admin");
         event.setTimestamp(Instant.parse("2026-08-20T10:00:00Z"));
@@ -151,7 +151,7 @@ class AuditChainCanonicalizerTest {
         copy.setEntityId(src.getEntityId());
         copy.setVersionId(src.getVersionId());
         copy.setScopeType(src.getScopeType());
-        copy.setProjectId(src.getProjectId());
+        copy.setTeamId(src.getTeamId());
         copy.setActorId(src.getActorId());
         copy.setActorDisplayName(src.getActorDisplayName());
         copy.setTimestamp(src.getTimestamp());

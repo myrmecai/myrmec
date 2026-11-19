@@ -39,10 +39,10 @@ class ServiceAccountJwtAuthenticationConverterTest {
         return builder.build();
     }
 
-    private static ServiceAccount account(UUID id, UUID projectId, String clientId, String name) {
+    private static ServiceAccount account(UUID id, UUID teamId, String clientId, String name) {
         ServiceAccount account = new ServiceAccount();
         account.setId(id);
-        account.setProjectId(projectId);
+        account.setTeamId(teamId);
         account.setKeycloakClientId(clientId);
         account.setName(name);
         account.setEnabled(true);
@@ -52,9 +52,9 @@ class ServiceAccountJwtAuthenticationConverterTest {
     @Test
     void resolvesActiveAccountFromAzpClaim() {
         UUID id = UUID.randomUUID();
-        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
         when(serviceAccountService.resolveActiveByClientId(eq("helpdesk-client")))
-                .thenReturn(Optional.of(account(id, projectId, "helpdesk-client", "Helpdesk")));
+                .thenReturn(Optional.of(account(id, teamId, "helpdesk-client", "Helpdesk")));
 
         AbstractAuthenticationToken auth = converter.convert(
                 jwtWithClaims(java.util.Map.of("azp", "helpdesk-client")));
@@ -65,7 +65,7 @@ class ServiceAccountJwtAuthenticationConverterTest {
 
         ServiceAccountPrincipal principal = (ServiceAccountPrincipal) auth.getPrincipal();
         assertThat(principal.getServiceAccountId()).isEqualTo(id);
-        assertThat(principal.getProjectId()).isEqualTo(projectId);
+        assertThat(principal.getTeamId()).isEqualTo(teamId);
         assertThat(principal.getKeycloakClientId()).isEqualTo("helpdesk-client");
         assertThat(principal.getDisplayName()).isEqualTo("Helpdesk");
         assertThat(principal.getName()).isEqualTo(id.toString());

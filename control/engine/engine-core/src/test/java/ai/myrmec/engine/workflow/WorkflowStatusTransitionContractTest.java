@@ -3,8 +3,8 @@
 package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine.IntegrationTestBase;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamRepository;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.workflow.dto.CreateWorkflowRequest;
 import ai.myrmec.engine.workflow.dto.WorkflowResponse;
@@ -44,17 +44,17 @@ class WorkflowStatusTransitionContractTest extends IntegrationTestBase {
     private TestDataBuilder data;
 
     @Autowired
-    private ProjectRepository projectRepository;
+    private TeamRepository TeamRepository;
 
     private WorkflowResponse createWorkflow() {
-        // Create a project first
-        Project project = data.project().create();
-        UUID projectId = project.getId();
-        assertThat(projectId).as("project ID must not be null").isNotNull();
+        // Create a team first
+        team team = data.team().create();
+        UUID teamId = team.getId();
+        assertThat(teamId).as("Team ID must not be null").isNotNull();
 
         return workflowService.create(
                 new CreateWorkflowRequest(
-                        projectId,
+                        teamId,
                         "RECON11 Test Workflow",
                         "Test",
                         List.of(new ai.myrmec.engine.workflow.dto.WorkflowStepDto(

@@ -20,10 +20,14 @@ import java.util.UUID;
 /**
  * Host-control socket handshake (protocol §4.2): authenticates the HOST
  * principal only. The token subject is a durable agent_hosts.id — the entity
- * is resolved and must be ACTIVE; hostType/ownership are never read from
- * claims. AGENT (instance) and USER tokens are rejected: this is the §18
- * "Token isolation" gate. It does NOT create a host instance — the first
- * valid host.open does (§4.2).
+ * is resolved and must be ACTIVE. AGENT (instance) and USER tokens are
+ * rejected: this is the §18 "Token isolation" gate. It does NOT create a
+ * host instance — the first valid host.open does (§4.2).
+ *
+ * <p>LOCAL ownership is resolved HERE, from the token's ownerUserId claim
+ * (stamped at registration), and stored as {@link #ATTR_OWNER_USER_ID} for
+ * the host.open stamp — owner identity is token-verified, never
+ * payload-asserted (the host.open payload no longer carries it).
  */
 @Slf4j
 @Component
@@ -32,6 +36,8 @@ public class HostControlHandshakeInterceptor implements HandshakeInterceptor {
 
     public static final String ATTR_HOST_ID = "hostId";
     public static final String ATTR_HOST_NAME = "hostName";
+    /** The ownerUserId claim of the connecting HOST token (LOCAL hosts); null for MANAGED. */
+    public static final String ATTR_OWNER_USER_ID = "ownerUserId";
 
     private final JwtTokenProvider jwtTokenProvider;
     private final AgentHostRepository agentHostRepository;
@@ -63,6 +69,7 @@ public class HostControlHandshakeInterceptor implements HandshakeInterceptor {
 
         attributes.put(ATTR_HOST_ID, host.getId());
         attributes.put(ATTR_HOST_NAME, host.getName());
+        attributes.put(ATTR_OWNER_USER_ID, jwtTokenProvider.getOwnerUserId(token));
         log.debug("Host WS handshake approved for host {} ({})", host.getId(), host.getName());
         return true;
     }

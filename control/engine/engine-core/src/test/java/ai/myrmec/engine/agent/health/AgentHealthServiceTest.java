@@ -38,10 +38,10 @@ class AgentHealthServiceTest extends IntegrationTestBase {
 
     @Test
     void aggregatesInstanceStateAndQueueDepth() {
-        var project = data.project().named("agent-health").create();
+        var team = data.team().named("agent-health").create();
         AgentHost agent = data.agent()
                 .named("agent-health-agent")
-                .inProject(project)
+                .inTeam(team)
                 .create()
                 .agent();
 
@@ -89,10 +89,10 @@ class AgentHealthServiceTest extends IntegrationTestBase {
 
     @Test
     void openHostInstanceMarksWorkerOnlineIdleAndAllocationMarksItBusy() {
-        var project = data.project().named("agent-health-2").create();
+        var team = data.team().named("agent-health-2").create();
         AgentHost agent = data.agent()
                 .named("agent-health-agent-2")
-                .inProject(project)
+                .inTeam(team)
                 .create()
                 .agent();
 
@@ -119,7 +119,7 @@ class AgentHealthServiceTest extends IntegrationTestBase {
         Session session = new Session();
         session.setServiceType("CONVERSATION");
         session.setRefId(UUID.randomUUID());
-        session.setProjectId(project.getId());
+        session.setTeamId(team.getId());
         session.setKind("SESSION_KIND_TURN");
         session.setHostInstanceId(hostInstance.getId());
         session.setAllocationState(ai.myrmec.engine.inference.SessionAllocator.ALLOC_STATE_ACTIVE);

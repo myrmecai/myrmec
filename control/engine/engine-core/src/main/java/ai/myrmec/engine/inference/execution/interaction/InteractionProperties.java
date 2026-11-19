@@ -6,7 +6,7 @@ package ai.myrmec.engine.inference.execution.interaction;
  * section 22.2 interaction policy defaults and the tighten-only domain.
  *
  * <p>These are the initial implementation defaults shipped on orchestration
- * {@code session.open} payloads; project policy may only TIGHTEN the global
+ * {@code session.open} payloads; Team policy may only TIGHTEN the global
  * bounds. Invalid policy fails initialization. This type is the engine-side
  * contract authority for Task 1 — persistence wiring and the policy-source
  * configuration belong to Task 2+, but validation semantics are fixed here.</p>

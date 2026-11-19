@@ -3,8 +3,8 @@ package ai.myrmec.engine.workflow;
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.DuplicateResourceException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamRepository;
 import ai.myrmec.engine.user.User;
 import ai.myrmec.engine.user.UserRepository;
 import ai.myrmec.engine.workflow.dto.*;
@@ -24,21 +24,21 @@ import java.util.UUID;
 public class WorkflowService {
 
     private final WorkflowRepository workflowRepository;
-    private final ProjectRepository projectRepository;
+    private final TeamRepository teamRepository;
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
     private final OrchestrationDefinitionValidator orchestrationDefinitionValidator;
 
     @Transactional(readOnly = true)
-    public List<WorkflowResponse> findByProject(UUID projectId) {
-        return workflowRepository.findByProjectId(projectId).stream()
+    public List<WorkflowResponse> findByTeam(UUID teamId) {
+        return workflowRepository.findByTeamId(teamId).stream()
                 .map(this::toResponse)
                 .toList();
     }
 
     @Transactional(readOnly = true)
-    public List<WorkflowResponse> findPublishedByProject(UUID projectId) {
-        return workflowRepository.findByProjectIdAndStatus(projectId, WorkflowStatus.PUBLISHED).stream()
+    public List<WorkflowResponse> findPublishedByTeam(UUID teamId) {
+        return workflowRepository.findByTeamIdAndStatus(teamId, WorkflowStatus.PUBLISHED).stream()
                 .map(this::toResponse)
                 .toList();
     }
@@ -52,10 +52,10 @@ public class WorkflowService {
 
     @Transactional
     public WorkflowResponse create(CreateWorkflowRequest request, UUID userId) {
-        Project project = projectRepository.findById(request.projectId())
-                .orElseThrow(() -> new ResourceNotFoundException("Project", request.projectId().toString()));
+        Team team = teamRepository.findById(request.teamId())
+                .orElseThrow(() -> new ResourceNotFoundException("team", request.teamId().toString()));
 
-        if (workflowRepository.existsByProjectIdAndName(request.projectId(), request.name())) {
+        if (workflowRepository.existsByTeamIdAndName(request.teamId(), request.name())) {
             throw new DuplicateResourceException("Workflow", "name", request.name());
         }
 
@@ -63,7 +63,7 @@ public class WorkflowService {
                 .orElseThrow(() -> new ResourceNotFoundException("User", userId.toString()));
 
         Workflow workflow = new Workflow();
-        workflow.setProject(project);
+        workflow.setTeam(team);
         workflow.setName(request.name());
         workflow.setDescription(request.description());
         workflow.setSteps(stepsToMapList(request.steps()));
@@ -83,7 +83,7 @@ public class WorkflowService {
 
         // Check name uniqueness if changed
         if (!workflow.getName().equals(request.name()) &&
-            workflowRepository.existsByProjectIdAndName(workflow.getProject().getId(), request.name())) {
+            workflowRepository.existsByTeamIdAndName(workflow.getTeam().getId(), request.name())) {
             throw new DuplicateResourceException("Workflow", "name", request.name());
         }
 
@@ -198,8 +198,8 @@ public class WorkflowService {
     private WorkflowResponse toResponse(Workflow workflow) {
         return new WorkflowResponse(
                 workflow.getId(),
-                workflow.getProject().getId(),
-                workflow.getProject().getName(),
+                workflow.getTeam().getId(),
+                workflow.getTeam().getName(),
                 workflow.getName(),
                 workflow.getDescription(),
                 mapListToSteps(workflow.getSteps()),

@@ -6,11 +6,11 @@ package ai.myrmec.engine.quota;
 import ai.myrmec.engine.IntegrationTestBase;
 import ai.myrmec.engine.group.Group;
 import ai.myrmec.engine.group.GroupRepository;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamRepository;
 import ai.myrmec.engine.quota.dto.DashboardResponse;
 import ai.myrmec.engine.quota.dto.EffectiveQuotasResponse;
-import ai.myrmec.engine.quota.dto.ProjectServiceBudgetsResponse;
+import ai.myrmec.engine.quota.dto.TeamServiceBudgetsResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpEntity;
@@ -27,7 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class BudgetControllerTest extends IntegrationTestBase {
 
-    @Autowired private ProjectRepository projectRepository;
+    @Autowired private TeamRepository TeamRepository;
     @Autowired private GroupRepository groupRepository;
 
     @Test
@@ -36,20 +36,20 @@ class BudgetControllerTest extends IntegrationTestBase {
         group.setName("Budget Controller Group");
         group = groupRepository.save(group);
 
-        Project project = new Project();
-        project.setName("Budget Controller Project");
-        project.setGroupId(group.getId());
-        project = projectRepository.save(project);
+        team team = new team();
+        team.setName("Budget Controller team");
+        team.setGroupId(group.getId());
+        team = TeamRepository.save(team);
 
-        String url = "/api/v1/budgets/projects/" + project.getId()
+        String url = "/api/v1/budgets/teams/" + team.getId()
                 + "/services?resourceType=COST_USD_CENTS&period=MONTHLY_CALENDAR";
-        ResponseEntity<ProjectServiceBudgetsResponse> resp = restTemplate.exchange(
+        ResponseEntity<TeamServiceBudgetsResponse> resp = restTemplate.exchange(
                 url, HttpMethod.GET, new HttpEntity<>(adminHeaders()),
-                ProjectServiceBudgetsResponse.class);
+                TeamServiceBudgetsResponse.class);
 
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(resp.getBody()).isNotNull();
-        assertThat(resp.getBody().getProjectId()).isEqualTo(project.getId());
+        assertThat(resp.getBody().getTeamId()).isEqualTo(team.getId());
         assertThat(resp.getBody().getResourceType()).isEqualTo("COST_USD_CENTS");
         assertThat(resp.getBody().getPeriod()).isEqualTo("MONTHLY_CALENDAR");
         assertThat(resp.getBody().getSharedPool()).isNotNull();
@@ -87,12 +87,12 @@ class BudgetControllerTest extends IntegrationTestBase {
         group.setName("Budget Effective Quotas Group");
         group = groupRepository.save(group);
 
-        Project project = new Project();
-        project.setName("Budget Effective Quotas Project");
-        project.setGroupId(group.getId());
-        project = projectRepository.save(project);
+        team team = new team();
+        team.setName("Budget Effective Quotas team");
+        team.setGroupId(group.getId());
+        team = TeamRepository.save(team);
 
-        String url = "/api/v1/budgets/projects/" + project.getId()
+        String url = "/api/v1/budgets/teams/" + team.getId()
                 + "/effective-quotas?resourceType=COST_USD_CENTS&period=MONTHLY_CALENDAR";
         ResponseEntity<EffectiveQuotasResponse> resp = restTemplate.exchange(
                 url, HttpMethod.GET, new HttpEntity<>(adminHeaders()),

@@ -1,0 +1,34 @@
+[
+  {
+    "code": "LOCAL",
+    "providerType": "LOCAL",
+    "name": "Local Account",
+    "isEnabled": true,
+    "isSystem": true,
+    "metadata": {}
+  },
+  {
+    "code": "OIDC_DEFAULT",
+    "providerType": "OIDC",
+    "name": "OIDC (Default)",
+    "isEnabled": false,
+    "isSystem": true,
+    "metadata": {}
+  },
+  {
+    "code": "GITHUB_DEFAULT",
+    "providerType": "GITHUB",
+    "name": "GitHub (Default)",
+    "isEnabled": false,
+    "isSystem": true,
+    "metadata": {}
+  },
+  {
+    "code": "GOOGLE_DEFAULT",
+    "providerType": "GOOGLE",
+    "name": "Google (Default)",
+    "isEnabled": false,
+    "isSystem": true,
+    "metadata": {}
+  }
+]

@@ -71,13 +71,13 @@ public class ConversationController {
     private final ObjectMapper objectMapper;
 
     @PostMapping
-    @Operation(summary = "Create a new conversation under a project")
-    @PreAuthorize("@projectAccess.canView(#request.projectId, authentication)")
+    @Operation(summary = "Create a new conversation under a Team")
+    @PreAuthorize("@teamAccess.canView(#request.teamId, authentication)")
     public ResponseEntity<ConversationResponse> create(
             @Valid @RequestBody CreateConversationRequest request,
             @CurrentUser UUID userId) {
         Conversation c = conversationService.createConversation(
-                request.projectId(),
+                request.teamId(),
                 userId,
                 request.title(),
                 request.agentId(),
@@ -94,16 +94,16 @@ public class ConversationController {
     }
 
     @GetMapping
-    @Operation(summary = "List conversations under a project (most recently updated first). "
+    @Operation(summary = "List conversations under a Team (most recently updated first). "
             + "CLOSED and ARCHIVED conversations are hidden unless includeClosed/includeArchived "
             + "are passed as true")
-    @PreAuthorize("@projectAccess.canView(#projectId, authentication)")
-    public ResponseEntity<List<ConversationResponse>> listByProject(
-            @RequestParam UUID projectId,
+    @PreAuthorize("@teamAccess.canView(#teamId, authentication)")
+    public ResponseEntity<List<ConversationResponse>> listByTeam(
+            @RequestParam UUID teamId,
             @RequestParam(defaultValue = "false") boolean includeClosed,
             @RequestParam(defaultValue = "false") boolean includeArchived) {
         List<ConversationResponse> body = conversationService
-                .listByProject(projectId, includeClosed, includeArchived).stream()
+                .listByTeam(teamId, includeClosed, includeArchived).stream()
                 .map(ConversationResponse::from)
                 .toList();
         return ResponseEntity.ok(body);

@@ -22,7 +22,7 @@ import java.util.UUID;
  * for the given scope. Role-gated: PLATFORM_ADMIN, ORG_ADMIN, or AUDITOR.
  *
  * <pre>{@code
- * GET /api/v1/admin/audit-log/verify?scopeType=PROJECT&projectId=<uuid>
+ * GET /api/v1/admin/audit-log/verify?scopeType=TEAM&teamId=<uuid>
  * → { "valid": true, "checkedCount": 42, "firstBrokenId": null, "reason": null }
  * }</pre>
  */
@@ -37,19 +37,19 @@ public class AuditChainVerifyController {
     /**
      * Verify the integrity of a scope's audit chain.
      *
-     * @param scopeType the scope type ("ORGANIZATION" or "PROJECT")
-     * @param projectId the project ID (required for PROJECT scope, null for ORG)
+     * @param scopeType the scope type ("ORGANIZATION" or "TEAM")
+     * @param teamId the Team ID (required for Team scope, null for ORG)
      * @return verification result
      */
     @GetMapping("/verify")
     @PreAuthorize("hasAnyRole('PLATFORM_ADMIN','ORG_ADMIN','AUDITOR')")
     public ResponseEntity<Map<String, Object>> verify(
             @RequestParam String scopeType,
-            @RequestParam(required = false) UUID projectId) {
+            @RequestParam(required = false) UUID teamId) {
 
-        log.info("Verifying audit chain: scopeType={}, projectId={}", scopeType, projectId);
+        log.info("Verifying audit chain: scopeType={}, teamId={}", scopeType, teamId);
 
-        AuditHashChainService.VerifyResult result = hashChainService.verifyScope(scopeType, projectId);
+        AuditHashChainService.VerifyResult result = hashChainService.verifyScope(scopeType, teamId);
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("valid", result.valid());

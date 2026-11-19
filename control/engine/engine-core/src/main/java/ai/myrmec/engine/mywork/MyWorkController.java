@@ -23,9 +23,9 @@ import java.util.UUID;
 /**
  * Read-only REST surface behind the unified "My Work" landing page (UC-013).
  *
- * <p>Every endpoint is a personal cross-project roll-up scoped to the caller's
+ * <p>Every endpoint is a personal cross-Team roll-up scoped to the caller's
  * VIEW-able projects (resolved inside {@link MyWorkService}), optionally
- * narrowed by the {@code projectIds} chip filter. There are no mutations here:
+ * narrowed by the {@code teamIds} chip filter. There are no mutations here:
  * the Approvals and Archived tabs drive their actions through the existing
  * per-resource write endpoints, so authorization lives in exactly one place per
  * mutation. The {@code /api/v1/**} security rule already requires an
@@ -34,7 +34,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/my-work")
 @RequiredArgsConstructor
-@Tag(name = "My Work", description = "Personal cross-project landing surface (UC-013)")
+@Tag(name = "My Work", description = "Personal cross-Team landing surface (UC-013)")
 public class MyWorkController {
 
     private final MyWorkService myWorkService;
@@ -43,27 +43,27 @@ public class MyWorkController {
     @Operation(summary = "Counters + first-run hints for every My Work tab")
     public MyWorkSummaryResponse summary(
             Authentication authentication,
-            @RequestParam(required = false) List<UUID> projectIds) {
-        return myWorkService.summary(authentication, projectIds);
+            @RequestParam(required = false) List<UUID> teamIds) {
+        return myWorkService.summary(authentication, teamIds);
     }
 
     @GetMapping("/workflows")
     @Operation(summary = "My Work Workflows tab — non-archived workflow definitions with live execution rollup")
     public List<MyWorkflowRow> workflows(
             Authentication authentication,
-            @RequestParam(required = false) List<UUID> projectIds,
+            @RequestParam(required = false) List<UUID> teamIds,
             @RequestParam(required = false) WorkflowStatus status,
             @RequestParam(required = false) String q) {
-        return myWorkService.workflows(authentication, projectIds, status, q);
+        return myWorkService.workflows(authentication, teamIds, status, q);
     }
 
     @GetMapping("/conversations")
     @Operation(summary = "My Work Conversations tab — active assistants with live session rollup")
     public List<MyAssistantRow> conversations(
             Authentication authentication,
-            @RequestParam(required = false) List<UUID> projectIds,
+            @RequestParam(required = false) List<UUID> teamIds,
             @RequestParam(required = false) String q) {
-        return myWorkService.conversations(authentication, projectIds, q);
+        return myWorkService.conversations(authentication, teamIds, q);
     }
 
     @GetMapping("/conversations/continue")
@@ -71,27 +71,27 @@ public class MyWorkController {
     public List<MyContinueRow> continueRail(
             Authentication authentication,
             @CurrentUser UUID userId,
-            @RequestParam(required = false) List<UUID> projectIds,
+            @RequestParam(required = false) List<UUID> teamIds,
             @RequestParam(defaultValue = "5") int limit) {
-        return myWorkService.continueRail(authentication, userId, projectIds, limit);
+        return myWorkService.continueRail(authentication, userId, teamIds, limit);
     }
 
     @GetMapping("/approvals")
     @Operation(summary = "My Work Approvals tab — pending human decisions across the caller's scope")
     public List<MyApprovalRow> approvals(
             Authentication authentication,
-            @RequestParam(required = false) List<UUID> projectIds,
+            @RequestParam(required = false) List<UUID> teamIds,
             @RequestParam(required = false) String q) {
-        return myWorkService.approvals(authentication, projectIds, q);
+        return myWorkService.approvals(authentication, teamIds, q);
     }
 
     @GetMapping("/archived")
     @Operation(summary = "My Work Archived tab — archived service definitions across the caller's scope")
     public List<MyArchivedRow> archived(
             Authentication authentication,
-            @RequestParam(required = false) List<UUID> projectIds,
+            @RequestParam(required = false) List<UUID> teamIds,
             @RequestParam(required = false) MyArchivedRow.Type type,
             @RequestParam(required = false) String q) {
-        return myWorkService.archived(authentication, projectIds, type, q);
+        return myWorkService.archived(authentication, teamIds, type, q);
     }
 }

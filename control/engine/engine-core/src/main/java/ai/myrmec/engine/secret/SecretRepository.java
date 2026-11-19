@@ -12,34 +12,34 @@ import java.util.UUID;
 @Repository
 public interface SecretRepository extends JpaRepository<Secret, UUID> {
 
-    /** Project-scoped secrets for a project (excluding globals). */
-    List<Secret> findByProjectIdOrderByNameAsc(UUID projectId);
+    /** Team-scoped secrets for a Team (excluding globals). */
+    List<Secret> findByTeamIdOrderByNameAsc(UUID teamId);
 
-    /** Global secrets (project_id IS NULL). */
-    @Query("SELECT s FROM Secret s WHERE s.project IS NULL ORDER BY s.name ASC")
+    /** Global secrets (team_id IS NULL). */
+    @Query("SELECT s FROM Secret s WHERE s.team IS NULL ORDER BY s.name ASC")
     List<Secret> findAllGlobal();
 
     /**
-     * Resolve a secret usable from the given project: either global or owned by
-     * that project. Used by services that consume a secret reference (knowledge
-     * repo, workflow tools, ...) to prevent cross-project leakage.
+     * Resolve a secret usable from the given team: either global or owned by
+     * that team. Used by services that consume a secret reference (knowledge
+     * repo, workflow tools, ...) to prevent cross-team leakage.
      */
     @Query("""
             SELECT s FROM Secret s
              WHERE s.id = :id
-               AND (s.project IS NULL OR s.project.id = :projectId)
+               AND (s.team IS NULL OR s.team.id = :teamId)
             """)
-    Optional<Secret> findResolvable(@Param("id") UUID id, @Param("projectId") UUID projectId);
+    Optional<Secret> findResolvable(@Param("id") UUID id, @Param("teamId") UUID teamId);
 
-    Optional<Secret> findByProjectIdAndName(UUID projectId, String name);
+    Optional<Secret> findByTeamIdAndName(UUID teamId, String name);
 
-    @Query("SELECT s FROM Secret s WHERE s.project IS NULL AND s.name = :name")
+    @Query("SELECT s FROM Secret s WHERE s.team IS NULL AND s.name = :name")
     Optional<Secret> findGlobalByName(@Param("name") String name);
 
-    boolean existsByProjectIdAndName(UUID projectId, String name);
+    boolean existsByTeamIdAndName(UUID teamId, String name);
 
-    @Query("SELECT COUNT(s) > 0 FROM Secret s WHERE s.project IS NULL AND s.name = :name")
+    @Query("SELECT COUNT(s) > 0 FROM Secret s WHERE s.team IS NULL AND s.name = :name")
     boolean existsGlobalByName(@Param("name") String name);
 
-    void deleteByProjectId(UUID projectId);
+    void deleteByteamId(UUID teamId);
 }

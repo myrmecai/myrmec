@@ -126,7 +126,7 @@ public class UserManagementController {
                 request.getRole(),
                 request.getScopeType(),
                 request.getGroupId(),
-                request.getProjectId(),
+                request.getTeamId(),
                 principal != null ? principal.getUserId() : null
         );
 
@@ -175,7 +175,7 @@ public class UserManagementController {
                 .map(r -> UserResponse.RoleInfo.builder()
                         .id(r.getId())
                         .role(r.getRole().name())
-                        .projectId(r.getProjectId())
+                        .teamId(r.getTeamId())
                         .createdAt(r.getCreatedAt())
                         .build())
                 .toList();

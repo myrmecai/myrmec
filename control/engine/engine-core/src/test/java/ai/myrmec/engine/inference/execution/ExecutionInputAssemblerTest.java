@@ -76,7 +76,7 @@ class ExecutionInputAssemblerTest {
     private ExecutionInputAssembler assembler;
 
     private UUID conversationId;
-    private UUID projectId;
+    private UUID teamId;
 
     @BeforeEach
     void setUp() {
@@ -112,7 +112,7 @@ class ExecutionInputAssemblerTest {
                 mock(ai.myrmec.engine.workflow.WorkflowTaskRepository.class));
 
         conversationId = UUID.randomUUID();
-        projectId = UUID.randomUUID();
+        teamId = UUID.randomUUID();
 
         // By default there are no attachments; individual tests override.
         when(attachmentService.listForMessage(any())).thenReturn(List.of());
@@ -161,11 +161,9 @@ class ExecutionInputAssemblerTest {
         UUID messageId = UUID.randomUUID();
         UUID visionAttachmentId = UUID.randomUUID();
 
-        // Vision model â†’ flagged.
+        // Vision model → flagged.
         wireConversation("Profile prompt.", "gpt-4o");
-        Model vision = new Model();
-        vision.setSupportsVision(true);
-        when(modelService.findByCode("gpt-4o")).thenReturn(vision);
+        when(modelService.hasCapability("gpt-4o", "VISION")).thenReturn(true);
         ConversationMessage user = message(messageId, 0L,
                 ConversationMessage.Role.USER, "look");
         when(conversationService.listMessages(conversationId)).thenReturn(List.of(user));
@@ -179,12 +177,10 @@ class ExecutionInputAssemblerTest {
         assertThat(flagged.inlineText()).isNull();
         assertThat(flagged.readContentPath()).contains(visionAttachmentId.toString());
 
-        // Non-vision model â†’ metadata only, never flagged.
+        // Non-vision model → metadata only, never flagged.
         UUID textAttachmentId = UUID.randomUUID();
         wireConversation("Profile prompt.", "text-only");
-        Model textOnly = new Model();
-        textOnly.setSupportsVision(false);
-        when(modelService.findByCode("text-only")).thenReturn(textOnly);
+        when(modelService.hasCapability("text-only", "VISION")).thenReturn(false);
         when(attachmentService.listForMessage(messageId)).thenReturn(List.of(
                 attachment(textAttachmentId, messageId, "shot.png", "image/png")));
 
@@ -358,7 +354,7 @@ class ExecutionInputAssemblerTest {
 
         Conversation conversation = new Conversation();
         conversation.setId(conversationId);
-        conversation.setProjectId(projectId);
+        conversation.setTeamId(teamId);
         conversation.setAgentProfileVersionId(profileVersionId);
         when(conversationRepository.findById(conversationId)).thenReturn(Optional.of(conversation));
 
@@ -378,14 +374,14 @@ class ExecutionInputAssemblerTest {
 
         when(sessionContextAssembler.assemble(any(), any(), any(), any()))
                 .thenReturn(new ai.myrmec.engine.websocket.message.payload.SessionOpenPayload(
-                        null, "CONVERSATION", projectId, null, null, null,
+                        null, "CONVERSATION", teamId, null, null, null,
                         List.of(), List.of(), false, null, null, null, null, List.of(), null,
                         null, null, null));
     }
 
     private void assemble() {
         // Only exercised for the side effects captured through the spec.
-        assembler.assembleConversationInput(conversationId, UUID.randomUUID(), projectId, 1L);
+        assembler.assembleConversationInput(conversationId, UUID.randomUUID(), teamId, 1L);
     }
 
     private InferenceRequestSpec captureSpec() {

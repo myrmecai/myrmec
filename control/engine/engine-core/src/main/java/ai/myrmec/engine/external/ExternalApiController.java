@@ -56,7 +56,7 @@ public class ExternalApiController {
     public ResponseEntity<List<ExternalAssistantResponse>> listAssistants(
             @CurrentServiceAccount ServiceAccountPrincipal principal) {
         List<ExternalAssistantResponse> body = assistantService
-                .listUsable(principal.getServiceAccountId(), principal.getProjectId()).stream()
+                .listUsable(principal.getServiceAccountId(), principal.getTeamId()).stream()
                 .map(ExternalAssistantResponse::of)
                 .toList();
         return ResponseEntity.ok(body);
@@ -68,7 +68,7 @@ public class ExternalApiController {
             @PathVariable UUID id,
             @CurrentServiceAccount ServiceAccountPrincipal principal) {
         ExternalAssistantService.UsableAssistant usable = assistantService.requireUsable(
-                principal.getServiceAccountId(), principal.getProjectId(), id);
+                principal.getServiceAccountId(), principal.getTeamId(), id);
         return ResponseEntity.ok(ExternalAssistantResponse.of(usable));
     }
 

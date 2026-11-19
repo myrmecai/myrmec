@@ -11,7 +11,7 @@ import ai.myrmec.engine.assistant.Assistant;
 import ai.myrmec.engine.assistant.AssistantService;
 import ai.myrmec.engine.assistant.AssistantVersion;
 import ai.myrmec.engine.assistant.AssistantVersionService;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,14 +54,14 @@ class ConversationAssistantPinningIT extends IntegrationTestBase {
 
     @Test
     void createConversationPinsPublishedAssistantVersion() {
-        Project project = data.project().named("conv-pin").create();
+        team team = data.team().named("conv-pin").create();
         AgentProfile profile = data.agentProfile().named("conv-pin-profile").create();
         Assistant assistant = assistantService.createAssistant(
-                project.getId(), "Pinned Assistant", "desc", profile.getId(), TEST_ADMIN_ID);
+                team.getId(), "Pinned Assistant", "desc", profile.getId(), TEST_ADMIN_ID);
         AssistantVersion published = versionService.publish(assistant.getId(), TEST_ADMIN_ID);
 
         Conversation conversation = conversationService.createConversation(
-                project.getId(), TEST_ADMIN_ID, "chat", null, null, assistant.getId());
+                team.getId(), TEST_ADMIN_ID, "chat", null, null, assistant.getId());
 
         assertThat(conversation.getAssistantId()).isEqualTo(assistant.getId());
         assertThat(conversation.getAssistantVersionId()).isEqualTo(published.getId());
@@ -75,15 +75,15 @@ class ConversationAssistantPinningIT extends IntegrationTestBase {
 
     @Test
     void profileRepublishDoesNotAffectPinnedSession() {
-        Project project = data.project().named("conv-repub").create();
+        team team = data.team().named("conv-repub").create();
         AgentProfile profile = data.agentProfile().named("conv-repub-profile")
                 .withSystemPrompt("v1 prompt").create();
         Assistant assistant = assistantService.createAssistant(
-                project.getId(), "Republish Assistant", "desc", profile.getId(), TEST_ADMIN_ID);
+                team.getId(), "Republish Assistant", "desc", profile.getId(), TEST_ADMIN_ID);
         AssistantVersion published = versionService.publish(assistant.getId(), TEST_ADMIN_ID);
 
         Conversation conversation = conversationService.createConversation(
-                project.getId(), TEST_ADMIN_ID, "chat", null, null, assistant.getId());
+                team.getId(), TEST_ADMIN_ID, "chat", null, null, assistant.getId());
         UUID pinnedProfileVersionId = conversation.getAgentProfileVersionId();
 
         // The Profile republishes a new version AFTER the session pinned v1.
@@ -107,70 +107,70 @@ class ConversationAssistantPinningIT extends IntegrationTestBase {
 
     @Test
     void createConversationResolvesHostByCapacityNotProfile() {
-        Project project = data.project().named("conv-host").create();
+        team team = data.team().named("conv-host").create();
 
         // A second profile the host does NOT carry, so the assistant's pin
         // is independent of the host fixture.
         AgentProfile assistantProfile = data.agentProfile().named("conv-host-assistant").create();
 
         // An unrelated, live but unscoped host — must NOT be chosen over the
-        // in-project live host (selection is capacity + project scope based).
+        // in-team live host (selection is capacity + team scope based).
         AgentHost unrelatedHost = data.agent().named("conv-host-unrelated-agent")
                 .create().agent();
-        AgentHostCreationResult inProjectResult = data.agent().named("conv-host-inproject-agent")
-                .inProject(project).create();
+        AgentHostCreationResult inProjectResult = data.agent().named("conv-host-inTeam-agent")
+                .inTeam(team).create();
         AgentHost inProjectHost = inProjectResult.agent();
 
         openInstance(unrelatedHost);
         openInstance(inProjectHost);
 
         Assistant assistant = assistantService.createAssistant(
-                project.getId(), "Hosted Assistant", "desc", assistantProfile.getId(), TEST_ADMIN_ID);
+                team.getId(), "Hosted Assistant", "desc", assistantProfile.getId(), TEST_ADMIN_ID);
         versionService.publish(assistant.getId(), TEST_ADMIN_ID);
 
         Conversation conversation = conversationService.createConversation(
-                project.getId(), TEST_ADMIN_ID, "chat", null, null, assistant.getId());
+                team.getId(), TEST_ADMIN_ID, "chat", null, null, assistant.getId());
 
-        // §3.7: runtime host is selected by capacity (live + project scope),
-        // never by profile binding. The in-project live host wins.
+        // §3.7: runtime host is selected by capacity (live + team scope),
+        // never by profile binding. The in-team live host wins.
         assertThat(conversation.getAgentId()).isEqualTo(inProjectHost.getId());
     }
 
     @Test
     void createConversationWithoutPublishedVersionRejected() {
-        Project project = data.project().named("conv-nopub").create();
+        team team = data.team().named("conv-nopub").create();
         AgentProfile profile = data.agentProfile().named("conv-nopub-profile").create();
         Assistant assistant = assistantService.createAssistant(
-                project.getId(), "Draft-only Assistant", "desc", profile.getId(), TEST_ADMIN_ID);
+                team.getId(), "Draft-only Assistant", "desc", profile.getId(), TEST_ADMIN_ID);
 
         assertThatThrownBy(() -> conversationService.createConversation(
-                project.getId(), TEST_ADMIN_ID, "chat", null, null, assistant.getId()))
+                team.getId(), TEST_ADMIN_ID, "chat", null, null, assistant.getId()))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("no published version");
     }
 
     @Test
     void createConversationWithArchivedAssistantRejected() {
-        Project project = data.project().named("conv-archived").create();
+        team team = data.team().named("conv-archived").create();
         AgentProfile profile = data.agentProfile().named("conv-archived-profile").create();
         Assistant assistant = assistantService.createAssistant(
-                project.getId(), "Archived Assistant", "desc", profile.getId(), TEST_ADMIN_ID);
+                team.getId(), "Archived Assistant", "desc", profile.getId(), TEST_ADMIN_ID);
         versionService.publish(assistant.getId(), TEST_ADMIN_ID);
         assistantService.archive(assistant.getId());
 
         assertThatThrownBy(() -> conversationService.createConversation(
-                project.getId(), TEST_ADMIN_ID, "chat", null, null, assistant.getId()))
+                team.getId(), TEST_ADMIN_ID, "chat", null, null, assistant.getId()))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("archived");
     }
 
     @Test
     void createConversationFromWrongProjectRejected() {
-        Project project = data.project().named("conv-owner").create();
-        Project otherProject = data.project().named("conv-other").create();
+        team team = data.team().named("conv-owner").create();
+        team otherProject = data.team().named("conv-other").create();
         AgentProfile profile = data.agentProfile().named("conv-wrongproj-profile").create();
         Assistant assistant = assistantService.createAssistant(
-                project.getId(), "Owned Assistant", "desc", profile.getId(), TEST_ADMIN_ID);
+                team.getId(), "Owned Assistant", "desc", profile.getId(), TEST_ADMIN_ID);
         versionService.publish(assistant.getId(), TEST_ADMIN_ID);
 
         assertThatThrownBy(() -> conversationService.createConversation(
@@ -181,10 +181,10 @@ class ConversationAssistantPinningIT extends IntegrationTestBase {
 
     @Test
     void createConversationWithoutAssistantLeavesPinsNull() {
-        Project project = data.project().named("conv-legacy").create();
+        team team = data.team().named("conv-legacy").create();
 
         Conversation conversation = conversationService.createConversation(
-                project.getId(), TEST_ADMIN_ID, "legacy chat", null, null);
+                team.getId(), TEST_ADMIN_ID, "legacy chat", null, null);
 
         assertThat(conversation.getAssistantId()).isNull();
         assertThat(conversation.getAssistantVersionId()).isNull();

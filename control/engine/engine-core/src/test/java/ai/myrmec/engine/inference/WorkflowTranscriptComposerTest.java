@@ -73,7 +73,7 @@ class WorkflowTranscriptComposerTest {
         assertThat(system).contains("### API Spec\nREST + JSON");
         assertThat(system).contains("### Architecture Doc\nUse microservices");
         assertThat(system).contains("### Deploy Guide\nUse Helm");
-        assertThat(system).contains("# Project Context");
+        assertThat(system).contains("# team Context");
     }
 
     @Test
@@ -91,8 +91,8 @@ class WorkflowTranscriptComposerTest {
         List<InferenceMessage> messages = composer.compose(spec);
 
         assertThat(messages).hasSize(2);
-        // System message starts with "# Project Context" (no profile prompt)
-        assertThat(messages.get(0).content()).startsWith("\n\n# Project Context");
+        // System message starts with "# team Context" (no profile prompt)
+        assertThat(messages.get(0).content()).startsWith("\n\n# team Context");
         assertThat(messages.get(1).content()).isEqualTo("Do the thing.");
     }
 
@@ -169,7 +169,7 @@ class WorkflowTranscriptComposerTest {
     }
 
     @Test
-    @DisplayName("empty knowledge list â€” no project context section")
+    @DisplayName("empty knowledge list â€” no team context section")
     void testEmptyKnowledge() {
         InferenceRequestSpec spec = InferenceRequestSpec.builder()
                 .serviceType("WORKFLOW")
@@ -182,6 +182,6 @@ class WorkflowTranscriptComposerTest {
 
         assertThat(messages).hasSize(2);
         assertThat(messages.get(0).content()).isEqualTo("System prompt.");
-        assertThat(messages.get(0).content()).doesNotContain("# Project Context");
+        assertThat(messages.get(0).content()).doesNotContain("# team Context");
     }
 }

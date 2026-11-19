@@ -71,12 +71,12 @@ public interface RetrievalProvider {
      *
      * @param kbId            the knowledge base ID (for config lookup)
      * @param providerConfig  the KB's {@code provider_config} JSON string
-     * @param projectId       the KB's owning project ID (for secret resolution;
+     * @param teamId       the KB's owning Team ID (for secret resolution;
      *                        null for SYSTEM/GROUP scope)
      * @param file            the file to ingest
      * @throws RetrievalException if ingestion fails
      */
-    default void ingest(UUID kbId, String providerConfig, UUID projectId,
+    default void ingest(UUID kbId, String providerConfig, UUID teamId,
                         ai.myrmec.engine.spi.connector.EmittedFile file) throws RetrievalException {
         throw new UnsupportedOperationException("Provider " + id() + " does not support ingestion");
     }

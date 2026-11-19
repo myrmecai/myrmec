@@ -12,9 +12,9 @@ import java.util.UUID;
  */
 public interface DataFeedRepository extends JpaRepository<DataFeed, UUID> {
 
-    List<DataFeed> findByScopeAndProjectIdIsNull(String scope);
+    List<DataFeed> findByScopeAndTeamIdIsNull(String scope);
 
-    List<DataFeed> findByScopeAndProjectId(String scope, UUID projectId);
+    List<DataFeed> findByScopeAndTeamId(String scope, UUID teamId);
 
     List<DataFeed> findByProviderVersionId(UUID providerVersionId);
 

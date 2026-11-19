@@ -10,7 +10,7 @@ import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionAllocator;
 import ai.myrmec.engine.inference.SessionRepository;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.quota.Quota;
 import ai.myrmec.engine.quota.QuotaConsumptionRepository;
 import ai.myrmec.engine.quota.QuotaRepository;
@@ -42,7 +42,7 @@ import static org.mockito.Mockito.verify;
  * #139 (§8.4/§12.3): the conversation execution.event durable sink.
  * TOKEN_USAGE events persist as {@code execution_events} rows with
  * {@code kind=CONVERSATION} ({@code task_id} null) AND attribute tokens to
- * the conversation/project consumption seam; replays of the same
+ * the conversation/team consumption seam; replays of the same
  * {@code sourceEventId} don't double-insert and still ack; an ingestion
  * failure stays unacked (the host resends); unknown executionIds are
  * rejected on the same error path as the orchestration validation.
@@ -96,20 +96,20 @@ class ConversationEventIngestionTest extends IntegrationTestBase {
     }
 
     private record Setup(UUID sessionId, UUID executionId, Host host, Conversation conversation,
-                         Project project) {}
+                         team team) {}
 
     /** A conversation execution in RUNNING state on a live host (house pattern). */
     private Setup runningConversationExecution() throws Exception {
         Host host = openedHost();
-        Project project = data.project().named("ce-proj").create();
+        team team = data.team().named("ce-proj").create();
         AgentProfile profile = data.agentProfile().named("ce-profile").create();
 
-        Conversation conversation = data.conversation().inProject(project).create();
+        Conversation conversation = data.conversation().inTeam(team).create();
         conversation.setAgentId(hostInstanceIdToAgentId(host));
         conversationRepository.save(conversation);
 
         UUID sessionId = allocator.offer("CONVERSATION", conversation.getId(), "CONVERSATION",
-                project.getId(), hostInstanceIdToAgentId(host)).orElseThrow();
+                team.getId(), hostInstanceIdToAgentId(host)).orElseThrow();
 
         String accept = """
                 { "protocolVersion": 1, "messageId": "m-acc", "type": "session.accept",
@@ -133,7 +133,7 @@ class ConversationEventIngestionTest extends IntegrationTestBase {
         execution.setStartedAt(Instant.now());
         execution = executionRepository.save(execution);
 
-        return new Setup(sessionId, execution.getId(), host, conversation, project);
+        return new Setup(sessionId, execution.getId(), host, conversation, team);
     }
 
     /** The host instance row is resolved back to its AgentHost id. */
@@ -186,10 +186,10 @@ class ConversationEventIngestionTest extends IntegrationTestBase {
                 .sum();
     }
 
-    private Quota projectTokensQuota(Project project) {
+    private Quota projectTokensQuota(team team) {
         Quota quota = new Quota();
-        quota.setScopeType(Quota.Scope.PROJECT);
-        quota.setScopeId(project.getId());
+        quota.setScopeType(Quota.Scope.TEAM);
+        quota.setScopeId(team.getId());
         quota.setResourceType(Quota.ResourceType.TOKENS);
         quota.setPeriod(Quota.Period.DAILY);
         quota.setLimitAmount(1_000_000L);
@@ -205,7 +205,7 @@ class ConversationEventIngestionTest extends IntegrationTestBase {
     @Test
     void conversationTokenUsagePersistsAndAttributesConsumption() throws Exception {
         Setup setup = runningConversationExecution();
-        projectTokensQuota(setup.project());
+        projectTokensQuota(setup.team());
 
         UUID eventId = UUID.randomUUID();
         sendEvent(setup, "m-usage-1", 1L, eventId, "TOKEN_USAGE",
@@ -223,9 +223,9 @@ class ConversationEventIngestionTest extends IntegrationTestBase {
                 .isEqualTo(1L);
         assertThat(ackForMessageId(setup.host().session(), "m-usage-1")).isNotNull();
 
-        // Tokens attributed to the project quota consumption (no assistant pin on
-        // this bare conversation fixture — the project path is the fallback).
-        assertThat(consumptionFor(setup.project().getId())).isEqualTo(25L);
+        // Tokens attributed to the team quota consumption (no assistant pin on
+        // this bare conversation fixture — the team path is the fallback).
+        assertThat(consumptionFor(setup.team().getId())).isEqualTo(25L);
     }
 
     // =================================================================

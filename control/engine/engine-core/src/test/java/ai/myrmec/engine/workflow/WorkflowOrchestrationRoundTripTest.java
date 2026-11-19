@@ -3,7 +3,7 @@
 package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine.IntegrationTestBase;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.workflow.dto.CreateWorkflowRequest;
 import ai.myrmec.engine.workflow.dto.WorkflowStepDto;
@@ -37,7 +37,7 @@ class WorkflowOrchestrationRoundTripTest extends IntegrationTestBase {
     @Test
     @DisplayName("taskType, nested orchestration, and retryPolicy survive both Jackson directions")
     void orchestrationMapSurvivesRoundTrip() {
-        Project project = data.project().named("orch-rt").create();
+        team team = data.team().named("orch-rt").create();
         UUID profileId = data.agentProfile().named("orch-rt-profile").create().getId();
 
         // A representative nested orchestration map — mirrors the §7 fields
@@ -59,7 +59,7 @@ class WorkflowOrchestrationRoundTripTest extends IntegrationTestBase {
                 "maxBackoffSeconds", 30);
 
         WorkflowStepDto orchestratorStep = new WorkflowStepDto(
-                "build", "Build the project", profileId,
+                "build", "Build the team", profileId,
                 "Orchestrate the build", List.of(), Map.of(),
                 600, null, null,
                 "ORCHESTRATOR", orchestration, retryPolicy);
@@ -71,7 +71,7 @@ class WorkflowOrchestrationRoundTripTest extends IntegrationTestBase {
                 "INFERENCE", null, null);
 
         var created = workflowService.create(new CreateWorkflowRequest(
-                project.getId(),
+                team.getId(),
                 "orch-rt-workflow-" + System.nanoTime(),
                 "Orchestration round-trip",
                 List.of(orchestratorStep, inferenceStep), null, null), TEST_ADMIN_ID);
@@ -113,7 +113,7 @@ class WorkflowOrchestrationRoundTripTest extends IntegrationTestBase {
     @Test
     @DisplayName("retryPolicy.maxRetries wins over the legacy bare maxRetries")
     void retryPolicyWinsOverLegacyField() {
-        Project project = data.project().named("orch-rt2").create();
+        team team = data.team().named("orch-rt2").create();
         UUID profileId = data.agentProfile().named("orch-rt2-profile").create().getId();
 
         WorkflowStepDto step = new WorkflowStepDto(
@@ -123,7 +123,7 @@ class WorkflowOrchestrationRoundTripTest extends IntegrationTestBase {
                 "INFERENCE", null, Map.of("maxRetries", 3));
 
         var created = workflowService.create(new CreateWorkflowRequest(
-                project.getId(),
+                team.getId(),
                 "orch-rt2-workflow-" + System.nanoTime(),
                 "Retry policy precedence",
                 List.of(step), null, null), TEST_ADMIN_ID);

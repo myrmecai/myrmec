@@ -41,8 +41,8 @@ public class KnowledgeSource {
     @Column(name = "scope", nullable = false, length = 20)
     private String scope;
 
-    @Column(name = "project_id")
-    private UUID projectId;
+    @Column(name = "team_id")
+    private UUID teamId;
 
     @Column(name = "name", nullable = false, length = 100)
     private String name;

@@ -3,7 +3,7 @@ package ai.myrmec.engine.workflow;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileRepository;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.spi.quota.QuotaDecision;
 import ai.myrmec.engine.spi.quota.QuotaPolicyEngine;
 import ai.myrmec.engine.user.User;
@@ -60,13 +60,13 @@ class WorkflowRequestStatusLifecycleTest {
         userId = UUID.randomUUID();
         workflowId = UUID.randomUUID();
 
-        Project project = new Project();
-        project.setId(UUID.randomUUID());
-        project.setName("phase10-bug74");
+        team team = new team();
+        team.setId(UUID.randomUUID());
+        team.setName("phase10-bug74");
 
         workflow = new Workflow();
         workflow.setId(workflowId);
-        workflow.setProject(project);
+        workflow.setTeam(team);
         workflow.setName("phase10-bug74-wf");
         workflow.setVersion(1);
         workflow.setStatus(WorkflowStatus.PUBLISHED);

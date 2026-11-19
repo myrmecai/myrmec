@@ -24,22 +24,22 @@ public final class AddressBookKnowledge {
         return loadResource("org-level/security-guidelines.md");
     }
 
-    // ==================== Project-Level Documents ====================
+    // ==================== team-Level Documents ====================
 
     public static String javaSpringStandards() {
-        return loadResource("project-level/java-spring-standards.md");
+        return loadResource("team-level/java-spring-standards.md");
     }
 
     public static String reactTypeScriptStandards() {
-        return loadResource("project-level/react-typescript-standards.md");
+        return loadResource("team-level/react-typescript-standards.md");
     }
 
     public static String restApiConventions() {
-        return loadResource("project-level/rest-api-conventions.md");
+        return loadResource("team-level/rest-api-conventions.md");
     }
 
     public static String architecture() {
-        return loadResource("project-level/architecture.md");
+        return loadResource("team-level/architecture.md");
     }
 
     // ==================== Helper ====================

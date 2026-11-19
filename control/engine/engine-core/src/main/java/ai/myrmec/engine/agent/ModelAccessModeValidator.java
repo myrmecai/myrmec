@@ -31,7 +31,7 @@ import org.springframework.stereotype.Component;
  * </table>
  *
  * <p>The mandate is read from the <b>org-default</b> governance profile
- * (design &sect;5.3: V1 check is org scope; per-project scope deferred).
+ * (design &sect;5.3: V1 check is org scope; per-Team scope deferred).
  * Violations throw {@link GovernanceViolationException} (HTTP 403
  * {@code GOVERNANCE_VIOLATION}); plain matrix violations throw
  * {@link BadRequestException}, matching the host service's existing

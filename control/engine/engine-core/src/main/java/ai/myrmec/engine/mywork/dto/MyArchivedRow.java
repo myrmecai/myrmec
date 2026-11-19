@@ -14,8 +14,8 @@ import java.util.UUID;
  */
 public record MyArchivedRow(
         UUID id,
-        UUID projectId,
-        String projectName,
+        UUID teamId,
+        String teamName,
         Type type,
         String name,
         String description,
@@ -27,22 +27,22 @@ public record MyArchivedRow(
         ASSISTANT
     }
 
-    public static MyArchivedRow ofWorkflow(Workflow w, String projectName) {
+    public static MyArchivedRow ofWorkflow(Workflow w, String teamName) {
         return new MyArchivedRow(
                 w.getId(),
-                w.getProject().getId(),
-                projectName,
+                w.getTeam().getId(),
+                teamName,
                 Type.WORKFLOW,
                 w.getName(),
                 w.getDescription(),
                 w.getUpdatedAt());
     }
 
-    public static MyArchivedRow ofAssistant(Assistant a, String projectName) {
+    public static MyArchivedRow ofAssistant(Assistant a, String teamName) {
         return new MyArchivedRow(
                 a.getId(),
-                a.getProjectId(),
-                projectName,
+                a.getTeamId(),
+                teamName,
                 Type.ASSISTANT,
                 a.getName(),
                 a.getDescription(),

@@ -41,10 +41,10 @@ public class AgentHost {
     private String description;
 
     /**
-     * Optional project scope. Null means system-wide.
+     * Optional Team scope. Null means system-wide.
      */
-    @Column(name = "project_id")
-    private UUID projectId;
+    @Column(name = "team_id")
+    private UUID teamId;
 
     /**
      * Registration key for agent instances to authenticate.

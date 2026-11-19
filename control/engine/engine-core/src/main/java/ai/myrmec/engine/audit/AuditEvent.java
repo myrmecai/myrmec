@@ -57,8 +57,8 @@ public class AuditEvent {
     @Column(name = "scope_type", nullable = false, length = 20)
     private String scopeType;
 
-    @Column(name = "project_id")
-    private UUID projectId;
+    @Column(name = "team_id")
+    private UUID teamId;
 
     @Column(name = "actor_id")
     private UUID actorId;

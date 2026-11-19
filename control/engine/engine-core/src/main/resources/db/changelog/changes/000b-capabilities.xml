@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+    <changeSet id="capability_tree" author="myrmec">
+        <createTable tableName="capability_tree">
+            <column name="id" type="varchar(50)">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="parent_id" type="varchar(50)">
+                <constraints nullable="true" foreignKeyName="fk_capability_tree_parent" references="capability_tree(id)" />
+            </column>
+            <column name="display_name" type="varchar(100)">
+                <constraints nullable="false" />
+            </column>
+            <column name="description" type="text" />
+            <column name="is_active" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false" />
+            </column>
+        </createTable>
+    </changeSet>
+    <changeSet id="capabilities_catalog_table" author="myrmec">
+        <createTable tableName="capabilities">
+            <column name="capability_key" type="varchar(100)">
+                <constraints primaryKey="true" nullable="false" />
+            </column>
+            <column name="display_name" type="varchar(100)">
+                <constraints nullable="false" />
+            </column>
+            <column name="description" type="text" />
+            <column name="is_active" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false" />
+            </column>
+        </createTable>
+    </changeSet>
+    <changeSet id="capability_mappings" author="myrmec">
+        <createTable tableName="capability_mappings">
+            <column name="capability_key" type="varchar(100)">
+                <constraints nullable="false" />
+            </column>
+            <column name="capability_tree_id" type="varchar(50)">
+                <constraints nullable="false" />
+            </column>
+        </createTable>
+    </changeSet>
+    <changeSet id="capability_tree_seed" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="capability_tree" />
+        </preConditions>
+
+        <loadData
+            tableName="capability_tree"
+            file="db/changelog/data/capability_tree.csv"
+            separator=","
+            encoding="UTF-8"
+            relativeToChangelogFile="false">
+            <column name="id" type="STRING" />
+            <column name="parent_id" type="STRING" />
+            <column name="display_name" type="STRING" />
+            <column name="description" type="STRING" />
+            <column name="is_active" type="BOOLEAN" />
+        </loadData>
+    </changeSet>
+    <changeSet id="capabilities_seed" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="capabilities" />
+        </preConditions>
+
+        <loadData
+            tableName="capabilities"
+            file="db/changelog/data/capabilities.csv"
+            separator=","
+            encoding="UTF-8"
+            relativeToChangelogFile="false">
+            <column name="capability_key" type="STRING" />
+            <column name="display_name" type="STRING" />
+            <column name="description" type="STRING" />
+            <column name="is_active" type="BOOLEAN" />
+        </loadData>
+    </changeSet>
+    <changeSet id="capability_mappings_seed" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="capability_mappings" />
+        </preConditions>
+
+        <loadData
+            tableName="capability_mappings"
+            file="db/changelog/data/capability_mappings.csv"
+            separator=","
+            encoding="UTF-8"
+            relativeToChangelogFile="false">
+            <column name="capability_key" type="STRING" />
+            <column name="capability_tree_id" type="STRING" />
+        </loadData>
+    </changeSet>
+</databaseChangeLog>

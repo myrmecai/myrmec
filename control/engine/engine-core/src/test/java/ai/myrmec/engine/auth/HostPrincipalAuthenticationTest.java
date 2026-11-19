@@ -37,7 +37,7 @@ class HostPrincipalAuthenticationTest extends IntegrationTestBase {
         AgentHostCreationResult result =
                 data.agent().named("filter-host").create();
         String token = jwtTokenProvider.generateHostAccessToken(
-                result.agent().getId(), result.agent().getName());
+                result.agent().getId(), result.agent().getName(), null);
 
         Authentication authentication = runFilterWithBearer(token);
 
@@ -63,7 +63,7 @@ class HostPrincipalAuthenticationTest extends IntegrationTestBase {
         });
 
         String token = jwtTokenProvider.generateHostAccessToken(
-                result.agent().getId(), result.agent().getName());
+                result.agent().getId(), result.agent().getName(), null);
 
         // The filter must NOT authenticate an inactive host: the security
         // context stays empty.

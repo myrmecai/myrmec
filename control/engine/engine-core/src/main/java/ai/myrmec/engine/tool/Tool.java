@@ -58,7 +58,7 @@ public class Tool {
     private ToolStatus status = ToolStatus.ACTIVE;
 
     /**
-     * Tool risk class (Phase 7b). Drives HITL gating: when a project has
+     * Tool risk class (Phase 7b). Drives HITL gating: when a Team has
      * {@code autoHitlOnDestructive=true}, any tool with class
      * {@link RiskClass#DESTRUCTIVE} or {@link RiskClass#IRREVERSIBLE}
      * triggers an APPROVAL_REQUEST before execution. Defaults to

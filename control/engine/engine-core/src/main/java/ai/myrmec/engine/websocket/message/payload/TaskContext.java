@@ -11,7 +11,7 @@ import java.util.Map;
  * and optional RAG configuration for external knowledge retrieval.
  * 
  * This context is injected into TaskAssignPayload and sent to agents
- * along with task input to provide organizational standards, project
+ * along with task input to provide organizational standards, Team
  * conventions, and task-specific instructions.
  */
 @Data

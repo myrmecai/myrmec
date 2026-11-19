@@ -9,7 +9,7 @@ import ai.myrmec.engine.conversation.dto.CreateConversationRequest;
 import ai.myrmec.engine.conversation.dto.PostUserMessageRequest;
 import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
 import ai.myrmec.engine.conversation.stream.ConversationSubscriber;
-import ai.myrmec.engine.project.Project;
+import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.testing.TestDataBuilder;
 import ai.myrmec.engine.user.AuthenticationProvider;
 import ai.myrmec.engine.user.User;
@@ -42,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Phase 6c-1 controller integration test — covers the REST surface
  * (create / get / list-messages / post-user-message) and the
- * {@code @conversationAccess} SpEL evaluator (project-level fallback ACL).
+ * {@code @conversationAccess} SpEL evaluator (team-level fallback ACL).
  *
  * <p>Not annotated {@code @Transactional} — the embedded HTTP server runs
  * on a separate thread, see {@code AgentRetrievalControllerTest} for the
@@ -103,9 +103,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void adminCanCreateConversationAndPostUserMessage() {
-        Project project = data.project().named("conv-ctrl-create").create();
+        team team = data.team().named("conv-ctrl-create").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "REST smoke", null);
+                team.getId(), null, "REST smoke", null);
 
         ResponseEntity<ConversationResponse> created = restTemplate.exchange(
                 "/api/v1/conversations",
@@ -117,7 +117,7 @@ class ConversationControllerTest extends IntegrationTestBase {
         assertThat(created.getBody()).isNotNull();
         UUID conversationId = created.getBody().id();
         assertThat(conversationId).isNotNull();
-        assertThat(created.getBody().projectId()).isEqualTo(project.getId());
+        assertThat(created.getBody().teamId()).isEqualTo(team.getId());
         assertThat(created.getBody().status()).isEqualTo("ACTIVE");
 
         // Post a USER message.
@@ -152,11 +152,11 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void firstUserMessageAutoTitlesAnUntitledConversation() {
-        Project project = data.project().named("conv-ctrl-autotitle").create();
+        team team = data.team().named("conv-ctrl-autotitle").create();
 
         // Created with no title.
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, null, null);
+                team.getId(), null, null, null);
         ResponseEntity<ConversationResponse> created = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -201,9 +201,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void userSuppliedTitleSurvivesTheFirstUserMessage() {
-        Project project = data.project().named("conv-ctrl-keeptitle").create();
+        team team = data.team().named("conv-ctrl-keeptitle").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "My chosen title", null);
+                team.getId(), null, "My chosen title", null);
         ResponseEntity<ConversationResponse> created = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -227,9 +227,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void cancelReturnsNotDeliveredWhenNoWorkerSocketAttached() {
-        Project project = data.project().named("conv-ctrl-cancel").create();
+        team team = data.team().named("conv-ctrl-cancel").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "Cancel smoke", null);
+                team.getId(), null, "Cancel smoke", null);
         ResponseEntity<ConversationResponse> created = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -251,9 +251,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void editUserMessageSupersedesTailAndAppendsNewUserTurn() {
-        Project project = data.project().named("conv-ctrl-edit").create();
+        team team = data.team().named("conv-ctrl-edit").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "Edit smoke", null);
+                team.getId(), null, "Edit smoke", null);
         UUID conversationId = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -303,9 +303,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void editRejectsAssistantMessage() {
-        Project project = data.project().named("conv-ctrl-edit-reject").create();
+        team team = data.team().named("conv-ctrl-edit-reject").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "Edit reject", null);
+                team.getId(), null, "Edit reject", null);
         UUID conversationId = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -326,9 +326,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void regenerateSupersedesAssistantTurn() {
-        Project project = data.project().named("conv-ctrl-regen").create();
+        team team = data.team().named("conv-ctrl-regen").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "Regen smoke", null);
+                team.getId(), null, "Regen smoke", null);
         UUID conversationId = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -372,9 +372,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void closeFlipsToTerminalClosedStampsTrailAndStaysRenamable() throws Exception {
-        Project project = data.project().named("conv-ctrl-close").create();
+        team team = data.team().named("conv-ctrl-close").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "Close me", null);
+                team.getId(), null, "Close me", null);
         ResponseEntity<ConversationResponse> created = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -411,9 +411,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void archiveFromActiveStampsBothTrailsAndIsIdempotent() throws Exception {
-        Project project = data.project().named("conv-ctrl-archive-active").create();
+        team team = data.team().named("conv-ctrl-archive-active").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "Archive from active", null);
+                team.getId(), null, "Archive from active", null);
         ResponseEntity<ConversationResponse> created = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -443,9 +443,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void archiveFromClosedPreservesTheExistingCloseTrail() throws Exception {
-        Project project = data.project().named("conv-ctrl-archive-closed").create();
+        team team = data.team().named("conv-ctrl-archive-closed").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "Archive from closed", null);
+                team.getId(), null, "Archive from closed", null);
         UUID conversationId = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -467,9 +467,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void patchIgnoresStatusFieldAndOnlyRenames() throws Exception {
-        Project project = data.project().named("conv-ctrl-patch").create();
+        team team = data.team().named("conv-ctrl-patch").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "Original title", null);
+                team.getId(), null, "Original title", null);
         ResponseEntity<ConversationResponse> created = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -491,9 +491,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void closedConversationRejectsNewUserMessages() throws Exception {
-        Project project = data.project().named("conv-ctrl-readonly").create();
+        team team = data.team().named("conv-ctrl-readonly").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "Read only after close", null);
+                team.getId(), null, "Read only after close", null);
         UUID conversationId = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -514,23 +514,23 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void listFiltersHideClosedAndArchivedByDefault() throws Exception {
-        Project project = data.project().named("conv-ctrl-list-filters").create();
+        team team = data.team().named("conv-ctrl-list-filters").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "stays active", null);
+                team.getId(), null, "stays active", null);
         UUID activeId = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
                 new HttpEntity<>(body, adminHeaders()),
                 ConversationResponse.class).getBody().id();
         CreateConversationRequest closeBody = new CreateConversationRequest(
-                project.getId(), null, "gets closed", null);
+                team.getId(), null, "gets closed", null);
         UUID closedId = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
                 new HttpEntity<>(closeBody, adminHeaders()),
                 ConversationResponse.class).getBody().id();
         CreateConversationRequest archiveBody = new CreateConversationRequest(
-                project.getId(), null, "gets archived", null);
+                team.getId(), null, "gets archived", null);
         UUID archivedId = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -544,7 +544,7 @@ class ConversationControllerTest extends IntegrationTestBase {
 
         // Default: only the ACTIVE conversation is listed.
         ResponseEntity<List<ConversationResponse>> defaults = restTemplate.exchange(
-                "/api/v1/conversations?projectId=" + project.getId(),
+                "/api/v1/conversations?teamId=" + team.getId(),
                 HttpMethod.GET,
                 new HttpEntity<>(adminHeaders()),
                 new ParameterizedTypeReference<List<ConversationResponse>>() {});
@@ -555,7 +555,7 @@ class ConversationControllerTest extends IntegrationTestBase {
 
         // Opt-in: closed rows come back with includeClosed=true.
         ResponseEntity<List<ConversationResponse>> withClosed = restTemplate.exchange(
-                "/api/v1/conversations?projectId=" + project.getId() + "&includeClosed=true",
+                "/api/v1/conversations?teamId=" + team.getId() + "&includeClosed=true",
                 HttpMethod.GET,
                 new HttpEntity<>(adminHeaders()),
                 new ParameterizedTypeReference<List<ConversationResponse>>() {});
@@ -565,7 +565,7 @@ class ConversationControllerTest extends IntegrationTestBase {
 
         // Opt-in: archived rows come back with includeArchived=true.
         ResponseEntity<List<ConversationResponse>> withArchived = restTemplate.exchange(
-                "/api/v1/conversations?projectId=" + project.getId() + "&includeArchived=true",
+                "/api/v1/conversations?teamId=" + team.getId() + "&includeArchived=true",
                 HttpMethod.GET,
                 new HttpEntity<>(adminHeaders()),
                 new ParameterizedTypeReference<List<ConversationResponse>>() {});
@@ -575,7 +575,7 @@ class ConversationControllerTest extends IntegrationTestBase {
 
         // Both opt-ins return the full set.
         ResponseEntity<List<ConversationResponse>> withBoth = restTemplate.exchange(
-                "/api/v1/conversations?projectId=" + project.getId()
+                "/api/v1/conversations?teamId=" + team.getId()
                         + "&includeClosed=true&includeArchived=true",
                 HttpMethod.GET,
                 new HttpEntity<>(adminHeaders()),
@@ -587,9 +587,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void closeAndArchiveBroadcastConversationStateFramesToSseViewers() throws Exception {
-        Project project = data.project().named("conv-ctrl-sse-state").create();
+        team team = data.team().named("conv-ctrl-sse-state").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "SSE state frames", null);
+                team.getId(), null, "SSE state frames", null);
         UUID conversationId = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -672,9 +672,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void unauthenticatedCallIsRejected() {
-        Project project = data.project().named("conv-ctrl-noauth").create();
+        team team = data.team().named("conv-ctrl-noauth").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "should be rejected", null);
+                team.getId(), null, "should be rejected", null);
 
         ResponseEntity<String> resp = restTemplate.exchange(
                 "/api/v1/conversations",
@@ -687,19 +687,19 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void projectEditorCanCreateConversationViaFallbackAcl() {
-        Project project = data.project().named("conv-ctrl-editor").create();
+        team team = data.team().named("conv-ctrl-editor").create();
         UUID someUser = seedUser("editor-" + UUID.randomUUID().toString().substring(0, 8));
 
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "editor session", null);
+                team.getId(), null, "editor session", null);
 
         ResponseEntity<ConversationResponse> resp = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
-                new HttpEntity<>(body, userHeaders(someUser, project.getId())),
+                new HttpEntity<>(body, userHeaders(someUser, team.getId())),
                 ConversationResponse.class);
 
-        // userHeaders mints a proj:<id>:EDITOR claim → projectAccess.canView passes
+        // userHeaders mints a proj:<id>:EDITOR claim → teamAccess.canView passes
         // (EDITOR implies VIEWER via UserRole.Role.impliedRoles()).
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(resp.getBody()).isNotNull();
@@ -708,10 +708,10 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void outsiderCannotAccessConversation() {
-        // Admin creates the conversation under one project.
-        Project project = data.project().named("conv-ctrl-outsider").create();
+        // Admin creates the conversation under one team.
+        team team = data.team().named("conv-ctrl-outsider").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "private", null);
+                team.getId(), null, "private", null);
         ResponseEntity<ConversationResponse> created = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -719,7 +719,7 @@ class ConversationControllerTest extends IntegrationTestBase {
                 ConversationResponse.class);
         UUID conversationId = created.getBody().id();
 
-        // Different user holds EDITOR on a *different* project — should not see this conv.
+        // Different user holds EDITOR on a *different* team — should not see this conv.
         UUID outsider = seedUser("outsider-" + UUID.randomUUID().toString().substring(0, 8));
         UUID otherProject = UUID.randomUUID();
         ResponseEntity<String> resp = restTemplate.exchange(
@@ -733,9 +733,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void eventsEndpointReplaysTheLifecycleLogInOrder() {
-        Project project = data.project().named("conv-ctrl-events").create();
+        team team = data.team().named("conv-ctrl-events").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "events session", null);
+                team.getId(), null, "events session", null);
         ResponseEntity<ConversationResponse> created = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -775,9 +775,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void eventsEndpointRejectsOutsiders() {
-        Project project = data.project().named("conv-ctrl-events-acl").create();
+        team team = data.team().named("conv-ctrl-events-acl").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "events acl", null);
+                team.getId(), null, "events acl", null);
         ResponseEntity<ConversationResponse> created = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -797,9 +797,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void editorCanPinAndUnpinAMessage() throws Exception {
-        Project project = data.project().named("conv-ctrl-pin").create();
+        team team = data.team().named("conv-ctrl-pin").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "pin session", null);
+                team.getId(), null, "pin session", null);
         ResponseEntity<ConversationResponse> created = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -848,9 +848,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void memberCanRateAndClearFeedbackOnAssistantMessage() throws Exception {
-        Project project = data.project().named("conv-ctrl-feedback").create();
+        team team = data.team().named("conv-ctrl-feedback").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "feedback session", null);
+                team.getId(), null, "feedback session", null);
         ResponseEntity<ConversationResponse> created = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -899,9 +899,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void ratingANonAssistantMessageIsRejected() throws Exception {
-        Project project = data.project().named("conv-ctrl-feedback-bad").create();
+        team team = data.team().named("conv-ctrl-feedback-bad").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "feedback guard", null);
+                team.getId(), null, "feedback guard", null);
         ResponseEntity<ConversationResponse> created = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -925,9 +925,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void memberCanExportConversationAsMarkdown() {
-        Project project = data.project().named("conv-ctrl-export").create();
+        team team = data.team().named("conv-ctrl-export").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "Export me", null);
+                team.getId(), null, "Export me", null);
         ResponseEntity<ConversationResponse> created = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,
@@ -956,9 +956,9 @@ class ConversationControllerTest extends IntegrationTestBase {
 
     @Test
     void messagesEndpointSupportsLimitAndBeforeCursorPagination() {
-        Project project = data.project().named("conv-ctrl-page").create();
+        team team = data.team().named("conv-ctrl-page").create();
         CreateConversationRequest body = new CreateConversationRequest(
-                project.getId(), null, "scrollback", null);
+                team.getId(), null, "scrollback", null);
         ResponseEntity<ConversationResponse> created = restTemplate.exchange(
                 "/api/v1/conversations",
                 HttpMethod.POST,

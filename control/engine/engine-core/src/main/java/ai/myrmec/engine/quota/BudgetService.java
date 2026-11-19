@@ -7,8 +7,8 @@ import ai.myrmec.engine.assistant.Assistant;
 import ai.myrmec.engine.assistant.AssistantRepository;
 import ai.myrmec.engine.group.Group;
 import ai.myrmec.engine.group.GroupRepository;
-import ai.myrmec.engine.project.Project;
-import ai.myrmec.engine.project.ProjectRepository;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamRepository;
 import ai.myrmec.engine.quota.dto.BudgetTreeNode;
 import ai.myrmec.engine.quota.dto.EffectiveQuota;
 import ai.myrmec.engine.quota.dto.SharedPool;
@@ -31,8 +31,8 @@ import java.util.UUID;
  *
  * <p>Calculates effective quotas, shared pools, and the dashboard tree
  * from the {@code quotas} table. The service is intentionally simple in
- * Community: no org table, no recursive nesting beyond group → project →
- * service. Parent scope is resolved by walking the project/group table
+ * Community: no org table, no recursive nesting beyond group → Team →
+ * service. Parent scope is resolved by walking the Team/group table
  * and falling back to the nearest matching ceiling.</p>
  */
 @Service
@@ -41,7 +41,7 @@ public class BudgetService {
 
     private final QuotaRepository quotaRepository;
     private final QuotaConsumptionRepository consumptionRepository;
-    private final ProjectRepository projectRepository;
+    private final TeamRepository teamRepository;
     private final GroupRepository groupRepository;
     private final WorkflowRepository workflowRepository;
     private final AssistantRepository assistantRepository;
@@ -92,23 +92,23 @@ public class BudgetService {
 
     /** Shared pool remaining for services without an explicit reservation. */
     @Transactional(readOnly = true)
-    public SharedPool sharedPool(UUID projectId, Quota.ResourceType resource, Quota.Period period) {
+    public SharedPool sharedPool(UUID teamId, Quota.ResourceType resource, Quota.Period period) {
         long totalLimit = 0;
         long reservedAmount = 0;
         long consumedInShared = 0;
 
-        // 1. Resolve the effective ceiling: PROJECT → GROUP → ORG.
-        List<Quota> projectQuotas = quotaRepository.findByScopeTypeAndScopeIdAndResourceType(
-                Quota.Scope.PROJECT, projectId, resource);
-        Quota projectCeiling = projectQuotas.stream()
+        // 1. Resolve the effective ceiling: Team → group → org.
+        List<Quota> teamQuotas = quotaRepository.findByScopeTypeAndScopeIdAndResourceType(
+                Quota.Scope.TEAM, teamId, resource);
+        Quota teamCeiling = teamQuotas.stream()
                 .filter(q -> q.getQuotaType() == QuotaType.CEILING && q.getPeriod() == period)
                 .findFirst()
                 .orElse(null);
-        if (projectCeiling != null) {
-            totalLimit = projectCeiling.getLimitAmount();
+        if (teamCeiling != null) {
+            totalLimit = teamCeiling.getLimitAmount();
         } else {
             // Fallback: GROUP ceiling, then ORG ceiling.
-            Long inherited = groupThenOrgCeiling(projectId, resource, period);
+            Long inherited = groupThenOrgCeiling(teamId, resource, period);
             if (inherited == null) {
                 return SharedPool.builder()
                         .totalLimit(0)
@@ -120,10 +120,10 @@ public class BudgetService {
             totalLimit = inherited;
         }
 
-        // 2. Sum SERVICE-scope reservations under this project (using
-        //    the denormalised project_id column).
-        List<Quota> serviceQuotas = quotaRepository.findByScopeTypeAndProjectIdAndResourceType(
-                Quota.Scope.SERVICE, projectId, resource);
+        // 2. Sum SERVICE-scope reservations under this Team (using
+        //    the denormalised team_id column).
+        List<Quota> serviceQuotas = quotaRepository.findByScopeTypeAndTeamIdAndResourceType(
+                Quota.Scope.SERVICE, teamId, resource);
         for (Quota q : serviceQuotas) {
             if (q.getPeriod() != period) {
                 continue;
@@ -143,12 +143,12 @@ public class BudgetService {
                 .build();
     }
 
-    /** Service-level budgets under a project, including their effective limits. */
+    /** Service-level budgets under a Team, including their effective limits. */
     @Transactional(readOnly = true)
-    public List<EffectiveQuota> serviceBudgets(UUID projectId, Quota.ResourceType resource, Quota.Period period) {
+    public List<EffectiveQuota> serviceBudgets(UUID teamId, Quota.ResourceType resource, Quota.Period period) {
         List<EffectiveQuota> result = new ArrayList<>();
-        List<Quota> serviceQuotas = quotaRepository.findByScopeTypeAndProjectIdAndResourceType(
-                Quota.Scope.SERVICE, projectId, resource);
+        List<Quota> serviceQuotas = quotaRepository.findByScopeTypeAndTeamIdAndResourceType(
+                Quota.Scope.SERVICE, teamId, resource);
         for (Quota q : serviceQuotas) {
             if (q.getPeriod() == period) {
                 result.add(effectiveQuota(Quota.Scope.SERVICE, q.getScopeId(), resource, period, null));
@@ -162,7 +162,7 @@ public class BudgetService {
     public List<BudgetTreeNode> buildDashboardTree(Quota.Period period,
                                                     Quota.ResourceType resource,
                                                     Authentication auth) {
-        // Community: flat org/group/project tree. Start with org rows as roots.
+        // Community: flat org/group/Team tree. Start with org rows as roots.
         List<BudgetTreeNode> roots = new ArrayList<>();
         List<Quota> orgRows = quotaRepository.findByScopeTypeAndResourceTypeAndPeriod(
                 Quota.Scope.ORG, resource, period);
@@ -208,10 +208,10 @@ public class BudgetService {
             case ORG -> groupsFor(resource, period, auth).stream()
                     .map(g -> groupNode(g.getId(), resource, period, auth))
                     .toList();
-            case GROUP -> projectsForGroup(scopeId, resource, period, auth).stream()
-                    .map(p -> projectNode(p.getId(), resource, period, auth))
+            case GROUP -> teamsForGroup(scopeId, resource, period, auth).stream()
+                    .map(t -> teamNode(t.getId(), resource, period, auth))
                     .toList();
-            case PROJECT -> serviceNodes(scopeId, resource, period, auth);
+            case TEAM -> serviceNodes(scopeId, resource, period, auth);
             default -> List.of();
         };
     }
@@ -225,19 +225,19 @@ public class BudgetService {
         return toTreeNode(groupRow, resource, period, auth);
     }
 
-    private BudgetTreeNode projectNode(UUID projectId, Quota.ResourceType resource,
-                                       Quota.Period period, Authentication auth) {
-        Quota projectRow = findOwnRow(Quota.Scope.PROJECT, projectId, resource, period);
-        if (projectRow == null) {
-            return syntheticProjectNode(projectId, resource, period, auth);
+    private BudgetTreeNode teamNode(UUID teamId, Quota.ResourceType resource,
+                                     Quota.Period period, Authentication auth) {
+        Quota teamRow = findOwnRow(Quota.Scope.TEAM, teamId, resource, period);
+        if (teamRow == null) {
+            return syntheticTeamNode(teamId, resource, period, auth);
         }
-        return toTreeNode(projectRow, resource, period, auth);
+        return toTreeNode(teamRow, resource, period, auth);
     }
 
-    private List<BudgetTreeNode> serviceNodes(UUID projectId, Quota.ResourceType resource,
+    private List<BudgetTreeNode> serviceNodes(UUID teamId, Quota.ResourceType resource,
                                               Quota.Period period, Authentication auth) {
-        List<Quota> serviceQuotas = quotaRepository.findByScopeTypeAndProjectIdAndResourceType(
-                Quota.Scope.SERVICE, projectId, resource);
+        List<Quota> serviceQuotas = quotaRepository.findByScopeTypeAndTeamIdAndResourceType(
+                Quota.Scope.SERVICE, teamId, resource);
         return serviceQuotas.stream()
                 .filter(q -> q.getPeriod() == period)
                 .map(q -> toTreeNode(q, resource, period, auth))
@@ -249,9 +249,9 @@ public class BudgetService {
         return groupRepository.findAll();
     }
 
-    private List<Project> projectsForGroup(UUID groupId, Quota.ResourceType resource,
-                                           Quota.Period period, Authentication auth) {
-        return projectRepository.findByGroupId(groupId);
+    private List<Team> teamsForGroup(UUID groupId, Quota.ResourceType resource,
+                                       Quota.Period period, Authentication auth) {
+        return teamRepository.findByGroupId(groupId);
     }
 
     private BudgetTreeNode syntheticOrgNode(Quota.Period period, Quota.ResourceType resource,
@@ -291,21 +291,21 @@ public class BudgetService {
                 .build();
     }
 
-    private BudgetTreeNode syntheticProjectNode(UUID projectId, Quota.ResourceType resource,
-                                                Quota.Period period, Authentication auth) {
+    private BudgetTreeNode syntheticTeamNode(UUID teamId, Quota.ResourceType resource,
+                                             Quota.Period period, Authentication auth) {
         return BudgetTreeNode.builder()
                 .id(null)
-                .scopeType(Quota.Scope.PROJECT.name())
-                .scopeId(projectId)
-                .name(scopeName(Quota.Scope.PROJECT, projectId))
+                .scopeType(Quota.Scope.TEAM.name())
+                .scopeId(teamId)
+                .name(scopeName(Quota.Scope.TEAM, teamId))
                 .resourceType(resource.name())
                 .period(period.name())
-                .effectiveLimit(effectiveQuota(Quota.Scope.PROJECT, projectId, resource, period, auth).getEffectiveLimit())
+                .effectiveLimit(effectiveQuota(Quota.Scope.TEAM, teamId, resource, period, auth).getEffectiveLimit())
                 .consumed(0L)
                 .quotaType(null)
                 .enforcementMode(null)
                 .paused(false)
-                .children(childrenFor(Quota.Scope.PROJECT, projectId, resource, period, auth))
+                .children(childrenFor(Quota.Scope.TEAM, teamId, resource, period, auth))
                 .build();
     }
 
@@ -328,17 +328,17 @@ public class BudgetService {
         return switch (scope) {
             case ORG -> null;
             case GROUP -> orgCeiling(resource, period);
-            case PROJECT -> groupThenOrgCeiling(scopeId, resource, period);
+            case TEAM -> groupThenOrgCeiling(scopeId, resource, period);
             case SERVICE -> {
                 // For SERVICE scope, scopeId is the instance ID.
-                // Resolve the project from the instance, then walk
-                // PROJECT → GROUP → ORG.
-                UUID projectId = resolveProjectFromInstance(scopeId);
-                if (projectId == null) {
-                    // Fallback: scopeId might be a project ID (legacy).
-                    projectId = scopeId;
+                // Resolve the Team from the instance, then walk
+                // Team → group → org.
+                UUID teamId = resolveTeamFromInstance(scopeId);
+                if (teamId == null) {
+                    // Fallback: scopeId might be a Team ID (legacy).
+                    teamId = scopeId;
                 }
-                yield projectThenGroupThenOrgCeiling(projectId, resource, period);
+                yield projectThenGroupThenOrgCeiling(teamId, resource, period);
             }
         };
     }
@@ -356,11 +356,11 @@ public class BudgetService {
         return q != null ? q.getLimitAmount() : null;
     }
 
-    private Long groupThenOrgCeiling(UUID projectId, Quota.ResourceType resource, Quota.Period period) {
-        Optional<Project> project = projectRepository.findById(projectId);
-        if (project.isPresent() && project.get().getGroupId() != null) {
+    private Long groupThenOrgCeiling(UUID teamId, Quota.ResourceType resource, Quota.Period period) {
+        Optional<Team> team = teamRepository.findById(teamId);
+        if (team.isPresent() && team.get().getGroupId() != null) {
             Quota group = quotaRepository.findByScopeTypeAndScopeIdAndResourceType(
-                            Quota.Scope.GROUP, project.get().getGroupId(), resource)
+                            Quota.Scope.GROUP, team.get().getGroupId(), resource)
                     .stream()
                     .filter(q -> q.getQuotaType() == QuotaType.CEILING && q.getPeriod() == period)
                     .min(Comparator.comparingLong(Quota::getLimitAmount))
@@ -372,17 +372,17 @@ public class BudgetService {
         return orgCeiling(resource, period);
     }
 
-    private Long projectThenGroupThenOrgCeiling(UUID projectId, Quota.ResourceType resource, Quota.Period period) {
-        Quota project = quotaRepository.findByScopeTypeAndScopeIdAndResourceType(
-                        Quota.Scope.PROJECT, projectId, resource)
+    private Long projectThenGroupThenOrgCeiling(UUID teamId, Quota.ResourceType resource, Quota.Period period) {
+        Quota team = quotaRepository.findByScopeTypeAndScopeIdAndResourceType(
+                        Quota.Scope.TEAM, teamId, resource)
                 .stream()
                 .filter(q -> q.getQuotaType() == QuotaType.CEILING && q.getPeriod() == period)
                 .min(Comparator.comparingLong(Quota::getLimitAmount))
                 .orElse(null);
-        if (project != null) {
-            return project.getLimitAmount();
+        if (team != null) {
+            return team.getLimitAmount();
         }
-        return groupThenOrgCeiling(projectId, resource, period);
+        return groupThenOrgCeiling(teamId, resource, period);
     }
 
     private long computeConsumed(Quota quota, Quota.ResourceType resource, Quota.Period period) {
@@ -399,7 +399,7 @@ public class BudgetService {
         return switch (scope) {
             case ORG -> "Organization";
             case GROUP -> groupRepository.findById(scopeId).map(Group::getName).orElse("Group " + scopeId);
-            case PROJECT -> projectRepository.findById(scopeId).map(Project::getName).orElse("Project " + scopeId);
+            case TEAM -> teamRepository.findById(scopeId).map(Team::getName).orElse("Team " + scopeId);
             case SERVICE -> {
                 // Try workflow, then assistant.
                 Optional<String> wfName = workflowRepository.findById(scopeId)
@@ -418,21 +418,21 @@ public class BudgetService {
     }
 
     /**
-     * Resolve the project ID from a service-instance UUID by looking up
+     * Resolve the Team ID from a service-instance UUID by looking up
      * the workflow / assistant table.  Falls back to checking if the
-     * scopeId is itself a project ID (legacy compatibility).
+     * scopeId is itself a Team ID (legacy compatibility).
      */
-    private UUID resolveProjectFromInstance(UUID serviceInstanceId) {
+    private UUID resolveTeamFromInstance(UUID serviceInstanceId) {
         Optional<Workflow> workflow = workflowRepository.findById(serviceInstanceId);
         if (workflow.isPresent()) {
-            return workflow.get().getProject().getId();
+            return workflow.get().getTeam().getId();
         }
         Optional<Assistant> assistant = assistantRepository.findById(serviceInstanceId);
         if (assistant.isPresent()) {
-            return assistant.get().getProjectId();
+            return assistant.get().getTeamId();
         }
-        // Fallback: scopeId might be a project ID (legacy / test data).
-        if (projectRepository.existsById(serviceInstanceId)) {
+        // Fallback: scopeId might be a Team ID (legacy / test data).
+        if (teamRepository.existsById(serviceInstanceId)) {
             return serviceInstanceId;
         }
         return null;
