@@ -2,13 +2,21 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.inference.execution;
 
-import ai.myrmec.engine.agent.Agent;
-import ai.myrmec.engine.agent.AgentHost;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+import org.springframework.stereotype.Service;
+
+import ai.myrmec.engine._protocol.TaskContext;
+import ai.myrmec.engine._protocol.payload.SessionOpenPayload;
 import ai.myrmec.engine.agent.AgentHostRepository;
 import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileVersion;
 import ai.myrmec.engine.agent.AgentProfileVersionService;
-import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.attachment.AttachmentService;
 import ai.myrmec.engine.attachment.ConversationMessageAttachment;
 import ai.myrmec.engine.conversation.Conversation;
@@ -17,31 +25,19 @@ import ai.myrmec.engine.conversation.ConversationNoticeService;
 import ai.myrmec.engine.conversation.ConversationRepository;
 import ai.myrmec.engine.conversation.ConversationService;
 import ai.myrmec.engine.governance.GovernancePolicyResolver;
+import ai.myrmec.engine.inference.ConversationTurnContext;
 import ai.myrmec.engine.inference.InferenceRequestAssembler;
 import ai.myrmec.engine.inference.InferenceRequestSpec;
 import ai.myrmec.engine.inference.SessionContextAssembler;
 import ai.myrmec.engine.knowledge.TaskContextResolver;
 import ai.myrmec.engine.model.ModelService;
 import ai.myrmec.engine.setting.SystemSettingService;
-import ai.myrmec.engine.inference.ConversationTurnContext;
-import ai.myrmec.engine.websocket.message.payload.SessionOpenPayload;
-import ai.myrmec.engine.websocket.message.payload.TaskContext;
-import ai.myrmec.engine.workflow.TaskStatus;
 import ai.myrmec.engine.workflow.Workflow;
-import ai.myrmec.engine.workflow.WorkflowRepository;
 import ai.myrmec.engine.workflow.WorkflowRequest;
 import ai.myrmec.engine.workflow.WorkflowTask;
 import ai.myrmec.engine.workflow.WorkflowTaskRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
 
 /**
  * Builds the Â§8.1 conversation {@code execution.start} input block from the
@@ -59,7 +55,6 @@ public class ExecutionInputAssembler {
     private final ConversationService conversationService;
     private final AgentHostRepository agentHostRepository;
     private final AgentProfileVersionService agentProfileVersionService;
-    private final AgentRepository agentInstanceRepository;
     private final AttachmentService attachmentService;
     private final SystemSettingService systemSettingService;
     private final ConversationNoticeService conversationNoticeService;
@@ -209,27 +204,14 @@ public class ExecutionInputAssembler {
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Conversation not found: " + conversationId));
 
-        UUID pinnedVersionId = conversation.getAgentProfileVersionId();
-        if (pinnedVersionId == null) {
-            throw new IllegalArgumentException("Conversation has no pinned profile version");
-        }
-        AgentProfileVersion profileVersion = agentProfileVersionService.findByIdWithTools(pinnedVersionId)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Pinned agent profile version not found: " + pinnedVersionId));
-
-        // Â§3.7/Â§16.1: the pinned version carries the whole behaviour contract
-        // (profile id, system prompt, tools). No host lookup â€” the host is
-        // needed at SEND time, not at input-assembly time, and a conversation
-        // with a pin but no bound host still assembles valid input.
-        // Assemble session.open to extract the active tool names.
-        SessionOpenPayload sessionOpen = sessionContextAssembler.assemble(
-                "CONVERSATION", conversationId, teamId, profileVersion.getProfileId());
+        // Â§3.7/Â§16.1: the frozen profile version rides the conversation's
+        // assistant_version PRIMARY binding; resolve it via the assembler.
+        SessionOpenPayload sessionOpen = sessionContextAssembler
+                .assembleConversation(sessionId, conversationId);
 
         List<ConversationMessage> all = conversationService.listMessages(conversationId);
         List<ConversationMessage> active = all.stream()
                 .filter(m -> !m.isSuperseded())
-                // Drop engine no-agent notices: a "no agent online" line
-                // must never be shipped to the agent that picks the turn up.
                 .filter(m -> !conversationNoticeService.isNoAgentNotice(m))
                 .toList();
         List<ConversationTurnContext.HistoryEntry> historyEntries = buildSlidingWindow(active);
@@ -238,23 +220,22 @@ public class ExecutionInputAssembler {
                 ? 0L
                 : all.get(all.size() - 1).getSequenceNo() + 1;
 
-        String systemPrompt = conversation.getSystemPromptOverride() != null
-                ? conversation.getSystemPromptOverride()
-                : (profileVersion != null ? profileVersion.getSystemPrompt() : null);
+        String systemPrompt = sessionOpen.profile() != null
+                ? sessionOpen.profile().systemPrompt() : null;
 
         List<InferenceRequestSpec.HistoryEntry> history = historyEntries.stream()
                 .map(h -> new InferenceRequestSpec.HistoryEntry(h.getRole(), h.getContent()))
                 .toList();
         List<InferenceRequestSpec.AttachmentDescriptor> attachments =
-                buildAttachments(conversationId, active, profileVersion).stream()
+                buildAttachments(conversationId, active, null).stream()
                         .map(a -> new InferenceRequestSpec.AttachmentDescriptor(
                                 a.getId().toString(), a.getFilename(), a.getMediaType(), a.getSizeBytes(),
                                 a.getInlineText(), a.isImage(), a.getReadContentPath()))
                         .toList();
 
-        List<String> activeToolNames = sessionOpen.tools() != null
-                ? sessionOpen.tools().stream()
-                        .map(SessionOpenPayload.ToolDefinition::name)
+        List<String> activeToolNames = sessionOpen.profile() != null
+                ? sessionOpen.profile().tools().stream()
+                        .map(SessionOpenPayload.ToolGrant::name)
                         .toList()
                 : java.util.List.of();
 

@@ -2,6 +2,12 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.inference.execution.interaction;
 
+import ai.myrmec.engine._protocol.HostProtocol;
+import ai.myrmec.engine._protocol.HostProtocolEnvelope;
+import ai.myrmec.engine._protocol.payload.ExecutionCancelPayload;
+import ai.myrmec.engine._protocol.payload.ExecutionControlPayload;
+import ai.myrmec.engine._protocol.payload.ExecutionControlRequestPayload;
+import ai.myrmec.engine._protocol.payload.ExecutionControlRequestResolvedPayload;
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.DuplicateResourceException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
@@ -13,12 +19,7 @@ import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
 import ai.myrmec.engine.user.UserPrincipal;
 import ai.myrmec.engine.user.UserRole;
 import ai.myrmec.engine.user.UserRoleRepository;
-import ai.myrmec.engine.websocket.host.HostProtocol;
-import ai.myrmec.engine.websocket.host.payload.ExecutionCancelPayload;
-import ai.myrmec.engine.websocket.host.payload.ExecutionControlPayload;
-import ai.myrmec.engine.websocket.host.payload.ExecutionControlRequestPayload;
-import ai.myrmec.engine.websocket.host.payload.ExecutionControlRequestResolvedPayload;
-import ai.myrmec.engine.websocket.host.HostProtocolEnvelope;
+
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;

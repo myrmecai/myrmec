@@ -4,10 +4,7 @@ import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.DraftConflictException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine._system.exception.ValidationDetail;
-import ai.myrmec.engine.agent.AgentProfile;
-import ai.myrmec.engine.agent.AgentProfileRepository;
 import ai.myrmec.engine.knowledge.KnowledgeProviderRepository;
-import ai.myrmec.engine.tool.Tool;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -19,7 +16,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 /**
  * Version-lifecycle service for the Assistant entity (#92,
@@ -41,9 +37,9 @@ public class AssistantVersionService {
 
     private final AssistantVersionRepository versionRepository;
     private final AssistantRepository assistantRepository;
-    private final AgentProfileRepository agentProfileRepository;
-    private final ai.myrmec.engine.agent.AgentProfileVersionService agentProfileVersionService;
     private final KnowledgeProviderRepository knowledgeProviderRepository;
+    private final AssistantAgentBindingRepository assistantAgentBindingRepository;
+    private final ai.myrmec.engine.agent.AgentProfileVersionService agentProfileVersionService;
 
     // ==================== Draft creation ====================
 
@@ -52,12 +48,11 @@ public class AssistantVersionService {
      * path). No clone source — seeded with defaults plus the chosen brain.
      */
     @Transactional
-    public AssistantVersion createInitialDraft(UUID assistantId, UUID agentProfileId, UUID ownerId) {
+    public AssistantVersion createInitialDraft(UUID assistantId, UUID ownerId) {
         AssistantVersion draft = new AssistantVersion();
         draft.setAssistantId(assistantId);
         draft.setStatus(AssistantVersion.Status.DRAFT);
         draft.setDraftOwnerId(ownerId);
-        draft.setAgentProfileId(agentProfileId);
         // parentVersionId stays null: nothing was published before this.
         return versionRepository.save(draft);
     }
@@ -87,7 +82,9 @@ public class AssistantVersionService {
         AssistantVersion draft = cloneForDraft(source);
         draft.setDraftOwnerId(ownerId);
         draft.setParentVersionId(currentVersionId);
-        return versionRepository.save(draft);
+        draft = versionRepository.save(draft);
+        cloneBindingsForDraft(currentVersionId, draft.getId());
+        return draft;
     }
 
     /**
@@ -158,11 +155,10 @@ public class AssistantVersionService {
             throw new BadRequestException("This assistant cannot be published yet.", failures);
         }
 
-        // §4.2/§5.6 (archived assistant-entity.md): stamp the bound Profile's
-        // currently published version — "Required Published version at publish
-        // time". The gate below guarantees it exists.
-        draft.setAgentProfileVersionId(
-                agentProfileVersionService.requirePublished(draft.getAgentProfileId()).getId());
+        // TODO(multi-model-bindings): profile version stamping moved to
+        // assistant_agent_bindings. The primary binding's profile_version_id
+        // is resolved separately; do not stamp the (now-removed) version-row
+        // agent_profile_version_id here.
 
         // No-op re-publish (§5.2) — only meaningful once a baseline exists.
         if (previous != null && !versionRowDiffers(draft, previous)) {
@@ -176,6 +172,7 @@ public class AssistantVersionService {
         draft.setPublishedAt(Instant.now());
         draft.setPublishedBy(publisherId);
         AssistantVersion published = versionRepository.save(draft);
+        stampProfileVersions(published.getId());
 
         assistant.setCurrentVersionId(published.getId());
         assistantRepository.save(assistant);
@@ -216,29 +213,11 @@ public class AssistantVersionService {
                             "Name is required and must be unique in this Team.")));
         }
 
-        // brain: profile set, exists, ACTIVE, and has a published version
-        // (§4.2 — agent_profile_version_id is "Required Published version at
-        // publish time"; AgentProfile is versioned since F0).
-        AgentProfile profile = null;
-        if (draft.getAgentProfileId() == null) {
-            failures.add(ValidationDetail.of("agentProfileId", "REQUIRED", "Pick a published agent profile."));
-        } else {
-            profile = agentProfileRepository.findById(draft.getAgentProfileId()).orElse(null);
-            if (profile == null || profile.getStatus() != AgentProfile.Status.ACTIVE) {
-                failures.add(ValidationDetail.of("agentProfileId", "INVALID_VALUE",
-                        "Pick a published agent profile."));
-            } else if (agentProfileVersionService.findPublished(profile.getId()).isEmpty()) {
-                failures.add(ValidationDetail.of("agentProfileId", "INVALID_VALUE",
-                        "This agent profile has no published version yet. Publish the profile first."));
-            }
-        }
-
-        // addendum requires profile opt-in.
-        if (draft.getAddendum() != null && !draft.getAddendum().isBlank()
-                && profile != null && !profile.isAddendumAllowed()) {
-            failures.add(ValidationDetail.of("addendum", "INVALID_VALUE",
-                    "This agent profile doesn't allow addenda."));
-        }
+        // brain: profile binding validation is deferred to the multi-model
+        // bindings refactor (assistant_agent_bindings). The version row no
+        // longer carries agent_profile_id / agent_profile_version_id.
+        // TODO(multi-model-bindings): validate the primary binding's profile
+        // version + addendum opt-in once bindings are wired.
 
         // reach: non-empty subset of allowed channels.
         List<String> channels = draft.getUsableVia();
@@ -271,25 +250,11 @@ public class AssistantVersionService {
                             + String.join(", ", unavailableKbs) + "."));
         }
 
-        // tools: every disabled tool must belong to the profile's published
-        // version (§16.1: the tool set lives on the version row).
-        // NOTE: the `assistant_disable_allowed=TRUE` half of the gate is deferred —
-        // the agent_profile_tools junction attribute is not mapped yet and the
-        // column defaults TRUE, so nothing is locked today (#92 follow-up).
-        if (profile != null && draft.getDisabledTools() != null && !draft.getDisabledTools().isEmpty()) {
-            Set<String> profileToolCodes = agentProfileVersionService.findPublished(profile.getId())
-                    .map(ai.myrmec.engine.agent.AgentProfileVersion::getTools)
-                    .map(tools -> tools.stream()
-                            .map(Tool::getCode)
-                            .collect(Collectors.toSet()))
-                    .orElse(Set.of());
-            for (String code : draft.getDisabledTools()) {
-                if (!profileToolCodes.contains(code)) {
-                    failures.add(ValidationDetail.of("disabledTools", "INVALID_VALUE",
-                            "Disabled tool '" + code + "' is not part of this profile."));
-                }
-            }
-        }
+        // tools: disabled-tool validation is deferred to the multi-model
+        // bindings refactor — the profile tool set is now reachable via the
+        // primary binding's profile version, not a version-row field.
+        // TODO(multi-model-bindings): re-add disabled-tool membership check
+        // against the primary binding's published profile version.
 
         return failures;
     }
@@ -305,11 +270,12 @@ public class AssistantVersionService {
         if (previous == null) {
             return AssistantVersion.BumpType.MAJOR;
         }
-        boolean brainChanged = !Objects.equals(draft.getAgentProfileId(), previous.getAgentProfileId())
-                || !Objects.equals(draft.getAgentProfileVersionId(), previous.getAgentProfileVersionId());
+        // TODO(multi-model-bindings): brain-swap detection moves to comparing the
+        // assistant_agent_bindings set (primary/subagent profile versions), not a
+        // version-row field.
         boolean hitlTightened = draft.getHitlOverrideMode() == AssistantVersion.HitlOverrideMode.STRICT
                 && previous.getHitlOverrideMode() != AssistantVersion.HitlOverrideMode.STRICT;
-        return (brainChanged || hitlTightened)
+        return hitlTightened
                 ? AssistantVersion.BumpType.MAJOR
                 : AssistantVersion.BumpType.MINOR;
     }
@@ -330,9 +296,7 @@ public class AssistantVersionService {
 
     /** Whether any version-row field differs from the baseline (§5.2 diff). */
     private boolean versionRowDiffers(AssistantVersion a, AssistantVersion b) {
-        return !Objects.equals(a.getAgentProfileId(), b.getAgentProfileId())
-                || !Objects.equals(a.getAgentProfileVersionId(), b.getAgentProfileVersionId())
-                || !Objects.equals(a.getAddendum(), b.getAddendum())
+        return !Objects.equals(a.getAddendum(), b.getAddendum())
                 || !Objects.equals(a.getGreetingMessage(), b.getGreetingMessage())
                 || a.getMaxIdleMinutes() != b.getMaxIdleMinutes()
                 || !Objects.equals(a.getMaxSessionAgeHours(), b.getMaxSessionAgeHours())
@@ -351,8 +315,6 @@ public class AssistantVersionService {
         AssistantVersion draft = new AssistantVersion();
         draft.setAssistantId(source.getAssistantId());
         draft.setStatus(AssistantVersion.Status.DRAFT);
-        draft.setAgentProfileId(source.getAgentProfileId());
-        draft.setAgentProfileVersionId(source.getAgentProfileVersionId());
         draft.setAddendum(source.getAddendum());
         draft.setGreetingMessage(source.getGreetingMessage());
         draft.setMaxIdleMinutes(source.getMaxIdleMinutes());
@@ -376,6 +338,43 @@ public class AssistantVersionService {
     private Assistant requireAssistant(UUID assistantId) {
         return assistantRepository.findById(assistantId)
                 .orElseThrow(() -> ResourceNotFoundException.of("Assistant", assistantId));
+    }
+
+    /**
+     * Freeze the profile ensemble at publish: for every binding on this
+     * (now-published) version, resolve the profile's current published version
+     * and stamp it on the binding. Once stamped, the binding row is immutable
+     * alongside its published assistant version — the profile can republish a
+     * newer version without changing this assistant version's behaviour.
+     */
+    private void stampProfileVersions(UUID assistantVersionId) {
+        for (AssistantAgentBinding binding
+                : assistantAgentBindingRepository.findByAssistantVersionIdOrderByRoleTypeAsc(assistantVersionId)) {
+            if (binding.getAgentProfileVersionId() == null) {
+                var version = agentProfileVersionService.requirePublished(binding.getAgentProfileId());
+                binding.setAgentProfileVersionId(version.getId());
+                assistantAgentBindingRepository.save(binding);
+            }
+        }
+    }
+
+    /**
+     * Copy the parent's role bindings onto the new draft (re-pointed to the
+     * draft id). The {@code agentProfileVersionId} is deliberately NOT copied —
+     * the draft re-resolves "latest published" at its own publish time.
+     */
+    private void cloneBindingsForDraft(UUID sourceVersionId, UUID draftVersionId) {
+        for (AssistantAgentBinding src
+                : assistantAgentBindingRepository.findByAssistantVersionIdOrderByRoleTypeAsc(sourceVersionId)) {
+            AssistantAgentBinding copy = new AssistantAgentBinding();
+            copy.setAssistantVersionId(draftVersionId);
+            copy.setAgentProfileId(src.getAgentProfileId());
+            copy.setModelCode(src.getModelCode());
+            copy.setRoleType(src.getRoleType());
+            copy.setAgentAlias(src.getAgentAlias());
+            copy.setPromptAddendum(src.getPromptAddendum());
+            assistantAgentBindingRepository.save(copy);
+        }
     }
 
     private static java.util.Optional<UUID> parseUuid(String value) {

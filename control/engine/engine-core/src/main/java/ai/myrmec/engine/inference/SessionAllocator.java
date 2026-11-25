@@ -2,15 +2,13 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.inference;
 
-import ai.myrmec.engine.agent.Agent;
+import ai.myrmec.engine._protocol.payload.SessionCloseReason;
 import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentHostInstanceRepository;
-import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
 import ai.myrmec.engine.conversation.event.IdleSessionExpiredEvent;
 import ai.myrmec.engine.node.NodeRegistryService;
-import ai.myrmec.engine.websocket.host.payload.SessionCloseReason;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
@@ -43,10 +41,6 @@ public class SessionAllocator {
     public static final String ALLOC_STATE_CLOSING = "CLOSING";
     public static final String ALLOC_STATE_CLOSED = "CLOSED";
 
-    /** Statuses that consume a slot (§2.7): reusable + serving + not-yet-released. */
-    private static final List<Agent.Status> SLOT_CONSUMING =
-            List.of(Agent.Status.IDLE, Agent.Status.RESERVED, Agent.Status.BOUND, Agent.Status.DEAD);
-
     /**
      * §12.2 execution states that mean "an execution is still in flight on this
      * session" — the idle-lease sweep defers these sessions. CANCELLING is
@@ -59,7 +53,6 @@ public class SessionAllocator {
 
     private final SessionRepository sessionRepository;
     private final AgentHostInstanceRepository instanceRepository;
-    private final AgentRepository agentRepository;
     private final NodeRegistryService nodeRegistryService;
     private final SessionExecutionRepository executionRepository;
     private final ApplicationEventPublisher eventPublisher;
@@ -73,7 +66,6 @@ public class SessionAllocator {
     public SessionAllocator(
             SessionRepository sessionRepository,
             AgentHostInstanceRepository instanceRepository,
-            AgentRepository agentRepository,
             NodeRegistryService nodeRegistryService,
             SessionExecutionRepository executionRepository,
             ApplicationEventPublisher eventPublisher,
@@ -84,7 +76,6 @@ public class SessionAllocator {
             @Value("${myrmec.host.allocation-sweep.enabled:true}") boolean enabled) {
         this.sessionRepository = sessionRepository;
         this.instanceRepository = instanceRepository;
-        this.agentRepository = agentRepository;
         this.nodeRegistryService = nodeRegistryService;
         this.executionRepository = executionRepository;
         this.eventPublisher = eventPublisher;
@@ -184,8 +175,9 @@ public class SessionAllocator {
     }
 
     /**
-     * §19.1 decision 1: the host confirmed context install — mint exactly one
-     * Agent row for the serving slot, flip ACTIVE, start the idle lease.
+     * §19.1 decision 1: the host confirmed context install — flip ACTIVE,
+     * start the idle lease. With the agent-instance model removed, the session
+     * itself is the runtime span; no separate worker row is minted.
      */
     @Transactional
     public boolean confirmOpened(UUID sessionId, String slotHostname) {
@@ -200,24 +192,10 @@ public class SessionAllocator {
             return false;
         }
 
-        // Mint the Agent row (§19.1): IDLE reusable, stamped to the live run.
-        if (agentRepository.countByAgentHostInstanceIdAndStatusIn(
-                instance.getId(), List.of(Agent.Status.IDLE, Agent.Status.RESERVED, Agent.Status.BOUND)) == 0
-                || agentRepository.findByAgentHostId(instance.getAgentHostId()).stream()
-                        .noneMatch(a -> session.getRefId().equals(a.getConversationId()))) {
-            Agent worker = new Agent();
-            worker.setAgentHostId(instance.getAgentHostId());
-            worker.setAgentHostInstanceId(instance.getId());
-            worker.setStatus(Agent.Status.IDLE);
-            worker.setHostname(slotHostname != null ? slotHostname : "host-slot");
-            worker.setConversationId(session.getRefId());
-            agentRepository.save(worker);
-        }
-
         session.setAllocationState(ALLOC_STATE_ACTIVE);
         session.setIdleLeaseExpiresAt(Instant.now().plus(Duration.ofSeconds(idleTimeoutSeconds)));
         sessionRepository.save(session);
-        log.info("Session {} ACTIVE on instance {}; worker minted", sessionId, instance.getId());
+        log.info("Session {} ACTIVE on instance {}", sessionId, instance.getId());
         return true;
     }
 
@@ -228,22 +206,11 @@ public class SessionAllocator {
         if (session == null || ALLOC_STATE_CLOSED.equals(session.getAllocationState())) {
             return; // idempotent
         }
-        UUID refId = session.getRefId();
         session.setAllocationState(ALLOC_STATE_CLOSING);
         session.setAllocationState(ALLOC_STATE_CLOSED);
         session.setClosedAt(Instant.now());
         session.setCloseReason(reasonCode);
         sessionRepository.save(session);
-
-        // Release the serving worker (IDLE = reusable) — capacity returns.
-        agentRepository.findByAgentHostIdAndStatus(instanceHostId(session), Agent.Status.IDLE)
-                .stream()
-                .filter(a -> refId.equals(a.getConversationId()))
-                .findFirst()
-                .ifPresent(worker -> {
-                    worker.setConversationId(null);
-                    agentRepository.save(worker);
-                });
         log.info("Session {} closed ({})", sessionId, reasonCode);
     }
 
@@ -474,11 +441,5 @@ public class SessionAllocator {
                     + "{} recovery-expired sessions",
                     expiredOffers, expiredLeases, hostLost, recovered);
         }
-    }
-
-    private UUID instanceHostId(Session session) {
-        return instanceRepository.findById(session.getHostInstanceId())
-                .map(AgentHostInstance::getAgentHostId)
-                .orElse(null);
     }
 }

@@ -36,11 +36,6 @@ public class CurrentUserArgumentResolver implements HandlerMethodArgumentResolve
 
         Object principal = authentication.getPrincipal();
 
-        // Handle AgentPrincipal - agents don't have a user ID
-        if (principal instanceof AgentPrincipal) {
-            return null;
-        }
-
         // Handle UserPrincipal
         if (principal instanceof UserPrincipal userPrincipal) {
             return userPrincipal.getUserId();

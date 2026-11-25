@@ -2,6 +2,10 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.inference.execution.interaction;
 
+import ai.myrmec.engine._protocol.HostProtocol;
+import ai.myrmec.engine._protocol.payload.ExecutionInteractionCompletePayload;
+import ai.myrmec.engine._protocol.payload.ExecutionInteractionFailedPayload;
+import ai.myrmec.engine._protocol.payload.ExecutionInteractionPayload;
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.DuplicateResourceException;
 import ai.myrmec.engine._system.exception.ResourceInUseException;
@@ -13,10 +17,6 @@ import ai.myrmec.engine.inference.execution.SessionExecution;
 import ai.myrmec.engine.inference.execution.SessionExecutionRepository;
 import ai.myrmec.engine.security.scan.SecretLeakService;
 import ai.myrmec.engine.user.UserPrincipal;
-import ai.myrmec.engine.websocket.host.HostProtocol;
-import ai.myrmec.engine.websocket.host.payload.ExecutionInteractionCompletePayload;
-import ai.myrmec.engine.websocket.host.payload.ExecutionInteractionFailedPayload;
-import ai.myrmec.engine.websocket.host.payload.ExecutionInteractionPayload;
 import ai.myrmec.engine.workflow.TaskAttemptRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;

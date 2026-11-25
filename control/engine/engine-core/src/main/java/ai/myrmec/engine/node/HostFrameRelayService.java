@@ -2,10 +2,11 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.node;
 
+import ai.myrmec.engine._controllers.node.AgentRelayController;
 import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentHostInstanceRepository;
-import ai.myrmec.engine.websocket.host.ChannelConnectionRegistry;
-import ai.myrmec.engine.websocket.host.HostConnectionManager;
+import ai.myrmec.engine.websocket.ChannelConnectionRegistry;
+import ai.myrmec.engine.websocket.HostConnectionManager;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;

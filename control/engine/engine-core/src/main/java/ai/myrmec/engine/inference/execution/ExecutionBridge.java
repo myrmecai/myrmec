@@ -2,8 +2,30 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.inference.execution;
 
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import ai.myrmec.engine._protocol.MessageType;
+import ai.myrmec.engine._protocol.WebSocketMessage;
+import ai.myrmec.engine._protocol.payload.ApprovalRequestPayload;
+import ai.myrmec.engine._protocol.payload.ExecutionApprovalRequestedPayload;
+import ai.myrmec.engine._protocol.payload.ExecutionCompletePayload;
+import ai.myrmec.engine._protocol.payload.ExecutionEventPayload;
+import ai.myrmec.engine._protocol.payload.ExecutionFailedPayload;
+import ai.myrmec.engine._protocol.payload.ExecutionInputRequestedPayload;
+import ai.myrmec.engine._protocol.payload.ExecutionPausedPayload;
 import ai.myrmec.engine.agent.AgentProfileVersion;
 import ai.myrmec.engine.agent.AgentProfileVersionRepository;
+import ai.myrmec.engine.assistant.AssistantAgentBinding;
+import ai.myrmec.engine.assistant.AssistantAgentBindingRepository;
 import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.conversation.ConversationMessage;
 import ai.myrmec.engine.conversation.ConversationRepository;
@@ -14,31 +36,14 @@ import ai.myrmec.engine.security.scan.SecretLeakService;
 import ai.myrmec.engine.spi.quota.QuotaPolicyEngine;
 import ai.myrmec.engine.spi.quota.QuotaResourceType;
 import ai.myrmec.engine.spi.quota.QuotaScope;
-import ai.myrmec.engine.websocket.host.payload.ExecutionApprovalRequestedPayload;
-import ai.myrmec.engine.websocket.host.payload.ExecutionFailedPayload;
-import ai.myrmec.engine.websocket.host.payload.ExecutionCompletePayload;
-import ai.myrmec.engine.websocket.host.payload.ExecutionEventPayload;
-import ai.myrmec.engine.websocket.host.payload.ExecutionPausedPayload;
-import ai.myrmec.engine.websocket.message.MessageType;
-import ai.myrmec.engine.websocket.message.WebSocketMessage;
-import ai.myrmec.engine.websocket.message.payload.ApprovalRequestPayload;
 import ai.myrmec.engine.workflow.ExecutionApprovalService;
 import ai.myrmec.engine.workflow.OrchestrationEventIngestionService;
 import ai.myrmec.engine.workflow.OrchestrationIds;
 import ai.myrmec.engine.workflow.OrchestrationOutcomeService;
 import ai.myrmec.engine.workflow.TaskAttempt;
 import ai.myrmec.engine.workflow.TaskAttemptRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.time.Instant;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.UUID;
 
 /**
  * Host→engine execution outcome bridging (§16 mapping): the SAME downstream
@@ -67,6 +72,7 @@ public class ExecutionBridge {
     private final ai.myrmec.engine.workflow.WorkflowTaskRepository workflowTaskRepository;
     private final ConversationRepository conversationRepository;
     private final AgentProfileVersionRepository agentProfileVersionRepository;
+    private final AssistantAgentBindingRepository assistantAgentBindingRepository;
     private final ai.myrmec.engine.inference.SessionRepository sessionRepository;
     private final ObjectMapper objectMapper;
 
@@ -298,6 +304,182 @@ public class ExecutionBridge {
         } catch (IllegalArgumentException unknown) {
             log.warn("execution.event {} for unknown dispatch {} — dropped", payload.eventId(), dispatchId);
         }
+    }
+
+    /**
+     * Conversation execution.event bridge (#22): forward the frame to SSE
+     * viewers EXACTLY as the agent emitted it (the client derives activity /
+     * tool / todo display), plus the two durable side-effects the mock also
+     * performs — a TOOL row for {@code TOOL_COMPLETED}, and live context-token
+     * tracking for the main model's {@code MODEL_USAGE}.
+     *
+     * <p>Best-effort on the broadcast; never rethrows (durability of the event
+     * itself is the handler's concern, already acked).</p>
+     */
+    public void onConversationEvent(UUID sessionId, ExecutionEventPayload payload) {
+        if (payload == null || payload.eventType() == null) {
+            return;
+        }
+        UUID conversationId = sessionRefIdOf(sessionId);
+        if (conversationId == null) {
+            log.warn("Discarding conversation event — no conversation for session {}", sessionId);
+            return;
+        }
+        String type = payload.eventType();
+        Map<String, Object> data = payload.data() == null ? Map.of() : payload.data();
+
+        // 1. Passthrough: forward the exact frame to SSE viewers (type + data).
+        try {
+            Map<String, Object> frame = new LinkedHashMap<>();
+            frame.put("eventType", type);
+            frame.put("occurredAt", payload.occurredAt() == null
+                    ? Instant.now().toString() : payload.occurredAt().toString());
+            frame.put("data", data);
+            String json = objectMapper.writeValueAsString(
+                    WebSocketMessage.of(MessageType.EXECUTION_EVENT, frame));
+            conversationStreamBroker.broadcast(conversationId, json);
+        } catch (Exception e) {
+            log.warn("execution.event passthrough broadcast failed for conv {}: {}",
+                    conversationId, e.getMessage());
+        }
+
+        // 2. TOOL_COMPLETED → durable TOOL row + message.complete.
+        if ("TOOL_COMPLETED".equals(type)) {
+            bridgeToolRow(conversationId, data);
+        }
+
+        // 3. MODEL_USAGE (main agent) → live context-token tracking.
+        if ("MODEL_USAGE".equals(type)) {
+            trackContextTokens(conversationId, data);
+        }
+    }
+
+    /** Persist a TOOL row for a completed tool call and fan it out (#22). */
+    private void bridgeToolRow(UUID conversationId, Map<String, Object> data) {
+        try {
+            String toolName = data.get("toolName") instanceof String s ? s : "tool";
+            String callId = data.get("callId") instanceof String s ? s : "";
+            boolean failed = Boolean.TRUE.equals(data.get("error"));
+            String preview = data.get("resultPreview") instanceof String s ? s : "";
+            String command = data.get("command") instanceof String s ? s : null;
+            String content = failed ? "Error: " + (preview.isBlank() ? "tool failed" : preview) : preview;
+
+            Map<String, Object> card = new LinkedHashMap<>();
+            card.put("toolName", toolName);
+            if (data.get("durationMs") instanceof Number n) {
+                card.put("durationMs", n.longValue());
+            }
+            card.put("error", failed);
+            if (command != null) {
+                card.put("command", command);
+            }
+            ConversationMessage row = conversationService.appendToolRow(
+                    conversationId, callId, objectMapper.writeValueAsString(card), content);
+
+            Map<String, Object> mc = buildHistoryEnvelope(row);
+            mc.put("toolCallId", row.getToolCallId());
+            String json = objectMapper.writeValueAsString(
+                    WebSocketMessage.of(MessageType.MESSAGE_COMPLETE, mc));
+            conversationStreamBroker.broadcast(conversationId, json);
+            log.info("Bridged TOOL_COMPLETED {} to TOOL row + message.complete for conv {} (seq {})",
+                    toolName, conversationId, row.getSequenceNo());
+        } catch (Exception e) {
+            log.warn("Failed to bridge TOOL_COMPLETED for conv {}: {}", conversationId, e.getMessage());
+        }
+    }
+
+    /** Record the main model's prompt size as the live context-token count. */
+    private void trackContextTokens(UUID conversationId, Map<String, Object> data) {
+        try {
+            String agentName = data.get("agentName") instanceof String s ? s : null;
+            if (!"main".equals(agentName)) {
+                return; // subagent calls measure a different thread
+            }
+            if (data.get("inputTokens") instanceof Number n) {
+                conversationRepository.findById(conversationId).ifPresent(c -> {
+                    c.setContextTokens(n.intValue());
+                    conversationRepository.save(c);
+                });
+            }
+        } catch (Exception e) {
+            log.warn("Failed to track context tokens for conv {}: {}", conversationId, e.getMessage());
+        }
+    }
+
+    /**
+     * Conversation ask_user interrupt (execution.input.requested): persist the
+     * INPUT_REQUEST row (payload verbatim + TTL), then broadcast both
+     * {@code input.request} and a {@code message.complete} history envelope so
+     * live viewers render the card immediately. Mirrors the approval read-half
+     * and the mock. An ask is OPTIONAL — nothing gates on it.
+     */
+    @Transactional
+    public void onConversationInputRequested(UUID sessionId, UUID agentId,
+                                             ExecutionInputRequestedPayload payload) {
+        UUID conversationId = sessionRefIdOf(sessionId);
+        if (conversationId == null) {
+            log.warn("Discarding conversation input.requested — no conversation for session {}",
+                    sessionId);
+            return;
+        }
+        if (payload == null || payload.question() == null) {
+            log.warn("Discarding conversation input.requested — missing question");
+            return;
+        }
+
+        Map<String, Object> card = new LinkedHashMap<>();
+        card.put("question", payload.question());
+        if (payload.options() != null) {
+            card.put("options", payload.options());
+        }
+        card.put("multiple", payload.multiple());
+        card.put("agentName", payload.agentName());
+        card.put("digest", payload.digest());
+        String payloadJson;
+        try {
+            payloadJson = objectMapper.writeValueAsString(card);
+        } catch (Exception e) {
+            payloadJson = "{}";
+        }
+
+        Instant expiresAt = payload.expiresAt() != null
+                ? payload.expiresAt()
+                : Instant.now().plus(24, java.time.temporal.ChronoUnit.HOURS);
+
+        ConversationMessage persisted;
+        try {
+            persisted = conversationService.appendInputRequest(conversationId, payloadJson, expiresAt);
+        } catch (Exception e) {
+            log.warn("Failed to persist input.request for conv {}: {}", conversationId, e.getMessage());
+            return;
+        }
+
+        // input.request frame (the canonical signal the client keys on).
+        try {
+            Map<String, Object> req = new LinkedHashMap<>();
+            req.put("conversationId", conversationId.toString());
+            req.put("messageId", persisted.getId().toString());
+            req.put("sequenceNo", persisted.getSequenceNo());
+            req.put("payloadJson", persisted.getPayloadJson());
+            req.put("expiresAt", persisted.getExpiresAt() == null ? null : persisted.getExpiresAt().toString());
+            String json = objectMapper.writeValueAsString(
+                    WebSocketMessage.of(MessageType.INPUT_REQUEST, req));
+            conversationStreamBroker.broadcast(conversationId, json);
+        } catch (Exception e) {
+            log.warn("input.request broadcast failed for conv {}: {}", conversationId, e.getMessage());
+        }
+
+        // message.complete bridge (durable row for history replay).
+        try {
+            String mcFrame = objectMapper.writeValueAsString(
+                    WebSocketMessage.of(MessageType.MESSAGE_COMPLETE, buildHistoryEnvelope(persisted)));
+            conversationStreamBroker.broadcast(conversationId, mcFrame);
+        } catch (Exception e) {
+            log.warn("input.request message.complete bridge failed for conv {}: {}",
+                    conversationId, e.getMessage());
+        }
+        log.info("Persisted INPUT_REQUEST {} for conv {} (execution {})",
+                persisted.getId(), conversationId, sessionId);
     }
 
     /**
@@ -610,8 +792,17 @@ public class ExecutionBridge {
      */
     private Long profileApprovalTtlSeconds(UUID conversationId) {
         try {
-            return conversationRepository.findById(conversationId)
-                    .map(Conversation::getAgentProfileVersionId)
+            UUID assistantVersionId = conversationRepository.findById(conversationId)
+                    .map(Conversation::getAssistantVersionId)
+                    .orElse(null);
+            if (assistantVersionId == null) {
+                return null;
+            }
+            return assistantAgentBindingRepository
+                    .findByAssistantVersionIdAndRoleType(
+                            assistantVersionId, AssistantAgentBinding.RoleType.PRIMARY)
+                    .stream().findFirst()
+                    .map(AssistantAgentBinding::getAgentProfileVersionId)
                     .flatMap(agentProfileVersionRepository::findById)
                     .map(AgentProfileVersion::getApprovalRequestTtlSeconds)
                     .map(Integer::longValue)

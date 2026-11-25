@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The Myrmec Authors -->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="agent-harness-table" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="harness"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="harness">
+            <column name="id" type="uuid" remarks="Primary key for the agent harness, which is the version id of the owner (assistant or workflow) that this harness is associated with">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="owner_type" type="varchar(20)" remarks="The type of the owner (e.g., 'assistant', 'workflow')">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <!-- ================================================================
+         assistant_context_bindings
+         ================================================================ -->
+    <changeSet id="harness-context-bindings" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="harness_context_bindings"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="harness_context_bindings">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="harness_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="binding_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="target_id" type="uuid">
+                <constraints nullable="false"/>
+            </column>
+            <column name="enabled" type="boolean">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="harness_context_bindings"
+            baseColumnNames="harness_id"
+            constraintName="fk_hcb_harness"
+            referencedTableName="harness"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+
+        <createIndex indexName="uq_hcb_type_target" tableName="harness_context_bindings" unique="true">
+            <column name="harness_id"/>
+            <column name="binding_type"/>
+            <column name="target_id"/>
+        </createIndex>
+    </changeSet>
+<!-- ================================================================
+         4. MULTI-MODEL ROLE BINDINGS (Assistant & Workflow Participants)
+         ================================================================ -->
+    <changeSet id="harness-agents-create-role-bindings" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <not><tableExists tableName="assistant_agent_bindings"/></not>
+        </preConditions>
+
+        <createTable tableName="harness_agent_bindings">
+            <column name="id" type="uuid">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="harness_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_hab_harness" referencedTableName="harness" referencedColumnNames="id"/>
+            </column>
+            <!-- The profile this role uses (definition-time reference). -->
+            <column name="agent_profile_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_hab_agent_profile" referencedTableName="agent_profiles" referencedColumnNames="id"/>
+            </column>
+			<!-- The role type (e.g., "primary, helper") -->
+            <column name="role_type" type="varchar(40)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Logical identifier for router/sub-agent invocation (e.g., "code_writer") -->
+            <column name="agent_alias" type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Optional localized prompt addendum (only permitted if agent_profiles.addendum_allowed = true) -->
+            <column name="prompt_addendum" type="text"/>
+        </createTable>
+
+        <createIndex tableName="harness_agent_bindings" indexName="idx_harness_bindings_lookup">
+            <column name="harness_id"/>
+            <column name="role_type"/>
+        </createIndex>
+
+        <addUniqueConstraint
+            tableName="harness_agent_bindings"
+            constraintName="uq_hab_alias"
+            columnNames="harness_id, agent_alias"/>
+    </changeSet>
+
+</databaseChangeLog>

@@ -336,6 +336,71 @@ public class ConnectionConfigService {
         return saved;
     }
 
+    /**
+     * Seed-path publish: create a draft, set the URL/config, and publish it
+     * WITHOUT the HTTP {@code testEndpoint} gate or connectivity check.
+     *
+     * <p>Used by the test-data seed so provider connection configs can be
+     * created and published deterministically against endpoints that may not
+     * be reachable at seed time. Mirrors {@link #publishDraft} otherwise
+     * (archives the prior published version, flips the parent to ACTIVE).</p>
+     */
+    @Transactional
+    public ConnectionConfigVersion publishSeedVersion(UUID configId, String url,
+                                                      Map<String, Object> configJson,
+                                                      UUID actorId, String actorDisplayName) {
+        ConnectionConfigVersion draft = getDraftVersion(configId);
+        if (draft == null) {
+            draft = createDraft(configId, actorId, actorDisplayName);
+        }
+        if (url != null) {
+            draft.setUrl(url);
+        }
+        if (configJson != null) {
+            draft.setConfig(configJson);
+        }
+        return publishWithoutGates(configId, draft, actorId, actorDisplayName);
+    }
+
+    /**
+     * Shared publish tail: archive prior published version, mark the draft
+     * PUBLISHED, and flip the parent to ACTIVE. Skips the URL/testEndpoint
+     * validation and connectivity check performed by {@link #publishDraft}.
+     */
+    private ConnectionConfigVersion publishWithoutGates(UUID configId, ConnectionConfigVersion draft,
+                                                        UUID actorId, String actorDisplayName) {
+        ConnectionConfig config = findById(configId);
+
+        ConnectionConfigVersion currentPublished = versionRepository
+                .findByConnectionConfigIdAndStatus(configId, EntityStatus.PUBLISHED).orElse(null);
+        if (currentPublished != null) {
+            currentPublished.setStatus(EntityStatus.ARCHIVED);
+            versionRepository.save(currentPublished);
+        }
+
+        draft.setStatus(EntityStatus.PUBLISHED);
+        draft.setDraftOwnerId(null);
+        draft.setPublishedAt(Instant.now());
+        draft.setPublishedBy(actorId);
+        ConnectionConfigVersion saved = versionRepository.save(draft);
+
+        config.setCurrentVersionId(saved.getId());
+        config.setStatus(EntityStatus.ACTIVE);
+        config.setPublishedAt(Instant.now());
+        config.setPublishedBy(actorId);
+        repository.save(config);
+
+        log.info("Published seed connection config version {} (id: {})",
+                draft.getVersionNumber(), configId);
+
+        auditEventService.recordEvent(
+                ResourceType.CONNECTION_CONFIG, configId, EntityStatus.PUBLISHED,
+                config.getScope(), config.getTeamId(), actorId, actorDisplayName,
+                saved.getId(), null, null, Map.of("version_number", draft.getVersionNumber()), null);
+
+        return saved;
+    }
+
     // ---- update draft ------------------------------------------------
 
     @Transactional

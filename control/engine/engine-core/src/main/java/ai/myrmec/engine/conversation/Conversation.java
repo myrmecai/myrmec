@@ -21,10 +21,12 @@ import java.util.UUID;
  * Conversation — durable container for an interactive chat. Maps 1:1 with
  * the {@code conversations} table.
  *
- * <p>A conversation pins to one {@link ai.myrmec.engine.team.Team}
+ * <p>
+ * A conversation pins to one {@link ai.myrmec.engine.team.Team}
  * and optionally to one agent. Messages append to
  * {@link ConversationMessage}; ACL lives on
- * {@link ConversationParticipant}.</p>
+ * {@link ConversationParticipant}.
+ * </p>
  */
 @Entity
 @Table(name = "conversations")
@@ -42,17 +44,23 @@ public class Conversation {
      * allocation layer, and the row stays ACTIVE so the next message
      * transparently re-offers a fresh session.
      */
-    public enum Status { ACTIVE, ARCHIVED, CLOSED }
+    public enum Status {
+        ACTIVE, ARCHIVED, CLOSED
+    }
 
     /** Where the conversation was started from (#96, External API seam). */
-    public enum Source { WEB_UI, EXTERNAL_API }
+    public enum Source {
+        WEB_UI, EXTERNAL_API
+    }
 
     /**
      * Position of this conversation inside a moderated thread (#96/#100 seam).
      * V1 is always {@link #STANDALONE}; V2 distinguishes the public-facing and
      * private moderator halves.
      */
-    public enum RoleInThread { STANDALONE, PUBLIC_FACING, MODERATOR_PRIVATE }
+    public enum RoleInThread {
+        STANDALONE, PUBLIC_FACING, MODERATOR_PRIVATE
+    }
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -61,28 +69,6 @@ public class Conversation {
 
     @Column(name = "team_id", nullable = false)
     private UUID teamId;
-
-    /** Null until the first agent turn lands; pinned thereafter. */
-    @Column(name = "agent_id")
-    private UUID agentId;
-
-    /**
-     * Current/last serving Host (slice 4a, denormalized durable machine).
-     * Unlike the ephemeral worker {@code agentId} this survives across bind
-     * attempts; the ephemeral worker is deliberately not denormalized here
-     * (see conversation-observability §4). Null until first bind.
-     */
-    @Column(name = "agent_host_id")
-    private UUID agentHostId;
-
-    /**
-     * Replica holding the client's live conversation connection (slice 4a).
-     * Null when no client is connected; on a single node it resolves to
-     * "self". The cross-node router (slice 4b) reads this to forward
-     * streamed output to the owning replica.
-     */
-    @Column(name = "home_node_id", length = 255)
-    private String homeNodeId;
 
     /**
      * Durable Assistant identity for this conversation (#92). Null for
@@ -97,14 +83,6 @@ public class Conversation {
      */
     @Column(name = "assistant_version_id")
     private UUID assistantVersionId;
-
-    /**
-     * Pinned profile version copied from the pinned Assistant version at
-     * session start (assistant-entity.md §5.6); immutable for the life of
-     * the session. Null for legacy chats without an assistant.
-     */
-    @Column(name = "agent_profile_version_id")
-    private UUID agentProfileVersionId;
 
     @Column(name = "title", length = 500)
     private String title;
@@ -140,13 +118,17 @@ public class Conversation {
     @Column(name = "archived_by")
     private UUID archivedBy;
 
-    /** Per-conversation system-prompt override (#9). Null means inherit profile. */
-    @Column(name = "system_prompt_override", columnDefinition = "text")
-    private String systemPromptOverride;
-
     /** Per-conversation pinned facts (#9), as free-form text the engine appends. */
     @Column(name = "pinned_facts", columnDefinition = "text")
     private String pinnedFacts;
+
+    /**
+     * Live context size — the main model's most recent prompt-token count,
+     * tracked from MODEL_USAGE execution events. Null until the first
+     * main-model call reports usage. Feeds the header's context bagel.
+     */
+    @Column(name = "context_tokens")
+    private Integer contextTokens;
 
     /**
      * Where the conversation was started from (#96). Defaults to {@code WEB_UI};
@@ -177,7 +159,10 @@ public class Conversation {
     @Column(name = "parent_conversation_id")
     private UUID parentConversationId;
 
-    /** Position of this conversation in a moderated thread (#96/#100). V1 always STANDALONE. */
+    /**
+     * Position of this conversation in a moderated thread (#96/#100). V1 always
+     * STANDALONE.
+     */
     @Enumerated(EnumType.STRING)
     @Column(name = "role_in_thread", nullable = false, length = 30)
     private RoleInThread roleInThread = RoleInThread.STANDALONE;
@@ -194,6 +179,9 @@ public class Conversation {
     @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
     @Column(name = "context_snapshot", columnDefinition = "jsonb")
     private ai.myrmec.engine.context.ContextSnapshot contextSnapshot;
+
+    @Column(name = "current_session_id")
+    private UUID currentSessionId;
 
     @PrePersist
     void onCreate() {

@@ -1,300 +1,173 @@
 [
   {
-    "code": "github",
-    "name": "GitHub",
-    "description": "Interact with GitHub repositories issues pull requests and more",
-    "toolType": "INTEGRATION",
-    "configSchema": {
-      "type": "object",
-      "properties": {
-        "token": { "type": "string", "description": "GitHub personal access token" },
-        "owner": { "type": "string", "description": "Repository owner" },
-        "repo": { "type": "string", "description": "Repository name" }
-      },
-      "required": ["token"]
-    },
-    "docsUrl": "https://docs.github.com/rest",
-    "riskClass": "SAFE"
-  },
-  {
-    "code": "filesystem",
-    "name": "Filesystem",
-    "description": "Read write and manage files on the local filesystem",
-    "toolType": "SYSTEM",
-    "configSchema": {
-      "type": "object",
-      "properties": {
-        "base_path": { "type": "string", "description": "Base directory for file operations" },
-        "allowed_extensions": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Allowed file extensions"
-        }
-      },
-      "required": ["base_path"]
-    },
+    "code": "ls",
+    "name": "List Directory",
+    "description": "List the contents of a directory in the workspace.",
+    "toolType": "FILE",
+    "configSchema": { "type": "object", "properties": { "path": { "type": "string" } } },
     "docsUrl": null,
     "riskClass": "SAFE"
   },
   {
-    "code": "postgres",
-    "name": "PostgreSQL",
-    "description": "Execute SQL queries against PostgreSQL databases",
-    "toolType": "DATABASE",
-    "configSchema": {
-      "type": "object",
-      "properties": {
-        "host": { "type": "string" },
-        "port": { "type": "integer", "default": 5432 },
-        "database": { "type": "string" },
-        "username": { "type": "string" },
-        "password": { "type": "string" }
-      },
-      "required": ["host", "database", "username", "password"]
-    },
+    "code": "glob",
+    "name": "Glob Files",
+    "description": "Find files in the workspace matching a glob pattern.",
+    "toolType": "FILE",
+    "configSchema": { "type": "object", "properties": { "pattern": { "type": "string" } } },
     "docsUrl": null,
-    "riskClass": "WRITE"
-  },
-  {
-    "code": "slack",
-    "name": "Slack",
-    "description": "Send messages and interact with Slack workspaces",
-    "toolType": "INTEGRATION",
-    "configSchema": {
-      "type": "object",
-      "properties": {
-        "bot_token": { "type": "string", "description": "Slack bot OAuth token" },
-        "default_channel": { "type": "string", "description": "Default channel for messages" }
-      },
-      "required": ["bot_token"]
-    },
-    "docsUrl": "https://api.slack.com/",
     "riskClass": "SAFE"
   },
   {
-    "code": "fetch",
-    "name": "HTTP Fetch",
-    "description": "Make HTTP requests to external APIs",
-    "toolType": "SYSTEM",
-    "configSchema": {
-      "type": "object",
-      "properties": {
-        "base_url": { "type": "string", "description": "Base URL for requests" },
-        "headers": { "type": "object", "description": "Default headers" },
-        "timeout": { "type": "integer", "default": 30, "description": "Request timeout in seconds" }
-      },
-      "required": []
-    },
+    "code": "grep",
+    "name": "Search Code",
+    "description": "Search file contents in the workspace for a text or regex pattern.",
+    "toolType": "FILE",
+    "configSchema": { "type": "object", "properties": { "query": { "type": "string" } } },
     "docsUrl": null,
     "riskClass": "SAFE"
   },
   {
     "code": "read_file",
     "name": "Read File",
-    "description": "Read the contents of a file from the workspace",
+    "description": "Read the contents of a file from the workspace.",
     "toolType": "FILE",
-    "configSchema": {
-      "type": "object",
-      "properties": {
-        "file_path": { "type": "string", "description": "Path to the file (relative to workspace)" },
-        "encoding": { "type": "string", "default": "utf-8", "description": "Text encoding" }
-      },
-      "required": ["file_path"]
-    },
+    "configSchema": { "type": "object", "properties": { "path": { "type": "string" } } },
     "docsUrl": null,
     "riskClass": "SAFE"
   },
   {
     "code": "write_file",
     "name": "Write File",
-    "description": "Write content to a file in the workspace",
+    "description": "Write content to a file in the workspace.",
     "toolType": "FILE",
-    "configSchema": {
-      "type": "object",
-      "properties": {
-        "file_path": { "type": "string", "description": "Path to the file (relative to workspace)" },
-        "content": { "type": "string", "description": "Content to write" },
-        "encoding": { "type": "string", "default": "utf-8", "description": "Text encoding" },
-        "create_dirs": { "type": "boolean", "default": true, "description": "Create parent directories if missing" }
-      },
-      "required": ["file_path", "content"]
-    },
+    "configSchema": { "type": "object", "properties": { "path": { "type": "string" }, "content": { "type": "string" } } },
     "docsUrl": null,
     "riskClass": "WRITE"
   },
   {
-    "code": "list_directory",
-    "name": "List Directory",
-    "description": "List contents of a directory in the workspace",
+    "code": "edit_file",
+    "name": "Edit File",
+    "description": "Apply a targeted edit to a file in the workspace.",
     "toolType": "FILE",
-    "configSchema": {
-      "type": "object",
-      "properties": {
-        "dir_path": { "type": "string", "default": ".", "description": "Directory path (relative to workspace)" },
-        "include_hidden": { "type": "boolean", "default": false, "description": "Include hidden files/directories" }
-      },
-      "required": []
-    },
-    "docsUrl": null,
-    "riskClass": "SAFE"
-  },
-  {
-    "code": "search_files",
-    "name": "Search Files",
-    "description": "Search for files matching a glob pattern",
-    "toolType": "FILE",
-    "configSchema": {
-      "type": "object",
-      "properties": {
-        "pattern": { "type": "string", "description": "Glob pattern (e.g. *.py src/**/*.java)" },
-        "dir_path": { "type": "string", "default": ".", "description": "Directory to search in" },
-        "max_results": { "type": "integer", "default": 100, "description": "Maximum results" }
-      },
-      "required": ["pattern"]
-    },
-    "docsUrl": null,
-    "riskClass": "SAFE"
-  },
-  {
-    "code": "search_code",
-    "name": "Search Code",
-    "description": "Search for text or regex pattern in code files",
-    "toolType": "FILE",
-    "configSchema": {
-      "type": "object",
-      "properties": {
-        "query": { "type": "string", "description": "Search string or regex pattern" },
-        "file_pattern": { "type": "string", "default": "*", "description": "Glob pattern for files to search" },
-        "dir_path": { "type": "string", "default": ".", "description": "Directory to search in" },
-        "is_regex": { "type": "boolean", "default": false, "description": "Treat query as regex pattern" },
-        "max_results": { "type": "integer", "default": 50, "description": "Maximum matches" },
-        "context_lines": { "type": "integer", "default": 2, "description": "Lines of context before/after match" }
-      },
-      "required": ["query"]
-    },
-    "docsUrl": null,
-    "riskClass": "SAFE"
-  },
-  {
-    "code": "get_file_tree",
-    "name": "Get File Tree",
-    "description": "Get a tree view of directory structure",
-    "toolType": "FILE",
-    "configSchema": {
-      "type": "object",
-      "properties": {
-        "dir_path": { "type": "string", "default": ".", "description": "Directory path (relative to workspace)" },
-        "max_depth": { "type": "integer", "default": 10, "description": "Maximum depth" }
-      },
-      "required": []
-    },
-    "docsUrl": null,
-    "riskClass": "SAFE"
-  },
-  {
-    "code": "apply_patch",
-    "name": "Apply Patch",
-    "description": "Apply a unified diff patch to a file",
-    "toolType": "FILE",
-    "configSchema": {
-      "type": "object",
-      "properties": {
-        "file_path": { "type": "string", "description": "Path to the file (relative to workspace)" },
-        "patch": { "type": "string", "description": "Unified diff patch content" }
-      },
-      "required": ["file_path", "patch"]
-    },
+    "configSchema": { "type": "object", "properties": { "path": { "type": "string" } } },
     "docsUrl": null,
     "riskClass": "WRITE"
   },
   {
-    "code": "git_status",
-    "name": "Git Status",
-    "description": "Show working tree status",
+    "code": "delete",
+    "name": "Delete File",
+    "description": "Delete a file or directory in the workspace. Irreversible.",
+    "toolType": "FILE",
+    "configSchema": { "type": "object", "properties": { "path": { "type": "string" } } },
+    "docsUrl": null,
+    "riskClass": "DESTRUCTIVE"
+  },
+  {
+    "code": "task",
+    "name": "Delegate to Sub-agent",
+    "description": "Delegate a task to a configured sub-agent.",
+    "toolType": "SYSTEM",
+    "configSchema": { "type": "object", "properties": { "description": { "type": "string" }, "subagent": { "type": "string" } } },
+    "docsUrl": null,
+    "riskClass": "SAFE"
+  },
+  {
+    "code": "execute_command",
+    "name": "Execute Command",
+    "description": "Run one allowed executable in the workspace with no shell.",
+    "toolType": "SYSTEM",
+    "configSchema": { "type": "object", "properties": { "executable": { "type": "string" }, "args": { "type": "array", "items": { "type": "string" } } } },
+    "docsUrl": null,
+    "riskClass": "DESTRUCTIVE"
+  },
+  {
+    "code": "get_diagnostics",
+    "name": "Get Diagnostics",
+    "description": "Retrieve compiler/linter diagnostics for the workspace.",
+    "toolType": "SYSTEM",
+    "configSchema": { "type": "object", "properties": {} },
+    "docsUrl": null,
+    "riskClass": "SAFE"
+  },
+  {
+    "code": "git_create_branch",
+    "name": "Create Git Branch",
+    "description": "Create a new git branch in the workspace and switch to it.",
     "toolType": "GIT",
-    "configSchema": {
-      "type": "object",
-      "properties": {},
-      "required": []
-    },
+    "configSchema": { "type": "object", "properties": { "branch": { "type": "string" } } },
     "docsUrl": null,
     "riskClass": "SAFE"
   },
   {
     "code": "git_commit",
     "name": "Git Commit",
-    "description": "Record changes to the repository with a commit message",
+    "description": "Stage all workspace changes and create one commit.",
     "toolType": "GIT",
-    "configSchema": {
-      "type": "object",
-      "properties": {
-        "message": { "type": "string", "description": "Commit message describing the changes" }
-      },
-      "required": ["message"]
-    },
+    "configSchema": { "type": "object", "properties": { "message": { "type": "string" } } },
     "docsUrl": null,
     "riskClass": "WRITE"
   },
   {
     "code": "git_push",
     "name": "Git Push",
-    "description": "Update remote refs along with associated objects",
+    "description": "Push the current branch to the remote. Never force-pushes.",
     "toolType": "GIT",
-    "configSchema": {
-      "type": "object",
-      "properties": {
-        "remote": { "type": "string", "default": "origin", "description": "Remote name" },
-        "branch": { "type": "string", "description": "Branch to push" }
-      },
-      "required": []
-    },
+    "configSchema": { "type": "object", "properties": { "branch": { "type": "string" } } },
     "docsUrl": null,
     "riskClass": "IRREVERSIBLE"
   },
   {
-    "code": "git_log",
-    "name": "Git Log",
-    "description": "Show commit logs",
-    "toolType": "GIT",
-    "configSchema": {
-      "type": "object",
-      "properties": {
-        "count": { "type": "integer", "default": 10, "description": "Number of commits to show (max 50)" }
-      },
-      "required": []
-    },
+    "code": "ask_user",
+    "name": "Ask User",
+    "description": "Ask the user a clarifying question with selectable options.",
+    "toolType": "SYSTEM",
+    "configSchema": { "type": "object", "properties": { "question": { "type": "string" } } },
     "docsUrl": null,
     "riskClass": "SAFE"
   },
   {
-    "code": "git_branch",
-    "name": "Git Branch",
-    "description": "List create or switch branches",
-    "toolType": "GIT",
-    "configSchema": {
-      "type": "object",
-      "properties": {
-        "branch_name": { "type": "string", "description": "Branch name to create or switch to" },
-        "create": { "type": "boolean", "default": false, "description": "Create the branch if true" }
-      },
-      "required": []
-    },
+    "code": "compact_conversation",
+    "name": "Compact Conversation",
+    "description": "Force a context compaction fold on the next model step.",
+    "toolType": "SYSTEM",
+    "configSchema": { "type": "object", "properties": {} },
     "docsUrl": null,
     "riskClass": "SAFE"
   },
   {
-    "code": "git_merge",
-    "name": "Git Merge",
-    "description": "Merge a branch into the current branch",
-    "toolType": "GIT",
-    "configSchema": {
-      "type": "object",
-      "properties": {
-        "branch": { "type": "string", "description": "Branch name to merge into current branch" }
-      },
-      "required": ["branch"]
-    },
+    "code": "write_todos",
+    "name": "Write Todos",
+    "description": "Maintain a structured todo list for the current task.",
+    "toolType": "SYSTEM",
+    "configSchema": { "type": "object", "properties": { "todos": { "type": "array" } } },
     "docsUrl": null,
-    "riskClass": "DESTRUCTIVE"
+    "riskClass": "SAFE"
+  },
+  {
+    "code": "internet_search",
+    "name": "Internet Search",
+    "description": "Run a web search using the local search service.",
+    "toolType": "INTEGRATION",
+    "configSchema": { "type": "object", "properties": { "query": { "type": "string" } } },
+    "docsUrl": null,
+    "riskClass": "SAFE"
+  },
+  {
+    "code": "list_attachments",
+    "name": "List Attachments",
+    "description": "List every file the user attached to this conversation.",
+    "toolType": "FILE",
+    "configSchema": { "type": "object", "properties": {} },
+    "docsUrl": null,
+    "riskClass": "SAFE"
+  },
+  {
+    "code": "read_attachment",
+    "name": "Read Attachment",
+    "description": "Read the text content of one attached file, paged by lines.",
+    "toolType": "FILE",
+    "configSchema": { "type": "object", "properties": { "attachmentId": { "type": "string" } } },
+    "docsUrl": null,
+    "riskClass": "SAFE"
   }
 ]

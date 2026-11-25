@@ -2,15 +2,16 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.inference.execution;
 
+import ai.myrmec.engine._protocol.HostProtocol;
+import ai.myrmec.engine._protocol.HostProtocolEnvelope;
+import ai.myrmec.engine._protocol.payload.ExecutionCancelPayload;
+import ai.myrmec.engine._protocol.payload.ExecutionPolicyUpdatePayload;
+import ai.myrmec.engine._protocol.payload.ExecutionStartPayload;
+import ai.myrmec.engine._protocol.payload.OrchestrationExecutionStartPayload;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.node.HostFrameRelayService;
-import ai.myrmec.engine.websocket.host.HostProtocol;
-import ai.myrmec.engine.websocket.host.HostProtocolEnvelope;
-import ai.myrmec.engine.websocket.host.payload.ExecutionCancelPayload;
-import ai.myrmec.engine.websocket.host.payload.ExecutionPolicyUpdatePayload;
-import ai.myrmec.engine.websocket.host.payload.ExecutionStartPayload;
-import ai.myrmec.engine.websocket.host.payload.OrchestrationExecutionStartPayload;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Engine→host execution commands (§8.1/§8.8) over the host socket — local or
@@ -40,11 +42,13 @@ public class ExecutionCommandSender {
     @Value("${myrmec.host.execution-start-timeout-seconds:300}")
     private int executionStartTimeoutSeconds;
 
+    /** sessionId → the serialized execution.start frame awaiting channel bind. */
+    private final Map<UUID, String> pendingStarts = new ConcurrentHashMap<>();
+
     /** §8.1: send execution.start for a conversation turn. */
-    public boolean startConversation(UUID executionId, Session session,
+    public boolean startConversation(SessionExecution execution, Session session,
                                      ExecutionStartPayload payload) {
-        return send(session.getHostInstanceId(), HostProtocol.EXECUTION_START,
-                null, payload, executionId, session.getId());
+        return sendExecutionStart(execution, session, payload);
     }
 
     /**
@@ -52,26 +56,72 @@ public class ExecutionCommandSender {
      * step — the same §8.1 input-block shape as a conversation turn, shipped on
      * the WORKFLOW session the allocator gave the task.
      */
-    public boolean startExecution(UUID executionId, Session session,
+    public boolean startExecution(SessionExecution execution, Session session,
                                   ExecutionStartPayload payload) {
-        return send(session.getHostInstanceId(), HostProtocol.EXECUTION_START,
-                null, payload, executionId, session.getId());
+        return sendExecutionStart(execution, session, payload);
     }
 
     /** §8.1: send execution.start for an orchestration attempt (§16.2 shape). */
-    public boolean startOrchestration(UUID executionId, Session session,
+    public boolean startOrchestration(SessionExecution execution, Session session,
                                       OrchestrationExecutionStartPayload payload) {
-        return send(session.getHostInstanceId(), HostProtocol.EXECUTION_START,
-                null, payload, executionId, session.getId());
+        return sendExecutionStart(execution, session, payload);
+    }
+
+    /**
+     * Shared execution.start arm: serialize, then deliver on the dedicated
+     * channel if bound; otherwise queue the frame and deliver it on channel
+     * bind (the agent SDK never receives execution.* on the control socket).
+     */
+    private boolean sendExecutionStart(SessionExecution execution, Session session, Object payload) {
+        HostProtocolEnvelope envelope = HostProtocolEnvelope.reply(HostProtocol.EXECUTION_START, null, payload, objectMapper);
+        envelope.setExecutionId(execution.getId());
+        envelope.setSessionId(session.getId());
+        envelope.setTurn(execution.getSequenceNo());
+        try {
+            String json = objectMapper.writeValueAsString(envelope);
+            boolean sent = relayService.sendDedicated(session.getId(), session.getHostInstanceId(), json);
+            if (!sent) {
+                // Channel not bound yet — queue for the bind flush.
+                pendingStarts.put(session.getId(), json);
+                log.debug("Queued execution.start for session {} (channel not bound yet)", session.getId());
+            }
+            return sent;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Flush a queued execution.start once the session's channel binds. */
+    public void flushPendingStart(UUID sessionId) {
+        String json = pendingStarts.remove(sessionId);
+        if (json == null) {
+            return;
+        }
+        ai.myrmec.engine.inference.Session session = sessionRepository.findById(sessionId).orElse(null);
+        if (session == null) {
+            return;
+        }
+        boolean sent = relayService.sendDedicated(sessionId, session.getHostInstanceId(), json);
+        if (!sent) {
+            // Still unbound (shouldn't happen on a bind flush) — re-queue.
+            pendingStarts.put(sessionId, json);
+        } else {
+            log.debug("Flushed queued execution.start for session {}", sessionId);
+        }
+    }
+
+    /** Drop any queued start for a session (reject / close). */
+    public void discardPendingStart(UUID sessionId) {
+        pendingStarts.remove(sessionId);
     }
 
     /** §8.8: request cancellation. */
-    public boolean cancel(UUID executionId, Session session, UUID dispatchId,
+    public boolean cancel(SessionExecution execution, Session session, UUID dispatchId,
                           String reasonCode, int gracePeriodSeconds) {
         return send(session.getHostInstanceId(), HostProtocol.EXECUTION_CANCEL,
-                null, new ExecutionCancelPayload(executionId, dispatchId, reasonCode,
+                null, new ExecutionCancelPayload(execution.getId(), dispatchId, reasonCode,
                         java.time.Instant.now(), gracePeriodSeconds),
-                executionId, session.getId());
+                execution.getId(), session.getId(), execution.getSequenceNo());
     }
 
     /**
@@ -79,24 +129,26 @@ public class ExecutionCommandSender {
      * accounted usage. Called by {@link SessionPolicyService} when a session's
      * accounted usage advances past the last-sent snapshot.
      */
-    public boolean policyUpdate(UUID executionId, Session session, UUID dispatchId,
+    public boolean policyUpdate(SessionExecution execution, Session session, UUID dispatchId,
                                 ExecutionPolicyUpdatePayload payload) {
         return send(session.getHostInstanceId(), HostProtocol.EXECUTION_POLICY_UPDATE,
-                null, payload, executionId, session.getId());
+                null, payload, execution.getId(), session.getId(), execution.getSequenceNo());
     }
 
     /**
-     * Serialize once, then route: node-aware resolution inside the relay
-     * service decides local socket vs HTTP relay to the owning replica.
+     * Serialize once, then route on the session's dedicated channel (the agent
+     * SDK receives all execution.* frames there). Sets the envelope's {@code turn}
+     * (the per-session {@code sequenceNo}) — the agent-channel identity model.
      */
     private boolean send(UUID hostInstanceId, String type, String correlationId,
-                         Object payload, UUID executionId, UUID sessionId) {
+                         Object payload, UUID executionId, UUID sessionId, Integer turn) {
         HostProtocolEnvelope envelope = HostProtocolEnvelope.reply(type, correlationId, payload, objectMapper);
         envelope.setExecutionId(executionId);
         envelope.setSessionId(sessionId);
+        envelope.setTurn(turn);
         try {
             String json = objectMapper.writeValueAsString(envelope);
-            return relayService.send(sessionId, hostInstanceId, json);
+            return relayService.sendDedicated(sessionId, hostInstanceId, json);
         } catch (Exception e) {
             return false;
         }

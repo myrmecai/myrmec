@@ -5,12 +5,6 @@ package ai.myrmec.engine.agent;
 
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
-import ai.myrmec.engine.agent.dto.HeartbeatRequest;
-import ai.myrmec.engine.agent.dto.HeartbeatResponse;
-import ai.myrmec.engine.conversation.Conversation;
-import ai.myrmec.engine.conversation.ConversationEventReason;
-import ai.myrmec.engine.conversation.ConversationEventService;
-import ai.myrmec.engine.conversation.ConversationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -20,19 +14,16 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
  * Service that manages {@link AgentHost} entities (CRUD, registration-key
- * generation) and routes runtime operations to the
- * underlying {@link Agent} instances via {@link AgentRepository}.
+ * generation) and its {@link AgentHostInstance} runtime rows.
  *
  * <p>This service manages agent <em>hosts</em> (the durable definition a
- * Supervisor process registers against). The ephemeral {@link Agent}
- * instances are persisted through {@link AgentRepository} but their
- * lifecycle FSM is driven from here.
+ * Supervisor process registers against) and their live instances (the
+ * heartbeat/liveness owner). The unified protocol's session allocation
+ * tracks the per-session runtime state.</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -44,9 +35,6 @@ public class AgentHostService {
 
     private final AgentHostRepository agentHostRepository;
     private final AgentHostInstanceRepository agentHostInstanceRepository;
-    private final AgentRepository agentInstanceRepository;
-    private final ConversationRepository conversationRepository;
-    private final ConversationEventService conversationEventService;
     private final ModelAccessModeValidator modelAccessModeValidator;
 
     // ========== Admin Operations ==========
@@ -163,8 +151,9 @@ public class AgentHostService {
                 .orElseThrow(() -> ResourceNotFoundException.agent(agentHostId));
 
         // Delete all instances first
-        List<Agent> instances = agentInstanceRepository.findByAgentHostId(agentHostId);
-        agentInstanceRepository.deleteAll(instances);
+        List<AgentHostInstance> instances = agentHostInstanceRepository
+                .findByAgentHostIdOrderByOpenedAtDesc(agentHostId);
+        agentHostInstanceRepository.deleteAll(instances);
 
         agentHostRepository.delete(agentHost);
         log.info("Deleted agent: {} ({}) with {} instances", agentHost.getName(), agentHostId, instances.size());
@@ -187,20 +176,26 @@ public class AgentHostService {
     }
 
     /**
-     * Count online instances for an agent host.
+     * Count live OPEN instances for an agent host. Used by the #88
+     * availability check (an OPEN instance means the host has live capacity).
      */
     @Transactional(readOnly = true)
     public int countOnlineInstances(UUID agentHostId) {
-        return (int) agentInstanceRepository.countOnlineByAgentHostId(agentHostId);
+        return (int) agentHostInstanceRepository.countByAgentHostIdAndStatus(
+                agentHostId, AgentHostInstance.Status.OPEN);
     }
 
     /**
-     * Count connected (non-{@code DEAD}) instances for a host — Agents with a
-     * live control socket, idle or busy. Used by the #88 availability check.
+     * Count connected instances for a host — OPEN + RECOVERING rows (a live
+     * supervisor run, idle or busy). Used by the #88 availability check.
      */
     @Transactional(readOnly = true)
     public int countConnectedInstances(UUID agentHostId) {
-        return (int) agentInstanceRepository.countConnectedByAgentHostId(agentHostId);
+        long open = agentHostInstanceRepository.countByAgentHostIdAndStatus(
+                agentHostId, AgentHostInstance.Status.OPEN);
+        long recovering = agentHostInstanceRepository.countByAgentHostIdAndStatus(
+                agentHostId, AgentHostInstance.Status.RECOVERING);
+        return (int) (open + recovering);
     }
 
     private String generateRegistrationKey() {
@@ -226,16 +221,27 @@ public class AgentHostService {
      * are MANAGED-only); the extension authenticates with short-lived
      * agent JWTs minted against the returned host/instance.</p>
      *
-     * @param userId    the authenticated user who owns the local agent
-     * @param teamId Team scope recorded at creation for governance
-     *                  display only; reuse is per-user, so it is not updated
-     *                  on later registrations
-     * @param hostname  host identity reported by the IDE extension (e.g. the
-     *                  machine name or VS Code session id)
-     * @return the local agent host definition (existing or newly created)
+    /**
+     * Legacy local-agent-instance path (pre-unified-protocol): retains the
+     * explicit Team scope. The unified host-register path uses the 2-arg
+     * overload below (system-wide, team derived from the bearer token).
      */
     @Transactional
     public AgentHost upsertLocalAgentHost(UUID userId, UUID teamId, String hostname) {
+        AgentHost host = upsertLocalAgentHost(userId, hostname);
+        host.setTeamId(teamId);
+        return agentHostRepository.save(host);
+    }
+
+    /**
+     * @param userId    the authenticated user who owns the local agent
+     * @param hostname  host identity reported by the IDE extension (e.g. the
+     *                  machine name or VS Code session id); cosmetic, used
+     *                  only to build the display name
+     * @return the local agent host definition (existing or newly created)
+     */
+    @Transactional
+    public AgentHost upsertLocalAgentHost(UUID userId, String hostname) {
         if (userId == null) {
             throw new BadRequestException("userId is required for a local agent host");
         }
@@ -254,8 +260,7 @@ public class AgentHostService {
                 host.setName(buildLocalHostName(userId, hostname));
             }
             host.setStatus(AgentHost.Status.ACTIVE);
-            log.info("Reused local agent host {} for user {} (Team {})",
-                    host.getId(), userId, teamId);
+            log.info("Reused local agent host {} for user {}", host.getId(), userId);
             return agentHostRepository.save(host);
         }
 
@@ -271,18 +276,19 @@ public class AgentHostService {
         }
         host.setName(name);
         host.setDescription("Local IDE agent for user " + userId);
-        // Team scope recorded at creation for governance display only;
-        // reuse is per-user, so it is not updated on later registrations.
-        host.setTeamId(teamId);
+        // A LOCAL host is per-user and system-wide (no team scope): the user's
+        // Team membership is already carried by the bearer token's role
+        // claims and enforced at the API layer.
+        host.setTeamId(null);
         host.setRegistrationKey(generateRegistrationKey());
         host.setMaxAgents(1);
         host.setStatus(AgentHost.Status.ACTIVE);
         host.setHostType(AgentHostType.LOCAL);
 
         host = agentHostRepository.save(host);
-        log.info("Created local agent host {} for user {} (Team {}) — owner stamps "
+        log.info("Created local agent host {} for user {} — owner stamps "
                         + "the instance at host.open",
-                host.getId(), userId, teamId);
+                host.getId(), userId);
         return host;
     }
 
@@ -292,34 +298,6 @@ public class AgentHostService {
     }
 
     // ========== Runtime Operations ==========
-
-    /**
-     * Record heartbeat from an agent instance.
-     */
-    @Transactional
-    public HeartbeatResponse recordHeartbeat(UUID instanceId, HeartbeatRequest request) {
-        Agent instance = agentInstanceRepository.findById(instanceId)
-                .orElseThrow(() -> ResourceNotFoundException.agentInstance(instanceId));
-
-        instance.recordHeartbeat();
-        agentInstanceRepository.save(instance);
-
-        log.debug("Heartbeat received from instance: {}", instanceId);
-
-        return HeartbeatResponse.builder()
-                .ack(true)
-                .serverTime(Instant.now())
-                .build();
-    }
-
-    /**
-     * Get an agent instance by ID.
-     */
-    @Transactional(readOnly = true)
-    public Agent getInstance(UUID instanceId) {
-        return agentInstanceRepository.findById(instanceId)
-                .orElseThrow(() -> ResourceNotFoundException.agentInstance(instanceId));
-    }
 
     /**
      * Get an agent host by ID.
@@ -338,249 +316,5 @@ public class AgentHostService {
         return agentHostRepository.findByRegistrationKey(registrationKey)
                 .orElseThrow(() -> new IllegalStateException(
                         "No agent definition found for registration key"));
-    }
-
-    /**
-     * Create a new agent instance for an agent host.
-     */
-    @Transactional
-    public Agent createInstance(UUID agentHostId, String hostname, String ipAddress,
-                                         String runtimeVersion, Map<String, Object> metadata) {
-        // Verify agent exists
-        AgentHost agentHost = agentHostRepository.findById(agentHostId)
-                .orElseThrow(() -> ResourceNotFoundException.agent(agentHostId));
-
-        Agent instance = new Agent();
-        instance.setAgentHostId(agentHostId);
-        instance.setHostname(hostname);
-        instance.setIpAddress(ipAddress);
-        instance.setRuntimeVersion(runtimeVersion);
-        instance.setMetadata(metadata);
-        instance.setStatus(Agent.Status.IDLE);
-        instance.setRegisteredAt(Instant.now());
-        instance.setLastHeartbeatAt(Instant.now());
-
-        instance = agentInstanceRepository.save(instance);
-        log.info("Agent instance registered: {} for agent {} ({})",
-                instance.getId(), agentHost.getName(), agentHostId);
-        return instance;
-    }
-
-    /**
-     * Get all instances for an agent host.
-     */
-    @Transactional(readOnly = true)
-    public List<Agent> getAgentsForAgentHost(UUID agentHostId) {
-        return agentInstanceRepository.findByAgentHostId(agentHostId);
-    }
-
-    /**
-     * Get all online instances.
-     */
-    @Transactional(readOnly = true)
-    public List<Agent> getOnlineInstances() {
-        return agentInstanceRepository.findByStatus(Agent.Status.IDLE);
-    }
-
-    /**
-     * Atomically reserve a specific warm Agent for a conversation
-     * (IDLE → RESERVED), pinning the conversation and profile version at
-     * reserve-time (agent-concurrency §9.5). Returns {@code true} if this
-     * caller won the claim; {@code false} if the Agent was no longer IDLE
-     * (lost the race or already bound), in which case the caller should try
-     * another candidate.
-     */
-    @Transactional
-    public boolean reserveInstance(UUID instanceId, UUID conversationId, UUID profileVersionId) {
-        int claimed = agentInstanceRepository.reserveIfIdle(
-                instanceId, Agent.Status.IDLE, Agent.Status.RESERVED,
-                conversationId, profileVersionId, Instant.now());
-        if (claimed > 0) {
-            log.debug("Reserved agent {} for conversation {} (profileVersion {})",
-                    instanceId, conversationId, profileVersionId);
-            UUID hostId = agentInstanceRepository.findById(instanceId)
-                    .map(Agent::getAgentHostId).orElse(null);
-            conversationEventService.record(conversationId, instanceId, hostId,
-                    Agent.Status.IDLE, Agent.Status.RESERVED, ConversationEventReason.RESERVED);
-            return true;
-        }
-        log.debug("Could not reserve agent {} — no longer IDLE", instanceId);
-        return false;
-    }
-
-    /**
-     * Release an Agent back into the warm pool (→ IDLE, binding cleared).
-     * Idempotent: a no-op if the Agent is already idle or gone.
-     */
-    @Transactional
-    public void releaseInstance(UUID instanceId) {
-        agentInstanceRepository.findById(instanceId).ifPresent(instance -> {
-            // Don't revive a DEAD Agent — it was reaped for a reason
-            // (host lost, transport error) and must not re-enter the pool.
-            if (instance.getStatus() == Agent.Status.DEAD) {
-                log.debug("Skipping release of DEAD Agent {}", instanceId);
-                return;
-            }
-            UUID conversationId = instance.getConversationId();
-            UUID hostId = instance.getAgentHostId();
-            Agent.Status fromState = instance.getStatus();
-            instance.release();
-            agentInstanceRepository.saveAndFlush(instance);
-            conversationEventService.record(conversationId, instanceId, hostId,
-                    fromState, Agent.Status.IDLE, ConversationEventReason.RELEASED);
-            log.debug("Released agent {} back to the warm pool", instanceId);
-        });
-    }
-
-    /**
-     * Flip a reserved Agent to {@code BOUND} once its conversation socket
-     * has attached to the home node (agent-concurrency §9.4/§9.5), and pin
-     * the home node on both the Agent and the conversation so the
-     * cross-node router can address turns + streamed output to this replica.
-     *
-     * <p>Defensive: only attaches when the Agent is still reserved for the
-     * same conversation it is attaching for. An Agent attaching for a
-     * conversation it was never bound to (or after it was already released)
-     * is rejected with {@code false}; the caller closes the socket.</p>
-     *
-     * @return {@code true} if the Agent was flipped to BOUND, {@code false}
-     *         if the Agent is gone or no longer bound to that conversation
-     */
-    @Transactional
-    public boolean attachConversation(UUID instanceId, UUID conversationId, String homeNodeId) {
-        Agent instance = agentInstanceRepository.findById(instanceId).orElse(null);
-        if (instance == null) {
-            log.warn("conversation.attach for unknown agent instance {} — rejecting", instanceId);
-            return false;
-        }
-        if (instance.getConversationId() == null
-                || !instance.getConversationId().equals(conversationId)) {
-            log.warn("conversation.attach mismatch — agent {} is bound to {} not {}; rejecting",
-                    instanceId, instance.getConversationId(), conversationId);
-            return false;
-        }
-        Agent.Status fromState = instance.getStatus();
-
-        // Idempotent re-attach (agent-concurrency §9.11): the Agent is already
-        // BOUND to this conversation on this same home node. The Agent
-        // Supervisor reconnected its conversation socket after a transient drop
-        // and re-sent conversation.attach. Treat it as a liveness event — stay
-        // BOUND, record CONVERSATION_REATTACHED, and do NOT re-emit
-        // INSTANCE_BOUND (no duplicate bind for the same tuple). The caller
-        // re-registers the fresh socket regardless.
-        if (fromState == Agent.Status.BOUND
-                && homeNodeId != null && homeNodeId.equals(instance.getHomeNodeId())) {
-            conversationEventService.record(conversationId, instanceId, instance.getAgentHostId(),
-                    Agent.Status.BOUND, Agent.Status.BOUND, ConversationEventReason.CONVERSATION_REATTACHED);
-            log.info("Agent {} re-attached conversation {} on same home node {} (CONVERSATION_REATTACHED)",
-                    instanceId, conversationId, homeNodeId);
-            return true;
-        }
-
-        instance.markBound(homeNodeId);
-        agentInstanceRepository.saveAndFlush(instance);
-        conversationEventService.record(conversationId, instanceId, instance.getAgentHostId(),
-                fromState, Agent.Status.BOUND, ConversationEventReason.INSTANCE_BOUND);
-
-        conversationRepository.findById(conversationId).ifPresent(conversation -> {
-            conversation.setHomeNodeId(homeNodeId);
-            conversation.setAgentHostId(instance.getAgentHostId());
-            conversationRepository.save(conversation);
-        });
-        log.info("Agent {} BOUND to conversation {} on home node {}",
-                instanceId, conversationId, homeNodeId);
-        return true;
-    }
-
-    /**
-     * Consume an {@code agent.bind.ack} from the Agent Host: the host
-     * received the {@code agent.bind} and its Agent is now dialing the home
-     * node, so flip the reserved Agent to {@code CONNECTING} and restart the
-     * reaper clock (the connect-timeout window runs from here, not from the
-     * original reserve). Only an Agent still {@code RESERVED} for the same
-     * conversation transitions; an ack arriving after the Agent already
-     * attached ({@code BOUND}) or was released is a harmless no-op.
-     *
-     * @return {@code true} if the Agent advanced to CONNECTING (or was
-     *         already past it for this conversation); {@code false} if the
-     *         ack does not match a live reservation
-     */
-    @Transactional
-    public boolean confirmBind(UUID instanceId, UUID conversationId) {
-        Agent instance = agentInstanceRepository.findById(instanceId).orElse(null);
-        if (instance == null || instance.getConversationId() == null
-                || !instance.getConversationId().equals(conversationId)) {
-            log.warn("agent.bind.ack mismatch — agent {} not reserved for {}; ignoring",
-                    instanceId, conversationId);
-            return false;
-        }
-        // Atomic compare-and-set: only transition RESERVED → CONNECTING.
-        // If the Agent already advanced to BOUND (because attachConversation
-        // won the race and committed first), the update affects zero rows
-        // and this late bind.ack is a harmless no-op. This prevents the
-        // race where a read-then-write confirmBind overwrites a BOUND status
-        // that attachConversation just persisted.
-        int updated = agentInstanceRepository.connectIfReserved(
-                instanceId, Agent.Status.RESERVED, Agent.Status.CONNECTING, Instant.now());
-        if (updated > 0) {
-            conversationEventService.record(conversationId, instanceId, instance.getAgentHostId(),
-                    Agent.Status.RESERVED, Agent.Status.CONNECTING, ConversationEventReason.BIND_ACKED);
-            log.debug("Agent {} CONNECTING for conversation {} (bind acked)",
-                    instanceId, conversationId);
-        } else {
-            log.debug("Agent {} already past RESERVED for conversation {} (bind.ack no-op, status={})",
-                    instanceId, conversationId, instance.getStatus());
-        }
-        return true;
-    }
-
-    /**
-     * Consume an {@code agent.bind.nack} from the Agent Host: the host cannot
-     * serve this binding (Agent spawn failed, capacity gone, etc.), so
-     * release the reserved Agent straight back to {@code IDLE} for the
-     * dispatcher to re-pick another candidate. Only an Agent still bound to
-     * the same conversation in a transient state ({@code RESERVED}/
-     * {@code CONNECTING}) is released.
-     *
-     * @return {@code true} if the Agent was released; {@code false} if the
-     *         nack does not match a live reservation
-     */
-    @Transactional
-    public boolean rejectBind(UUID instanceId, UUID conversationId, String reason) {
-        Agent instance = agentInstanceRepository.findById(instanceId).orElse(null);
-        if (instance == null || instance.getConversationId() == null
-                || !instance.getConversationId().equals(conversationId)) {
-            log.warn("agent.bind.nack mismatch — agent {} not reserved for {}; ignoring",
-                    instanceId, conversationId);
-            return false;
-        }
-        if (instance.getStatus() == Agent.Status.RESERVED
-                || instance.getStatus() == Agent.Status.CONNECTING) {
-            Agent.Status fromState = instance.getStatus();
-            UUID hostId = instance.getAgentHostId();
-            instance.release();
-            agentInstanceRepository.saveAndFlush(instance);
-            conversationEventService.record(conversationId, instanceId, hostId,
-                    fromState, Agent.Status.IDLE, ConversationEventReason.BIND_NACKED);
-            log.info("Agent {} released after bind.nack for conversation {} (reason: {})",
-                    instanceId, conversationId, reason);
-        }
-        return true;
-    }
-
-    /**
-     * Mark stale instances as offline.
-     */
-    @Transactional
-    public int markStaleInstancesOffline(Instant threshold) {
-        List<Agent> staleInstances = agentInstanceRepository.findStaleInstances(threshold);
-        for (Agent instance : staleInstances) {
-            instance.markOffline();
-            agentInstanceRepository.save(instance);
-        }
-        if (!staleInstances.isEmpty()) {
-            log.info("Marked {} stale instances as offline", staleInstances.size());
-        }
-        return staleInstances.size();
     }
 }

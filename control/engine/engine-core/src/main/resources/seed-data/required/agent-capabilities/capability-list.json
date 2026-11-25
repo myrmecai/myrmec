@@ -42,6 +42,12 @@
     "active": true
   },
   {
+    "capabilityKey": "exec.shell",
+    "displayName": "Shell Execution",
+    "description": "Permission to execute arbitrary shell commands.",
+    "active": true
+  },
+  {
     "capabilityKey": "exec.test.run",
     "displayName": "Run Test Suites",
     "description": "Scoped permission to trigger unit tests and test runners (e.g., npm test, pytest, mvn test).",

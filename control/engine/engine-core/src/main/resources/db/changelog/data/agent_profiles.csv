@@ -1,2 +1,0 @@
-﻿id,name,description,is_system,addendum_allowed,status,created_at,updated_at
-6d7b8c9d-0e1f-4a2b-8c3d-9e4f5a6b7c8d,Myrmec Local Agent,Built-in profile for the local IDE agent,true,true,ACTIVE,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP

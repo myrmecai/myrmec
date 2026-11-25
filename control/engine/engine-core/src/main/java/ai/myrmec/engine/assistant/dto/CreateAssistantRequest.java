@@ -13,7 +13,6 @@ import java.util.UUID;
 public record CreateAssistantRequest(
         @NotNull UUID teamId,
         @NotBlank @Size(max = 120) String name,
-        @Size(max = 4000) String description,
-        @NotNull UUID agentProfileId
+        @Size(max = 4000) String description
 ) {
 }

@@ -37,7 +37,8 @@
     "description": "Command and script execution.",
     "active": true,
     "capabilities": [
-      "exec.sandbox.shell"
+      "exec.sandbox.shell",
+      "exec.shell"
     ]
   },
   {

@@ -1,0 +1,12 @@
+{
+  "assistant": {
+    "name": "Fullstack Developer",
+    "description": "A primary orchestrator plus coder and reviewer sub-agents.",
+    "team": "Fullstack Developer Team"
+  },
+  "agentRoles": [
+    { "roleType": "PRIMARY",   "agentAlias": "primary",  "profileAlias": "primary",  "promptAddendum": null },
+    { "roleType": "SUB_AGENT", "agentAlias": "coder",    "profileAlias": "coder",    "promptAddendum": null },
+    { "roleType": "SUB_AGENT", "agentAlias": "reviewer", "profileAlias": "reviewer", "promptAddendum": null }
+  ]
+}

@@ -51,26 +51,6 @@
             </column>
         </createTable>
 
-        <!-- Seed moved to db/changelog/data/authentication_providers.csv -->
-        <loadData
-            tableName="authentication_providers"
-            file="db/changelog/data/authentication_providers.csv"
-            separator=","
-            encoding="UTF-8"
-            relativeToChangelogFile="false">
-            <column name="code" type="STRING" />
-            <column name="provider_type" type="STRING" />
-            <column
-                name="name" type="STRING" />
-            <column name="is_enabled" type="BOOLEAN" />
-            <column
-                name="is_system" type="BOOLEAN" />
-            <column name="metadata" type="STRING" />
-            <column
-                name="created_at" type="DATE" />
-            <column name="updated_at" type="DATE" />
-        </loadData>
-
         <createIndex indexName="idx_authentication_providers_type"
             tableName="authentication_providers">
             <column name="provider_type" />
@@ -209,30 +189,6 @@
         <createIndex indexName="idx_org_groups_parent_group_id" tableName="org_groups">
             <column name="parent_group_id" />
         </createIndex>
-    </changeSet>
-
-    <changeSet id="001-core-security-seed-default-group" author="myrmec">
-        <preConditions onFail="MARK_RAN">
-            <sqlCheck expectedResult="0"> SELECT COUNT(*) FROM org_groups WHERE id =
-                '00000000-0000-0000-0000-000000000001' </sqlCheck>
-        </preConditions>
-
-        <!-- Seed moved to db/changelog/data/org_groups.csv -->
-        <loadData
-            tableName="org_groups"
-            file="db/changelog/data/org_groups.csv"
-            separator=","
-            encoding="UTF-8"
-            relativeToChangelogFile="false">
-            <column name="id" type="STRING" />
-            <column name="name" type="STRING" />
-            <column
-                name="description" type="STRING" />
-            <column name="parent_group_id" type="STRING" />
-            <column
-                name="created_at" type="DATE" />
-            <column name="updated_at" type="DATE" />
-        </loadData>
     </changeSet>
 
     <!-- ================================================================

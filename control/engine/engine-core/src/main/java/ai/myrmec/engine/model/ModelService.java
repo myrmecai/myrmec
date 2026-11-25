@@ -8,6 +8,8 @@ import ai.myrmec.engine._system.exception.ResourceNotFoundException;
 import ai.myrmec.engine.model.dto.CreateModelRequest;
 import ai.myrmec.engine.model.dto.TestModelResponse;
 import ai.myrmec.engine.model.dto.UpdateModelRequest;
+import ai.myrmec.engine.connection.ConnectionConfig;
+import ai.myrmec.engine.connection.ConnectionConfigRepository;
 import ai.myrmec.engine.secret.SecretPayload;
 import ai.myrmec.engine.secret.SecretResolverService;
 import ai.myrmec.engine.secret.CredentialType;
@@ -42,6 +44,7 @@ public class ModelService {
 
     private final ModelRepository modelRepository;
     private final ModelProviderConfigRepository providerRepository;
+    private final ConnectionConfigRepository connectionConfigRepository;
     private final EncryptionService encryptionService;
     private final SecretResolverService secretResolverService;
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -262,7 +265,8 @@ public class ModelService {
     /**
      * Get the decrypted API key for a model, resolving the credential
      * from the provider's linked {@code ConnectionConfig} → secrets vault.
-     * Returns {@code null} when the provider has no linked config.
+     * Returns {@code null} when the provider has no linked config or the
+     * config has no credential secret.
      */
     public String getApiKey(String code) {
         Model model = findByCode(code);
@@ -270,8 +274,16 @@ public class ModelService {
         if (provider == null || provider.getConnectionConfigId() == null) {
             return null;
         }
+        // The provider links a ConnectionConfig row; its credentialSecretId is
+        // the actual vault secret reference (the config id itself is not a
+        // secret). Resolve through the config so the secret id is correct.
+        ConnectionConfig config = connectionConfigRepository
+                .findById(provider.getConnectionConfigId()).orElse(null);
+        if (config == null || config.getCredentialSecretId() == null) {
+            return null;
+        }
         SecretPayload payload = secretResolverService.resolveOneOf(
-                provider.getConnectionConfigId(), null,
+                config.getCredentialSecretId(), null,
                 CredentialType.BEARER_TOKEN, CredentialType.API_KEY,
                 CredentialType.SECRET_KEY);
         return switch (payload) {

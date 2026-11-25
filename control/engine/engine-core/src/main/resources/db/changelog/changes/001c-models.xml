@@ -50,33 +50,9 @@
         </createTable>
     </changeSet>
 
-    <!-- Seed moved to db/changelog/data/model_providers.csv -->
-    <changeSet id="004-models-seed-model-providers" author="myrmec">
-        <preConditions onFail="MARK_RAN">
-            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM model_providers WHERE code = 'openai'</sqlCheck>
-        </preConditions>
-        <comment>Seed known AI model providers (all INACTIVE until an admin enables them)</comment>
-
-        <loadData
-            tableName="model_providers"
-            file="db/changelog/data/model_providers.csv"
-            separator=","
-            encoding="UTF-8"
-            relativeToChangelogFile="false">
-            <column name="code" type="STRING"/>
-            <column name="name" type="STRING"/>
-            <column name="base_url" type="STRING"/>
-            <column name="deployment_type" type="STRING"/>
-            <column name="requires_auth" type="BOOLEAN"/>
-            <column name="docs_url" type="STRING"/>
-            <column name="description" type="STRING"/>
-            <column name="is_system" type="BOOLEAN"/>
-            <column name="status" type="STRING"/>
-            <column name="connection_config_id" type="STRING"/>
-            <column name="created_at" type="DATE"/>
-            <column name="updated_at" type="DATE"/>
-    </loadData>
-    </changeSet>
+    <!-- ================================================================
+         models
+         ================================================================ -->
 
     <!-- ================================================================
          model_capabilities
@@ -107,24 +83,9 @@
                 <constraints nullable="false"/>
             </column>
             <column name="updated_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
-                <constraints nullable="false"/>
+                <constraints nullable="true"/>
             </column>
         </createTable>
-
-        <loadData
-            tableName="model_capabilities"
-            file="db/changelog/data/model_capabilities.csv"
-            separator=","
-            encoding="UTF-8"
-            relativeToChangelogFile="false">
-            <column name="code" type="STRING"/>
-            <column name="name" type="STRING"/>
-            <column name="description" type="STRING"/>
-            <column name="is_system" type="BOOLEAN"/>
-            <column name="status" type="STRING"/>
-            <column name="created_at" type="DATE"/>
-            <column name="updated_at" type="DATE"/>
-        </loadData>
     </changeSet>
 
     <!-- ================================================================
@@ -235,69 +196,6 @@
         <createIndex indexName="idx_mcb_capability" tableName="model_capability_bindings">
             <column name="capability_code"/>
         </createIndex>
-    </changeSet>
-
-    <!-- Seed moved to db/changelog/data/models.csv -->
-    <changeSet id="004-models-seed-github-gpt4o" author="myrmec">
-        <preConditions onFail="MARK_RAN">
-            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM models WHERE code = 'github-gpt-4o'</sqlCheck>
-        </preConditions>
-        <comment>Seed default GPT-4o model via GitHub Models for E2E testing and demo</comment>
-
-        <loadData
-            tableName="models"
-            file="db/changelog/data/models.csv"
-            separator=","
-            encoding="UTF-8"
-            relativeToChangelogFile="false">
-            <column name="code" type="STRING"/>
-            <column name="name" type="STRING"/>
-            <column name="provider" type="STRING"/>
-            <column name="model_id" type="STRING"/>
-            <column name="api_endpoint" type="STRING"/>
-            <column name="infra_config" type="STRING"/>
-            <column name="default_params" type="STRING"/>
-            <column name="status" type="STRING"/>
-            <column name="health_status" type="STRING"/>
-            <column name="last_health_check" type="DATE"/>
-            <column name="last_tested_at" type="DATE"/>
-            <column name="last_test_status" type="STRING"/>
-            <column name="input_price" type="NUMERIC"/>
-            <column name="output_price" type="NUMERIC"/>
-            <column name="currency" type="STRING"/>
-            <column name="context_window_tokens" type="NUMERIC"/>
-            <column name="max_output_tokens" type="NUMERIC"/>
-            <column name="training_cutoff_date" type="DATE"/>
-            <column name="release_date" type="DATE"/>
-            <column name="created_at" type="DATE"/>
-            <column name="updated_at" type="DATE"/>
-        </loadData>
-
-        <insert tableName="model_capability_bindings">
-            <column name="model_code" value="github-gpt-4o"/>
-            <column name="capability_code" value="VISION"/>
-            <column name="parameters" value='{"maxImages":8}'/>
-        </insert>
-        <insert tableName="model_capability_bindings">
-            <column name="model_code" value="github-gpt-4o"/>
-            <column name="capability_code" value="INPUT_TEXT"/>
-        </insert>
-        <insert tableName="model_capability_bindings">
-            <column name="model_code" value="github-gpt-4o"/>
-            <column name="capability_code" value="INPUT_IMAGE"/>
-        </insert>
-        <insert tableName="model_capability_bindings">
-            <column name="model_code" value="github-gpt-4o"/>
-            <column name="capability_code" value="OUTPUT_TEXT"/>
-        </insert>
-        <insert tableName="model_capability_bindings">
-            <column name="model_code" value="github-gpt-4o"/>
-            <column name="capability_code" value="STREAMING"/>
-        </insert>
-        <insert tableName="model_capability_bindings">
-            <column name="model_code" value="github-gpt-4o"/>
-            <column name="capability_code" value="TOOL_USE"/>
-        </insert>
     </changeSet>
 
     <!-- ================================================================

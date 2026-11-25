@@ -30,8 +30,8 @@ public class WorkflowTaskService {
     }
 
     @Transactional(readOnly = true)
-    public List<WorkflowTaskResponse> findByAgentInstance(UUID agentInstanceId) {
-        return taskRepository.findByAgentInstanceId(agentInstanceId).stream()
+    public List<WorkflowTaskResponse> findBySession(UUID sessionId) {
+        return taskRepository.findBySessionId(sessionId).stream()
                 .map(this::toResponse)
                 .toList();
     }
@@ -43,7 +43,7 @@ public class WorkflowTaskService {
                 task.getStepId(),
                 task.getAgentProfile().getId(),
                 task.getAgentProfile().getName(),
-                task.getAgentInstance() != null ? task.getAgentInstance().getId() : null,
+                task.getSessionId() != null ? task.getSessionId() : null,
                 task.getInput(),
                 task.getOutput(),
                 task.getStatus(),

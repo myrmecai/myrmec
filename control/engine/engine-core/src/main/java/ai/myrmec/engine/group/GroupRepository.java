@@ -1,6 +1,7 @@
 package ai.myrmec.engine.group;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -15,6 +16,21 @@ public interface GroupRepository extends JpaRepository<Group, UUID> {
     Optional<Group> findByName(String name);
 
     boolean existsByName(String name);
+
+    /**
+     * Insert a group with an explicit {@code id}, bypassing the JPA UUID
+     * generator (which would otherwise overwrite the seeded default group's
+     * fixed {@link Group#DEFAULT_GROUP_ID}).
+     */
+    @Modifying
+    @Query(value = """
+            INSERT INTO org_groups (id, name, parent_group_id, description, created_at)
+            VALUES (:id, :name, :parentGroupId, :description, CURRENT_TIMESTAMP)
+            """, nativeQuery = true)
+    void insertWithId(@Param("id") UUID id,
+                      @Param("name") String name,
+                      @Param("parentGroupId") UUID parentGroupId,
+                      @Param("description") String description);
 
     /**
      * Return the given group plus all of its ancestors (walking

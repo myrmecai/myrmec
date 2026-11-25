@@ -7,7 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import ai.myrmec.engine.websocket.host.HostConnectionManager;
+import ai.myrmec.engine.websocket.HostConnectionManager;
 
 import java.util.List;
 import java.util.Optional;
@@ -116,14 +116,13 @@ public class HostSelectionService {
 
     /** Validate the advertised block against the section 22.2 current contract. */
     private static boolean isCurrentInteractionCapability(Object advertised) {
-        if (!(advertised instanceof ai.myrmec.engine.websocket.host.payload
-                .SessionInteractionCapability typed)) {
+        if (!(advertised instanceof ai.myrmec.engine._protocol.SessionInteractionCapability typed)) {
             return false;
         }
         try {
             // Re-validate defensively: construction can only come from the
             // parser, but the selection gate must never trust in-memory state.
-            new ai.myrmec.engine.websocket.host.payload.SessionInteractionCapability(
+            new ai.myrmec.engine._protocol.SessionInteractionCapability(
                     typed.version(), typed.temporaryHold());
             return true;
         } catch (IllegalArgumentException e) {

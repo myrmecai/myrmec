@@ -48,6 +48,8 @@
         <column name="kind" type="varchar(20)"/>
         <!-- The agent_host_instances row serving this session (FK SET NULL). -->
         <column name="host_instance_id" type="uuid"/>
+        <!-- §20 routing identity: the engine node whose host socket serves this session. -->
+        <column name="home_node_id" type="varchar(255)"/>
         <!-- Protocol §11.1 allocation FSM: OFFERED|INITIALIZING|ACTIVE|CLOSING|CLOSED|RECOVERING. -->
         <column name="allocation_state" type="varchar(20)"/>
         <!-- Pending-offer lease expiry (§7.1). -->
@@ -91,6 +93,38 @@
         <column name="allocation_state"/>
         <column name="offer_expires_at"/>
     </createIndex>
+    </changeSet>
+
+    <!-- ================================================================
+         Cross-file FKs: workflow tables (created in 007-workflows.xml)
+         that reference sessions(id). Added here (after sessions exists).
+         ================================================================ -->
+    <changeSet id="013-sessions-workflow-tasks-fk-session" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="workflow_tasks"/>
+            <not><foreignKeyConstraintExists foreignKeyName="fk_workflow_tasks_session"/></not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="workflow_tasks"
+            baseColumnNames="session_id"
+            referencedTableName="sessions"
+            referencedColumnNames="id"
+            constraintName="fk_workflow_tasks_session"
+            onDelete="SET NULL"/>
+    </changeSet>
+
+    <changeSet id="013-sessions-task-attempts-fk-session" author="myrmec">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="task_attempts"/>
+            <not><foreignKeyConstraintExists foreignKeyName="fk_task_attempts_session"/></not>
+        </preConditions>
+        <addForeignKeyConstraint
+            baseTableName="task_attempts"
+            baseColumnNames="session_id"
+            referencedTableName="sessions"
+            referencedColumnNames="id"
+            constraintName="fk_task_attempts_session"
+            onDelete="SET NULL"/>
     </changeSet>
 
 </databaseChangeLog>

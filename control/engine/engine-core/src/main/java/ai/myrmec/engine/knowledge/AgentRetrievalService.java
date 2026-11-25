@@ -44,28 +44,28 @@ public class AgentRetrievalService {
     private final RetrievalDispatcher retrievalDispatcher;
 
     /**
-     * Execute a retrieval query.
+     * Execute a retrieval query for the given session.
      *
-     * @param agentInstanceId  the authenticated agent instance
-     * @param request          the retrieval request
+     * @param sessionId  the session the retrieval runs against (its context
+     *                   pins the knowledge source)
+     * @param request    the retrieval request
      * @return list of hits (empty on provider failure — agent degrades gracefully)
      */
     @Transactional
-    public List<RetrievalHit> retrieve(UUID agentInstanceId, RetrievalRequest request) {
-        // 1. Resolve the session — prefer explicit sessionId, else find active
-        //    session for this agent instance.
-        Session session = resolveSession(agentInstanceId, request.sessionId());
+    public List<RetrievalHit> retrieve(UUID sessionId, RetrievalRequest request) {
+        // 1. Resolve the session.
+        Session session = sessionRepository.findByIdAndStatus(sessionId, "ACTIVE")
+                .orElse(null);
         if (session == null) {
-            log.warn("Retrieval rejected — no active session for agent {} (sessionId={})",
-                    agentInstanceId, request.sessionId());
-            throw new RetrievalForbiddenException("No active session for this agent.");
+            log.warn("Retrieval rejected — no active session {} ", sessionId);
+            throw new RetrievalForbiddenException("No active session for this retrieval.");
         }
 
         // 2. Validate the knowledge source is pinned to this session
         if (!sessionContextAssembler.isKnowledgeSourcePinned(session.getId(),
                 request.sourceId())) {
-            log.warn("Retrieval rejected — source {} not pinned to session {} (agent {})",
-                    request.sourceId(), session.getId(), agentInstanceId);
+            log.warn("Retrieval rejected — source {} not pinned to session {}",
+                    request.sourceId(), session.getId());
             throw new RetrievalForbiddenException(
                     "Knowledge source " + request.sourceId()
                             + " is not pinned to this session.");
@@ -153,22 +153,9 @@ public class AgentRetrievalService {
             log.warn("Failed to record retrieval audit event: {}", e.getMessage());
         }
 
-        log.info("Retrieval for agent {} session {} source {} → {} hits",
-                agentInstanceId, session.getId(), request.sourceId(), hits.size());
+        log.info("Retrieval for session {} source {} → {} hits",
+                session.getId(), request.sourceId(), hits.size());
         return hits;
-    }
-
-    private Session resolveSession(UUID agentInstanceId, UUID explicitSessionId) {
-        if (explicitSessionId != null) {
-            return sessionRepository.findByIdAndStatus(explicitSessionId, "ACTIVE")
-                    .orElse(null);
-        }
-        // Without an explicit sessionId we cannot reliably resolve the session
-        // from the agent instance alone (an agent may have multiple concurrent
-        // sessions). The caller should pass sessionId; if not, we reject.
-        log.debug("No explicit sessionId in retrieval request from agent {} — cannot resolve",
-                agentInstanceId);
-        return null;
     }
 
     /**

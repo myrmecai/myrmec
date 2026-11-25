@@ -40,12 +40,9 @@ public interface TaskAttemptRepository extends JpaRepository<TaskAttempt, UUID> 
     Optional<TaskAttempt> findByTaskIdAndAttemptNumber(UUID taskId, Integer attemptNumber);
 
     /**
-     * Find all running attempts for an agent instance.
+     * Find all running attempts for a session.
      */
-    List<TaskAttempt> findByAgentInstanceIdAndStatus(UUID agentInstanceId, AttemptStatus status);
-
-    /** Phase 9d agent health: count active task attempts per instance. */
-    long countByAgentInstanceIdAndStatus(UUID agentInstanceId, AttemptStatus status);
+    List<TaskAttempt> findBySessionIdAndStatus(UUID sessionId, AttemptStatus status);
 
     /**
      * Count attempts that count toward retry limit (COMPLETED or FAILED, not ABANDONED/SKIPPED).

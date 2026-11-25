@@ -59,30 +59,4 @@
             </column>
         </createTable>
     </changeSet>
-
-    <changeSet id="system-settings-seed" author="myrmec">
-        <preConditions onFail="MARK_RAN">
-            <tableExists tableName="system_settings" />
-            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM system_settings WHERE setting_key =
-                'history_limit'</sqlCheck>
-        </preConditions>
-
-        <loadData
-            tableName="system_settings"
-            file="db/changelog/data/system_settings.csv"
-            separator=","
-            encoding="UTF-8"
-            relativeToChangelogFile="false">
-            <column name="setting_key" type="STRING" />
-            <column name="value_type" type="STRING" />
-            <column
-                name="setting_value" type="STRING" />
-            <column name="description" type="STRING" />
-            <column
-                name="updated_by" type="STRING" />
-            <column name="created_at" type="DATE" />
-            <column
-                name="updated_at" type="DATE" />
-        </loadData>
-    </changeSet>
 </databaseChangeLog>

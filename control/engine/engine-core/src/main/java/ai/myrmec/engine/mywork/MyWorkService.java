@@ -8,6 +8,9 @@ import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.conversation.ConversationMessage;
 import ai.myrmec.engine.conversation.ConversationMessageRepository;
 import ai.myrmec.engine.conversation.ConversationRepository;
+import ai.myrmec.engine.inference.Session;
+import ai.myrmec.engine.inference.SessionRepository;
+import ai.myrmec.engine.mywork.dto.AssistantTreeNode;
 import ai.myrmec.engine.mywork.dto.MyApprovalRow;
 import ai.myrmec.engine.mywork.dto.MyArchivedRow;
 import ai.myrmec.engine.mywork.dto.MyAssistantRow;
@@ -71,6 +74,7 @@ public class MyWorkService {
     private final ConversationRepository conversationRepository;
     private final ConversationMessageRepository conversationMessageRepository;
     private final AssistantVersionRepository assistantVersionRepository;
+    private final SessionRepository sessionRepository;
 
     // ------------------------------------------------------------------ summary
 
@@ -183,6 +187,74 @@ public class MyWorkService {
                 .limit(Math.max(0, limit))
                 .map(c -> MyContinueRow.of(c, assistantName(c.getAssistantId(), assistantNames)))
                 .toList();
+    }
+
+    /**
+     * The Assistants-section tree (UC-013): each in-scope non-archived
+     * assistant with the <em>caller's own</em> ACTIVE conversations nested
+     * under it, newest first. Workflows are NOT part of this tree — they ride
+     * the separate {@code GET /my-work/workflows} roll-up.
+     */
+    public List<AssistantTreeNode> conversationTree(Authentication authentication, List<UUID> teamIds) {
+        Scope scope = resolveScope(authentication, teamIds);
+        UUID callerId = callerIdOf(authentication);
+        Map<UUID, List<Conversation>> activeByAssistant = activeSessionsByAssistant(scope);
+        Map<UUID, List<Conversation>> ownByAssistant = ownActiveSessionsByAssistant(scope, callerId);
+
+        List<AssistantTreeNode> rows = new ArrayList<>();
+        for (Assistant a : scope.assistants()) {
+            if (a.getArchivedAt() != null) {
+                continue;
+            }
+            List<Conversation> active = activeByAssistant.getOrDefault(a.getId(), List.of());
+            Instant lastSessionAt = active.stream()
+                    .map(MyWorkService::sessionTimestamp)
+                    .max(Comparator.naturalOrder())
+                    .orElse(null);
+            List<AssistantTreeNode.AssistantConversation> own = ownByAssistant
+                    .getOrDefault(a.getId(), List.of()).stream()
+                    .sorted(Comparator.comparing(Conversation::getUpdatedAt).reversed())
+                    .map(c -> AssistantTreeNode.AssistantConversation.of(c, stateOf(c)))
+                    .toList();
+            rows.add(AssistantTreeNode.of(a, scope.teamName(a.getTeamId()),
+                    active.size(), lastSessionAt, own));
+        }
+        rows.sort(Comparator.comparing(AssistantTreeNode::name, String.CASE_INSENSITIVE_ORDER));
+        return rows;
+    }
+
+    /**
+     * Index of the caller's OWN ACTIVE conversations per assistant (the tree's
+     * nested children — the Continue-rail "own recent sessions" semantic).
+     */
+    private Map<UUID, List<Conversation>> ownActiveSessionsByAssistant(Scope scope, UUID callerId) {
+        Map<UUID, List<Conversation>> byAssistant = new HashMap<>();
+        if (callerId == null) {
+            return byAssistant;
+        }
+        for (Conversation c : conversationRepository.findByCreatedByOrderByUpdatedAtDesc(callerId)) {
+            if (c.getStatus() != Conversation.Status.ACTIVE || c.getAssistantId() == null) {
+                continue;
+            }
+            if (!scope.contains(c.getTeamId())) {
+                continue;
+            }
+            byAssistant.computeIfAbsent(c.getAssistantId(), k -> new ArrayList<>()).add(c);
+        }
+        return byAssistant;
+    }
+
+    /**
+     * The UC-013 conversation state palette. A conversation with an ACTIVE
+     * runtime session is {@code ACTIVE}; an ACTIVE conversation without a live
+     * session is {@code IDLE} (awaiting its next re-offer).
+     */
+    private String stateOf(Conversation c) {
+        boolean hasLive = sessionRepository
+                .findByRefIdAndServiceTypeAndAllocationStateIn(c.getId(), "CONVERSATION",
+                        List.of("ACTIVE", "OFFERED", "INITIALIZING"))
+                .isPresent();
+        return hasLive ? "ACTIVE" : "IDLE";
     }
 
     // ------------------------------------------------------------------ approvals
@@ -331,17 +403,14 @@ public class MyWorkService {
     /**
      * Map each assistant to the {@code agentProfileId} of its currently-published
      * version. Draft assistants have no profile id until first publish.
+     *
+     * <p>TODO(multi-model-bindings): resolve the profile id from the assistant's
+     * PRIMARY binding instead of the (removed) version-row field.
      */
     private Map<UUID, UUID> assistantProfileIds(List<Assistant> assistants) {
         Map<UUID, UUID> result = new HashMap<>();
-        for (Assistant a : assistants) {
-            if (a.getCurrentVersionId() == null) {
-                continue;
-            }
-            assistantVersionRepository.findById(a.getCurrentVersionId())
-                    .map(ai.myrmec.engine.assistant.AssistantVersion::getAgentProfileId)
-                    .ifPresent(profileId -> result.put(a.getId(), profileId));
-        }
+        // Profile-id resolution deferred to the multi-model bindings refactor.
+        // TODO: resolve via AssistantAgentBindingRepository primary binding.
         return result;
     }
 

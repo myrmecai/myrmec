@@ -302,6 +302,8 @@
             <!-- Supervisor-run identity (§6.1). -->
             <column name="instance_nonce" type="varchar(36)"/>
             <column name="hostname" type="varchar(255)"/>
+            <column name="ip_address" type="varchar(45)"/>
+            <column name="runtime_version" type="varchar(20)"/>
             <column name="pool_size" type="integer" defaultValueNumeric="1">
                 <constraints nullable="false"/>
             </column>
@@ -367,85 +369,6 @@
         <createIndex indexName="idx_agent_host_instances_recovery" tableName="agent_host_instances">
             <column name="status"/>
             <column name="recovery_expires_at"/>
-        </createIndex>
-    </changeSet>
-
-    <!-- ================================================================
-         agents - a single execution body bound to one session at a time
-         ================================================================ -->
-    <changeSet id="003-agents-create-agents" author="myrmec">
-        <preConditions onFail="MARK_RAN">
-            <not>
-                <tableExists tableName="agents"/>
-            </not>
-        </preConditions>
-
-        <createTable tableName="agents">
-            <column name="id" type="uuid">
-                <constraints primaryKey="true" nullable="false"/>
-            </column>
-            <column name="agent_host_id" type="uuid"/>
-            <!-- The live supervisor run that minted/serves this agent (§19.1). -->
-            <column name="agent_host_instance_id" type="uuid"/>
-            <column name="conversation_id" type="uuid"/>
-            <column name="profile_version_id" type="uuid"/>
-            <column name="hostname" type="varchar(255)"/>
-            <column name="ip_address" type="varchar(45)"/>
-            <column name="runtime_version" type="varchar(20)"/>
-            <column name="status" type="varchar(20)" defaultValue="OFFLINE">
-                <constraints nullable="false"/>
-            </column>
-            <column name="last_heartbeat_at" type="timestamp with time zone"/>
-            <column name="registered_at" type="timestamp with time zone" defaultValueComputed="CURRENT_TIMESTAMP">
-                <constraints nullable="false"/>
-            </column>
-            <column name="state_changed_at" type="timestamp with time zone"/>
-            <column name="home_node_id" type="varchar(255)"/>
-            <column name="metadata" type="text"/>
-        </createTable>
-
-        <addForeignKeyConstraint
-            baseTableName="agents"
-            baseColumnNames="agent_host_id"
-            referencedTableName="agent_hosts"
-            referencedColumnNames="id"
-            constraintName="fk_agents_host"
-            onDelete="CASCADE"/>
-
-        <addForeignKeyConstraint
-            baseTableName="agents"
-            baseColumnNames="agent_host_instance_id"
-            referencedTableName="agent_host_instances"
-            referencedColumnNames="id"
-            constraintName="fk_agents_host_instance"
-            onDelete="SET NULL"/>
-
-        <addForeignKeyConstraint
-            baseTableName="agents"
-            baseColumnNames="home_node_id"
-            referencedTableName="engine_nodes"
-            referencedColumnNames="node_id"
-            constraintName="fk_agents_home_node"
-            onDelete="SET NULL"/>
-
-        <createIndex tableName="agents" indexName="idx_agents_status">
-            <column name="status"/>
-        </createIndex>
-
-        <createIndex tableName="agents" indexName="idx_agents_host">
-            <column name="agent_host_id"/>
-        </createIndex>
-
-        <createIndex tableName="agents" indexName="idx_agents_host_instance">
-            <column name="agent_host_instance_id"/>
-        </createIndex>
-
-        <createIndex tableName="agents" indexName="idx_agents_last_heartbeat">
-            <column name="last_heartbeat_at"/>
-        </createIndex>
-
-        <createIndex tableName="agents" indexName="idx_agents_home_node">
-            <column name="home_node_id"/>
         </createIndex>
     </changeSet>
 

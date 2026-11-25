@@ -3,10 +3,10 @@
 
 package ai.myrmec.engine.workflow;
 
-import ai.myrmec.engine.agent.Agent;
-import ai.myrmec.engine.agent.AgentHostInstance;
-import ai.myrmec.engine.agent.AgentHostInstanceRepository;
-import ai.myrmec.engine.agent.AgentRepository;
+import ai.myrmec.engine._controllers.websocket.HostChannelWebSocketHandler;
+import ai.myrmec.engine._protocol.payload.ExecutionStartPayload;
+import ai.myrmec.engine._protocol.payload.OrchestrationExecutionStartPayload;
+import ai.myrmec.engine._protocol.payload.SessionOpenPayload;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionContextAssembler;
 import ai.myrmec.engine.inference.SessionRepository;
@@ -14,10 +14,6 @@ import ai.myrmec.engine.inference.execution.ExecutionCommandSender;
 import ai.myrmec.engine.inference.execution.ExecutionInputAssembler;
 import ai.myrmec.engine.inference.execution.ExecutionRegistry;
 import ai.myrmec.engine.inference.execution.SessionExecution;
-import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
-import ai.myrmec.engine.websocket.host.payload.ExecutionStartPayload;
-import ai.myrmec.engine.websocket.host.payload.OrchestrationExecutionStartPayload;
-import ai.myrmec.engine.websocket.message.payload.SessionOpenPayload;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
@@ -33,7 +29,7 @@ import java.util.UUID;
  * conversation handler's staged-turn continuation.
  *
  * <p>Two continuation points, driven by
- * {@link HostControlWebSocketHandler}:</p>
+ * {@link HostChannelWebSocketHandler}:</p>
  * <ol>
  *   <li>{@code session.accept} &rarr; {@link #onSessionAccepted}: ship the
  *       assembled {@code session.open}. For an ORCHESTRATOR step the
@@ -58,28 +54,24 @@ import java.util.UUID;
 public class TaskDispatchContinuation {
 
     private final PendingTaskDispatches pendingTaskDispatches;
-    private final HostControlWebSocketHandler hostControlWebSocketHandler;
+    private final HostChannelWebSocketHandler hostControlWebSocketHandler;
     private final SessionRepository sessionRepository;
     private final SessionContextAssembler sessionContextAssembler;
     private final ExecutionRegistry executionRegistry;
     private final ExecutionCommandSender executionCommandSender;
     private final WorkflowTaskRepository taskRepository;
     private final TaskAttemptRepository attemptRepository;
-    private final AgentRepository agentRepository;
-    private final AgentHostInstanceRepository hostInstanceRepository;
     private final ExecutionInputAssembler executionInputAssembler;
     private final WorkflowRepository workflowRepository;
     public TaskDispatchContinuation(
             PendingTaskDispatches pendingTaskDispatches,
-            @Lazy HostControlWebSocketHandler hostControlWebSocketHandler,
+            @Lazy HostChannelWebSocketHandler hostControlWebSocketHandler,
             SessionRepository sessionRepository,
             SessionContextAssembler sessionContextAssembler,
             ExecutionRegistry executionRegistry,
             ExecutionCommandSender executionCommandSender,
             WorkflowTaskRepository taskRepository,
             TaskAttemptRepository attemptRepository,
-            AgentRepository agentRepository,
-            AgentHostInstanceRepository hostInstanceRepository,
             ExecutionInputAssembler executionInputAssembler,
             WorkflowRepository workflowRepository) {
         this.pendingTaskDispatches = pendingTaskDispatches;
@@ -90,8 +82,6 @@ public class TaskDispatchContinuation {
         this.executionCommandSender = executionCommandSender;
         this.taskRepository = taskRepository;
         this.attemptRepository = attemptRepository;
-        this.agentRepository = agentRepository;
-        this.hostInstanceRepository = hostInstanceRepository;
         this.executionInputAssembler = executionInputAssembler;
         this.workflowRepository = workflowRepository;
     }
@@ -112,13 +102,12 @@ public class TaskDispatchContinuation {
         }
         // §7.3 (Wave 6, A4): the step's declared timeout ships on the
         // session.open policy block so the host enforces the workflow's limits.
-        SessionOpenPayload open = sessionContextAssembler.assembleContext(
-                sessionId, session.getServiceType(), session.getRefId(),
+        // Workflow is single-profile; task/assignment still ride the legacy
+        // orchestration assignment path (workflow bindings are the follow-up).
+        SessionOpenPayload open = sessionContextAssembler.assembleWorkflow(
+                sessionId, session.getRefId(),
                 session.getTeamId(), context.agentProfileId(),
-                context.timeoutSeconds(), null);
-        if (context.orchestration()) {
-            open = open.withAssignment(context.assignment(), context.assignmentDigest());
-        }
+                context.timeoutSeconds(), null, null);
         hostControlWebSocketHandler.sendSessionOpen(sessionId, open);
         log.info("Continued staged workflow dispatch for session {} (task {}, orchestration {}) "
                 + "â€” session.open sent", sessionId, context.taskId(), context.orchestration());
@@ -167,11 +156,11 @@ public class TaskDispatchContinuation {
         }
 
         boolean sent = context.orchestration()
-                ? executionCommandSender.startOrchestration(execution.getId(), session,
+                ? executionCommandSender.startOrchestration(execution, session,
                         new OrchestrationExecutionStartPayload(
                                 execution.getId(), sessionId, context.attemptId(),
                                 context.attemptId(), context.assignmentDigest(), deadline))
-                : executionCommandSender.startExecution(execution.getId(), session,
+                : executionCommandSender.startExecution(execution, session,
                         executionStartPayload(sessionId, execution, context, deadline));
         if (!sent) {
             log.warn("Host socket gone for staged workflow session {} â€” execution.start not delivered",
@@ -205,20 +194,10 @@ public class TaskDispatchContinuation {
                                     ::cast)
                             .toList()
                         : java.util.List.of();
-        java.util.List<String> activeTools = java.util.List.of();
-        if (input.get("toolPolicy") instanceof Map<?, ?> policy
-                && policy.get("activeToolNames") instanceof java.util.List<?> tools) {
-            activeTools = tools.stream().map(String::valueOf).toList();
-        }
         return new ExecutionStartPayload(
-                execution.getId(),
-                sessionId,
-                context.stepIndex(),
-                context.requestId().toString(),
+                new ExecutionStartPayload.Input(messages, null),
                 deadline,
-                new ExecutionStartPayload.Input(messages, null, null),
-                new ExecutionStartPayload.ToolPolicy(activeTools, "ENGINE"),
-                new ExecutionStartPayload.Output(false, context.stepIndex(), "TEXT"));
+                null);
     }
 
     /**
@@ -236,45 +215,20 @@ public class TaskDispatchContinuation {
                 task, session.getId(), context.stepIndex());
     }
     /**
-     * &sect;19.1: the Agent serving this session is the Agent row the allocator
-     * minted at {@code session.opened} (stamped with the request id and the live
-     * instance). The attempt created at dispatch time is bound to it so
-     * task/attempt reads and the orchestration outcome path resolve the
-     * coordinator row exactly as they did on the legacy path.
+     * §19.1: bind the dispatched attempt/task to the serving session. With the
+     * agent-instance model removed, the session IS the runtime span — the
+     * attempt and task reference {@code session_id} directly.
      */
     private void bindAttemptToServingAgent(Session session, TaskDispatchContext context) {
-        UUID hostedBy = hostIdOf(session);
-        Agent agent = hostedBy == null ? null
-                : agentRepository.findByAgentHostId(hostedBy).stream()
-                        .filter(a -> session.getHostInstanceId() != null
-                                && session.getHostInstanceId().equals(a.getAgentHostInstanceId()))
-                        .filter(a -> context.requestId().equals(a.getConversationId()))
-                        .findFirst()
-                        .orElse(null);
-        if (agent == null) {
-            log.warn("No serving Agent row for session {} (request {}) â€” attempt {} left unbound",
-                    session.getId(), context.requestId(), context.attemptId());
-            return;
-        }
         WorkflowTask task = taskRepository.findById(context.taskId()).orElse(null);
         if (task != null) {
-            task.setAgentInstance(agent);
+            task.setSessionId(session.getId());
             taskRepository.save(task);
         }
         attemptRepository.findById(context.attemptId()).ifPresent(attempt -> {
-            attempt.setAgentInstance(agent);
+            attempt.setSessionId(session.getId());
             attemptRepository.save(attempt);
         });
-    }
-
-    /** The durable host of a session's live instance (null when unresolvable). */
-    private UUID hostIdOf(Session session) {
-        if (session.getHostInstanceId() == null) {
-            return null;
-        }
-        return hostInstanceRepository.findById(session.getHostInstanceId())
-                .map(AgentHostInstance::getAgentHostId)
-                .orElse(null);
     }
 
     private void abandon(UUID attemptId, String reason) {

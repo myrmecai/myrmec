@@ -6,23 +6,15 @@ import jakarta.validation.constraints.Size;
 import java.util.UUID;
 
 /**
- * Request to create a new conversation under a Team.
+ * Request to create a new conversation from an assistant.
  *
- * <p>{@code agentId} is optional — when omitted, the conversation has no
- * default agent and individual messages must select one. {@code title}
- * is free-form metadata used by the UI for the conversation list.
- * {@code assistantId}, when supplied (#92), pins the assistant's currently
- * published version onto the conversation for the life of the session.</p>
+ * <p>The assistant owns the Team (1:1), so the team is derived server-side.
+ * {@code title} is free-form metadata used by the UI for the conversation
+ * list. The agent/host and profile version are runtime concerns resolved at
+ * start, not creation.</p>
  */
 public record CreateConversationRequest(
-        @NotNull UUID teamId,
-        UUID agentId,
-        @Size(max = 255) String title,
-        @Size(max = 4000) String systemPromptOverride,
-        UUID assistantId
+        @NotNull UUID assistantId,
+        @Size(max = 255) String title
 ) {
-    /** Backward-compatible constructor for callers without an assistant. */
-    public CreateConversationRequest(UUID teamId, UUID agentId, String title, String systemPromptOverride) {
-        this(teamId, agentId, title, systemPromptOverride, null);
-    }
 }

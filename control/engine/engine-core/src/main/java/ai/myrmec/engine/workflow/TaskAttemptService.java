@@ -1,7 +1,6 @@
 package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
-import ai.myrmec.engine.agent.Agent;
 import ai.myrmec.engine.workflow.dto.TaskAttemptResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -51,11 +50,11 @@ public class TaskAttemptService {
      * Create a new attempt for a task.
      */
     @Transactional
-    public TaskAttempt createAttempt(WorkflowTask task, Agent agentInstance) {
+    public TaskAttempt createAttempt(WorkflowTask task, UUID sessionId) {
         TaskAttempt attempt = new TaskAttempt();
         attempt.setTask(task);
         attempt.setAttemptNumber(task.getAttempt());
-        attempt.setAgentInstance(agentInstance);
+        attempt.setSessionId(sessionId);
         attempt.setStatus(AttemptStatus.RUNNING);
         attempt.setStartedAt(Instant.now());
         
@@ -159,7 +158,7 @@ public class TaskAttemptService {
             task.setErrorMessage(null);
             task.setStartedAt(null);
             task.setCompletedAt(null);
-            task.setAgentInstance(null);
+            task.setSessionId(null);
             task.setAttempt(task.getAttempt() + 1);
         } else {
             // Retries exhausted (or maxRetries=0) — terminal failure.
@@ -281,26 +280,26 @@ public class TaskAttemptService {
     }
 
     /**
-     * Find all running attempts for an agent instance.
+     * Find running attempts for a session.
      */
     @Transactional(readOnly = true)
-    public List<TaskAttempt> findRunningAttemptsByAgent(UUID agentInstanceId) {
-        return taskAttemptRepository.findByAgentInstanceIdAndStatus(agentInstanceId, AttemptStatus.RUNNING);
+    public List<TaskAttempt> findRunningAttemptsBySession(UUID sessionId) {
+        return taskAttemptRepository.findBySessionIdAndStatus(sessionId, AttemptStatus.RUNNING);
     }
 
     /**
-     * Mark all running attempts for an agent as abandoned.
-     * Used when an agent disconnects unexpectedly.
+     * Mark all running attempts for a session as abandoned.
+     * Used when a session is lost unexpectedly.
      */
     @Transactional
-    public int abandonAllForAgent(UUID agentInstanceId, String reason) {
-        List<TaskAttempt> runningAttempts = findRunningAttemptsByAgent(agentInstanceId);
+    public int abandonAllForSession(UUID sessionId, String reason) {
+        List<TaskAttempt> runningAttempts = findRunningAttemptsBySession(sessionId);
         for (TaskAttempt attempt : runningAttempts) {
             attempt.markAbandoned(reason);
             taskAttemptRepository.save(attempt);
         }
         if (!runningAttempts.isEmpty()) {
-            log.info("Abandoned {} running attempts for agent {}", runningAttempts.size(), agentInstanceId);
+            log.info("Abandoned {} running attempts for session {}", runningAttempts.size(), sessionId);
         }
         return runningAttempts.size();
     }
@@ -315,7 +314,7 @@ public class TaskAttemptService {
                 attempt.getId(),
                 attempt.getTask().getId(),
                 attempt.getAttemptNumber(),
-                attempt.getAgentInstance() != null ? attempt.getAgentInstance().getId() : null,
+                attempt.getSessionId() != null ? attempt.getSessionId() : null,
                 attempt.getStatus(),
                 attempt.getResult(),
                 attempt.getOutput(),

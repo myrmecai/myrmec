@@ -2,8 +2,6 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.node;
 
-import ai.myrmec.engine.websocket.message.WebSocketMessage;
-
 import java.util.UUID;
 import java.util.function.BiConsumer;
 

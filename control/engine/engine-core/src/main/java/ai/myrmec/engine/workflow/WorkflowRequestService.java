@@ -313,7 +313,7 @@ public class WorkflowRequestService {
                 return;
             }
             boolean delivered = executionCommandSender.cancel(
-                    inFlight.getId(), session, inFlight.getDispatchId(),
+                    inFlight, session, inFlight.getDispatchId(),
                     CANCEL_REASON_USER, CANCEL_GRACE_SECONDS);
             if (delivered) {
                 log.info("Relayed execution.cancel for task {} (execution {})",

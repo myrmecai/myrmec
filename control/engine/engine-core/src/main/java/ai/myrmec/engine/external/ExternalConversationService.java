@@ -55,7 +55,7 @@ public class ExternalConversationService {
                 principal.getServiceAccountId(), principal.getTeamId(), assistantId);
 
         Conversation conversation = conversationService.createConversation(
-                principal.getTeamId(), null, null, null, null, assistantId);
+                assistantId, null, null);
         conversation.setSource(Conversation.Source.EXTERNAL_API);
         conversation.setExternalUserRef(endUserRef);
         conversation.setServiceAccountId(principal.getServiceAccountId());

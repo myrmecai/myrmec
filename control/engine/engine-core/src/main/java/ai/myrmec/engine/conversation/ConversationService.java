@@ -1,24 +1,5 @@
 package ai.myrmec.engine.conversation;
 
-import ai.myrmec.engine._system.exception.BadRequestException;
-import ai.myrmec.engine._system.exception.ResourceNotFoundException;
-import ai.myrmec.engine.agent.AgentHost;
-import ai.myrmec.engine.agent.HostSelectionService;
-import ai.myrmec.engine.assistant.Assistant;
-import ai.myrmec.engine.assistant.AssistantRepository;
-import ai.myrmec.engine.assistant.AssistantVersion;
-import ai.myrmec.engine.assistant.AssistantVersionRepository;
-import ai.myrmec.engine.audit.AuditEventService;
-import ai.myrmec.engine.conversation.event.ConversationArchivedEvent;
-import ai.myrmec.engine.conversation.event.ConversationClosedEvent;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -28,18 +9,50 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import ai.myrmec.engine._system.common.Constants;
+import ai.myrmec.engine._system.exception.BadRequestException;
+import ai.myrmec.engine._system.exception.CapacityException;
+import ai.myrmec.engine._system.exception.ResourceNotFoundException;
+import ai.myrmec.engine.agent.AgentHost;
+import ai.myrmec.engine.agent.HostSelectionService;
+import ai.myrmec.engine.assistant.Assistant;
+import ai.myrmec.engine.assistant.AssistantAgentBindingRepository;
+import ai.myrmec.engine.assistant.AssistantRepository;
+import ai.myrmec.engine.assistant.AssistantVersion;
+import ai.myrmec.engine.assistant.AssistantVersionRepository;
+import ai.myrmec.engine.agent.AgentProfileVersionRepository;
+import ai.myrmec.engine.audit.AuditEventService;
+import ai.myrmec.engine.conversation.event.ConversationArchivedEvent;
+import ai.myrmec.engine.conversation.event.ConversationClosedEvent;
+import ai.myrmec.engine.inference.SessionAllocator;
+import ai.myrmec.engine.model.ModelService;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.team.TeamService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Coordinates conversation creation, ACL, and message appending.
  *
- * <p>Sequence numbers are assigned <em>here</em> rather than by the
+ * <p>
+ * Sequence numbers are assigned <em>here</em> rather than by the
  * database because the engine streams the same sequence_no to all WS
  * viewers and would otherwise need a round-trip to learn what the
  * database picked. Acquiring a row-level lock on the parent conversation
  * row in {@link #appendMessage} serialises concurrent writers per
- * conversation while leaving cross-conversation throughput unaffected.</p>
+ * conversation while leaving cross-conversation throughput unaffected.
+ * </p>
  *
- * <p>Phase 6a only persists; the streaming broker (6c) and context-window
- * manager (6d) layer on top.</p>
+ * <p>
+ * Phase 6a only persists; the streaming broker (6c) and context-window
+ * manager (6d) layer on top.
+ * </p>
  */
 @Service
 @RequiredArgsConstructor
@@ -52,77 +65,70 @@ public class ConversationService {
     private final AuditEventService auditEventService;
     private final AssistantRepository assistantRepository;
     private final AssistantVersionRepository assistantVersionRepository;
-    private final HostSelectionService hostSelectionService;
-    @org.springframework.context.annotation.Lazy
-    private final ai.myrmec.engine.agent.AgentRepository agentInstanceRepository;
-    @org.springframework.context.annotation.Lazy
-    private final ai.myrmec.engine.agent.AgentHostService agentService;
+    private final AssistantAgentBindingRepository assistantAgentBindingRepository;
+    private final AgentProfileVersionRepository agentProfileVersionRepository;
     private final ai.myrmec.engine.inference.SessionContextAssembler sessionContextAssembler;
     private final ai.myrmec.engine.governance.GovernancePolicyResolver governancePolicyResolver;
     private final ai.myrmec.engine.context.InstructionAssetVersionResolver instructionAssetVersionResolver;
-    /** 2026-09-21 close/archive design 5.2: host session.close pushes ride the
+    private final HostSelectionService hostSelectionService;
+    private final TeamService teamService;
+    private final SessionAllocator sessionAllocator;
+    private final ai.myrmec.engine.inference.SessionRepository sessionRepository;
+    private final ModelService modelService;
+    /** Lazy provider: HostControlWebSocketHandler injects ConversationService,
+     * so a direct field would cycle. Resolved only at the offer call site. */
+    private final org.springframework.beans.factory.ObjectProvider<
+            ai.myrmec.engine._controllers.websocket.HostChannelWebSocketHandler> hostControlWebSocketHandler;
+    /**
+     * 2026-09-21 close/archive design 5.2: host session.close pushes ride the
      * event listener (injecting HostControlWebSocketHandler here would cycle
-     * with ConversationService). */
+     * with ConversationService).
+     */
     private final ApplicationEventPublisher eventPublisher;
 
-    /** Create a new conversation and seed an OWNER participant row. */
+    /**
+     * Create a durable (un-started) conversation from an assistant.
+     *
+     * <p>
+     * The assistant owns the Team (1:1), so the team is derived here rather
+     * than supplied. The assistant's currently-published version is pinned onto
+     * the conversation for the life of the session. No host/agent is selected
+     * (that happens at {@link #start(UUID)}); {@code agentId} and the profile
+     * version pin are runtime concerns.
+     * </p>
+     */
     @Transactional
     public Conversation createConversation(
-            UUID teamId,
+            UUID assistantId,
             UUID createdBy,
             String title) {
-        return createConversation(teamId, createdBy, title, null, null);
-    }
+        Assistant assistant = assistantRepository.findByIdForUpdate(assistantId)
+                .orElseThrow(() -> ResourceNotFoundException.of("Assistant", assistantId.toString()));
 
-    /**
-     * Full-form create â€” used by the REST endpoint. {@code agentId} is
-     * optional (pinned when null on first agent turn); same for
-     * {@code systemPromptOverride}.
-     */
-    @Transactional
-    public Conversation createConversation(
-            UUID teamId,
-            UUID createdBy,
-            String title,
-            UUID agentId,
-            String systemPromptOverride) {
-        return createConversation(teamId, createdBy, title, agentId, systemPromptOverride, null);
-    }
+        if (assistant.getArchivedAt() != null) {
+            throw new BadRequestException("Assistant is archived and cannot start new conversations.");
+        }
+        if (assistant.isDisabled()) {
+            throw new BadRequestException("Assistant is disabled and cannot start new conversations.");
+        }
+        UUID currentVersionId = assistant.getCurrentVersionId();
+        if (currentVersionId == null) {
+            throw new BadRequestException("Assistant has no published version to start a conversation with.");
+        }
+        AssistantVersion version = assistantVersionRepository.findById(currentVersionId)
+                .orElseThrow(() -> ResourceNotFoundException.of("AssistantVersion", currentVersionId.toString()));
 
-    /**
-     * Assistant-aware create (#92). When {@code assistantId} is supplied the
-     * assistant's currently published version is pinned onto the new
-     * conversation for the life of the session (assistant-entity.md Â§5.6).
-     *
-     * <p>The parent assistant row is taken under a pessimistic write lock so
-     * that a concurrent publish cannot race the version we pin: we read
-     * {@code current_version_id} and copy it (plus its stamped
-     * {@code agent_profile_version_id}) onto the conversation in the same
-     * transaction. Any publish that commits after us bumps a new version but
-     * leaves this conversation pinned to the snapshot it started with.</p>
-     */
-    @Transactional
-    public Conversation createConversation(
-            UUID teamId,
-            UUID createdBy,
-            String title,
-            UUID agentId,
-            String systemPromptOverride,
-            UUID assistantId) {
         Conversation conversation = new Conversation();
-        conversation.setTeamId(teamId);
+        conversation.setTeamId(assistant.getTeamId());
+        conversation.setAssistantId(assistant.getId());
+        conversation.setAssistantVersionId(version.getId());
         conversation.setCreatedBy(createdBy);
         conversation.setTitle(title);
-        conversation.setAgentId(agentId);
-        conversation.setSystemPromptOverride(systemPromptOverride);
         conversation.setStatus(Conversation.Status.ACTIVE);
 
-        if (assistantId != null) {
-            pinAssistantVersion(conversation, teamId, assistantId);
-        }
-
-        // Build and set the context snapshot if the governance profile has CONTEXT_PINNING=ON
-        ai.myrmec.engine.context.ContextSnapshot snapshot = buildContextSnapshot(teamId);
+        // Build and set the context snapshot if the governance profile has
+        // CONTEXT_PINNING=ON
+        ai.myrmec.engine.context.ContextSnapshot snapshot = buildContextSnapshot(assistant.getTeamId());
         conversation.setContextSnapshot(snapshot);
 
         conversation = conversationRepository.save(conversation);
@@ -138,44 +144,81 @@ public class ConversationService {
     }
 
     /**
-     * Resolve and pin the assistant's published version under a row lock.
-     * Mutates {@code conversation} in place; never persists it.
+     * Start (or resume) a conversation: attach an active run to an already
+     * created transcript. This is where the runtime is prepared — the profile
+     * version is pinned (first start only, pin-once) and a host is selected by
+     * capacity.
+     *
+     * <p>
+     * Create produces only a durable transcript; a user may send messages
+     * only once the conversation has been started (and the agent is ready).
+     * </p>
      */
-    private void pinAssistantVersion(Conversation conversation, UUID teamId, UUID assistantId) {
-        Assistant assistant = assistantRepository.findByIdForUpdate(assistantId)
-                .orElseThrow(() -> ResourceNotFoundException.of("Assistant", assistantId.toString()));
+    @Transactional
+    public Conversation start(UUID conversationId) {
+        Conversation conversation = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> ResourceNotFoundException.of("Conversation", conversationId));
 
-        if (teamId != null && !teamId.equals(assistant.getTeamId())) {
-            throw new BadRequestException("Assistant does not belong to the requested Team.");
-        }
-        if (assistant.getArchivedAt() != null) {
-            throw new BadRequestException("Assistant is archived and cannot start new conversations.");
-        }
-        if (assistant.isDisabled()) {
-            throw new BadRequestException("Assistant is disabled and cannot start new conversations.");
+        if (conversation.getStatus() != Conversation.Status.ACTIVE) {
+            throw new BadRequestException("Conversation is " + conversation.getStatus()
+                    + " and cannot be started");
         }
 
-        UUID currentVersionId = assistant.getCurrentVersionId();
-        if (currentVersionId == null) {
-            throw new BadRequestException("Assistant has no published version to start a conversation with.");
+        // Resume: an existing session is attached and still open.
+        if (conversation.getCurrentSessionId() != null
+                && isOpenSession(conversation.getCurrentSessionId())) {
+            log.info("Resuming conversation {} with existing session {}", conversationId,
+                    conversation.getCurrentSessionId());
+            return conversation;
         }
-        AssistantVersion version = assistantVersionRepository.findById(currentVersionId)
-                .orElseThrow(() -> ResourceNotFoundException.of("AssistantVersion", currentVersionId.toString()));
 
-        conversation.setAssistantId(assistant.getId());
-        conversation.setAssistantVersionId(version.getId());
-        conversation.setAgentProfileVersionId(version.getAgentProfileVersionId());
-
-                // The conversation pins its profile VERSION from the assistant; the
-        // runtime host is now selected by capacity (§3.7), never by profile.
-        // Leaving it null is non-fatal — the session is created and the turn
-        // dispatcher simply declines until a host becomes available.
-        if (conversation.getAgentId() == null) {
-            hostSelectionService.selectForTeam(teamId)
-                    .ifPresent(h -> conversation.setAgentId(h.getId()));
-        }
+        startNewSession(conversation);
+        return conversation;
     }
 
+    /** Whether a session id points at a still-open (not CLOSED) session. */
+    private boolean isOpenSession(UUID sessionId) {
+        return sessionRepository.findById(sessionId)
+                .map(s -> !ai.myrmec.engine.inference.SessionAllocator.ALLOC_STATE_CLOSED
+                        .equals(s.getAllocationState()))
+                .orElse(false);
+    }
+
+    /**
+     * Allocate + offer a fresh session for the conversation. The V2
+     * {@code session.open} is assembled later (on the host's
+     * {@code session.accept}) from the conversation's frozen
+     * {@code assistant_version_id} bindings — no profile resolution happens
+     * here.
+     */
+    private void startNewSession(Conversation conversation) {
+        UUID conversationId = conversation.getId();
+
+        AgentHost host = hostSelectionService.selectForTeam(conversation.getTeamId())
+                .orElseThrow(() -> new CapacityException(
+                        "No host with live capacity serves the team"));
+        UUID hostId = host.getId();
+
+        UUID sessionId = sessionAllocator.offer(
+                Constants.SERVICE_TYPE_CONVERSATION, conversationId,
+                Constants.SERVICE_TYPE_CONVERSATION, conversation.getTeamId(), hostId)
+                .orElseThrow(() -> new CapacityException(
+                        "No allocation capacity on host " + hostId + " for conv " + conversationId));
+
+        conversation.setCurrentSessionId(sessionId);
+        conversationRepository.save(conversation);
+
+        hostControlWebSocketHandler.getObject().sendSessionOffer(
+                sessionId, Constants.SERVICE_TYPE_CONVERSATION, conversationId);
+
+        log.info("Started conversation {} — offered session {} on host {}",
+                conversationId, sessionId, hostId);
+    }
+
+    /** Next assistant sequence for a conversation (max persisted + 1). */
+    public long nextAssistantSequence(UUID conversationId) {
+        return messageRepository.countByConversationId(conversationId) + 1;
+    }
     @Transactional
     public ConversationParticipant addParticipant(
             UUID conversationId,
@@ -184,8 +227,8 @@ public class ConversationService {
         conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Conversation", conversationId));
 
-        Optional<ConversationParticipant> existing =
-                participantRepository.findByConversationIdAndUserId(conversationId, userId);
+        Optional<ConversationParticipant> existing = participantRepository.findByConversationIdAndUserId(conversationId,
+                userId);
         if (existing.isPresent()) {
             ConversationParticipant p = existing.get();
             p.setRole(role);
@@ -306,7 +349,8 @@ public class ConversationService {
      * the marker, keeping the contradictory notice out of the agent's history
      * window once a worker does come online.
      *
-     * @param payloadJson serialised marker (e.g. {@code {"kind":"NO_AGENT_NOTICE"}})
+     * @param payloadJson serialised marker (e.g.
+     *                    {@code {"kind":"NO_AGENT_NOTICE"}})
      */
     @Transactional
     public ConversationMessage appendSystemNotice(
@@ -333,6 +377,44 @@ public class ConversationService {
         conversationRepository.save(conversation);
         return message;
     }
+
+    /**
+     * Append a tool-call result row (#22) — the durable transcript surface for
+     * a {@code TOOL_COMPLETED} execution event. Mirrors the mock's
+     * {@code appendToolRow}: {@code toolCallId} + {@code payloadJson}
+     * ({@code {toolName, durationMs, error, command?}}) with a bounded content
+     * preview. Like {@link #appendSystemNotice} it bypasses the auto-title
+     * heuristic and never bumps the read-only guard (tool rows are
+     * engine-internal).
+     */
+    @Transactional
+    public ConversationMessage appendToolRow(
+            UUID conversationId,
+            String toolCallId,
+            String payloadJson,
+            String content) {
+        Conversation conversation = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Conversation", conversationId));
+
+        long nextSequence = messageRepository
+                .findFirstByConversationIdOrderBySequenceNoDesc(conversationId)
+                .map(m -> m.getSequenceNo() + 1)
+                .orElse(0L);
+
+        ConversationMessage message = new ConversationMessage();
+        message.setConversationId(conversationId);
+        message.setSequenceNo(nextSequence);
+        message.setRole(ConversationMessage.Role.TOOL);
+        message.setContent(content);
+        message.setToolCallId(toolCallId);
+        message.setPayloadJson(payloadJson);
+        message = messageRepository.save(message);
+
+        conversation.setUpdatedAt(java.time.Instant.now());
+        conversationRepository.save(conversation);
+        return message;
+    }
+
     private static final int AUTO_TITLE_MAX = 60;
 
     /**
@@ -411,11 +493,13 @@ public class ConversationService {
      * and must be an {@link ConversationMessage.Role#ASSISTANT} turn
      * (only model answers are rateable).
      *
-     * <p>A {@code null} or blank {@code rating} clears any existing
+     * <p>
+     * A {@code null} or blank {@code rating} clears any existing
      * feedback (un-rates the message); a non-null rating is parsed
      * case-insensitively to {@link ConversationMessage.Rating} and an
      * unknown value is rejected. Every mutation is attributed to
-     * {@code actorUserId} and audited.</p>
+     * {@code actorUserId} and audited.
+     * </p>
      */
     @Transactional
     public ConversationMessage setMessageFeedback(
@@ -533,8 +617,10 @@ public class ConversationService {
         return assistant;
     }
 
-    /** Load a message, asserting it belongs to the conversation and is on the
-     * active (non-superseded) branch. */
+    /**
+     * Load a message, asserting it belongs to the conversation and is on the
+     * active (non-superseded) branch.
+     */
     private ConversationMessage requireActiveMessage(UUID conversationId, UUID messageId) {
         ConversationMessage message = messageRepository.findById(messageId)
                 .orElseThrow(() -> new ResourceNotFoundException("Message", messageId));
@@ -569,6 +655,69 @@ public class ConversationService {
     }
 
     /**
+     * Per-turn context-window read-model (UC-013 header "context bagel").
+     *
+     * <p>{@code contextTokens} is the token count of the conversation's latest
+     * ASSISTANT turn — an approximation of the current context size, since the
+     * engine does not yet persist per-turn prompt-token usage separately.
+     * {@code maxContextTokens} is the serving model's declared context-window
+     * ceiling.</p>
+     */
+    @Transactional(readOnly = true)
+    public ai.myrmec.engine.conversation.dto.ConversationContextResponse context(UUID conversationId) {
+        Conversation conversation = findById(conversationId);
+
+        // Primary source: the live context size tracked from MODEL_USAGE
+        // events. Fall back to the latest ASSISTANT turn's token count when
+        // the conversation predates context-token tracking.
+        Integer contextTokens = conversation.getContextTokens();
+        if (contextTokens == null) {
+            List<ConversationMessage> all = messageRepository
+                    .findByConversationIdOrderBySequenceNoAsc(conversationId);
+            for (int i = all.size() - 1; i >= 0; i--) {
+                ConversationMessage m = all.get(i);
+                if (m.getRole() == ConversationMessage.Role.ASSISTANT && m.getTokenCount() != null) {
+                    contextTokens = m.getTokenCount();
+                    break;
+                }
+            }
+        }
+
+        Integer maxContextTokens = resolveContextWindow(conversation);
+
+        return ai.myrmec.engine.conversation.dto.ConversationContextResponse
+                .of(contextTokens, maxContextTokens);
+    }
+
+    /**
+     * The serving model's context-window ceiling, or null when the assistant's
+     * PRIMARY binding has no published profile version / model, or the model
+     * declares no window. Never throws — a lookup failure must not block the
+     * context read.
+     */
+    private Integer resolveContextWindow(Conversation conversation) {
+        try {
+            UUID assistantVersionId = conversation.getAssistantVersionId();
+            if (assistantVersionId == null) {
+                return null;
+            }
+            return assistantAgentBindingRepository
+                    .findByAssistantVersionIdAndRoleType(
+                            assistantVersionId,
+                            ai.myrmec.engine.assistant.AssistantAgentBinding.RoleType.PRIMARY)
+                    .stream().findFirst()
+                    .map(ai.myrmec.engine.assistant.AssistantAgentBinding::getAgentProfileVersionId)
+                    .flatMap(agentProfileVersionRepository::findById)
+                    .map(ai.myrmec.engine.agent.AgentProfileVersion::getDefaultModel)
+                    .map(modelService::findByCode)
+                    .map(ai.myrmec.engine.model.Model::getContextWindowTokens)
+                    .orElse(null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
      * Render a conversation transcript to Markdown for export / handoff
      * (#104d) and record the export as an audited action. The caller's
      * ACL is enforced upstream by {@code @conversationAccess.canView}; we
@@ -579,11 +728,11 @@ public class ConversationService {
     public String exportMarkdown(UUID conversationId, UUID actorUserId) {
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Conversation", conversationId));
-        List<ConversationMessage> messages =
-                messageRepository.findByConversationIdOrderBySequenceNoAsc(conversationId);
+        List<ConversationMessage> messages = messageRepository.findByConversationIdOrderBySequenceNoAsc(conversationId);
 
         String title = (conversation.getTitle() == null || conversation.getTitle().isBlank())
-                ? "Conversation" : conversation.getTitle().trim();
+                ? "Conversation"
+                : conversation.getTitle().trim();
         StringBuilder md = new StringBuilder();
         md.append("# ").append(title).append("\n\n");
         md.append("_Exported ").append(Instant.now()).append(" Â· ")
@@ -625,10 +774,12 @@ public class ConversationService {
      * first. Used by the chat sidebar to show the user the threads they
      * can resume.
      *
-     * <p>2026-09-21 close/archive lifecycle design section 4.4: CLOSED and
+     * <p>
+     * 2026-09-21 close/archive lifecycle design section 4.4: CLOSED and
      * ARCHIVED rows are hidden unless the caller opts in via
      * {@code includeClosed} / {@code includeArchived}, so the default list
-     * shows only resumable ACTIVE chats.</p>
+     * shows only resumable ACTIVE chats.
+     * </p>
      */
     @Transactional(readOnly = true)
     public List<Conversation> listByTeam(UUID teamId, boolean includeClosed, boolean includeArchived) {
@@ -639,48 +790,17 @@ public class ConversationService {
     }
 
     /**
-     * Release any worker still BOUND to this conversation back to the warm
-     * pool (§9.5). Called when the conversation is archived or closed.
-     * Also closes any active inference sessions for this conversation.
-     */
-    /**
-     * Release any workers still linked to this conversation back to the warm
-     * pool (§9.5). Called when the conversation is archived or closed.
-     * Also closes any active inference sessions for this conversation.
+     * Close any active inference sessions for this conversation. Called when
+     * the conversation is archived or closed (the session stays open across
+     * turns; close it here on archive/close).
      *
-     * <p>Stale rows are the norm after crashed reconnects: several instances
-     * can point at one conversation. Every one of them is released. The whole
-     * release is best-effort — but each step is isolated so one failure cannot
-     * poison the caller's transaction (an exception thrown through a joined
-     * inner @Transactional marks it rollback-only even when caught here, and
-     * the outer commit then dies with UnexpectedRollbackException).</p>
+     * <p>
+     * With the warm-worker {@code agents} model removed, there are no
+     * separate workers to release — the session IS the runtime span and is
+     * closed directly.
+     * </p>
      */
     private void releaseBoundWorker(UUID conversationId) {
-        List<UUID> instanceIds;
-        try {
-            instanceIds = agentInstanceRepository
-                    .findByConversationIdAndStatus(conversationId, ai.myrmec.engine.agent.Agent.Status.BOUND)
-                    .stream()
-                    .map(ai.myrmec.engine.agent.Agent::getId)
-                    .toList();
-        } catch (Exception e) {
-            log.warn("Failed to look up bound workers for conversation {}: {}",
-                    conversationId, e.getMessage());
-            instanceIds = List.of();
-        }
-        for (UUID instanceId : instanceIds) {
-            try {
-                agentService.releaseInstance(instanceId);
-                log.info("Released BOUND worker {} for archived conversation {}",
-                        instanceId, conversationId);
-            } catch (Exception e) {
-                // Isolated per-instance: a failure here must not abort the
-                // remaining releases (and it must never leak into the outer
-                // transaction's commit — see the javadoc above).
-                log.warn("Failed to release worker {} for archived conversation {}: {}",
-                        instanceId, conversationId, e.getMessage());
-            }
-        }
         try {
             // Close any active CONVERSATION sessions for this conversation
             // (the session stays open across turns; close it here on archive).
@@ -717,9 +837,11 @@ public class ConversationService {
      * ({@link #releaseBoundWorker}: worker release + session close). The
      * close trail is stamped with reason {@code USER_ENDED}.
      *
-     * <p>Closing an already-CLOSED conversation is idempotent and returns
+     * <p>
+     * Closing an already-CLOSED conversation is idempotent and returns
      * the row unchanged. Closing an ARCHIVED conversation is rejected with
-     * {@link IllegalArgumentException} (mapped to 400).</p>
+     * {@link IllegalArgumentException} (mapped to 400).
+     * </p>
      */
     @Transactional
     public Conversation closeConversation(UUID conversationId, UUID userId) {
@@ -749,12 +871,12 @@ public class ConversationService {
      * delete that subsumes the old DELETED. No un-archive.
      *
      * <ul>
-     *   <li>CLOSED - only the archive trail is stamped
-     *       ({@code USER_ARCHIVED}); the existing close trail is preserved.</li>
-     *   <li>ACTIVE - both trails are stamped: the archive trail plus an
-     *       implicit close with {@code close_reason = ARCHIVED}, and the
-     *       {@link #releaseBoundWorker} teardown runs.</li>
-     *   <li>ARCHIVED - idempotent, row returned unchanged.</li>
+     * <li>CLOSED - only the archive trail is stamped
+     * ({@code USER_ARCHIVED}); the existing close trail is preserved.</li>
+     * <li>ACTIVE - both trails are stamped: the archive trail plus an
+     * implicit close with {@code close_reason = ARCHIVED}, and the
+     * {@link #releaseBoundWorker} teardown runs.</li>
+     * <li>ARCHIVED - idempotent, row returned unchanged.</li>
      * </ul>
      */
     @Transactional
@@ -795,11 +917,13 @@ public class ConversationService {
     /**
      * Append an {@code APPROVAL_REQUEST} row authored by an agent.
      *
-     * <p>{@code payloadJson} carries the proposed action (free-form
+     * <p>
+     * {@code payloadJson} carries the proposed action (free-form
      * agent-supplied JSON â€” the UI's renderer picks based on shape).
      * {@code expiresAt} bounds the wait; the row flips to
      * {@link ConversationMessage.ApprovalStatus#EXPIRED} when checked
-     * past that instant.</p>
+     * past that instant.
+     * </p>
      */
     @Transactional
     public ConversationMessage appendApprovalRequest(
@@ -837,9 +961,11 @@ public class ConversationService {
      * request and append a paired {@code APPROVAL_RESPONSE} row carrying
      * the decider's identity + optional comment.
      *
-     * <p>Rejects with {@link IllegalStateException} when the request is
+     * <p>
+     * Rejects with {@link IllegalStateException} when the request is
      * missing, of the wrong role, already decided, expired, or when the
-     * caller tries to set anything other than APPROVED / REJECTED.</p>
+     * caller tries to set anything other than APPROVED / REJECTED.
+     * </p>
      */
     @Transactional
     public ApprovalDecisionResult submitApprovalDecision(
@@ -907,11 +1033,172 @@ public class ConversationService {
         return new ApprovalDecisionResult(request, response);
     }
 
-    /** Lookup helper for the controller â€” returns null when the row is missing. */
+    /**
+     * Lookup helper for the controller â€” returns null when the row is missing.
+     */
     @Transactional(readOnly = true)
     public Optional<ConversationMessage> findMessage(UUID messageId) {
         return messageRepository.findById(messageId);
     }
+
+    /**
+     * The pending (unanswered, unexpired) {@code INPUT_REQUEST} at the tail of
+     * the active branch — the composer-send path routes typed text to it
+     * (Copilot semantics: the options dissolve, the text answers the question).
+     * Mirrors the mock's {@code pendingInputRequest}: the latest unanswered
+     * ask wins; a trailing {@code INPUT_RESPONSE} means the latest ask was
+     * already answered.
+     */
+    @Transactional(readOnly = true)
+    public Optional<ConversationMessage> pendingInputRequest(UUID conversationId) {
+        List<ConversationMessage> tail = messageRepository
+                .findByConversationIdOrderBySequenceNoDesc(conversationId,
+                        org.springframework.data.domain.PageRequest.of(0, 200));
+        for (ConversationMessage m : tail) {
+            if (m.isSuperseded()) {
+                continue;
+            }
+            if (m.getRole() == ConversationMessage.Role.INPUT_RESPONSE) {
+                return Optional.empty();
+            }
+            if (m.getRole() == ConversationMessage.Role.INPUT_REQUEST) {
+                return Optional.of(m);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** Minimal JSON string escaping for a single double-quoted string value. */
+    private static String escapeJson(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(raw.length() + 8);
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            switch (c) {
+                case '"' -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> {
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Append an {@code INPUT_REQUEST} row (the ask_user tool's question). The
+     * {@code payloadJson} carries the question payload verbatim (question,
+     * options, multiple, agentName, digest); the row's {@code approvalStatus}
+     * doubles as the PENDING/ANSWERED discriminator so the card collapses on
+     * answer. Mirrors {@link #appendApprovalRequest}.
+     */
+    @Transactional
+    public ConversationMessage appendInputRequest(
+            UUID conversationId,
+            String payloadJson,
+            Instant expiresAt) {
+        Conversation conversation = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Conversation", conversationId));
+
+        long nextSequence = messageRepository
+                .findFirstByConversationIdOrderBySequenceNoDesc(conversationId)
+                .map(m -> m.getSequenceNo() + 1)
+                .orElse(0L);
+
+        ConversationMessage message = new ConversationMessage();
+        message.setConversationId(conversationId);
+        message.setSequenceNo(nextSequence);
+        message.setRole(ConversationMessage.Role.INPUT_REQUEST);
+        message.setContent("");
+        message.setPayloadJson(payloadJson);
+        message.setApprovalStatus(ConversationMessage.ApprovalStatus.PENDING);
+        message.setExpiresAt(expiresAt);
+        message = messageRepository.save(message);
+
+        conversation.setUpdatedAt(Instant.now());
+        conversationRepository.save(conversation);
+        return message;
+    }
+
+    /**
+     * Answer a pending {@code INPUT_REQUEST} (the ask_user tool's resume path):
+     * mark the request ANSWERED and append the paired {@code INPUT_RESPONSE}
+     * row. Returns both rows so the controller can broadcast the request
+     * mutation and the response frame in one pass.
+     *
+     * <p>Rejects with {@link IllegalStateException} when the row is missing,
+     * of the wrong role, already answered, or expired.</p>
+     */
+    @Transactional
+    public InputDecisionResult submitInputAnswer(
+            UUID conversationId,
+            UUID requestMessageId,
+            UUID answererUserId,
+            String answerDisplay) {
+        Conversation conversation = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Conversation", conversationId));
+
+        ConversationMessage request = messageRepository.findById(requestMessageId)
+                .orElseThrow(() -> new ResourceNotFoundException("Input request", requestMessageId));
+        if (!conversationId.equals(request.getConversationId())) {
+            throw new IllegalStateException(
+                    "Input request " + requestMessageId
+                            + " does not belong to conversation " + conversationId);
+        }
+        if (request.getRole() != ConversationMessage.Role.INPUT_REQUEST) {
+            throw new IllegalStateException(
+                    "Message " + requestMessageId + " is not an INPUT_REQUEST");
+        }
+        ConversationMessage.ApprovalStatus current = request.getApprovalStatus();
+        if (current != null && current != ConversationMessage.ApprovalStatus.PENDING) {
+            throw new IllegalStateException(
+                    "Input " + requestMessageId + " already answered (status=" + current + ")");
+        }
+        Instant expires = request.getExpiresAt();
+        if (expires != null && Instant.now().isAfter(expires)) {
+            request.setApprovalStatus(ConversationMessage.ApprovalStatus.EXPIRED);
+            messageRepository.save(request);
+            throw new IllegalStateException(
+                    "Input " + requestMessageId + " has expired (expiresAt=" + expires + ")");
+        }
+
+        request.setApprovalStatus(ConversationMessage.ApprovalStatus.APPROVED);
+        request.setApproverId(answererUserId);
+        request = messageRepository.save(request);
+
+        long nextSequence = messageRepository
+                .findFirstByConversationIdOrderBySequenceNoDesc(conversationId)
+                .map(m -> m.getSequenceNo() + 1)
+                .orElse(0L);
+        ConversationMessage response = new ConversationMessage();
+        response.setConversationId(conversationId);
+        response.setSequenceNo(nextSequence);
+        response.setRole(ConversationMessage.Role.INPUT_RESPONSE);
+        response.setAuthorUserId(answererUserId);
+        response.setContent(answerDisplay);
+        response.setParentMessageId(request.getId());
+        // The card reads { display } from payloadJson (AskCard.parseAnswer).
+        response.setPayloadJson("{\"display\":\"" + escapeJson(answerDisplay) + "\"}");
+        response = messageRepository.save(response);
+
+        conversation.setUpdatedAt(Instant.now());
+        conversationRepository.save(conversation);
+        return new InputDecisionResult(request, response);
+    }
+
+    /** Carries both rows produced by {@link #submitInputAnswer}. */
+    public record InputDecisionResult(ConversationMessage request, ConversationMessage response) {
+    }
+
     /**
      * Carries both rows produced by {@link #submitApprovalDecision} so the
      * caller can broadcast the request mutation AND append the response
@@ -919,7 +1206,8 @@ public class ConversationService {
      */
     public record ApprovalDecisionResult(
             ConversationMessage request,
-            ConversationMessage response) { }
+            ConversationMessage response) {
+    }
 
     /**
      * Build a {@link ai.myrmec.engine.context.ContextSnapshot} for the Team

@@ -3,9 +3,9 @@
 
 package ai.myrmec.engine.workflow;
 
+import ai.myrmec.engine._controllers.websocket.HostChannelWebSocketHandler;
 import ai.myrmec.engine.agent.*;
 import ai.myrmec.engine.inference.SessionAllocator;
-import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -56,12 +56,11 @@ public class TaskDispatcherService {
     private final WorkflowRequestRepository requestRepository;
     // §3.7: host candidates come from the capacity-based selector.
     private final HostSelectionService hostSelectionService;
-    private final AgentRepository agentInstanceRepository;
     private final AgentHostRepository agentHostRepository;
     private final AgentHostInstanceRepository hostInstanceRepository;
     private final SessionAllocator sessionAllocator;
-    private final HostControlWebSocketHandler hostControlWebSocketHandler;
-    private final ai.myrmec.engine.websocket.host.HostConnectionManager hostConnectionManager;
+    private final HostChannelWebSocketHandler hostControlWebSocketHandler;
+    private final ai.myrmec.engine.websocket.HostConnectionManager hostConnectionManager;
     private final PendingTaskDispatches pendingTaskDispatches;
     private final TaskAttemptService taskAttemptService;
     private final TaskAttemptRepository attemptRepository;

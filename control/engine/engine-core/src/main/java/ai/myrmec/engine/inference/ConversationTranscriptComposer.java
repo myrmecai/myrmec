@@ -18,7 +18,7 @@ import java.util.Map;
  * <p>Ports {@code assembleConversationMessages()} from
  * {@code agents/src/executor/ConversationDispatcher.ts} byte-for-byte:
  * <ul>
- *   <li>system message = (conversation.systemPromptOverride ?? profile.systemPrompt) + pinnedFacts</li>
+ *   <li>system message = profile.systemPrompt + pinnedFacts</li>
  *   <li>sliding-window history</li>
  *   <li>user message + attachment context</li>
  * </ul></p>

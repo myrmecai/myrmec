@@ -207,7 +207,7 @@ public class OrchestrationOutcomeService {
             task.setErrorMessage(null);
             task.setStartedAt(null);
             task.setCompletedAt(null);
-            task.setAgentInstance(null);
+            task.setSessionId(null);
             task.setAttempt(task.getAttempt() + 1);
             // §16.6: retryable failure consumes one retry and applies the
             // step's bounded exponential backoff.

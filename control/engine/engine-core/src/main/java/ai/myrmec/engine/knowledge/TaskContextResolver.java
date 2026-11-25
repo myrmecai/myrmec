@@ -2,6 +2,13 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.knowledge;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+import org.springframework.stereotype.Service;
+
+import ai.myrmec.engine._protocol.TaskContext;
 import ai.myrmec.engine._system.common.DomainConstants.EntityStatus;
 import ai.myrmec.engine._system.common.DomainConstants.Scope;
 import ai.myrmec.engine.instruction.InstructionAsset;
@@ -10,14 +17,8 @@ import ai.myrmec.engine.instruction.InstructionAssetVersion;
 import ai.myrmec.engine.instruction.InstructionAssetVersionRepository;
 import ai.myrmec.engine.team.Team;
 import ai.myrmec.engine.team.TeamRepository;
-import ai.myrmec.engine.websocket.message.payload.TaskContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
 
 /**
  * TaskContextResolver — resolves the AI context for a workflow task.

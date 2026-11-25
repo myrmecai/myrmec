@@ -73,17 +73,11 @@ public class AssistantVersion {
     private UUID draftOwnerId;
 
     // --- Brain (§4.2) ---
-
-    @Column(name = "agent_profile_id")
-    private UUID agentProfileId;
-
-    /**
-     * Pinned published {@code agent_profile_versions} row stamped at publish
-     * time (assistant-entity.md §4.2: "Required Published version at publish
-     * time"). Immutable once PUBLISHED.
-     */
-    @Column(name = "agent_profile_version_id")
-    private UUID agentProfileVersionId;
+    //
+    // The single-brain model has been replaced by multi-model role bindings
+    // (assistant_agent_bindings). The assistant no longer pins a single
+    // agent_profile_id / agent_profile_version_id on the version row; the
+    // profile version (and optional model) now live on AssistantAgentBinding.
 
     @Column(name = "addendum", columnDefinition = "text")
     private String addendum;

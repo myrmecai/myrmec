@@ -42,6 +42,23 @@ myrmec:
     email: ${MYRMEC_ADMIN_EMAIL:}
     password: ${MYRMEC_ADMIN_PASSWORD:}
     name: ${MYRMEC_ADMIN_NAME:System Administrator}
+  # Dev-only hosted login page for the VS Code plugin (mirrors the mock).
+  # Enabled only when MYRMEC_DEV_LOGIN_PAGE_ENABLED=true.
+  dev-login-page:
+    enabled: ${MYRMEC_DEV_LOGIN_PAGE_ENABLED:false}
+    demo-email: ${MYRMEC_DEV_LOGIN_PAGE_DEMO_EMAIL:demo@myrmec.dev}
+    demo-password: ${MYRMEC_DEV_LOGIN_PAGE_DEMO_PASSWORD:Demo123!}
+  # Optional test-data seeding (providers, models, profiles, assistant).
+  # Enabled only when MYRMEC_LOAD_TEST_DATA=true.
+  load-test-data: ${MYRMEC_LOAD_TEST_DATA:false}
+  # CORS configuration. Default allows all localhost / 127.0.0.1 ports for
+  # local VS Code plugin webviews. Override with explicit origins or "*".
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+      - http://127.0.0.1:5173
+    allowed-origin-patterns:
+      - "vscode-webview://*"
   encryption:
     key: ${MYRMEC_ENCRYPTION_KEY:default-encryption-key-change-in-production}
     previous-keys: ${MYRMEC_ENCRYPTION_PREVIOUS_KEYS:}

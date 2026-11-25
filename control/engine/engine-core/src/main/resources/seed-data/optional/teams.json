@@ -1,0 +1,11 @@
+[
+  {
+    "name": "Fullstack Developer Team",
+    "description": "Test team for the Fullstack Developer assistant.",
+    "allowedServiceTypes": ["WORKFLOW", "CONVERSATIONAL"],
+    "workspaceRepoUrl": null,
+    "workspaceRepoBranch": "main",
+    "autoHitlOnDestructive": false,
+    "attachmentsEnabled": true
+  }
+]

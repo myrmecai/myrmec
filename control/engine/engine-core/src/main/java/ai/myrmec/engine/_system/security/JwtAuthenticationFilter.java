@@ -2,8 +2,6 @@ package ai.myrmec.engine._system.security;
 
 import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentHostType;
-import ai.myrmec.engine.agent.Agent;
-import ai.myrmec.engine.agent.AgentRepository;
 import ai.myrmec.engine.agent.AgentHostRepository;
 import ai.myrmec.engine.registration.RegistrationKeyService;
 import ai.myrmec.engine.user.User;
@@ -33,7 +31,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenProvider jwtTokenProvider;
     private final AgentHostRepository agentRepository;
-    private final AgentRepository agentInstanceRepository;
     private final UserRepository userRepository;
     private final RegistrationKeyService registrationKeyService;
 
@@ -49,9 +46,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             // Only accept access tokens for API authentication
             if (jwtTokenProvider.validateAccessToken(token)) {
-                if (jwtTokenProvider.isAgentToken(token)) {
-                    authenticateAgent(token);
-                } else if (jwtTokenProvider.isAgentHostToken(token)) {
+                if (jwtTokenProvider.isAgentHostToken(token)) {
                     authenticateAgentHost(token);
                 } else if (jwtTokenProvider.isUserToken(token)) {
                     authenticateUser(token);
@@ -60,24 +55,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
-    }
-
-    private void authenticateAgent(String token) {
-        UUID instanceId = jwtTokenProvider.getSubjectId(token);
-        String agentName = jwtTokenProvider.getName(token);
-        Agent instance = agentInstanceRepository.findById(instanceId).orElse(null);
-
-        if (instance != null && !isRegistrationKeyRevoked(instance)) {
-            AgentPrincipal principal = new AgentPrincipal(instance, agentName);
-            UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(
-                            principal,
-                            null,
-                            List.of(new SimpleGrantedAuthority("ROLE_AGENT"))
-                    );
-            SecurityContextHolder.getContext().setAuthentication(authentication);
-            log.debug("Authenticated agent instance: {} (agent: {})", instanceId, agentName);
-        }
     }
 
     private void authenticateUser(String token) {
@@ -179,20 +156,5 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         return registrationKeyService.findByKeyValue(host.getRegistrationKey())
                 .filter(key -> !key.isValid())
                 .isPresent();
-    }
-
-    /**
-     * Check if the agent's registration key has been revoked.
-     * This provides token revocation via registration key revocation.
-     */
-    private boolean isRegistrationKeyRevoked(Agent instance) {
-        // Look up the agent definition to get the registration key
-        AgentHost agent = agentRepository.findById(instance.getAgentHostId()).orElse(null);
-        if (agent == null || agent.getRegistrationKey() == null) {
-            return false;
-        }
-        return registrationKeyService.findByKeyValue(agent.getRegistrationKey())
-                .map(key -> !key.isValid())
-                .orElse(false); // Key not in table = not revoked
     }
 }

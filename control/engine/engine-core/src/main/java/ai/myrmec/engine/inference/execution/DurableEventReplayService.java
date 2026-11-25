@@ -2,13 +2,13 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.inference.execution;
 
+import ai.myrmec.engine._protocol.HostProtocol;
+import ai.myrmec.engine._protocol.HostProtocolEnvelope;
+import ai.myrmec.engine._protocol.payload.ProtocolErrorPayload;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.node.HostFrameRelayService;
-import ai.myrmec.engine.websocket.host.ChannelConnectionRegistry;
-import ai.myrmec.engine.websocket.host.HostProtocol;
-import ai.myrmec.engine.websocket.host.HostProtocolEnvelope;
-import ai.myrmec.engine.websocket.host.payload.ProtocolErrorPayload;
+import ai.myrmec.engine.websocket.ChannelConnectionRegistry;
 import ai.myrmec.engine.workflow.ExecutionEvent;
 import ai.myrmec.engine.workflow.ExecutionEventRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;

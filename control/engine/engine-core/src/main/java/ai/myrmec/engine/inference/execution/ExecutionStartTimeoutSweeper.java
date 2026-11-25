@@ -2,11 +2,11 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.inference.execution;
 
+import ai.myrmec.engine._controllers.websocket.HostChannelWebSocketHandler;
+import ai.myrmec.engine._protocol.payload.SessionCloseReason;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionAllocator;
 import ai.myrmec.engine.inference.SessionRepository;
-import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
-import ai.myrmec.engine.websocket.host.payload.SessionCloseReason;
 import ai.myrmec.engine.workflow.OrchestrationOutcomeService;
 import ai.myrmec.engine.workflow.TaskAttemptService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -50,7 +50,7 @@ public class ExecutionStartTimeoutSweeper {
     private final ExecutionRegistry executionRegistry;
     private final TaskAttemptService taskAttemptService;
     private final OrchestrationOutcomeService orchestrationOutcomeService;
-    private final HostControlWebSocketHandler hostControlWebSocketHandler;
+    private final HostChannelWebSocketHandler hostControlWebSocketHandler;
     private final ObjectMapper objectMapper;
 
     private final boolean enabled;
@@ -63,7 +63,7 @@ public class ExecutionStartTimeoutSweeper {
             ExecutionRegistry executionRegistry,
             TaskAttemptService taskAttemptService,
             OrchestrationOutcomeService orchestrationOutcomeService,
-            HostControlWebSocketHandler hostControlWebSocketHandler,
+            HostChannelWebSocketHandler hostControlWebSocketHandler,
             ObjectMapper objectMapper,
             @Value("${myrmec.host.execution-start-sweep.enabled:true}") boolean enabled,
             @Value("${myrmec.host.execution-start-timeout-seconds:300}")

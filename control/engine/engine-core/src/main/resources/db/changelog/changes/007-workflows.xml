@@ -261,7 +261,7 @@
             <column name="agent_profile_id" type="uuid">
                 <constraints nullable="false"/>
             </column>
-            <column name="agent_instance_id" type="uuid"/>
+            <column name="session_id" type="uuid"/>
             <column name="input" type="text"/>
             <column name="output" type="text"/>
             <column name="status" type="varchar(20)" defaultValue="PENDING">
@@ -338,21 +338,6 @@
             onDelete="SET NULL"/>
     </changeSet>
 
-    <!-- Foreign key to agent_instances (agents table) -->
-    <changeSet id="007-workflows-tasks-fk-agent-instance" author="myrmec">
-        <preConditions onFail="MARK_RAN">
-            <tableExists tableName="workflow_tasks"/>
-            <not><foreignKeyConstraintExists foreignKeyName="fk_workflow_tasks_agent_instance"/></not>
-        </preConditions>
-        <addForeignKeyConstraint
-            baseTableName="workflow_tasks"
-            baseColumnNames="agent_instance_id"
-            referencedTableName="agents"
-            referencedColumnNames="id"
-            constraintName="fk_workflow_tasks_agent_instance"
-            onDelete="SET NULL"/>
-    </changeSet>
-
     <!-- Index for looking up tasks by request -->
     <changeSet id="007-workflows-tasks-idx-request-id" author="myrmec">
         <preConditions onFail="MARK_RAN">
@@ -375,14 +360,14 @@
         </createIndex>
     </changeSet>
 
-    <!-- Index for looking up tasks by agent instance -->
-    <changeSet id="007-workflows-tasks-idx-agent-instance" author="myrmec">
+    <!-- Index for looking up tasks by session -->
+    <changeSet id="007-workflows-tasks-idx-session" author="myrmec">
         <preConditions onFail="MARK_RAN">
             <tableExists tableName="workflow_tasks"/>
-            <not><indexExists indexName="idx_workflow_tasks_agent_instance_id"/></not>
+            <not><indexExists indexName="idx_workflow_tasks_session_id"/></not>
         </preConditions>
-        <createIndex tableName="workflow_tasks" indexName="idx_workflow_tasks_agent_instance_id">
-            <column name="agent_instance_id"/>
+        <createIndex tableName="workflow_tasks" indexName="idx_workflow_tasks_session_id">
+            <column name="session_id"/>
         </createIndex>
     </changeSet>
 
@@ -506,7 +491,7 @@
             <column name="attempt_number" type="integer">
                 <constraints nullable="false"/>
             </column>
-            <column name="agent_instance_id" type="uuid"/>
+            <column name="session_id" type="uuid"/>
             <column name="status" type="varchar(20)" defaultValue="RUNNING">
                 <constraints nullable="false"/>
             </column>
@@ -546,21 +531,6 @@
             referencedColumnNames="id"
             constraintName="fk_task_attempts_task"
             onDelete="CASCADE"/>
-    </changeSet>
-
-    <!-- FK to agent_instances -->
-    <changeSet id="007-workflows-attempts-fk-agent" author="myrmec">
-        <preConditions onFail="MARK_RAN">
-            <tableExists tableName="task_attempts"/>
-            <not><foreignKeyConstraintExists foreignKeyName="fk_task_attempts_agent_instance"/></not>
-        </preConditions>
-        <addForeignKeyConstraint
-            baseTableName="task_attempts"
-            baseColumnNames="agent_instance_id"
-            referencedTableName="agents"
-            referencedColumnNames="id"
-            constraintName="fk_task_attempts_agent_instance"
-            onDelete="SET NULL"/>
     </changeSet>
 
     <!-- Index for querying attempts by task -->

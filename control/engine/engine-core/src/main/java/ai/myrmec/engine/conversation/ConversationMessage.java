@@ -41,7 +41,7 @@ import java.util.UUID;
 @NoArgsConstructor
 public class ConversationMessage {
 
-    public enum Role { USER, ASSISTANT, SYSTEM, TOOL, APPROVAL_REQUEST, APPROVAL_RESPONSE, CONTEXT_SUMMARY }
+    public enum Role { USER, ASSISTANT, SYSTEM, TOOL, APPROVAL_REQUEST, APPROVAL_RESPONSE, CONTEXT_SUMMARY, INPUT_REQUEST, INPUT_RESPONSE }
 
     /**
      * Lifecycle of an HITL approval row. Set only on rows whose

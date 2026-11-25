@@ -2,6 +2,7 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.inference.execution;
 
+import ai.myrmec.engine._protocol.payload.ExecutionPolicyUpdatePayload;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionRepository;
 import ai.myrmec.engine.quota.BasicQuotaPolicyEngine;
@@ -9,7 +10,6 @@ import ai.myrmec.engine.spi.quota.QuotaDecision;
 import ai.myrmec.engine.spi.quota.QuotaPolicyEngine;
 import ai.myrmec.engine.spi.quota.QuotaResourceType;
 import ai.myrmec.engine.spi.quota.QuotaScope;
-import ai.myrmec.engine.websocket.host.payload.ExecutionPolicyUpdatePayload;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -113,7 +113,7 @@ public class SessionPolicyService {
                 new ExecutionPolicyUpdatePayload.Usage(functionCalls, totalTokens),
                 allowance);
         boolean sent = executionCommandSender.policyUpdate(
-                executionId, session, execution.getDispatchId(), payload);
+                execution, session, execution.getDispatchId(), payload);
         if (sent) {
             lastSent.put(executionId, new SentSnapshot(functionCalls, totalTokens, Instant.now()));
             log.info("execution.policy.update sent for execution {} (dispatch {}, calls {}, tokens {}, maxTokens {})",

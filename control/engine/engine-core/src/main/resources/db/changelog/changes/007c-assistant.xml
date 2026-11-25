@@ -79,10 +79,6 @@
                 <constraints nullable="true"/>
             </column>
             <column name="draft_owner_id" type="uuid"/>
-            <column name="agent_profile_id" type="uuid">
-                <constraints nullable="true"/>
-            </column>
-            <column name="agent_profile_version_id" type="uuid"/>
             <column name="addendum" type="text"/>
             <column name="greeting_message" type="text">
                 <constraints nullable="false"/>
@@ -125,14 +121,6 @@
             baseColumnNames="parent_version_id"
             constraintName="fk_assistant_version_parent"
             referencedTableName="assistant_version"
-            referencedColumnNames="id"
-            onDelete="SET NULL"/>
-
-        <addForeignKeyConstraint
-            baseTableName="assistant_version"
-            baseColumnNames="agent_profile_id"
-            constraintName="fk_assistant_version_agent_profile"
-            referencedTableName="agent_profiles"
             referencedColumnNames="id"
             onDelete="SET NULL"/>
 
@@ -247,23 +235,32 @@
             <not><tableExists tableName="assistant_agent_bindings"/></not>
         </preConditions>
 
-        <!-- Binds profiles and models to an assistant for multi-model orchestration -->
+        <!-- Binds profiles and models to an assistant VERSION for multi-model
+             orchestration. Keyed to assistant_version (not assistant) so a
+             published version's ensemble is immutable: models/profiles cannot
+             change once the version publishes. The concrete agent_profile_versions
+             row is resolved and frozen here at publish time. -->
         <createTable tableName="assistant_agent_bindings">
             <column name="id" type="uuid">
                 <constraints primaryKey="true" nullable="false"/>
             </column>
-            <column name="assistant_id" type="uuid">
-                <constraints nullable="false" foreignKeyName="fk_binding_assistant" referencedTableName="assistants" referencedColumnNames="id"/>
+            <column name="assistant_version_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_binding_assistant_version" referencedTableName="assistant_version" referencedColumnNames="id"/>
             </column>
-            <!-- Pins to an immutable version for deterministic execution -->
-            <column name="profile_version_id" type="uuid">
-                <constraints nullable="false" foreignKeyName="fk_binding_profile_version" referencedTableName="agent_profile_versions" referencedColumnNames="id"/>
+            <!-- The profile this role uses (definition-time reference). -->
+            <column name="agent_profile_id" type="uuid">
+                <constraints nullable="false" foreignKeyName="fk_binding_agent_profile" referencedTableName="agent_profiles" referencedColumnNames="id"/>
+            </column>
+            <!-- The frozen published profile version, resolved at publish time.
+                 Kills the "latest published" drift: this row never changes after
+                 the assistant version publishes. -->
+            <column name="agent_profile_version_id" type="uuid">
+                <constraints nullable="true" foreignKeyName="fk_binding_agent_profile_version" referencedTableName="agent_profile_versions" referencedColumnNames="id"/>
             </column>
             <!-- Specific LLM engine assigned to this role -->
             <column name="model_code" type="varchar(50)">
                 <constraints nullable="true" foreignKeyName="fk_binding_model" referencedTableName="models" referencedColumnNames="code"/>
             </column>
-            <!-- Role type: e.g., 'PRIMARY_ORCHESTRATOR', 'SUB_AGENT_CODER', 'REVIEWER' -->
             <column name="role_type" type="varchar(40)">
                 <constraints nullable="false"/>
             </column>
@@ -276,9 +273,14 @@
         </createTable>
 
         <createIndex tableName="assistant_agent_bindings" indexName="idx_assistant_bindings_lookup">
-            <column name="assistant_id"/>
+            <column name="assistant_version_id"/>
             <column name="role_type"/>
         </createIndex>
+
+        <addUniqueConstraint
+            tableName="assistant_agent_bindings"
+            constraintName="uq_assistant_agent_binding_alias"
+            columnNames="assistant_version_id, agent_alias"/>
     </changeSet>
 
 </databaseChangeLog>

@@ -63,6 +63,10 @@ public class Session {
     @Column(name = "host_instance_id")
     private UUID hostInstanceId;
 
+    /** §20 routing identity: the engine node whose host socket serves this session. */
+    @Column(name = "home_node_id", length = 255)
+    private String homeNodeId;
+
     /** Protocol §11.1 allocation FSM: OFFERED|INITIALIZING|ACTIVE|CLOSING|CLOSED|RECOVERING. */
     @Column(name = "allocation_state", length = 20)
     private String allocationState;

@@ -44,7 +44,6 @@ public class JwtTokenProvider {
     private static final String ACCESS_TOKEN = "access";
     private static final String REFRESH_TOKEN = "refresh";
 
-    public static final String PRINCIPAL_AGENT = "AGENT";
     public static final String PRINCIPAL_USER = "USER";
     public static final String PRINCIPAL_AGENT_HOST = "AGENT_HOST";
 
@@ -62,39 +61,6 @@ public class JwtTokenProvider {
         this.accessTokenMinutes = accessTokenMinutes;
         this.refreshTokenDays = refreshTokenDays;
         this.issuer = issuer;
-    }
-
-    // ==================== Agent tokens ====================
-
-    public String generateAgentAccessToken(UUID agentId, String agentName) {
-        Instant now = Instant.now();
-        Instant expiry = now.plus(accessTokenMinutes, ChronoUnit.MINUTES);
-
-        return Jwts.builder()
-                .issuer(issuer)
-                .subject(agentId.toString())
-                .claim(TOKEN_TYPE_CLAIM, ACCESS_TOKEN)
-                .claim(PRINCIPAL_CLAIM, PRINCIPAL_AGENT)
-                .claim(NAME_CLAIM, agentName)
-                .issuedAt(Date.from(now))
-                .expiration(Date.from(expiry))
-                .signWith(secretKey)
-                .compact();
-    }
-
-    public String generateAgentRefreshToken(UUID agentId) {
-        Instant now = Instant.now();
-        Instant expiry = now.plus(refreshTokenDays, ChronoUnit.DAYS);
-
-        return Jwts.builder()
-                .issuer(issuer)
-                .subject(agentId.toString())
-                .claim(TOKEN_TYPE_CLAIM, REFRESH_TOKEN)
-                .claim(PRINCIPAL_CLAIM, PRINCIPAL_AGENT)
-                .issuedAt(Date.from(now))
-                .expiration(Date.from(expiry))
-                .signWith(secretKey)
-                .compact();
     }
 
     // ==================== Agent Host tokens (protocol §4.1) ====================
@@ -149,22 +115,6 @@ public class JwtTokenProvider {
                 .compact();
     }
 
-    /**
-     * @deprecated Use {@link #generateAgentAccessToken(UUID, String)} instead
-     */
-    @Deprecated
-    public String generateAccessToken(UUID agentId) {
-        return generateAgentAccessToken(agentId, null);
-    }
-
-    /**
-     * @deprecated Use {@link #generateAgentRefreshToken(UUID)} instead
-     */
-    @Deprecated
-    public String generateRefreshToken(UUID agentId) {
-        return generateAgentRefreshToken(agentId);
-    }
-
     // ==================== User tokens ====================
 
     public String generateUserAccessToken(UUID userId, String name, String email, List<String> roles) {
@@ -211,18 +161,8 @@ public class JwtTokenProvider {
         return UUID.fromString(subject);
     }
 
-    /**
-     * @deprecated Use {@link #getSubjectId(String)} instead
-     */
-    @Deprecated
-    public UUID getAgentId(String token) {
-        return getSubjectId(token);
-    }
-
     public String getPrincipalType(String token) {
-        String principal = parseToken(token).getPayload().get(PRINCIPAL_CLAIM, String.class);
-        // Backwards compatibility: if no principal claim, assume AGENT
-        return principal != null ? principal : PRINCIPAL_AGENT;
+        return parseToken(token).getPayload().get(PRINCIPAL_CLAIM, String.class);
     }
 
     public String getName(String token) {
@@ -251,10 +191,6 @@ public class JwtTokenProvider {
     /** The issuer stamped into every minted token (myrmec.auth.issuer). */
     public String getIssuer() {
         return issuer;
-    }
-
-    public boolean isAgentToken(String token) {
-        return PRINCIPAL_AGENT.equals(getPrincipalType(token));
     }
 
     public boolean isUserToken(String token) {

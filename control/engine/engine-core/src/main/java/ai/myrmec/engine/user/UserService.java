@@ -58,6 +58,14 @@ public class UserService {
     }
 
     /**
+     * Find user by email, returning null when absent.
+     */
+    @Transactional(readOnly = true)
+    public User findByEmailOrNull(String email) {
+        return userRepository.findByEmail(email.toLowerCase().trim()).orElse(null);
+    }
+
+    /**
      * Save user.
      */
     @Transactional

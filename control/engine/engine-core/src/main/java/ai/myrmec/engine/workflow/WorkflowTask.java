@@ -2,7 +2,6 @@ package ai.myrmec.engine.workflow;
 
 import ai.myrmec.engine._system.common.JsonMapConverter;
 import ai.myrmec.engine._system.common.JsonListConverter;
-import ai.myrmec.engine.agent.Agent;
 import ai.myrmec.engine.agent.AgentProfile;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -45,11 +44,10 @@ public class WorkflowTask {
     private AgentProfile agentProfile;
 
     /**
-     * Agent instance that executed/is executing this task (null if not yet assigned).
+     * Session executing this task (null if not yet assigned).
      */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "agent_instance_id")
-    private Agent agentInstance;
+    @Column(name = "session_id")
+    private UUID sessionId;
 
     /**
      * Input to this task (from workflow input + previous step outputs).
@@ -229,11 +227,11 @@ public class WorkflowTask {
     /**
      * Create a new attempt for this task.
      */
-    public TaskAttempt createAttempt(Agent agentInstance) {
+    public TaskAttempt createAttempt(UUID sessionId) {
         TaskAttempt attempt = new TaskAttempt();
         attempt.setTask(this);
         attempt.setAttemptNumber(this.attempt);
-        attempt.setAgentInstance(agentInstance);
+        attempt.setSessionId(sessionId);
         attempt.setStatus(AttemptStatus.RUNNING);
         this.attempts.add(attempt);
         this.currentAttempt = attempt;

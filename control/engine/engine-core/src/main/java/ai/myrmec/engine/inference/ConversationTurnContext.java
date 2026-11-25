@@ -1,6 +1,5 @@
 package ai.myrmec.engine.inference;
 
-import ai.myrmec.engine.websocket.message.payload.SessionOpenPayload;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -8,6 +7,8 @@ import lombok.NoArgsConstructor;
 
 import java.util.List;
 import java.util.UUID;
+
+import ai.myrmec.engine._protocol.payload.SessionOpenPayload;
 
 /**
  * Engine-internal conversation-turn assembly context (§6.2).
@@ -75,8 +76,8 @@ public class ConversationTurnContext {
     /** Per-turn timeout in seconds. */
     private int timeoutSeconds;
 
-    /** Model handle + decrypted API key (§6.1 model config). */
-    private SessionOpenPayload.ModelConfig model;
+    /** Model handle (§6.1 model config). */
+    private SessionOpenPayload.ModelSpec model;
 
     /**
      * Attachments bound to the triggering user message (#103). Empty/null

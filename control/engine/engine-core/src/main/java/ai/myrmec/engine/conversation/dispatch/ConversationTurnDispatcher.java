@@ -3,6 +3,7 @@
 
 package ai.myrmec.engine.conversation.dispatch;
 
+import ai.myrmec.engine._protocol.payload.ExecutionStartPayload;
 import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentHostInstance;
 import ai.myrmec.engine.agent.AgentHostInstanceRepository;
@@ -10,6 +11,8 @@ import ai.myrmec.engine.agent.AgentProfile;
 import ai.myrmec.engine.agent.AgentProfileRepository;
 import ai.myrmec.engine.agent.AgentProfileVersionRepository;
 import ai.myrmec.engine.agent.HostSelectionService;
+import ai.myrmec.engine.assistant.AssistantAgentBinding;
+import ai.myrmec.engine.assistant.AssistantAgentBindingRepository;
 import ai.myrmec.engine.conversation.Conversation;
 import ai.myrmec.engine.conversation.ConversationMessage;
 import ai.myrmec.engine.conversation.ConversationRepository;
@@ -26,8 +29,6 @@ import ai.myrmec.engine.spi.quota.QuotaDecision;
 import ai.myrmec.engine.spi.quota.QuotaPolicyEngine;
 import ai.myrmec.engine.spi.quota.QuotaResourceType;
 import ai.myrmec.engine.spi.quota.QuotaScope;
-import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
-import ai.myrmec.engine.websocket.host.payload.ExecutionStartPayload;
 import ai.myrmec.engine.inference.InferenceMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,7 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.function.LongFunction;
+import java.util.function.BiFunction;
 
 /**
  * Routes a freshly-arrived USER message onto the unified host-control socket
@@ -56,7 +57,8 @@ import java.util.function.LongFunction;
  *
  * <p><b>One-way unified path.</b> The legacy {@code agent.bind} +
  * {@code conversation.attach} + {@code inference.assign} wire is gone. A turn
- * is staged one of two ways:</p>
+ * reuses the ACTIVE {@code CONVERSATION} session that
+ * {@link ConversationService#start} already allocated and offered:</p>
  * <ol>
  *   <li><b>Reuse</b> &mdash; an ACTIVE {@code CONVERSATION} session already
  *       exists for this conversation and is pinned to the live host this
@@ -64,14 +66,13 @@ import java.util.function.LongFunction;
  *       {@link ExecutionRegistry#start} creates the execution row and
  *       {@link ExecutionCommandSender#startConversation} ships it. No wire
  *       handshake, no re-allocation.</li>
- *   <li><b>Offer</b> &mdash; no usable ACTIVE session:
- *       {@link SessionAllocator#offer} mints the session row (OFFERED) on the
- *       host selected by capacity, and
- *       {@link HostControlWebSocketHandler#sendSessionOffer} puts it on the
- *       wire. The assembled turn is parked in {@link PendingConversationTurns}
- *       because the host's {@code session.accept}/{@code session.opened}
- *       answers arrive <em>after</em> this method returns, and &sect;7.4
- *       forbids {@code execution.start} before {@code session.opened}.</li>
+ *   <li><b>Decline</b> &mdash; no ACTIVE session: the dispatcher declines.
+ *       Session allocation + offer is owned by {@link ConversationService#start}
+ *       (the client's create&rarr;start phase); a turn dispatched before the
+ *       session is ACTIVE means {@code start} was never called (or the session
+ *       already closed), so the turn is dropped gracefully &mdash; the message
+ *       row is already persisted and the #87 backlog drainer re-dispatches once
+ *       a session exists.</li>
  * </ol>
  *
  * <p><b>Best-effort.</b> When no host with live capacity serves the Team the
@@ -113,6 +114,7 @@ public class ConversationTurnDispatcher {
     private final ConversationService conversationService;
     private final AgentProfileRepository agentProfileRepository;
     private final AgentProfileVersionRepository agentProfileVersionRepository;
+    private final AssistantAgentBindingRepository assistantAgentBindingRepository;
     private final QuotaPolicyEngine quotaPolicyEngine;
     private final ai.myrmec.engine.snapshot.SnapshotWriter snapshotWriter;
     private final ai.myrmec.engine.conversation.ConversationNoticeService conversationNoticeService;
@@ -126,8 +128,6 @@ public class ConversationTurnDispatcher {
     private final ExecutionRegistry executionRegistry;
     private final ExecutionCommandSender executionCommandSender;
     private final ExecutionInputAssembler executionInputAssembler;
-    private final HostControlWebSocketHandler hostControlWebSocketHandler;
-    private final PendingConversationTurns pendingConversationTurns;
 
     /**
      * Relay a cancel for the in-flight turn of a conversation to the host that
@@ -155,7 +155,7 @@ public class ConversationTurnDispatcher {
             return false;
         }
         boolean delivered = executionCommandSender.cancel(
-                inFlight.getId(), session, null, CANCEL_REASON_USER, CANCEL_GRACE_SECONDS);
+                inFlight, session, null, CANCEL_REASON_USER, CANCEL_GRACE_SECONDS);
         if (delivered) {
             log.info("Relayed execution.cancel for conv {} (execution {})",
                     conversationId, inFlight.getId());
@@ -166,16 +166,22 @@ public class ConversationTurnDispatcher {
     }
 
     /**
-     * &sect;3.7: the profile comes from the conversation's pinned version (the
-     * assistant pin), never from the host. Conversations without a pin cannot
-     * dispatch (graceful no-agent decline).
+     * &sect;3.7: the profile comes from the conversation's frozen assistant
+     * version binding (the PRIMARY binding's pinned profile version), never from
+     * the host. Conversations without a pin cannot dispatch (graceful no-agent
+     * decline).
      */
     private Optional<AgentProfile> pinnedProfileOf(Conversation conversation) {
-        UUID pinnedVersionId = conversation.getAgentProfileVersionId();
-        if (pinnedVersionId == null) {
+        UUID assistantVersionId = conversation.getAssistantVersionId();
+        if (assistantVersionId == null) {
             return Optional.empty();
         }
-        return agentProfileVersionRepository.findByIdWithTools(pinnedVersionId)
+        return assistantAgentBindingRepository
+                .findByAssistantVersionIdAndRoleType(
+                        assistantVersionId, AssistantAgentBinding.RoleType.PRIMARY)
+                .stream().findFirst()
+                .map(AssistantAgentBinding::getAgentProfileVersionId)
+                .flatMap(agentProfileVersionRepository::findByIdWithTools)
                 .map(v -> agentProfileRepository.findById(v.getProfileId()).orElse(null));
     }
 
@@ -218,7 +224,8 @@ public class ConversationTurnDispatcher {
 
         long preRowSequence = nextAssistantSequence(conversationId);
         boolean staged = stageTurn(conversation, hostId, preRowSequence,
-                seq -> buildTurn(conversation, seq), "CONVERSATION_TURN_DISPATCHED");
+                (sessionId, seq) -> buildTurn(conversation, sessionId, seq),
+                "CONVERSATION_TURN_DISPATCHED");
         if (staged) {
             log.info("Dispatched conversation turn for conv {} via the unified host-control path",
                     conversationId);
@@ -269,7 +276,8 @@ public class ConversationTurnDispatcher {
 
         long preRowSequence = nextAssistantSequence(conversationId);
         boolean staged = stageTurn(conversation, hostId, preRowSequence,
-                seq -> buildSummaryTurn(conversation, seq, previousSummaryContent, olderBlock),
+                (sessionId, seq) -> buildSummaryTurn(conversation, sessionId, seq,
+                        previousSummaryContent, olderBlock),
                 "CONVERSATION_SUMMARY_DISPATCHED");
         if (staged) {
             log.info("Dispatched summarisation turn for conv {} (folding {} msg(s))",
@@ -279,7 +287,7 @@ public class ConversationTurnDispatcher {
     }
 
     // ====================================================================
-    // Unified staging: reuse an ACTIVE session, otherwise offer a new one
+    // Unified staging: reuse the ACTIVE session (allocation is start()'s job)
     // ====================================================================
 
     /**
@@ -291,28 +299,29 @@ public class ConversationTurnDispatcher {
      * assignment) and {@link ExecutionCommandSender#startConversation} ships
      * {@code execution.start} immediately.</p>
      *
-     * <p><b>Offer</b> (no usable ACTIVE session): the session row is minted
-     * OFFERED by the allocator and the offer goes on the wire. Because
-     * {@code session.accept}/{@code session.opened} arrive asynchronously, the
-     * assembled turn is parked in {@link PendingConversationTurns} and resumed
-     * by the host-control handler once the session is ACTIVE.</p>
+     * <p><b>Decline</b> (no usable ACTIVE session): the turn is dropped.
+     * Session allocation + offer belong to {@link ConversationService#start}
+     * (the client's create&rarr;start phase) &mdash; this dispatcher no longer
+     * mints or offers sessions. A turn arriving without an ACTIVE session means
+     * {@code start} was never called or the session already closed; the message
+     * row is already persisted, so the turn is declined gracefully and the #87
+     * backlog drainer re-dispatches once a session exists.</p>
      *
-     * @param preRowSequence the sequence the caller pre-minted before any
-     *                       execution row existed (used on the offer path and as
-     *                       the first-turn fallback on the reuse path)
+     * @param preRowSequence the sequence the caller pre-minted (the first-turn
+     *                       fallback on the reuse path)
      * @param bundleFactory  builds the wire turn for a given sequence number
      * @param snapshotEvent  the execution_snapshots event type for this turn
      */
     private boolean stageTurn(Conversation conversation, UUID hostId, long preRowSequence,
-                             LongFunction<ConversationTurnBundle> bundleFactory,
+                             BiFunction<UUID, Long, ConversationTurnBundle> bundleFactory,
                              String snapshotEvent) {
         UUID conversationId = conversation.getId();
 
         Session existing = activeSessionOf(conversationId).orElse(null);
         if (existing != null && !hostId.equals(hostOfSessionInstance(existing))) {
             // The live session is pinned to a different host instance: it cannot
-            // serve a turn on the host this dispatch selected. Close it so the
-            // offer below can mint a fresh session on the live host.
+            // serve a turn on the host this dispatch selected. Close it and let
+            // start() re-offer a fresh session on the next phase.
             log.info("Closing ACTIVE session {} for conv {} (pinned to instance {}, host {} selected)",
                     existing.getId(), conversationId, existing.getHostInstanceId(), hostId);
             sessionAllocator.close(existing.getId(), "HOST_RESELECTED");
@@ -324,35 +333,19 @@ public class ConversationTurnDispatcher {
                     bundleFactory, snapshotEvent);
         }
 
-        UUID sessionId = sessionAllocator.offer(
-                SERVICE_TYPE_CONVERSATION, conversationId, SERVICE_TYPE_CONVERSATION,
-                conversation.getTeamId(), hostId).orElse(null);
-        if (sessionId == null) {
-            log.warn("No allocation capacity on host {} for conv {}", hostId, conversationId);
-            conversationNoticeService.emitNoAgentNotice(conversationId);
-            return false;
-        }
-
-        ConversationTurnBundle bundle = bundleFactory.apply(preRowSequence);
-        // Park the assembled turn until the host answers session.accept/session.opened.
-        pendingConversationTurns.stage(sessionId, conversationId, bundle.input(),
-                bundle.toStartPayload(null));
-        hostControlWebSocketHandler.sendSessionOffer(
-                sessionId, SERVICE_TYPE_CONVERSATION, conversationId);
-        log.info("Offered session {} to host {} for conv {} (turn parked until session.opened)",
-                sessionId, hostId, conversationId);
-        writeSnapshot(conversation, bundle.toStartPayload(null), snapshotEvent);
-        return true;
+        log.warn("No ACTIVE session for conv {} \u2014 declining turn (start() allocates the session)",
+                conversationId);
+        return false;
     }
 
     /** Ship a turn on an already-ACTIVE session (the sticky reuse hot path). */
     private boolean shipOnExistingSession(Conversation conversation, Session session,
                                           long preRowSequence,
-                                          LongFunction<ConversationTurnBundle> bundleFactory,
+                                          BiFunction<UUID, Long, ConversationTurnBundle> bundleFactory,
                                           String snapshotEvent) {
         UUID conversationId = conversation.getId();
         long sequenceNo = resolveSequenceNo(session.getId(), preRowSequence);
-        ConversationTurnBundle bundle = bundleFactory.apply(sequenceNo);
+        ConversationTurnBundle bundle = bundleFactory.apply(session.getId(), sequenceNo);
         SessionExecution execution = executionRegistry.start(
                 session.getId(), conversationId.toString(),
                 Instant.now().plusSeconds(DEFAULT_TIMEOUT_SECONDS), bundle.input()).orElse(null);
@@ -362,7 +355,7 @@ public class ConversationTurnDispatcher {
             return false;
         }
         boolean sent = executionCommandSender.startConversation(
-                execution.getId(), session, bundle.toStartPayload(execution.getId()));
+                execution, session, bundle.toStartPayload());
         if (!sent) {
             log.warn("Host socket gone for session {} (conv {}) \u2014 execution.start not delivered",
                     session.getId(), conversationId);
@@ -372,7 +365,7 @@ public class ConversationTurnDispatcher {
         // now, after the send (a failed send leaves the session no busier than
         // before, so only success re-arms the window).
         sessionAllocator.touchIdleLease(session.getId());
-        writeSnapshot(conversation, bundle.toStartPayload(execution.getId()), snapshotEvent);
+        writeSnapshot(conversation, bundle.toStartPayload(), snapshotEvent);
         return true;
     }
 
@@ -386,10 +379,11 @@ public class ConversationTurnDispatcher {
      * authoritative session identity on the wire comes from the allocator-owned
      * {@link Session} row, which the command sender stamps onto the envelope.</p>
      */
-    private ConversationTurnBundle buildTurn(Conversation conversation, long sequenceNo) {
+    private ConversationTurnBundle buildTurn(Conversation conversation, UUID sessionId,
+                                             long sequenceNo) {
         UUID conversationId = conversation.getId();
         Map<String, Object> input = executionInputAssembler.assembleConversationInput(
-                conversationId, conversationId, conversation.getTeamId(), sequenceNo);
+                conversationId, sessionId, conversation.getTeamId(), sequenceNo);
         return new ConversationTurnBundle(conversationId, input, sequenceNo);
     }
 
@@ -399,7 +393,8 @@ public class ConversationTurnDispatcher {
      * turns being folded, and the carry-forward summary, shipped as one more
      * execution on the conversation's session.
      */
-    private ConversationTurnBundle buildSummaryTurn(Conversation conversation, long sequenceNo,
+    private ConversationTurnBundle buildSummaryTurn(Conversation conversation, UUID sessionId,
+                                                    long sequenceNo,
                                                     String previousSummaryContent,
                                                     List<ConversationMessage> olderBlock) {
         List<InferenceMessage> messages = new ArrayList<>();
@@ -458,8 +453,7 @@ public class ConversationTurnDispatcher {
 
     /** The next assistant sequence for the conversation (max persisted + 1). */
     private long nextAssistantSequence(UUID conversationId) {
-        List<ConversationMessage> all = conversationService.listMessages(conversationId);
-        return all.isEmpty() ? 0L : all.get(all.size() - 1).getSequenceNo() + 1;
+        return conversationService.nextAssistantSequence(conversationId);
     }
 
     /**
@@ -516,7 +510,7 @@ public class ConversationTurnDispatcher {
         snapshotWriter.write(ai.myrmec.engine.snapshot.SnapshotWriter.SnapshotRequest.builder()
                 .teamId(conversation.getTeamId())
                 .eventType(eventType)
-                .agentId(conversation.getAgentId())
+                .agentId(null)
                 .conversationId(conversation.getId())
                 .source(conversation.getSource() == null ? null : conversation.getSource().name())
                 .serviceAccountId(conversation.getServiceAccountId())
@@ -559,24 +553,14 @@ public class ConversationTurnDispatcher {
      */
     private record ConversationTurnBundle(UUID conversationId, Map<String, Object> input, long sequenceNo) {
 
-        ExecutionStartPayload toStartPayload(UUID executionId) {
+        ExecutionStartPayload toStartPayload() {
             @SuppressWarnings("unchecked")
             List<InferenceMessage> messages = input.get("messages") instanceof List<?> list
                     ? (List<InferenceMessage>) list : List.of();
-            List<String> activeTools = List.of();
-            if (input.get("toolPolicy") instanceof Map<?, ?> policy
-                    && policy.get("activeToolNames") instanceof List<?> tools) {
-                activeTools = tools.stream().map(String::valueOf).toList();
-            }
             return new ExecutionStartPayload(
-                    executionId,
-                    conversationId,
-                    (int) sequenceNo,
-                    conversationId.toString(),
+                    new ExecutionStartPayload.Input(messages, null),
                     Instant.now().plusSeconds(DEFAULT_TIMEOUT_SECONDS),
-                    new ExecutionStartPayload.Input(messages, null, null),
-                    new ExecutionStartPayload.ToolPolicy(activeTools, "ENGINE"),
-                    new ExecutionStartPayload.Output(true, (int) sequenceNo, "TEXT"));
+                    null);
         }
     }
 }

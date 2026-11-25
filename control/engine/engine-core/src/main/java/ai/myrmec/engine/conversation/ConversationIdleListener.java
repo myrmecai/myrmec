@@ -2,25 +2,27 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.conversation;
 
+import java.time.Instant;
+import java.util.Map;
+import java.util.UUID;
+
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import ai.myrmec.engine._controllers.websocket.HostChannelWebSocketHandler;
+import ai.myrmec.engine._protocol.MessageType;
+import ai.myrmec.engine._protocol.WebSocketMessage;
 import ai.myrmec.engine.conversation.event.ConversationArchivedEvent;
 import ai.myrmec.engine.conversation.event.ConversationClosedEvent;
 import ai.myrmec.engine.conversation.event.IdleSessionExpiredEvent;
 import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionRepository;
-import ai.myrmec.engine.websocket.host.HostControlWebSocketHandler;
-import ai.myrmec.engine.websocket.message.MessageType;
-import ai.myrmec.engine.websocket.message.WebSocketMessage;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.event.TransactionPhase;
-import org.springframework.transaction.event.TransactionalEventListener;
-
-import java.time.Instant;
-import java.util.Map;
-import java.util.UUID;
 
 /**
  * Fans conversation lifecycle state changes out to the push surfaces the
@@ -28,7 +30,7 @@ import java.util.UUID;
  * lifecycle design section 5).
  *
  * <p>The allocation sweep and ConversationService cannot inject
- * {@link HostControlWebSocketHandler} (bean cycle: the handler injects
+ * {@link HostChannelWebSocketHandler} (bean cycle: the handler injects
  * ConversationService), so they publish events and this leaf listener owns
  * the pushes:</p>
  *
@@ -52,7 +54,7 @@ import java.util.UUID;
 @Slf4j
 public class ConversationIdleListener {
 
-    private final HostControlWebSocketHandler hostControlWebSocketHandler;
+    private final HostChannelWebSocketHandler hostControlWebSocketHandler;
     private final ConversationStreamBroker streamBroker;
     private final ObjectMapper objectMapper;
     private final SessionRepository sessionRepository;

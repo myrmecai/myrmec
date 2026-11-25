@@ -2,13 +2,17 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.agent;
 
-import jakarta.persistence.*;
+import jakarta.persistence.EmbeddedId;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.time.Instant;
-
+/**
+ * Junction row binding an {@link AgentProfileVersion} to a capability from the
+ * catalog. Pure link table — no timestamp (see {@code 002-agents.xml}).
+ */
 @Entity
 @Table(name = "agent_profile_capabilities")
 @Getter
@@ -18,12 +22,4 @@ public class AgentProfileCapability {
 
     @EmbeddedId
     private AgentProfileCapabilityId id;
-
-    @Column(name = "created_at", nullable = false, updatable = false)
-    private Instant createdAt;
-
-    @PrePersist
-    protected void onCreate() {
-        createdAt = Instant.now();
-    }
 }

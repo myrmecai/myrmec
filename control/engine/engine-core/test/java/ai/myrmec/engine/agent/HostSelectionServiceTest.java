@@ -1,0 +1,117 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The Myrmec Authors
+package ai.myrmec.engine.agent;
+
+import ai.myrmec.engine.IntegrationTestBase;
+import ai.myrmec.engine.team.Team;
+import ai.myrmec.engine.testing.TestDataBuilder;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+
+import java.util.Map;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Capacity-based host selection (decoupling §3.7).
+ *
+ * <p>These tests are discriminating: the outcome must depend on scope and
+ * liveness, never on a profile binding. Every host in the fixture is
+ * created with the <em>same</em> arbitrary profile so that a profile-based
+ * selector would be indeterminate, while the capacity-based selector
+ * returns the team-scoped / live host.
+ */
+class HostSelectionServiceTest extends IntegrationTestBase {
+
+    @Autowired
+    TestDataBuilder data;
+
+    @Autowired
+    AgentHostInstanceRepository instanceRepository;
+
+    @Autowired
+    HostSelectionService selector;
+
+    @Autowired
+    ai.myrmec.engine.websocket.HostConnectionManager connectionManager;
+
+    @Test
+    void selectsProjectScopedHostOverUnscopedWhenBothLive() {
+        AgentProfile profile = data.agentProfile().named("selector-profile").create();
+        team team = data.team().named("selector-team").create();
+
+        AgentHost scoped = data.agent().named("scoped-live").inTeam(team).create().agent();
+        AgentHost unscoped = data.agent().named("unscoped-live").create().agent();
+
+        openInstance(scoped);
+        openInstance(unscoped);
+
+        assertThat(selector.selectForTeam(team.getId()))
+                .isPresent()
+                .hasValueSatisfying(h -> assertThat(h.getId()).isEqualTo(scoped.getId()));
+    }
+
+    @Test
+    void ignoresHostWithoutLiveInstance() {
+        AgentProfile profile = data.agentProfile().named("selector-profile").create();
+        team team = data.team().named("selector-team").create();
+
+        data.agent().named("dead-host").inTeam(team).create();
+
+        assertThat(selector.selectForTeam(team.getId())).isEmpty();
+    }
+
+    @Test
+    void prefersUnscopedLiveHostOverScopedDeadHost() {
+        AgentProfile profile = data.agentProfile().named("selector-profile").create();
+        team team = data.team().named("selector-team").create();
+
+        AgentHost scopedDead = data.agent().named("scoped-dead").inTeam(team).create().agent();
+        AgentHost unscopedLive = data.agent().named("unscoped-live").create().agent();
+
+        openInstance(unscopedLive);
+
+        assertThat(selector.selectForTeam(team.getId()))
+                .isPresent()
+                .hasValueSatisfying(h -> assertThat(h.getId()).isEqualTo(unscopedLive.getId()));
+    }
+
+    @Test
+    void emptyWhenNoHostIsActive() {
+        team team = data.team().named("selector-team").create();
+
+        assertThat(selector.selectForTeam(team.getId())).isEmpty();
+    }
+
+    @Test
+    void selectForNullPrefersUnscopedLiveHost() {
+        AgentProfile profile = data.agentProfile().named("selector-profile").create();
+
+        AgentHost scoped = data.agent().named("scoped-live").inTeam(data.team().named("other-team").create()).create().agent();
+        AgentHost unscoped = data.agent().named("unscoped-live").create().agent();
+
+        openInstance(scoped);
+        openInstance(unscoped);
+
+        assertThat(selector.selectForTeam(null))
+                .isPresent()
+                .hasValueSatisfying(h -> assertThat(h.getId()).isEqualTo(unscoped.getId()));
+    }
+
+    private void openInstance(AgentHost host) {
+        AgentHostInstance instance = instanceRepository.saveAndFlush(AgentHostInstance.open(
+                host, null, "dev-laptop", 1, Map.of("cpuCount", 2), "engine-node-1"));
+        // Two-sided liveness: the selection also requires the instance's
+        // control socket to be registered and open. Register an open mock
+        // socket so the fixture's "live" hosts are live on both sides.
+        org.springframework.web.socket.WebSocketSession socket =
+                org.mockito.Mockito.mock(org.springframework.web.socket.WebSocketSession.class);
+        org.mockito.Mockito.when(socket.isOpen()).thenReturn(true);
+        org.mockito.Mockito.when(socket.getId())
+                .thenReturn("test-socket-" + instance.getId());
+        connectionManager.register(instance.getId(), socket, Map.of(
+                "sessionInteraction",
+                new ai.myrmec.engine._protocol.SessionInteractionCapability(1, true)));
+    }
+}

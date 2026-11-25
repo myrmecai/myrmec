@@ -1,21 +1,23 @@
 package ai.myrmec.engine.conversation;
 
-import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
-import ai.myrmec.engine.websocket.message.MessageType;
-import ai.myrmec.engine.websocket.message.WebSocketMessage;
-import ai.myrmec.engine.websocket.message.payload.ApprovalDecisionPayload;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
-import java.util.List;
-import java.util.UUID;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import ai.myrmec.engine._protocol.MessageType;
+import ai.myrmec.engine._protocol.WebSocketMessage;
+import ai.myrmec.engine._protocol.payload.ApprovalDecisionPayload;
+import ai.myrmec.engine.conversation.stream.ConversationStreamBroker;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Phase 7e — flips APPROVAL_REQUEST rows past their {@code expiresAt}

@@ -2,6 +2,7 @@
 // Copyright 2026 The Myrmec Authors
 package ai.myrmec.engine.workflow;
 
+import ai.myrmec.engine._protocol.payload.ExecutionEventPayload;
 import ai.myrmec.engine.conversation.ConversationRepository;
 import ai.myrmec.engine.inference.Session;
 import ai.myrmec.engine.inference.SessionRepository;
@@ -11,7 +12,6 @@ import ai.myrmec.engine.inference.execution.SessionPolicyService;
 import ai.myrmec.engine.spi.quota.QuotaPolicyEngine;
 import ai.myrmec.engine.spi.quota.QuotaResourceType;
 import ai.myrmec.engine.spi.quota.QuotaScope;
-import ai.myrmec.engine.websocket.host.payload.ExecutionEventPayload;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

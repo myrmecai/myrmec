@@ -3,8 +3,6 @@ package ai.myrmec.engine.assistant;
 import ai.myrmec.engine._system.exception.BadRequestException;
 import ai.myrmec.engine._system.exception.DuplicateResourceException;
 import ai.myrmec.engine._system.exception.ResourceNotFoundException;
-import ai.myrmec.engine.agent.AgentProfile;
-import ai.myrmec.engine.agent.AgentProfileRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -31,24 +29,26 @@ public class AssistantService {
 
     private final AssistantRepository assistantRepository;
     private final AssistantGrantRepository grantRepository;
-    private final AgentProfileRepository agentProfileRepository;
     private final AssistantVersionService versionService;
 
     // ==================== Parent lifecycle ====================
 
     /**
-     * Start-dialog create (§8): a new parent row plus its initial Draft seeded
-     * with the chosen brain. The creator is granted OWNER.
+     * Start-dialog create (§8): a new parent row plus its initial Draft. The
+     * creator is granted OWNER.
+     *
+     * <p>NOTE: the brain (agent profile) is no longer pinned on the version row;
+     * it now lives on {@code assistant_agent_bindings}. Bindings are wired
+     * separately in the multi-model-bindings refactor.</p>
      */
     @Transactional
     public Assistant createAssistant(UUID teamId, String name, String description,
-                                     UUID agentProfileId, UUID createdBy) {
+                                     UUID createdBy) {
         String trimmedName = name == null ? "" : name.trim();
         if (trimmedName.isEmpty()) {
             throw BadRequestException.requiredField("name");
         }
         requireUniqueName(teamId, trimmedName, null);
-        requireActiveProfile(agentProfileId);
 
         Assistant assistant = new Assistant();
         assistant.setTeamId(teamId);
@@ -57,7 +57,7 @@ public class AssistantService {
         assistant.setCreatedBy(createdBy);
         Assistant saved = assistantRepository.save(assistant);
 
-        versionService.createInitialDraft(saved.getId(), agentProfileId, createdBy);
+        versionService.createInitialDraft(saved.getId(), createdBy);
 
         if (createdBy != null) {
             grantOwner(saved.getId(), createdBy);
@@ -188,18 +188,6 @@ public class AssistantService {
                 .ifPresent(other -> {
                     throw new DuplicateResourceException("Assistant", "name", name);
                 });
-    }
-
-    private void requireActiveProfile(UUID agentProfileId) {
-        if (agentProfileId == null) {
-            throw BadRequestException.requiredField("agentProfileId");
-        }
-        AgentProfile profile = agentProfileRepository.findById(agentProfileId)
-                .orElseThrow(() -> ResourceNotFoundException.of("AgentProfile", agentProfileId));
-        if (profile.getStatus() != AgentProfile.Status.ACTIVE) {
-            throw BadRequestException.forField("agentProfileId", "INVALID_VALUE",
-                    "Pick a published agent profile.");
-        }
     }
 
     private Assistant requireAssistant(UUID assistantId) {

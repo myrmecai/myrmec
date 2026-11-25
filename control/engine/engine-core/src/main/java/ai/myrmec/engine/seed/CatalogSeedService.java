@@ -198,7 +198,14 @@ public class CatalogSeedService {
             if (groupRepository.existsById(seed.getId())) {
                 continue;
             }
-            groupRepository.save(seed);
+            // Insert with the explicit fixed id (e.g. the default group's
+            // Group.DEFAULT_GROUP_ID). A plain repository.save() would let the
+            // JPA UUID generator overwrite it with a random value.
+            groupRepository.insertWithId(
+                    seed.getId(),
+                    seed.getName(),
+                    seed.getParentGroupId(),
+                    seed.getDescription());
         }
         log.info("Seeded default organization group");
     }

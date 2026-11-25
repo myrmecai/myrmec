@@ -122,7 +122,7 @@ public class OrchestrationApprovalService {
         task.setPauseReason(null);
         task.setStartedAt(null);
         task.setCompletedAt(null);
-        task.setAgentInstance(null);
+        task.setSessionId(null);
         task.setNextEligibleAt(null);
         // One fresh continuation attempt ordinal — the attempt counter
         // advances so the dispatcher creates a NEW attempt row.

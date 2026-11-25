@@ -9,7 +9,6 @@ import ai.myrmec.engine.agent.AgentHost;
 import ai.myrmec.engine.agent.AgentHostType;
 import ai.myrmec.engine.agent.AgentHostRepository;
 import ai.myrmec.engine.agent.AgentHostService;
-import ai.myrmec.engine.auth.dto.HostLocalRegisterRequest;
 import ai.myrmec.engine.auth.dto.HostRefreshRequest;
 import ai.myrmec.engine.auth.dto.HostRefreshResponse;
 import ai.myrmec.engine.auth.dto.HostRegisterResponse;
@@ -73,11 +72,11 @@ public class HostAuthService {
      * stored on the durable host record's live instance at host.open.
      */
     @Transactional
-    public HostRegisterResponse registerLocal(UUID userId, HostLocalRegisterRequest request, String hostname) {
+    public HostRegisterResponse registerLocal(UUID userId, String hostname) {
         if (userId == null) {
             throw new InvalidRegistrationKeyException("userId is required for local host registration");
         }
-        AgentHost host = agentHostService.upsertLocalAgentHost(userId, request.getTeamId(), hostname);
+        AgentHost host = agentHostService.upsertLocalAgentHost(userId, hostname);
         return mintPair(host, "local", userId);
     }
 

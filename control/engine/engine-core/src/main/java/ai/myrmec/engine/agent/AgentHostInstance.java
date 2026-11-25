@@ -72,6 +72,12 @@ public class AgentHostInstance {
     @Column(name = "hostname", length = 255)
     private String hostname;
 
+    @Column(name = "ip_address", length = 45)
+    private String ipAddress;
+
+    @Column(name = "runtime_version", length = 20)
+    private String runtimeVersion;
+
     @Column(name = "pool_size", nullable = false)
     private Integer poolSize = 1;
 

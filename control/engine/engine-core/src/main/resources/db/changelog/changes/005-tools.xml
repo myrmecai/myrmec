@@ -55,36 +55,6 @@
         </createIndex>
     </changeSet>
 
-    <!-- Seed moved to db/changelog/data/tools.csv -->
-    <changeSet id="005-tools-seed-system-tools" author="myrmec">
-        <preConditions onFail="MARK_RAN">
-            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM tools WHERE code = 'github'</sqlCheck>
-        </preConditions>
-        <comment>Seed system tools</comment>
-
-        <loadData
-            tableName="tools"
-            file="db/changelog/data/tools.csv"
-            separator=","
-            encoding="UTF-8"
-            relativeToChangelogFile="false">
-            <column name="code" type="STRING"/>
-            <column name="name" type="STRING"/>
-            <column name="description" type="STRING"/>
-            <column name="tool_type" type="STRING"/>
-            <column name="config_schema" type="STRING"/>
-            <column name="docs_url" type="STRING"/>
-            <column name="is_system" type="BOOLEAN"/>
-            <column name="status" type="STRING"/>
-            <column name="risk_class" type="STRING"/>
-            <column name="description_hash" type="STRING"/>
-            <column name="description_approved_at" type="DATE"/>
-            <column name="description_approved_by" type="STRING"/>
-            <column name="created_at" type="DATE"/>
-            <column name="updated_at" type="DATE"/>
-        </loadData>
-    </changeSet>
-
 
 
     <!-- ================================================================
